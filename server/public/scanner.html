@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>Barcode Scanner</title>
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0f0f0f;
+      color: #fff;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+    }
+    h1 { font-size: 1.2rem; font-weight: 600; margin-bottom: 16px; opacity: 0.8; }
+    #reader { width: 100%; max-width: 400px; border-radius: 12px; overflow: hidden; }
+    #status {
+      margin-top: 16px;
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      background: #1e1e1e;
+      width: 100%; max-width: 400px;
+      text-align: center;
+    }
+    #last-scan {
+      margin-top: 12px;
+      padding: 14px 16px;
+      border-radius: 8px;
+      background: #1a2a1a;
+      border: 1px solid #2a4a2a;
+      width: 100%; max-width: 400px;
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #4caf50;
+      text-align: center;
+      min-height: 52px;
+      display: flex; align-items: center; justify-content: center;
+      word-break: break-all;
+    }
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; background: #888; }
+    .dot.ok { background: #4caf50; }
+    .dot.err { background: #f44336; }
+  </style>
+</head>
+<body>
+  <h1>Barcode Scanner</h1>
+  <div id="reader"></div>
+  <div id="status"><span class="dot" id="dot"></span><span id="status-text">Connecting...</span></div>
+  <div id="last-scan">—</div>
+
+  <script>
+    const statusEl = document.getElementById('status-text');
+    const dotEl = document.getElementById('dot');
+    const lastScanEl = document.getElementById('last-scan');
+    let ws;
+
+    function connect() {
+      ws = new WebSocket(`wss://${location.host}/`);
+      ws.onopen = () => { dotEl.className = 'dot ok'; statusEl.textContent = 'Connected — ready to scan'; };
+      ws.onclose = () => { dotEl.className = 'dot err'; statusEl.textContent = 'Disconnected — retrying...'; setTimeout(connect, 2000); };
+      ws.onerror = () => { dotEl.className = 'dot err'; statusEl.textContent = 'Connection error'; };
+    }
+    connect();
+
+    let lastValue = '', cooldown = false;
+
+    function onScanSuccess(value) {
+      if (cooldown || value === lastValue) return;
+      lastValue = value; cooldown = true;
+      setTimeout(() => { cooldown = false; lastValue = ''; }, 2000);
+      lastScanEl.textContent = value;
+      statusEl.textContent = 'Sent: ' + value;
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'scan', value }));
+      if (navigator.vibrate) navigator.vibrate(80);
+    }
+
+    new Html5QrcodeScanner('reader', {
+      fps: 10,
+      qrbox: { width: 280, height: 180 },
+      supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
+      rememberLastUsedCamera: true,
+    }).render(onScanSuccess);
+  </script>
+</body>
+</html>
