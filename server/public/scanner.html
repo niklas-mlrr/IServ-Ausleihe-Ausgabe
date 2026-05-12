@@ -68,6 +68,13 @@
     button:disabled { opacity: 0.5; cursor: not-allowed; }
     .torch-on { background: #4caf50 !important; }
     #camera-select { flex: 2; }
+    #reload-btn {
+      display: none;
+      background: #d32f2f;
+      width: 100%; max-width: 400px;
+      margin-top: 12px;
+    }
+    #reload-btn.show { display: block; }
   </style>
 </head>
 <body>
@@ -79,6 +86,7 @@
     <select id="camera-select"><option>Loading cameras...</option></select>
     <button id="torch-btn">Light</button>
   </div>
+  <button id="reload-btn">Reload Camera</button>
 
   <script>
     const statusEl = document.getElementById('status-text');
@@ -94,37 +102,29 @@
     }
     connect();
 
-    let lastValue = '', cooldown = false, html5QrCode = null, currentCameraId = null, isTorchOn = false;
+    let lastValue = '', cooldown = false, html5QrCode = null, currentCameraId = null, isTorchOn = false, isCameraRunning = false;
     const cameraSelect = document.getElementById('camera-select');
     const torchBtn = document.getElementById('torch-btn');
+    const reloadBtn = document.getElementById('reload-btn');
 
-    // Audio beep for successful scan (initialized on first user interaction)
-    let audioCtx = null;
-    function initAudio() {
-      if (!audioCtx && typeof AudioContext !== 'undefined') {
-        audioCtx = new AudioContext();
-      }
-      if (audioCtx?.state === 'suspended') {
-        audioCtx.resume();
-      }
-    }
+    // Simple beep using data URI (works better on iOS)
+    const beepSound = new Audio('data:audio/wav;base64,UklGRl9vT1BXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU');
+    // Generate actual beep sound
+    const audioCtx = typeof AudioContext !== 'undefined' ? new (window.AudioContext || window.webkitAudioContext)() : null;
     function playBeep() {
       if (!audioCtx) return;
+      if (audioCtx.state === 'suspended') audioCtx.resume();
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
       osc.connect(gain);
       gain.connect(audioCtx.destination);
-      osc.frequency.value = 880;
+      osc.frequency.value = 1200;
       osc.type = 'sine';
-      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
-      osc.start();
-      osc.stop(audioCtx.currentTime + 0.15);
+      gain.gain.setValueAtTime(0.5, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+      osc.start(audioCtx.currentTime);
+      osc.stop(audioCtx.currentTime + 0.1);
     }
-
-    // Initialize audio on any user tap
-    document.addEventListener('touchstart', initAudio, { once: true });
-    document.addEventListener('click', initAudio, { once: true });
 
     function onScanSuccess(value) {
       if (cooldown || value === lastValue) return;
@@ -149,6 +149,7 @@
     });
 
     function initScanner(cameraId) {
+      isCameraRunning = false;
       if (html5QrCode) html5QrCode.stop();
       html5QrCode = new Html5Qrcode('reader');
       html5QrCode.start(
@@ -157,6 +158,8 @@
         onScanSuccess,
         () => {}
       ).then(() => {
+        isCameraRunning = true;
+        reloadBtn.classList.remove('show');
         currentCameraId = cameraId;
         // Attempt to get video element for torch control
         const video = document.querySelector('#reader video');
@@ -165,6 +168,11 @@
           const capabilities = track.getCapabilities?.();
           torchBtn.disabled = !(capabilities && capabilities.torch);
         }
+      }).catch(err => {
+        console.error('Camera error:', err);
+        reloadBtn.classList.add('show');
+        statusEl.textContent = 'Camera error — tap Reload';
+        dotEl.className = 'dot err';
       });
     }
 
@@ -189,6 +197,39 @@
         console.log('Torch not supported');
       }
     });
+
+    // Reload camera button
+    reloadBtn.addEventListener('click', () => {
+      reloadBtn.classList.remove('show');
+      if (currentCameraId) initScanner(currentCameraId);
+    });
+
+    // Handle phone wake from sleep / visibility change
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        isCameraRunning = false;
+      } else {
+        // Page became visible again - show reload button
+        setTimeout(() => {
+          const video = document.querySelector('#reader video');
+          if (!video || video.paused || video.ended) {
+            reloadBtn.classList.add('show');
+            statusEl.textContent = 'Camera paused — tap Reload';
+            dotEl.className = 'dot err';
+          }
+        }, 500);
+      }
+    });
+
+    // Also check periodically if video is still playing
+    setInterval(() => {
+      const video = document.querySelector('#reader video');
+      if (video && (video.paused || video.ended) && !document.hidden) {
+        reloadBtn.classList.add('show');
+        statusEl.textContent = 'Camera paused — tap Reload';
+        dotEl.className = 'dot err';
+      }
+    }, 3000);
 
   </script>
 </body>
