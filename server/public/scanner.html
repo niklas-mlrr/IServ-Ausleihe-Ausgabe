@@ -46,16 +46,33 @@
     .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; background: #888; }
     .dot.ok { background: #4caf50; }
     .dot.err { background: #f44336; }
-    #reload-btn {
-      display: none;
+    .controls {
       margin-top: 16px;
-      padding: 12px 24px;
+      display: flex;
+      gap: 12px;
+      width: 100%; max-width: 400px;
+    }
+    button, select {
+      flex: 1;
+      padding: 12px 16px;
       border: none;
       border-radius: 8px;
-      background: #d32f2f;
+      background: #2a2a2a;
       color: #fff;
       font-size: 0.95rem;
       cursor: pointer;
+      transition: background 0.2s;
+    }
+    button:hover, select:hover { background: #3a3a3a; }
+    button:active { background: #4a4a4a; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .torch-on { background: #4caf50 !important; }
+    #camera-select { flex: 2; }
+    #reload-btn {
+      display: none;
+      background: #d32f2f;
+      width: 100%; max-width: 400px;
+      margin-top: 12px;
     }
     #reload-btn.show { display: block; }
   </style>
@@ -65,13 +82,16 @@
   <div id="reader"></div>
   <div id="status"><span class="dot" id="dot"></span><span id="status-text">Connecting...</span></div>
   <div id="last-scan">—</div>
-  <button id="reload-btn" onclick="location.reload()">Reload Camera</button>
+  <div class="controls">
+    <select id="camera-select"><option>Loading cameras...</option></select>
+    <button id="torch-btn">Light</button>
+  </div>
+  <button id="reload-btn">Reload Camera</button>
 
   <script>
     const statusEl = document.getElementById('status-text');
     const dotEl = document.getElementById('dot');
     const lastScanEl = document.getElementById('last-scan');
-    const reloadBtn = document.getElementById('reload-btn');
     let ws;
 
     function connect() {
@@ -82,34 +102,33 @@
     }
     connect();
 
-    // Audio beep using Web Audio API
-    let audioCtx = null;
-    document.addEventListener('click', () => {
-      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      if (audioCtx?.state === 'suspended') audioCtx.resume();
-    }, { once: true });
-    document.addEventListener('touchstart', () => {
-      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      if (audioCtx?.state === 'suspended') audioCtx.resume();
-    }, { once: true });
+    let lastValue = '', cooldown = false, html5QrCode = null, currentCameraId = null, isTorchOn = false, isCameraRunning = false;
+    const cameraSelect = document.getElementById('camera-select');
+    const torchBtn = document.getElementById('torch-btn');
+    const reloadBtn = document.getElementById('reload-btn');
+
+    // Simple beep using data URI (works better on iOS)
+    const beepSound = new Audio('data:audio/wav;base64,UklGRl9vT1BXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU');
+    // Generate actual beep sound
+    const audioCtx = typeof AudioContext !== 'undefined' ? new (window.AudioContext || window.webkitAudioContext)() : null;
     function playBeep() {
       if (!audioCtx) return;
+      if (audioCtx.state === 'suspended') audioCtx.resume();
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
       osc.connect(gain);
       gain.connect(audioCtx.destination);
-      osc.frequency.value = 880;
+      osc.frequency.value = 1200;
       osc.type = 'sine';
-      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
-      osc.start();
-      osc.stop(audioCtx.currentTime + 0.15);
+      gain.gain.setValueAtTime(0.5, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+      osc.start(audioCtx.currentTime);
+      osc.stop(audioCtx.currentTime + 0.1);
     }
-
-    let lastValue = '', cooldown = false;
 
     function onScanSuccess(value) {
       if (cooldown || value === lastValue) return;
+      initAudio(); // ensure audio context is ready
       lastValue = value; cooldown = true;
       setTimeout(() => { cooldown = false; lastValue = ''; }, 2000);
       lastScanEl.textContent = value;
@@ -119,24 +138,78 @@
       playBeep();
     }
 
-    // Scanner with higher resolution
-    new Html5QrcodeScanner('reader', {
-      fps: 15,
-      qrbox: { width: 300, height: 200 },
-      aspectRatio: 1.0,
-      supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
-      rememberLastUsedCamera: true,
-    }).render(onScanSuccess, null, {
-      videoConstraints: {
-        facingMode: 'environment',
-        width: { ideal: 1920 },
-        height: { ideal: 1080 }
+    // Load available cameras
+    Html5Qrcode.getCameras().then(cameras => {
+      cameraSelect.innerHTML = cameras.map((c, i) => `<option value="${c.id}" ${i === 0 ? 'selected' : ''}>${c.label}</option>`).join('');
+      currentCameraId = cameras[0]?.id;
+      initScanner(currentCameraId);
+    }).catch(err => {
+      cameraSelect.innerHTML = '<option>No cameras found</option>';
+      cameraSelect.disabled = true;
+    });
+
+    function initScanner(cameraId) {
+      isCameraRunning = false;
+      if (html5QrCode) html5QrCode.stop();
+      html5QrCode = new Html5Qrcode('reader');
+      html5QrCode.start(
+        cameraId,
+        { fps: 15, qrbox: { width: 300, height: 200 }, aspectRatio: 1.0 },
+        onScanSuccess,
+        () => {}
+      ).then(() => {
+        isCameraRunning = true;
+        reloadBtn.classList.remove('show');
+        currentCameraId = cameraId;
+        // Attempt to get video element for torch control
+        const video = document.querySelector('#reader video');
+        if (video && video.srcObject) {
+          const track = video.srcObject.getVideoTracks()[0];
+          const capabilities = track.getCapabilities?.();
+          torchBtn.disabled = !(capabilities && capabilities.torch);
+        }
+      }).catch(err => {
+        console.error('Camera error:', err);
+        reloadBtn.classList.add('show');
+        statusEl.textContent = 'Camera error — tap Reload';
+        dotEl.className = 'dot err';
+      });
+    }
+
+    // Camera selector change
+    cameraSelect.addEventListener('change', () => {
+      initScanner(cameraSelect.value);
+      isTorchOn = false;
+      torchBtn.classList.remove('torch-on');
+    });
+
+    // Torch toggle
+    torchBtn.addEventListener('click', async () => {
+      const video = document.querySelector('#reader video');
+      if (!video || !video.srcObject) return;
+      const track = video.srcObject.getVideoTracks()[0];
+      if (!track) return;
+      try {
+        await track.applyConstraints({ advanced: [{ torch: !isTorchOn }] });
+        isTorchOn = !isTorchOn;
+        torchBtn.classList.toggle('torch-on', isTorchOn);
+      } catch (e) {
+        console.log('Torch not supported');
       }
     });
 
-    // Show reload button after phone wakes from sleep
+    // Reload camera button
+    reloadBtn.addEventListener('click', () => {
+      reloadBtn.classList.remove('show');
+      if (currentCameraId) initScanner(currentCameraId);
+    });
+
+    // Handle phone wake from sleep / visibility change
     document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) {
+      if (document.hidden) {
+        isCameraRunning = false;
+      } else {
+        // Page became visible again - show reload button
         setTimeout(() => {
           const video = document.querySelector('#reader video');
           if (!video || video.paused || video.ended) {
@@ -147,6 +220,17 @@
         }, 500);
       }
     });
+
+    // Also check periodically if video is still playing
+    setInterval(() => {
+      const video = document.querySelector('#reader video');
+      if (video && (video.paused || video.ended) && !document.hidden) {
+        reloadBtn.classList.add('show');
+        statusEl.textContent = 'Camera paused — tap Reload';
+        dotEl.className = 'dot err';
+      }
+    }, 3000);
+
   </script>
 </body>
 </html>
