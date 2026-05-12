@@ -36,17 +36,23 @@ URL = f'wss://localhost:{args.port}/'
 def on_message(ws, raw):
     try:
         msg = json.loads(raw)
-    except Exception:
+    except Exception as e:
+        print(f'[error] JSON parse failed: {e}', file=sys.stderr)
         return
+    print(f'[debug] received: {msg}')
     if msg.get('type') == 'scan':
         value = str(msg.get('value', '')).strip()
         if not value:
             return
-        print(f'[scan] {value}')
+        print(f'[scan] typing: {value}')
         time.sleep(0.05)
-        pyautogui.typewrite(value, interval=0.02)
-        if args.enter:
-            pyautogui.press('enter')
+        try:
+            pyautogui.typewrite(value, interval=0.02)
+            if args.enter:
+                pyautogui.press('enter')
+            print(f'[scan] typed successfully')
+        except Exception as e:
+            print(f'[error] pyautogui failed: {e}', file=sys.stderr)
 
 
 def on_open(ws):
