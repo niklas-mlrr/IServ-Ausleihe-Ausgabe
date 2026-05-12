@@ -9,11 +9,12 @@ const { WebSocketServer } = require('ws');
 
 const PORT = 3443;
 
-function getLocalIP() {
+function getAllLocalIPs() {
+  const ips = [];
   for (const iface of Object.values(os.networkInterfaces()).flat()) {
-    if (iface.family === 'IPv4' && !iface.internal) return iface.address;
+    if (iface.family === 'IPv4' && !iface.internal) ips.push(iface.address);
   }
-  return '127.0.0.1';
+  return ips.length ? ips : ['127.0.0.1'];
 }
 
 async function getCert() {
@@ -23,11 +24,11 @@ async function getCert() {
     return { cert: fs.readFileSync(certPath, 'utf8'), key: fs.readFileSync(keyPath, 'utf8') };
   }
   console.log('Generating self-signed certificate...');
-  const ip = getLocalIP();
-  const pems = await selfsigned.generate([{ name: 'commonName', value: ip }], {
+  const ips = getAllLocalIPs();
+  const pems = await selfsigned.generate([{ name: 'commonName', value: ips[0] }], {
     days: 3650,
     keySize: 2048,
-    extensions: [{ name: 'subjectAltName', altNames: [{ type: 7, ip: ip }] }],
+    extensions: [{ name: 'subjectAltName', altNames: ips.map(ip => ({ type: 7, ip })) }],
   });
   fs.writeFileSync(certPath, pems.cert);
   fs.writeFileSync(keyPath, pems.private);
@@ -80,8 +81,8 @@ async function main() {
   });
 
   server.listen(PORT, () => {
-    const ip = getLocalIP();
-    const url = `https://${ip}:${PORT}`;
+    const ips = getAllLocalIPs();
+    const url = `https://${ips[0]}:${PORT}`;
     console.log(`\nBarcode server running at ${url}`);
     console.log('\nScan this QR code with your phone to open the scanner:\n');
     qrcode.generate(url, { small: true });
