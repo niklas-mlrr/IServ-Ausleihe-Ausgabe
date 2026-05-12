@@ -81,11 +81,18 @@
     }
 
     new Html5QrcodeScanner('reader', {
-      fps: 10,
-      qrbox: { width: 280, height: 180 },
+      fps: 15,
+      qrbox: { width: 300, height: 200 },
+      aspectRatio: 1.0,
       supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
       rememberLastUsedCamera: true,
-    }).render(onScanSuccess);
+    }).render(onScanSuccess, null, {
+      videoConstraints: {
+        facingMode: 'environment',
+        width: { ideal: 1920 },
+        height: { ideal: 1080 }
+      }
+    });
   </script>
 </body>
 </html>
