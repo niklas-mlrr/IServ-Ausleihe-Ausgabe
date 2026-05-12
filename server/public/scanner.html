@@ -46,6 +46,28 @@
     .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; background: #888; }
     .dot.ok { background: #4caf50; }
     .dot.err { background: #f44336; }
+    .controls {
+      margin-top: 16px;
+      display: flex;
+      gap: 12px;
+      width: 100%; max-width: 400px;
+    }
+    button, select {
+      flex: 1;
+      padding: 12px 16px;
+      border: none;
+      border-radius: 8px;
+      background: #2a2a2a;
+      color: #fff;
+      font-size: 0.95rem;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    button:hover, select:hover { background: #3a3a3a; }
+    button:active { background: #4a4a4a; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .torch-on { background: #4caf50 !important; }
+    #camera-select { flex: 2; }
   </style>
 </head>
 <body>
@@ -53,6 +75,10 @@
   <div id="reader"></div>
   <div id="status"><span class="dot" id="dot"></span><span id="status-text">Connecting...</span></div>
   <div id="last-scan">—</div>
+  <div class="controls">
+    <select id="camera-select"><option>Loading cameras...</option></select>
+    <button id="torch-btn">Light</button>
+  </div>
 
   <script>
     const statusEl = document.getElementById('status-text');
@@ -68,7 +94,25 @@
     }
     connect();
 
-    let lastValue = '', cooldown = false;
+    let lastValue = '', cooldown = false, html5QrCode = null, currentCameraId = null, isTorchOn = false;
+    const cameraSelect = document.getElementById('camera-select');
+    const torchBtn = document.getElementById('torch-btn');
+
+    // Audio beep for successful scan
+    const audioCtx = typeof AudioContext !== 'undefined' ? new AudioContext() : null;
+    function playBeep() {
+      if (!audioCtx) return;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.frequency.value = 880;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.15);
+    }
 
     function onScanSuccess(value) {
       if (cooldown || value === lastValue) return;
@@ -78,21 +122,61 @@
       statusEl.textContent = 'Sent: ' + value;
       if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'scan', value }));
       if (navigator.vibrate) navigator.vibrate(80);
+      playBeep();
     }
 
-    new Html5QrcodeScanner('reader', {
-      fps: 15,
-      qrbox: { width: 300, height: 200 },
-      aspectRatio: 1.0,
-      supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
-      rememberLastUsedCamera: true,
-    }).render(onScanSuccess, null, {
-      videoConstraints: {
-        facingMode: 'environment',
-        width: { ideal: 1920 },
-        height: { ideal: 1080 }
+    // Load available cameras
+    Html5Qrcode.getCameras().then(cameras => {
+      cameraSelect.innerHTML = cameras.map((c, i) => `<option value="${c.id}" ${i === 0 ? 'selected' : ''}>${c.label}</option>`).join('');
+      currentCameraId = cameras[0]?.id;
+      initScanner(currentCameraId);
+    }).catch(err => {
+      cameraSelect.innerHTML = '<option>No cameras found</option>';
+      cameraSelect.disabled = true;
+    });
+
+    function initScanner(cameraId) {
+      if (html5QrCode) html5QrCode.stop();
+      html5QrCode = new Html5Qrcode('reader');
+      html5QrCode.start(
+        cameraId,
+        { fps: 15, qrbox: { width: 300, height: 200 }, aspectRatio: 1.0 },
+        onScanSuccess,
+        () => {}
+      ).then(() => {
+        currentCameraId = cameraId;
+        // Attempt to get video element for torch control
+        const video = document.querySelector('#reader video');
+        if (video && video.srcObject) {
+          const track = video.srcObject.getVideoTracks()[0];
+          const capabilities = track.getCapabilities?.();
+          torchBtn.disabled = !(capabilities && capabilities.torch);
+        }
+      });
+    }
+
+    // Camera selector change
+    cameraSelect.addEventListener('change', () => {
+      initScanner(cameraSelect.value);
+      isTorchOn = false;
+      torchBtn.classList.remove('torch-on');
+    });
+
+    // Torch toggle
+    torchBtn.addEventListener('click', async () => {
+      const video = document.querySelector('#reader video');
+      if (!video || !video.srcObject) return;
+      const track = video.srcObject.getVideoTracks()[0];
+      if (!track) return;
+      try {
+        await track.applyConstraints({ advanced: [{ torch: !isTorchOn }] });
+        isTorchOn = !isTorchOn;
+        torchBtn.classList.toggle('torch-on', isTorchOn);
+      } catch (e) {
+        console.log('Torch not supported');
       }
     });
+
   </script>
 </body>
 </html>
