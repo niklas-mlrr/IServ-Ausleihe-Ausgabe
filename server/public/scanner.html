@@ -98,8 +98,16 @@
     const cameraSelect = document.getElementById('camera-select');
     const torchBtn = document.getElementById('torch-btn');
 
-    // Audio beep for successful scan
-    const audioCtx = typeof AudioContext !== 'undefined' ? new AudioContext() : null;
+    // Audio beep for successful scan (initialized on first user interaction)
+    let audioCtx = null;
+    function initAudio() {
+      if (!audioCtx && typeof AudioContext !== 'undefined') {
+        audioCtx = new AudioContext();
+      }
+      if (audioCtx?.state === 'suspended') {
+        audioCtx.resume();
+      }
+    }
     function playBeep() {
       if (!audioCtx) return;
       const osc = audioCtx.createOscillator();
@@ -114,8 +122,13 @@
       osc.stop(audioCtx.currentTime + 0.15);
     }
 
+    // Initialize audio on any user tap
+    document.addEventListener('touchstart', initAudio, { once: true });
+    document.addEventListener('click', initAudio, { once: true });
+
     function onScanSuccess(value) {
       if (cooldown || value === lastValue) return;
+      initAudio(); // ensure audio context is ready
       lastValue = value; cooldown = true;
       setTimeout(() => { cooldown = false; lastValue = ''; }, 2000);
       lastScanEl.textContent = value;
