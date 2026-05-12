@@ -107,28 +107,32 @@
     const torchBtn = document.getElementById('torch-btn');
     const reloadBtn = document.getElementById('reload-btn');
 
-    // Simple beep using data URI (works better on iOS)
-    const beepSound = new Audio('data:audio/wav;base64,UklGRl9vT1BXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU');
-    // Generate actual beep sound
-    const audioCtx = typeof AudioContext !== 'undefined' ? new (window.AudioContext || window.webkitAudioContext)() : null;
+    // Audio beep using Web Audio API
+    let audioCtx = null;
+    document.addEventListener('click', () => {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx?.state === 'suspended') audioCtx.resume();
+    }, { once: true });
+    document.addEventListener('touchstart', () => {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx?.state === 'suspended') audioCtx.resume();
+    }, { once: true });
     function playBeep() {
       if (!audioCtx) return;
-      if (audioCtx.state === 'suspended') audioCtx.resume();
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
       osc.connect(gain);
       gain.connect(audioCtx.destination);
-      osc.frequency.value = 1200;
+      osc.frequency.value = 880;
       osc.type = 'sine';
-      gain.gain.setValueAtTime(0.5, audioCtx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
-      osc.start(audioCtx.currentTime);
-      osc.stop(audioCtx.currentTime + 0.1);
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.15);
     }
 
     function onScanSuccess(value) {
       if (cooldown || value === lastValue) return;
-      initAudio(); // ensure audio context is ready
       lastValue = value; cooldown = true;
       setTimeout(() => { cooldown = false; lastValue = ''; }, 2000);
       lastScanEl.textContent = value;
