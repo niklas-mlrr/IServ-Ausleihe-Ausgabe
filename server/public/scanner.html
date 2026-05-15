@@ -48,13 +48,15 @@
     .dot.err { background: #f44336; }
     .controls {
       margin-top: 16px;
-      display: flex;
-      gap: 12px;
+      display: grid;
+      gap: 8px;
       width: 100%; max-width: 400px;
     }
+    #camera-row { grid-template-columns: 1fr auto auto; }
+    #sound-row  { grid-template-columns: 1fr 1fr; }
     button, select {
-      flex: 1;
-      padding: 12px 16px;
+      width: 100%;
+      padding: 12px 10px;
       border: none;
       border-radius: 8px;
       background: #2a2a2a;
@@ -62,14 +64,16 @@
       font-size: 0.95rem;
       cursor: pointer;
       transition: background 0.2s;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     button:hover, select:hover { background: #3a3a3a; }
     button:active { background: #4a4a4a; }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
     .torch-on { background: #4caf50 !important; }
     .sound-on { background: #4caf50 !important; }
-    #camera-select { flex: 1.5; }
-    #reload-btn { flex: 0 0 auto; padding: 12px 14px; font-size: 1.1rem; }
+    #reload-btn { padding: 12px 14px; font-size: 1.1rem; width: auto; }
   </style>
 </head>
 <body>
@@ -77,11 +81,14 @@
   <div id="reader"></div>
   <div id="status"><span class="dot" id="dot"></span><span id="status-text">Connecting...</span></div>
   <div id="last-scan">—</div>
-  <div class="controls">
+  <div class="controls" id="camera-row">
     <select id="camera-select"><option>Loading cameras...</option></select>
     <button id="torch-btn">Light</button>
-    <button id="sound-btn">Sound</button>
     <button id="reload-btn" title="Reload camera">&#x21BA;</button>
+  </div>
+  <div class="controls" id="sound-row">
+    <button id="sound-btn">Sound: off</button>
+    <button id="sound-test-btn">Test beep</button>
   </div>
 
   <script>
@@ -104,32 +111,49 @@
     const soundBtn = document.getElementById('sound-btn');
     const reloadBtn = document.getElementById('reload-btn');
 
+    const soundTestBtn = document.getElementById('sound-test-btn');
+
     let audioCtx = null;
-    function getAudioCtx() {
-      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      return audioCtx;
+
+    function beepWithCtx(ctx) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.value = 1200;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0.5, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.15);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.15);
     }
-    async function playBeep() {
-      try {
-        const ctx = getAudioCtx();
-        if (ctx.state === 'suspended') await ctx.resume();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.frequency.value = 1200;
-        osc.type = 'sine';
-        gain.gain.setValueAtTime(0.5, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.15);
-        osc.start(ctx.currentTime);
-        osc.stop(ctx.currentTime + 0.15);
-      } catch (e) {}
+
+    function playBeep() {
+      if (!audioCtx) return;
+      try { beepWithCtx(audioCtx); } catch (e) {}
     }
 
     soundBtn.addEventListener('click', () => {
       soundEnabled = !soundEnabled;
-      soundBtn.classList.toggle('sound-on', soundEnabled);
-      if (soundEnabled) playBeep();
+      if (soundEnabled) {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        soundBtn.textContent = 'Sound: on';
+        soundBtn.classList.add('sound-on');
+        try { beepWithCtx(audioCtx); } catch (e) {}
+      } else {
+        soundBtn.textContent = 'Sound: off';
+        soundBtn.classList.remove('sound-on');
+      }
+    });
+
+    soundTestBtn.addEventListener('click', () => {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        statusEl.textContent = 'Audio ctx state: ' + ctx.state;
+        beepWithCtx(ctx);
+      } catch (e) {
+        statusEl.textContent = 'Audio error: ' + e.message;
+      }
     });
 
     function onScanSuccess(value) {
