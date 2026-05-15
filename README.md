@@ -93,6 +93,13 @@ python3 client.py --no-enter     # Don't press Enter after typing
 └── start.bat           # Windows launcher
 ```
 
+## Sound
+
+The scanner UI has an optional beep sound on each scan, using the Web Audio API.
+
+- **Android:** Works as long as media/ring volume is not at zero. No mute switch equivalent.
+- **iOS:** The Web Audio API follows the hardware mute/silent switch. If the switch is muted, no sound plays. This is an iOS restriction and cannot be overridden from a web app.
+
 ## Troubleshooting
 
 | Issue | Solution |
