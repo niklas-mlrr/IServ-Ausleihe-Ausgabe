@@ -28,21 +28,6 @@
       width: 100%; max-width: 320px;
       text-align: center;
     }
-    #last-scan {
-      margin-top: 12px;
-      padding: 14px 16px;
-      border-radius: 8px;
-      background: #1a2a1a;
-      border: 1px solid #2a4a2a;
-      width: 100%; max-width: 320px;
-      font-size: 1.1rem;
-      font-weight: 600;
-      color: #4caf50;
-      text-align: center;
-      min-height: 52px;
-      display: flex; align-items: center; justify-content: center;
-      word-break: break-all;
-    }
     .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; background: #888; }
     .dot.ok { background: #4caf50; }
     .dot.err { background: #f44336; }
@@ -52,7 +37,7 @@
       gap: 8px;
       width: 100%; max-width: 320px;
     }
-    #camera-row { grid-template-columns: 1fr auto auto; }
+    #camera-row { grid-template-columns: 1fr auto; }
     #sound-row  { grid-template-columns: 1fr 1fr; }
     button, select {
       width: 100%;
@@ -80,21 +65,18 @@
   <h1>Barcode Scanner</h1>
   <div id="reader"></div>
   <div id="status"><span class="dot" id="dot"></span><span id="status-text">Connecting...</span></div>
-  <div id="last-scan">—</div>
   <div class="controls" id="camera-row">
     <select id="camera-select"><option>Loading cameras...</option></select>
-    <button id="torch-btn">Light</button>
     <button id="reload-btn" title="Reload camera">&#x21BA;</button>
   </div>
   <div class="controls" id="sound-row">
     <button id="sound-btn">Sound: off</button>
-    <button id="sound-test-btn">Test beep</button>
+    <button id="torch-btn">Light</button>
   </div>
 
   <script>
     const statusEl = document.getElementById('status-text');
     const dotEl = document.getElementById('dot');
-    const lastScanEl = document.getElementById('last-scan');
     let ws;
 
     function connect() {
@@ -110,8 +92,6 @@
     const torchBtn = document.getElementById('torch-btn');
     const soundBtn = document.getElementById('sound-btn');
     const reloadBtn = document.getElementById('reload-btn');
-
-    const soundTestBtn = document.getElementById('sound-test-btn');
 
     let audioCtx = null, audioBuffer = null;
 
@@ -149,19 +129,14 @@
       }
     });
 
-    soundTestBtn.addEventListener('click', async () => {
-      await initAudio();
-      playBeep();
-      statusEl.textContent = 'Audio: OK';
-    });
+
 
     function onScanSuccess(value) {
       if (cooldown || value === lastValue) return;
       if (soundEnabled) playBeep();
       lastValue = value; cooldown = true;
       setTimeout(() => { cooldown = false; lastValue = ''; }, 2000);
-      lastScanEl.textContent = value;
-      statusEl.textContent = 'Sent: ' + value;
+statusEl.textContent = 'Sent: ' + value;
       if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'scan', value }));
       if (navigator.vibrate) navigator.vibrate(80);
     }
