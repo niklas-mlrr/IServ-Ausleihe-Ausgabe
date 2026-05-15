@@ -67,6 +67,7 @@
     button:active { background: #4a4a4a; }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
     .torch-on { background: #4caf50 !important; }
+    .sound-on { background: #4caf50 !important; }
     #camera-select { flex: 2; }
     #reload-btn { flex: 0 0 auto; padding: 12px 14px; font-size: 1.1rem; }
   </style>
@@ -79,6 +80,7 @@
   <div class="controls">
     <select id="camera-select"><option>Loading cameras...</option></select>
     <button id="torch-btn">Light</button>
+    <button id="sound-btn">Sound</button>
     <button id="reload-btn" title="Reload camera">&#x21BA;</button>
   </div>
 
@@ -96,29 +98,39 @@
     }
     connect();
 
-    let lastValue = '', cooldown = false, html5QrCode = null, currentCameraId = null, isTorchOn = false, isCameraRunning = false, isRestarting = false;
+    let lastValue = '', cooldown = false, html5QrCode = null, currentCameraId = null, isTorchOn = false, isCameraRunning = false, isRestarting = false, soundEnabled = false;
     const cameraSelect = document.getElementById('camera-select');
     const torchBtn = document.getElementById('torch-btn');
+    const soundBtn = document.getElementById('sound-btn');
     const reloadBtn = document.getElementById('reload-btn');
 
-    // Simple beep using data URI (works better on iOS)
-    const beepSound = new Audio('data:audio/wav;base64,UklGRl9vT1BXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU');
-    // Generate actual beep sound
-    const audioCtx = typeof AudioContext !== 'undefined' ? new (window.AudioContext || window.webkitAudioContext)() : null;
-    function playBeep() {
-      if (!audioCtx) return;
-      if (audioCtx.state === 'suspended') audioCtx.resume();
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      osc.connect(gain);
-      gain.connect(audioCtx.destination);
-      osc.frequency.value = 1200;
-      osc.type = 'sine';
-      gain.gain.setValueAtTime(0.5, audioCtx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
-      osc.start(audioCtx.currentTime);
-      osc.stop(audioCtx.currentTime + 0.1);
+    let audioCtx = null;
+    function getAudioCtx() {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      return audioCtx;
     }
+    function playBeep() {
+      try {
+        const ctx = getAudioCtx();
+        if (ctx.state === 'suspended') ctx.resume();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = 1200;
+        osc.type = 'sine';
+        gain.gain.setValueAtTime(0.5, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.15);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.15);
+      } catch (e) {}
+    }
+
+    soundBtn.addEventListener('click', () => {
+      soundEnabled = !soundEnabled;
+      soundBtn.classList.toggle('sound-on', soundEnabled);
+      if (soundEnabled) playBeep();
+    });
 
     function onScanSuccess(value) {
       if (cooldown || value === lastValue) return;
@@ -128,7 +140,7 @@
       statusEl.textContent = 'Sent: ' + value;
       if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'scan', value }));
       if (navigator.vibrate) navigator.vibrate(80);
-      playBeep();
+      if (soundEnabled) playBeep();
     }
 
     // Load available cameras
