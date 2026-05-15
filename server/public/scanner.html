@@ -113,43 +113,44 @@
 
     const soundTestBtn = document.getElementById('sound-test-btn');
 
-    let audioCtx = null;
-
-    function unlockCtx(ctx) {
-      // iOS requires a silent buffer played synchronously during a user gesture to unlock AudioContext
-      const buf = ctx.createBuffer(1, 1, ctx.sampleRate);
-      const src = ctx.createBufferSource();
-      src.buffer = buf;
-      src.connect(ctx.destination);
-      src.start(0);
+    // Generate a WAV beep as a Blob URL — <audio> uses media playback category on iOS,
+    // which plays even when the ringer/mute switch is on silent (unlike Web Audio API)
+    function makeBeepUrl(freq = 880, duration = 0.2, sampleRate = 8000) {
+      const n = Math.floor(sampleRate * duration);
+      const buf = new ArrayBuffer(44 + n);
+      const v = new DataView(buf);
+      const s = (o, str) => { for (let i = 0; i < str.length; i++) v.setUint8(o + i, str.charCodeAt(i)); };
+      s(0, 'RIFF'); v.setUint32(4, 36 + n, true); s(8, 'WAVE');
+      s(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true);
+      v.setUint16(22, 1, true); v.setUint32(24, sampleRate, true);
+      v.setUint32(28, sampleRate, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true);
+      s(36, 'data'); v.setUint32(40, n, true);
+      for (let i = 0; i < n; i++) {
+        const fade = Math.min(i, n - i, sampleRate * 0.01) / (sampleRate * 0.01);
+        v.setUint8(44 + i, Math.round(128 + Math.sin(2 * Math.PI * freq * i / sampleRate) * 120 * fade));
+      }
+      return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
     }
-
-    function beepWithCtx(ctx) {
-      const osc = ctx.createOscillator();
-      osc.connect(ctx.destination);
-      osc.type = 'sine';
-      osc.frequency.value = 880;
-      osc.start();
-      osc.stop(ctx.currentTime + 0.3);
-    }
+    const beepUrl = makeBeepUrl();
+    let beepAudio = null;
 
     function playBeep() {
-      if (!audioCtx) return;
-      try { beepWithCtx(audioCtx); } catch (e) {}
+      if (!beepAudio) return;
+      beepAudio.currentTime = 0;
+      beepAudio.play().catch(() => {});
     }
 
     soundBtn.addEventListener('click', () => {
       soundEnabled = !soundEnabled;
       if (soundEnabled) {
-        if (!audioCtx) {
-          audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-          unlockCtx(audioCtx);
-          audioCtx.resume().then(() => beepWithCtx(audioCtx));
-        } else {
-          beepWithCtx(audioCtx);
-        }
         soundBtn.textContent = 'Sound: on';
         soundBtn.classList.add('sound-on');
+        if (!beepAudio) {
+          beepAudio = new Audio(beepUrl);
+          beepAudio.load();
+        }
+        beepAudio.currentTime = 0;
+        beepAudio.play().catch(e => { statusEl.textContent = 'Audio error: ' + e.message; });
       } else {
         soundBtn.textContent = 'Sound: off';
         soundBtn.classList.remove('sound-on');
@@ -157,16 +158,10 @@
     });
 
     soundTestBtn.addEventListener('click', () => {
-      try {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        unlockCtx(ctx);
-        ctx.resume().then(() => {
-          statusEl.textContent = 'Audio ctx: ' + ctx.state;
-          beepWithCtx(ctx);
-        });
-      } catch (e) {
-        statusEl.textContent = 'Audio error: ' + e.message;
-      }
+      const a = new Audio(beepUrl);
+      a.play()
+        .then(() => { statusEl.textContent = 'Audio: playing'; })
+        .catch(e => { statusEl.textContent = 'Audio error: ' + e.message; });
     });
 
     function onScanSuccess(value) {
