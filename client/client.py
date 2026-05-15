@@ -15,6 +15,7 @@ Usage:
 """
 import argparse
 import json
+import signal
 import ssl
 import sys
 import time
@@ -70,6 +71,12 @@ def on_close(ws, code, msg):
 
 # Skip certificate verification since we use a self-signed cert
 ssl_opts = {'cert_reqs': ssl.CERT_NONE}
+
+def _sigint(sig, frame):
+    print('\nExiting.')
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, _sigint)
 
 print(f'Connecting to {URL} (waiting for scans... Ctrl+C to quit)')
 while True:
