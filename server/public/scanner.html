@@ -68,7 +68,7 @@
     button:disabled { opacity: 0.5; cursor: not-allowed; }
     .torch-on { background: #4caf50 !important; }
     .sound-on { background: #4caf50 !important; }
-    #camera-select { flex: 2; }
+    #camera-select { flex: 1.5; }
     #reload-btn { flex: 0 0 auto; padding: 12px 14px; font-size: 1.1rem; }
   </style>
 </head>
@@ -109,10 +109,10 @@
       if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       return audioCtx;
     }
-    function playBeep() {
+    async function playBeep() {
       try {
         const ctx = getAudioCtx();
-        if (ctx.state === 'suspended') ctx.resume();
+        if (ctx.state === 'suspended') await ctx.resume();
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
         osc.connect(gain);
