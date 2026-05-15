@@ -18,14 +18,14 @@
       padding: 20px;
     }
     h1 { font-size: 1.2rem; font-weight: 600; margin-bottom: 16px; opacity: 0.8; }
-    #reader { width: 100%; max-width: 400px; border-radius: 12px; overflow: hidden; }
+    #reader { width: 100%; max-width: 320px; border-radius: 12px; overflow: hidden; }
     #status {
       margin-top: 16px;
       padding: 10px 16px;
       border-radius: 8px;
       font-size: 0.9rem;
       background: #1e1e1e;
-      width: 100%; max-width: 400px;
+      width: 100%; max-width: 320px;
       text-align: center;
     }
     #last-scan {
@@ -34,7 +34,7 @@
       border-radius: 8px;
       background: #1a2a1a;
       border: 1px solid #2a4a2a;
-      width: 100%; max-width: 400px;
+      width: 100%; max-width: 320px;
       font-size: 1.1rem;
       font-weight: 600;
       color: #4caf50;
@@ -50,7 +50,7 @@
       margin-top: 16px;
       display: grid;
       gap: 8px;
-      width: 100%; max-width: 400px;
+      width: 100%; max-width: 320px;
     }
     #camera-row { grid-template-columns: 1fr auto auto; }
     #sound-row  { grid-template-columns: 1fr 1fr; }
@@ -115,6 +115,15 @@
 
     let audioCtx = null;
 
+    function unlockCtx(ctx) {
+      // iOS requires a silent buffer played synchronously during a user gesture to unlock AudioContext
+      const buf = ctx.createBuffer(1, 1, ctx.sampleRate);
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.connect(ctx.destination);
+      src.start(0);
+    }
+
     function beepWithCtx(ctx) {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
@@ -136,10 +145,15 @@
     soundBtn.addEventListener('click', () => {
       soundEnabled = !soundEnabled;
       if (soundEnabled) {
-        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (!audioCtx) {
+          audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+          unlockCtx(audioCtx);
+          audioCtx.resume().then(() => beepWithCtx(audioCtx));
+        } else {
+          beepWithCtx(audioCtx);
+        }
         soundBtn.textContent = 'Sound: on';
         soundBtn.classList.add('sound-on');
-        try { beepWithCtx(audioCtx); } catch (e) {}
       } else {
         soundBtn.textContent = 'Sound: off';
         soundBtn.classList.remove('sound-on');
@@ -149,8 +163,11 @@
     soundTestBtn.addEventListener('click', () => {
       try {
         const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        statusEl.textContent = 'Audio ctx state: ' + ctx.state;
-        beepWithCtx(ctx);
+        unlockCtx(ctx);
+        ctx.resume().then(() => {
+          statusEl.textContent = 'Audio ctx: ' + ctx.state;
+          beepWithCtx(ctx);
+        });
       } catch (e) {
         statusEl.textContent = 'Audio error: ' + e.message;
       }
@@ -195,7 +212,7 @@
       try {
         await html5QrCode.start(
           cameraId,
-          { fps: 15, qrbox: { width: 300, height: 200 }, aspectRatio: 1.0 },
+          { fps: 15, qrbox: { width: 240, height: 160 }, aspectRatio: 1.0 },
           onScanSuccess,
           () => {}
         );
