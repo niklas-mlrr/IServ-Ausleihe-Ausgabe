@@ -70,6 +70,10 @@ The scanner UI has an optional beep sound on each scan, using the Web Audio API.
 - **Android:** Works as long as media/ring volume is not at zero. No mute switch equivalent.
 - **iOS:** The Web Audio API follows the hardware mute/silent switch. If the switch is muted, no sound plays. This is an iOS restriction and cannot be overridden from a web app.
 
+## Pausing Input
+
+Press **Ctrl+Shift+F9** (Windows) or **Cmd+Shift+F9** (macOS) to toggle input pause. While paused, scans are received but not typed — useful when you need to type something manually without triggering barcode input. The current state is printed in the terminal.
+
 ## Configuration
 
 ### Desktop Client Options
