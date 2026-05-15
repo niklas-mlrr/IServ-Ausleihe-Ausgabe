@@ -18,7 +18,8 @@
       padding: 20px;
     }
     h1 { font-size: 1.2rem; font-weight: 600; margin-bottom: 16px; opacity: 0.8; }
-    #reader { width: 100%; max-width: 320px; border-radius: 12px; overflow: hidden; }
+    #reader { width: 100%; max-width: 320px; border-radius: 12px; overflow: hidden; box-shadow: 0 0 0 0px #4caf50; transition: box-shadow 0.6s ease-out; }
+    #reader.scan-success { box-shadow: 0 0 0 3px #4caf50; transition: none; }
     #status {
       margin-top: 16px;
       padding: 10px 16px;
@@ -92,6 +93,8 @@
     const torchBtn = document.getElementById('torch-btn');
     const soundBtn = document.getElementById('sound-btn');
     const reloadBtn = document.getElementById('reload-btn');
+    const readerEl = document.getElementById('reader');
+    let scanFlashTimeout = null;
 
     let audioCtx = null, audioBuffer = null;
 
@@ -136,9 +139,12 @@
       if (soundEnabled) playBeep();
       lastValue = value; cooldown = true;
       setTimeout(() => { cooldown = false; lastValue = ''; }, 2000);
-statusEl.textContent = 'Sent: ' + value;
+      statusEl.textContent = 'Sent: ' + value;
       if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'scan', value }));
       if (navigator.vibrate) navigator.vibrate(80);
+      readerEl.classList.add('scan-success');
+      clearTimeout(scanFlashTimeout);
+      scanFlashTimeout = setTimeout(() => readerEl.classList.remove('scan-success'), 1200);
     }
 
     // Load available cameras
