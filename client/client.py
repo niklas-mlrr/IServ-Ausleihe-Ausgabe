@@ -71,14 +71,16 @@ def on_close(ws, code, msg):
 # Skip certificate verification since we use a self-signed cert
 ssl_opts = {'cert_reqs': ssl.CERT_NONE}
 
-print(f'Connecting to {URL} (waiting for scans...)')
+print(f'Connecting to {URL} (waiting for scans... Ctrl+C to quit)')
 while True:
     try:
         ws = websocket.WebSocketApp(URL, on_open=on_open, on_message=on_message,
                                     on_error=on_error, on_close=on_close)
-        ws.run_forever(sslopt=ssl_opts, reconnect=3)
+        ws.run_forever(sslopt=ssl_opts)
+        # run_forever returned normally (disconnected) — wait then retry
+        time.sleep(3)
     except KeyboardInterrupt:
-        print('Exiting.')
+        print('\nExiting.')
         sys.exit(0)
     except Exception as e:
         print(f'[fatal] {e} — retrying in 5s', file=sys.stderr)
