@@ -48,9 +48,9 @@ def _toggle_pause():
 
 _OS = platform.system()
 if _OS == 'Darwin':
-    _hotkey_combo = '<cmd>+<shift>+f9'
+    _hotkey_combo = '<cmd>+<shift>+<f9>'
 else:
-    _hotkey_combo = '<ctrl>+<shift>+f9'
+    _hotkey_combo = '<ctrl>+<shift>+<f9>'
 
 _hotkey_listener = kb.GlobalHotKeys({_hotkey_combo: _toggle_pause})
 _hotkey_listener.daemon = True
