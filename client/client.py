@@ -15,12 +15,15 @@ Usage:
 """
 import argparse
 import json
+import platform
 import signal
 import ssl
 import sys
+import threading
 import time
 import websocket
 import pyautogui
+from pynput import keyboard as kb
 
 pyautogui.PAUSE = 0.02
 pyautogui.FAILSAFE = False
@@ -33,6 +36,26 @@ args = parser.parse_args()
 
 URL = f'wss://localhost:{args.port}/'
 
+paused = False
+_pause_lock = threading.Lock()
+
+def _toggle_pause():
+    global paused
+    with _pause_lock:
+        paused = not paused
+    state = 'PAUSED — scans will be ignored' if paused else 'ACTIVE — scans will be typed'
+    print(f'[hotkey] {state}')
+
+_OS = platform.system()
+if _OS == 'Darwin':
+    _hotkey_combo = '<cmd>+<shift>+f9'
+else:
+    _hotkey_combo = '<ctrl>+<shift>+f9'
+
+_hotkey_listener = kb.GlobalHotKeys({_hotkey_combo: _toggle_pause})
+_hotkey_listener.daemon = True
+_hotkey_listener.start()
+
 
 def on_message(ws, raw):
     try:
@@ -44,6 +67,9 @@ def on_message(ws, raw):
     if msg.get('type') == 'scan':
         value = str(msg.get('value', '')).strip()
         if not value:
+            return
+        if paused:
+            print(f'[scan] ignored (paused): {value}')
             return
         print(f'[scan] typing: {value}')
         time.sleep(0.05)
@@ -79,6 +105,7 @@ def _sigint(sig, frame):
 signal.signal(signal.SIGINT, _sigint)
 
 print(f'Connecting to {URL} (waiting for scans... Ctrl+C to quit)')
+print(f'Toggle input pause: Ctrl+Shift+F9 (Windows) / Cmd+Shift+F9 (macOS)')
 while True:
     try:
         ws = websocket.WebSocketApp(URL, on_open=on_open, on_message=on_message,
