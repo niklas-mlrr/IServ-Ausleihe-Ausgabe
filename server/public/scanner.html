@@ -71,7 +71,7 @@
   </div>
   <div class="controls" id="sound-row">
     <button id="sound-btn">Sound: off</button>
-    <button id="torch-btn">Light</button>
+    <button id="torch-btn">Light: off</button>
   </div>
 
   <script>
@@ -143,8 +143,12 @@ statusEl.textContent = 'Sent: ' + value;
 
     // Load available cameras
     Html5Qrcode.getCameras().then(cameras => {
-      cameraSelect.innerHTML = cameras.map((c, i) => `<option value="${c.id}" ${i === 0 ? 'selected' : ''}>${c.label}</option>`).join('');
-      currentCameraId = cameras[0]?.id;
+      const preferred =
+        cameras.find(c => /back dual wide/i.test(c.label)) ||
+        cameras.find(c => /back/i.test(c.label)) ||
+        cameras[0];
+      cameraSelect.innerHTML = cameras.map(c => `<option value="${c.id}" ${c === preferred ? 'selected' : ''}>${c.label}</option>`).join('');
+      currentCameraId = preferred?.id;
       initScanner(currentCameraId);
     }).catch(err => {
       cameraSelect.innerHTML = '<option>No cameras found</option>';
@@ -176,6 +180,7 @@ statusEl.textContent = 'Sent: ' + value;
         isCameraRunning = true;
         currentCameraId = cameraId;
         isTorchOn = false;
+        torchBtn.textContent = 'Light: off';
         torchBtn.classList.remove('torch-on');
         statusEl.textContent = ws && ws.readyState === WebSocket.OPEN ? 'Connected — ready to scan' : 'Reconnecting...';
         const video = document.querySelector('#reader video');
@@ -199,6 +204,7 @@ statusEl.textContent = 'Sent: ' + value;
     cameraSelect.addEventListener('change', () => {
       initScanner(cameraSelect.value);
       isTorchOn = false;
+      torchBtn.textContent = 'Light: off';
       torchBtn.classList.remove('torch-on');
     });
 
@@ -211,6 +217,7 @@ statusEl.textContent = 'Sent: ' + value;
       try {
         await track.applyConstraints({ advanced: [{ torch: !isTorchOn }] });
         isTorchOn = !isTorchOn;
+        torchBtn.textContent = isTorchOn ? 'Light: on' : 'Light: off';
         torchBtn.classList.toggle('torch-on', isTorchOn);
       } catch (e) {
         console.log('Torch not supported');
