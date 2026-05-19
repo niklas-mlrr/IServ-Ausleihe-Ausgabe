@@ -1,5 +1,4 @@
 server/node_modules/
-server/public/html5-qrcode.min.js
 server/cert.pem
 server/key.pem
 __pycache__/
