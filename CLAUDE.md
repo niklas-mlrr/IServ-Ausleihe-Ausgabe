@@ -37,6 +37,18 @@ produktive Schul-/Schülerdaten zu.
 Lesen (GET, Playwright-Browsing ohne Submit) ist okay. Alles andere gegen
 Produktion ist tabu.
 
+## Dokumentations-Workflow (Wiki ↔ docs/)
+
+- **`docs/` im Repo ist die Primärquelle** für alles Projektgebundene:
+  PLAN.md, Spike-Protokolle, Architekturentscheidungen, Messergebnisse
+  (= Seminarfach-Material, versioniert mit dem Code).
+- Die Wiki-Seite (`~/cc/wiki/30_projects/sba/ausleihe_ausgabe/overview.md`)
+  ist nur Überblick + Einstieg: Status, Key Facts, Links auf `docs/`.
+  Inhalte nie duplizieren — eine Info hat genau einen Heimatort.
+- **Bei `/wiki-ingest` in diesem Projekt immer beide Seiten prüfen:**
+  1. `docs/` — fehlen Protokolle/Entscheidungen/Messwerte aus der Session?
+  2. Wiki-Overview — stimmen Status, Phasen-Stand und Verweise noch?
+
 ## Projekt-Setup
 
 - `uv sync` — Umgebung (Python ≥3.12); `iserv-ausleihe-api` kommt als
