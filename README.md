@@ -1,118 +1,89 @@
-# Barcode Scanner
+# IServ Ausleihe-Ausgabe
 
-Scan barcodes on your phone, get them typed on your computer. A lightweight WebSocket bridge between a browser-based scanner and a desktop keyboard simulator.
+Seminarfachprojekt „Optimierung der Schulbuchausleihe" — eine Web-App, die die
+Buchausgabe der Schulbuchausleihe (IServ-Modul) ergänzt, nicht ersetzt.
+**Eine App, zwei Modi:**
 
-## How it Works
+| Modus | Einsatz | Ablauf |
+|-------|---------|--------|
+| **A — Stapel** | Sommerferien, Stapelerstellung | Leitstand (Laptop) wählt Klasse, Schüler werden alphabetisch abgearbeitet; Helfer scannen Bücher per Handykamera; Buchung; Leihschein-Druck |
+| **B — Live-Ausgabe** (Pilot) | Schuljahresbeginn, Testklasse ab Jg. 9 | iPad zeigt personalisierten QR → Schüler scannt → 4-stelliger Pairing-Code am Leitstand bestätigt → Schüler scannt eigene Bücher |
 
-1. **Server** (Node.js) – HTTPS + WebSocket server with self-signed certificate
-2. **Phone** – Browser-based scanner using the camera (`html5-qrcode`)
-3. **Desktop** – Python client that receives barcodes and types them as keyboard input
+Der vollständige Projektplan (Architektur, Sicherheitsmodell, Phasen, offene
+Punkte) steht in **[`docs/PLAN.md`](docs/PLAN.md)**.
+
+## Architektur (Kurzfassung)
 
 ```
-┌─────────────┐        ┌──────────────┐        ┌─────────────┐
-│    Phone    │───────>│  Node Server │───────>│   Desktop   │
-│   Camera    │  WS/WSS │   (HTTPS)    │  WS/WSS │ (simulates  │
-│  Scanner UI │        │              │        │   typing)   │
-└─────────────┘        └──────────────┘        └─────────────┘
+Helfer-/Schüler-Handy (Kamera-Scanner)        iPad (QR-Anzeige)
+        │ HTTPS + WebSocket                        │
+        ▼                                          ▼
+  Python-Server (FastAPI) — Windows-Laptop, Schul-WLAN, Port 3443
+  ├─ web/        statische UI (Leitstand, Scanner, QR-Display)
+  ├─ ausleihe-api  read-only: Klassen, Schüler, Anmeldungen,
+  │                Bezahlstatus, Leihschein-PDF
+  ├─ automation/ Playwright: Buchungen durch das OFFIZIELLE
+  │              IServ-Frontend (ein Browser-Context pro Schüler)
+  └─ Druck       Leihschein-PDF → Silent-Print (Windows)
 ```
+
+Leitplanken: **keine selbstprogrammierten Schreibzugriffe auf die
+Ausleihe-Datenbank** — alle Buchungen laufen durch das offizielle IServ-Frontend
+(Playwright) inklusive dessen Validierung. Die
+[ausleihe-api](https://github.com/niklas-mlrr/IServ-Ausleihe-API) wird
+ausschließlich lesend genutzt. Das bestehende System (USB-Handscanner) bleibt
+jederzeit als Fallback nutzbar.
 
 ## Setup
 
-### Requirements
-- Node.js (for server)
-- Python 3 + pip (for desktop client)
-- Phone with camera
-
-### Install
+Voraussetzungen: Python ≥ 3.12, [uv](https://docs.astral.sh/uv/), das
+Schwesterprojekt `ausleihe-api` als Checkout unter `../ausleihe-api`.
 
 ```bash
-cd server
-npm install
-
-cd ../client
-pip install -r requirements.txt
+uv sync                              # Umgebung + Dependencies
+uv run playwright install chromium   # Browser für den Write-Pfad
+cp .env.example .env                 # dann ISERV_* Zugangsdaten eintragen
 ```
 
-## Usage
-
-### Quick Start (macOS/Linux)
+Smoke-Test (read-only):
 
 ```bash
-./start.sh
+uv run python -c "
+from dotenv import load_dotenv; load_dotenv()
+from ausleihe import AusleiheClient
+print(AusleiheClient().get('/schoolyears/current')['id'])"
 ```
 
-On first run, the server generates a self-signed certificate and prints a QR code. Scan it with your phone to open the scanner.
-
-### Manual Start
-
-**Terminal 1 – Server:**
-```bash
-cd server
-npm start
-```
-
-**Terminal 2 – Desktop Client:**
-```bash
-cd client
-python3 client.py
-```
-
-**Phone:**
-- Scan the QR code shown in the server terminal, or
-- Navigate to `https://<server-ip>:3443`
-- Accept the self-signed certificate warning
-- Grant camera permission
-
-## Sound
-
-The scanner UI has an optional beep sound on each scan, using the Web Audio API.
-
-- **Android:** Works as long as media/ring volume is not at zero. No mute switch equivalent.
-- **iOS:** The Web Audio API follows the hardware mute/silent switch. If the switch is muted, no sound plays. This is an iOS restriction and cannot be overridden from a web app.
-
-## Pausing Input
-
-Press **Ctrl+Shift+F9** (Windows) or **Cmd+Shift+F9** (macOS) to toggle input pause. While paused, scans are received but not typed — useful when you need to type something manually without triggering barcode input. The current state is printed in the terminal.
-
-## Configuration
-
-### Desktop Client Options
-
-```bash
-python3 client.py --port 3001    # Custom port
-python3 client.py --no-enter     # Don't press Enter after typing
-```
-
-## Security
-
-- Self-signed certificate auto-generated on first run
-- Certificate includes all local IPs as SANs (including Tailscale)
-- WebSocket connection between phone and desktop
-
-## Project Structure
+## Projektstruktur
 
 ```
-├── server/
-│   ├── server.js       # HTTPS + WebSocket server
-│   ├── package.json
-│   └── public/
-│       └── scanner.html  # Camera scanner UI
-├── client/
-│   ├── client.py       # Desktop keyboard simulator
-│   └── requirements.txt
-├── start.sh            # macOS/Linux launcher
-└── start.bat           # Windows launcher
+├── server/        FastAPI-App: HTTPS, WebSocket-Hub, Rollen/Sessions (Phase 2)
+├── automation/    Playwright-Worker + Spikes (Ausgaben: automation/out/, gitignored)
+├── web/           statische UI ohne Build-Step
+│   ├── scan.html            Kamera-Scanner (html5-qrcode, Beep, Torch)
+│   ├── html5-qrcode.min.js  vendored
+│   └── beep.mp3
+├── docs/
+│   ├── PLAN.md    Projektplan — Arbeitsgrundlage
+│   └── spikes/    Spike-Protokolle
+└── pyproject.toml
 ```
 
-## Troubleshooting
+## Sicherheits- und Produktionsregeln
 
-| Issue | Solution |
-|-------|----------|
-| "Camera not working" | Use Chrome/Safari, not in-app browsers. Ensure HTTPS |
-| "Can't connect" | Firewall: allow port 3443. Check IP hasn't changed |
-| macOS: "permission denied" | Grant Accessibility permission to Terminal in System Settings |
-| Certificate warning | Expected with self-signed certs; click "Advanced" → "Proceed" |
+- `ausleihe-api` läuft hier **ausnahmslos read-only** (`allow_writes=False`);
+  niemals PUT/POST/DELETE gegen die Produktion.
+- Schreiboperationen nur via Playwright durch das offizielle IServ-Frontend.
+- Tests nur mit Niklas' Account und **ausgemusterten Büchern**; Test-Ausleihen
+  werden sofort zurückgenommen (Rückbau-Plan vor jedem Probelauf, PLAN §6).
+- Keine dauerhafte Speicherung von Schülerdaten; Logs ohne personenbezogene
+  Daten. Server nur im Schul-WLAN erreichbar, Zugriff rollenbasiert
+  (Details: PLAN §3).
+- Credentials nur in `.env` (gitignored), niemals committen.
 
-## License
+## Status
 
-MIT
+Phase 0 (Projekt-Setup) — siehe Phasenplan in [`docs/PLAN.md`](docs/PLAN.md).
+Historie: Das Repo ist ein entkoppelter Fork des
+[Barcode-Scanners](https://github.com/niklas-mlrr/Barcode-Scanner); der alte
+Node-Server/Keyboard-Client liegt in der Git-Historie (bis `0bd06bc`).

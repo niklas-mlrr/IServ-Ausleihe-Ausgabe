@@ -1,0 +1,56 @@
+# IServ Ausleihe-Ausgabe — Project Memory
+
+Seminarfachprojekt: Handy-Scanner für die Schulbuch-Stapelerstellung (Modus A)
+und Live-Ausgabe-Pilot (Modus B). **Arbeitsgrundlage: `docs/PLAN.md`** (Zielbild,
+Architektur, Sicherheitsmodell, Phasen, offene Punkte O1–O9).
+
+Wiki-Kontext: `~/cc/wiki/30_projects/sba/ausleihe_ausgabe/` (Projekt) und
+`~/cc/wiki/30_projects/sba/ausleihe_api/` (api_reference, auth, schemas,
+write_endpoints).
+
+## ⚠️ PRODUKTIONS-SCHUTZ — UNBEDINGT BEACHTEN
+
+Die `.env` enthält **echte IServ-Zugangsdaten gegen die PRODUKTIONSUMGEBUNG**
+der Schule (Ausleihe-Admin-Account). Diese Credentials greifen auf reale,
+produktive Schul-/Schülerdaten zu.
+
+**ABSOLUTE REGELN:**
+
+- Die `ausleihe-api` wird hier **ausnahmslos read-only** genutzt:
+  `AusleiheClient()` immer mit `allow_writes=False` (Default). **Niemals**
+  PUT/POST/DELETE gegen die Produktion — auch nicht „zum Testen". In diesem
+  Projekt gibt es keinen Grund, das je zu ändern.
+- Schreiboperationen (Buch ausgeben/zurücknehmen) laufen **ausschließlich**
+  via Playwright durch das **offizielle IServ-Frontend** — nie durch
+  selbstprogrammierte API-Calls. Die in
+  `~/cc/wiki/30_projects/sba/ausleihe_api/write_endpoints.md` dokumentierten
+  Schreib-Endpunkte (z. B. `processBook`) sind reine Dokumentation.
+- **Playwright-Tests nur mit Niklas' Account und ausgemusterten Büchern.**
+  Jede Test-Ausleihe wird **sofort zurückgenommen**. Vor jedem Probelauf den
+  Rückbau-Plan schriftlich festhalten (PLAN §6).
+- Buchende Spike-/Test-Läufe (alles, was eine Ausleihe anlegt oder
+  zurücknimmt) **nie unbeaufsichtigt oder automatisch** starten — nur nach
+  expliziter Freigabe durch Niklas im jeweiligen Einzelfall.
+- Credentials niemals committen oder loggen. Keine Schülerdaten in Logs
+  (Buch-Codes ja, Namen nein — PLAN §3.7).
+
+Lesen (GET, Playwright-Browsing ohne Submit) ist okay. Alles andere gegen
+Produktion ist tabu.
+
+## Projekt-Setup
+
+- `uv sync` — Umgebung (Python ≥3.12); `iserv-ausleihe-api` kommt als
+  editable Install aus dem Schwesterprojekt `../ausleihe-api`.
+- `uv run playwright install chromium` — Browser für den Write-Pfad.
+- `.env` nach Vorlage `.env.example` (`ISERV_DOMAIN`, `ISERV_USERNAME`,
+  `ISERV_PASSWORD`).
+
+## Struktur
+
+| Pfad | Inhalt |
+|------|--------|
+| `server/` | FastAPI-App: HTTPS, WebSocket-Hub, Rollen/Sessions (Phase 2) |
+| `automation/` | Playwright-Worker + Spikes; Ausgaben in `automation/out/` (gitignored) |
+| `web/` | Statische UI ohne Build-Step: `scan.html`, `html5-qrcode.min.js`, `beep.mp3` |
+| `docs/PLAN.md` | Projektplan — bei Entscheidungen fortschreiben |
+| `docs/spikes/` | Spike-Protokolle (Seminarfach-Material) |

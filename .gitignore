@@ -1,5 +1,14 @@
-server/node_modules/
-server/cert.pem
-server/key.pem
+# Credentials — niemals committen (Produktions-Zugangsdaten!)
+.env
+
+# Python
+.venv/
 __pycache__/
 *.pyc
+
+# Selbstsignierte Zertifikate (werden lokal generiert)
+*.pem
+certs/
+
+# Spike-/Automation-Ausgaben (Screenshots, DOM-Dumps, Traces)
+automation/out/
