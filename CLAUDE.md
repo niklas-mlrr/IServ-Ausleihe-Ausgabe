@@ -16,6 +16,14 @@ produktive Schul-/Schülerdaten zu.
 
 **ABSOLUTE REGELN:**
 
+- **Accounts (geklärt 2026-06-12):** Die `.env`-Credentials gehören zum
+  Admin-Account von **Lukas Podleschny** (Mitentwickler). Dieser Account dient
+  **AUSSCHLIESSLICH zum Lesen** von Informationen (API-Reads, Playwright-
+  Browsing) — niemals zum Setzen/Schreiben auf das Live-System.
+- **Testschüler ist Niklas Müller:** Auf seiner Schülerkartei werden später
+  Test-Buchungen durchgeführt — aber **nur nach expliziter Bestätigung von
+  Niklas und Lukas im Einzelfall**. Auch mit dem Testschüler gilt: ohne
+  Freigabe nichts am Live-System verändern.
 - Die `ausleihe-api` wird hier **ausnahmslos read-only** genutzt:
   `AusleiheClient()` immer mit `allow_writes=False` (Default). **Niemals**
   PUT/POST/DELETE gegen die Produktion — auch nicht „zum Testen". In diesem

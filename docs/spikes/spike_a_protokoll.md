@@ -55,10 +55,11 @@ Counter-Seite ist headless automatisierbar, Selektoren sind stabil benennbar
 Mechanik selbst (Erfolgs-/Fehler-Feedback nach Barcode-Enter), die den
 freigegebenen Test mit ausgemustertem Buch braucht.
 
-**Nebenbefund (klären):** Der `.env`-Account ist mit dem Schülerprofil
-„Lukas Podleschny, Klasse 12Mk" verknüpft (`#/myprofile`). Die Testregel sagt
-„nur Niklas' Account" — vor dem Buchungstest klären, welcher Account hier
-konfiguriert ist bzw. auf Niklas' Account wechseln.
+**Nebenbefund (geklärt 2026-06-12):** Der `.env`-Account ist der Admin-Account
+von Lukas Podleschny (Mitentwickler) — **ausschließlich lesend** zu verwenden.
+Testschüler für spätere Buchungstests ist **Niklas Müller**; jede Buchung auf
+dem Live-System (auch Tests) nur nach expliziter Bestätigung von Niklas und
+Lukas. Der Buchungstest (`--issue`/`--return`) ist bis dahin zurückgestellt.
 
 ### O2 — Parallele Sessions desselben Accounts (Spike B, hier mit erfassen)
 
