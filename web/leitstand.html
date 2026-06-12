@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ausleihe-Leitstand</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #111;
+      color: #eee;
+      min-height: 100vh;
+      padding: 24px 16px;
+    }
+    h1 { font-size: 1.4rem; margin-bottom: 20px; opacity: 0.85; }
+    h2 { font-size: 1rem; font-weight: 600; margin: 20px 0 8px; opacity: 0.7; text-transform: uppercase; letter-spacing: .05em; }
+    .card {
+      background: #1c1c1e;
+      border-radius: 10px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    label { display: block; font-size: 0.85rem; opacity: 0.6; margin-bottom: 4px; }
+    input, select {
+      width: 100%;
+      padding: 10px 12px;
+      background: #2a2a2c;
+      color: #eee;
+      border: 1px solid #3a3a3c;
+      border-radius: 8px;
+      font-size: 1rem;
+      margin-bottom: 10px;
+    }
+    button {
+      padding: 10px 18px;
+      border: none;
+      border-radius: 8px;
+      background: #0a84ff;
+      color: #fff;
+      font-size: 0.95rem;
+      cursor: pointer;
+      transition: background .15s;
+    }
+    button:hover { background: #0070e0; }
+    button:disabled { background: #444; cursor: not-allowed; }
+    button.danger { background: #ff3b30; }
+    button.danger:hover { background: #d43028; }
+    button.secondary { background: #3a3a3c; }
+    button.secondary:hover { background: #4a4a4c; }
+    button.success { background: #30d158; color: #000; }
+    button.success:hover { background: #28b84e; }
+    .row { display: flex; gap: 8px; align-items: center; }
+    .row > * { flex: 1 }
+    .row > button { flex: 0 0 auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    th { text-align: left; padding: 6px 8px; opacity: 0.5; font-weight: 500; border-bottom: 1px solid #2a2a2c; }
+    td { padding: 7px 8px; border-bottom: 1px solid #1e1e1e; }
+    tr:last-child td { border-bottom: none; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .badge-pending  { background: #2c2c2e; color: #888; }
+    .badge-active   { background: #0a3d6b; color: #5ac8fa; }
+    .badge-done     { background: #1a3a1a; color: #30d158; }
+    .badge-skipped  { background: #3a1a1a; color: #ff6b6b; }
+    .ws-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; background: #888; }
+    .ws-dot.ok { background: #30d158; }
+    .ws-dot.err { background: #ff3b30; }
+    #msg { margin-top: 8px; font-size: 0.85rem; opacity: 0.7; min-height: 1.2em; }
+    #login-view, #main-view { max-width: 900px; margin: 0 auto; }
+    .helper-url { font-size: 0.8rem; color: #5ac8fa; word-break: break-all; }
+    .qr-modal {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,.8); align-items: center; justify-content: center;
+      z-index: 100;
+    }
+    .qr-modal.show { display: flex; }
+    .qr-box {
+      background: #fff; border-radius: 12px; padding: 20px;
+      text-align: center; max-width: 320px;
+    }
+    .qr-box img { max-width: 100%; border-radius: 4px; }
+    .qr-box p { color: #333; font-size: 0.85rem; margin-top: 10px; word-break: break-all; }
+    .qr-box button { background: #333; margin-top: 12px; }
+  </style>
+</head>
+<body>
+
+<!-- Login -->
+<div id="login-view">
+  <h1>Ausleihe-Leitstand</h1>
+  <div class="card">
+    <label>Passwort</label>
+    <input type="password" id="pw-input" placeholder="Leitstand-Passwort" autocomplete="current-password">
+    <button id="login-btn" onclick="doLogin()">Einloggen</button>
+    <div id="login-msg" style="margin-top:8px;font-size:.85rem;color:#ff6b6b"></div>
+  </div>
+</div>
+
+<!-- Haupt-UI (nach Login) -->
+<div id="main-view" style="display:none">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+    <h1>Leitstand <span class="ws-dot" id="ws-dot"></span></h1>
+    <button class="secondary" onclick="doLogout()">Abmelden</button>
+  </div>
+
+  <!-- Klassen-Auswahl -->
+  <div class="card">
+    <h2>Klasse</h2>
+    <div class="row">
+      <select id="class-select"><option value="">-- Klassen werden geladen… --</option></select>
+      <button onclick="selectClass()">Queue aufbauen</button>
+    </div>
+    <div id="msg"></div>
+  </div>
+
+  <!-- Helfer -->
+  <div class="card">
+    <h2>Helfer</h2>
+    <div class="row" style="margin-bottom:12px">
+      <input type="text" id="helper-name" placeholder="Name des Helfers (optional)" style="margin-bottom:0">
+      <button onclick="addHelper()">+ Helfer</button>
+    </div>
+    <table id="helper-table">
+      <thead><tr><th>Name</th><th>Status</th><th>Aktueller Schüler</th><th>Nächster</th><th></th></tr></thead>
+      <tbody id="helper-tbody"></tbody>
+    </table>
+  </div>
+
+  <!-- Schüler-Queue -->
+  <div class="card">
+    <h2>Schüler-Queue <span id="queue-count" style="opacity:.5;font-weight:400"></span></h2>
+    <table id="queue-table">
+      <thead><tr><th>Name</th><th>Klasse</th><th>Status</th><th></th></tr></thead>
+      <tbody id="queue-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- QR-Modal -->
+<div class="qr-modal" id="qr-modal" onclick="closeQr()">
+  <div class="qr-box" onclick="event.stopPropagation()">
+    <img id="qr-img" src="" alt="QR-Code">
+    <p id="qr-url"></p>
+    <button onclick="closeQr()">Schließen</button>
+  </div>
+</div>
+
+<script>
+  let ws = null;
+  let state = { active_form: null, queue: [], helpers: {} };
+
+  // ---- Login ----
+  document.getElementById('pw-input').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+
+  async function doLogin() {
+    const pw = document.getElementById('pw-input').value;
+    const r = await fetch('/api/login', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ password: pw }) });
+    if (r.ok) {
+      document.getElementById('login-view').style.display = 'none';
+      document.getElementById('main-view').style.display = '';
+      loadClasses();
+      connectWs();
+    } else {
+      document.getElementById('login-msg').textContent = 'Falsches Passwort';
+    }
+  }
+
+  async function doLogout() {
+    await fetch('/api/logout', { method: 'POST' });
+    location.reload();
+  }
+
+  // ---- WebSocket ----
+  function connectWs() {
+    ws = new WebSocket(`wss://${location.host}/ws/leitstand`);
+    const dot = document.getElementById('ws-dot');
+    ws.onopen  = () => { dot.className = 'ws-dot ok'; };
+    ws.onclose = () => { dot.className = 'ws-dot err'; setTimeout(connectWs, 3000); };
+    ws.onerror = () => { dot.className = 'ws-dot err'; };
+    ws.onmessage = e => {
+      const msg = JSON.parse(e.data);
+      if (msg.type === 'state') applyState(msg);
+    };
+  }
+
+  // ---- Klassen ----
+  async function loadClasses() {
+    const r = await fetch('/api/classes');
+    if (!r.ok) return;
+    const { classes } = await r.json();
+    const sel = document.getElementById('class-select');
+    sel.innerHTML = '<option value="">-- Klasse wählen --</option>' +
+      classes.map(c => `<option value="${c}">${c}</option>`).join('');
+  }
+
+  async function selectClass() {
+    const form = document.getElementById('class-select').value;
+    if (!form) return;
+    showMsg('Lade Schüler…');
+    const r = await fetch('/api/select-class', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ form }) });
+    const d = await r.json();
+    showMsg(r.ok ? `${d.count} Schüler geladen` : d.detail);
+  }
+
+  // ---- Helfer ----
+  async function addHelper() {
+    const name = document.getElementById('helper-name').value || 'Helfer';
+    const r = await fetch('/api/add-helper', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ name }) });
+    const d = await r.json();
+    if (r.ok) showQr(d.qr, d.url);
+  }
+
+  async function removeHelper(token) {
+    await fetch(`/api/helper/${token}`, { method: 'DELETE' });
+  }
+
+  async function nextStudent(token) {
+    const r = await fetch('/api/next-student', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ helper_token: token }) });
+    const d = await r.json();
+    if (!r.ok) showMsg(d.detail || 'Fehler');
+  }
+
+  // ---- Queue-Steuerung ----
+  async function skipStudent(studentId) {
+    await fetch('/api/skip', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ student_id: studentId }) });
+  }
+
+  async function finishStudent(studentId) {
+    await fetch('/api/finish', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ student_id: studentId }) });
+  }
+
+  // ---- State rendering ----
+  function applyState(s) {
+    state = s;
+    renderHelpers();
+    renderQueue();
+  }
+
+  function renderHelpers() {
+    const tbody = document.getElementById('helper-tbody');
+    const helpers = Object.values(state.helpers);
+    if (!helpers.length) {
+      tbody.innerHTML = '<tr><td colspan="5" style="opacity:.4;text-align:center">Noch keine Helfer</td></tr>';
+      return;
+    }
+    tbody.innerHTML = helpers.map(h => {
+      const student = h.student_id ? state.queue.find(q => q.student_id === h.student_id) : null;
+      const studentName = student ? `${student.lastname}, ${student.firstname}` : '–';
+      const connDot = h.connected ? '<span style="color:#30d158">●</span>' : '<span style="color:#888">○</span>';
+      const hasStudent = h.student_id !== null;
+      return `<tr>
+        <td>${h.name}</td>
+        <td>${connDot} ${h.connected ? 'verbunden' : 'getrennt'}</td>
+        <td>${studentName}</td>
+        <td>${hasStudent ? '' : `<button class="success" onclick="nextStudent('${h.token}')">Nächster</button>`}</td>
+        <td><button class="danger" onclick="removeHelper('${h.token}')">✕</button></td>
+      </tr>`;
+    }).join('');
+  }
+
+  function renderQueue() {
+    const tbody = document.getElementById('queue-tbody');
+    const queue = state.queue;
+    document.getElementById('queue-count').textContent =
+      `(${queue.filter(q => q.status === 'pending').length} offen / ${queue.length} gesamt)`;
+
+    if (!queue.length) {
+      tbody.innerHTML = '<tr><td colspan="4" style="opacity:.4;text-align:center">Keine Schüler — Klasse auswählen</td></tr>';
+      return;
+    }
+    tbody.innerHTML = queue.map(s => {
+      const badgeClass = { pending: 'badge-pending', active: 'badge-active', done: 'badge-done', skipped: 'badge-skipped' }[s.status] || '';
+      const statusLabel = { pending: 'Wartend', active: 'Aktiv', done: 'Fertig', skipped: 'Übersprungen' }[s.status] || s.status;
+      const actions = s.status === 'pending'
+        ? `<button class="secondary" onclick="skipStudent(${s.student_id})">Überspringen</button>`
+        : s.status === 'active'
+          ? `<button class="success" onclick="finishStudent(${s.student_id})">Abschließen</button> <button class="secondary" onclick="skipStudent(${s.student_id})">Abbrechen</button>`
+          : '';
+      return `<tr>
+        <td>${s.lastname}, ${s.firstname}</td>
+        <td>${s.form}</td>
+        <td><span class="badge ${badgeClass}">${statusLabel}</span></td>
+        <td>${actions}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  // ---- QR-Modal ----
+  function showQr(dataUrl, url) {
+    document.getElementById('qr-img').src = dataUrl;
+    document.getElementById('qr-url').textContent = url;
+    document.getElementById('qr-modal').classList.add('show');
+  }
+  function closeQr() {
+    document.getElementById('qr-modal').classList.remove('show');
+  }
+
+  // ---- Util ----
+  function showMsg(text) {
+    document.getElementById('msg').textContent = text;
+  }
+
+  // Beim Laden prüfen ob bereits eingeloggt
+  fetch('/api/state').then(r => {
+    if (r.ok) {
+      document.getElementById('login-view').style.display = 'none';
+      document.getElementById('main-view').style.display = '';
+      r.json().then(s => { applyState(s); });
+      loadClasses();
+      connectWs();
+    }
+  });
+</script>
+</body>
+</html>

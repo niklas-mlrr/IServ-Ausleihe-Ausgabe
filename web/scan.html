@@ -18,6 +18,28 @@
       padding: 20px;
     }
     h1 { font-size: 1.2rem; font-weight: 600; margin-bottom: 16px; opacity: 0.8; }
+    #student-panel {
+      width: 100%; max-width: 320px;
+      background: #1a2a1a;
+      border: 1px solid #2a4a2a;
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin-bottom: 12px;
+      font-size: 0.9rem;
+      display: none;
+    }
+    #student-panel .s-name { font-size: 1.05rem; font-weight: 600; margin-bottom: 4px; }
+    #student-panel .s-meta { opacity: .7; font-size: 0.8rem; }
+    #student-panel .badge-paid   { color: #4caf50; }
+    #student-panel .badge-unpaid { color: #f44336; }
+    #student-panel .badge-wait   { color: #888; }
+    #scan-results { width: 100%; max-width: 320px; margin-top: 10px; }
+    .scan-item {
+      padding: 8px 12px; border-radius: 7px; margin-bottom: 6px; font-size: 0.85rem;
+    }
+    .scan-item.staged { background: #1a3a1a; color: #4caf50; }
+    .scan-item.error  { background: #3a1a1a; color: #f44336; }
+    .scan-item.wait   { background: #1e1e1e; color: #888; }
     #reader { width: 100%; max-width: 320px; border-radius: 12px; overflow: hidden; box-shadow: 0 0 0 0px #4caf50; transition: box-shadow 0.6s ease-out; }
     #reader.scan-success { box-shadow: 0 0 0 3px #4caf50; transition: none; }
     #status {
@@ -64,8 +86,13 @@
 </head>
 <body>
   <h1>Barcode Scanner</h1>
+  <div id="student-panel">
+    <div class="s-name" id="s-name">–</div>
+    <div class="s-meta" id="s-meta"></div>
+  </div>
   <div id="reader"></div>
   <div id="status"><span class="dot" id="dot"></span><span id="status-text">Connecting...</span></div>
+  <div id="scan-results"></div>
   <div class="controls" id="camera-row">
     <select id="camera-select"><option>Loading cameras...</option></select>
     <button id="reload-btn" title="Reload camera">&#x21BA;</button>
@@ -78,13 +105,51 @@
   <script>
     const statusEl = document.getElementById('status-text');
     const dotEl = document.getElementById('dot');
+    const studentPanel = document.getElementById('student-panel');
+    const scanResults = document.getElementById('scan-results');
     let ws;
 
+    const token = new URLSearchParams(location.search).get('token');
+
+    function handleServerMessage(msg) {
+      if (msg.type === 'student_info') {
+        const s = msg.student;
+        studentPanel.style.display = '';
+        document.getElementById('s-name').textContent = `${s.lastname}, ${s.firstname}`;
+        const paidClass = !s.enrolled ? 'badge-wait' : s.paid ? 'badge-paid' : 'badge-unpaid';
+        const paidText = !s.enrolled ? 'Nicht angemeldet' : s.paid ? 'Bezahlt' : `Offen: ${s.amount_open} €`;
+        const booksHave = (s.current_books || []).length;
+        const booksExpected = (s.books_to_receive || []).length;
+        document.getElementById('s-meta').innerHTML =
+          `<span class="${paidClass}">${paidText}</span> · ${booksHave}/${booksExpected} Bücher`;
+        statusEl.textContent = 'Bereit — Buch scannen';
+      } else if (msg.type === 'scan_result') {
+        const cls = msg.status === 'staged' ? 'staged' : 'error';
+        const item = document.createElement('div');
+        item.className = `scan-item ${cls}`;
+        item.textContent = `${msg.barcode} — ${msg.msg || msg.status}`;
+        scanResults.prepend(item);
+        if (scanResults.children.length > 10) scanResults.lastChild.remove();
+      } else if (msg.type === 'waiting') {
+        studentPanel.style.display = 'none';
+        statusEl.textContent = msg.msg || 'Warte auf Schüler-Zuweisung';
+      } else if (msg.type === 'error') {
+        statusEl.textContent = 'Fehler: ' + (msg.msg || '');
+        dotEl.className = 'dot err';
+      }
+    }
+
     function connect() {
-      ws = new WebSocket(`wss://${location.host}/`);
-      ws.onopen = () => { dotEl.className = 'dot ok'; statusEl.textContent = 'Connected — ready to scan'; };
-      ws.onclose = () => { dotEl.className = 'dot err'; statusEl.textContent = 'Disconnected — retrying...'; setTimeout(connect, 2000); };
-      ws.onerror = () => { dotEl.className = 'dot err'; statusEl.textContent = 'Connection error'; };
+      if (!token) {
+        statusEl.textContent = 'Kein Token in der URL — vom Leitstand QR-Code scannen';
+        dotEl.className = 'dot err';
+        return;
+      }
+      ws = new WebSocket(`wss://${location.host}/ws/scanner/${token}`);
+      ws.onopen  = () => { dotEl.className = 'dot ok'; statusEl.textContent = 'Verbunden'; };
+      ws.onclose = () => { dotEl.className = 'dot err'; statusEl.textContent = 'Getrennt — neu verbinden…'; setTimeout(connect, 2000); };
+      ws.onerror = () => { dotEl.className = 'dot err'; statusEl.textContent = 'Verbindungsfehler'; };
+      ws.onmessage = e => { try { handleServerMessage(JSON.parse(e.data)); } catch (_) {} };
     }
     connect();
 

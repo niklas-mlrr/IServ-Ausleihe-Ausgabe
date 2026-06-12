@@ -111,7 +111,7 @@ Sicherheitsanforderungen (aus Klärung 2026-06-12, „keine Sicherheitslücken")
 | # | Frage | Vorschlag / nächster Schritt |
 |---|-------|------------------------------|
 | O1 | Modus A: Wie kommt ein Schüler auf ein bestimmtes Helfer-Handy? | Vorschlag: Helfer tippt „Nächster Schüler" → Server vergibt den nächsten aus der alphabetischen Queue; Leitstand kann manuell zuweisen/überschreiben. |
-| O2 | Erlaubt IServ mehrere parallele Sessions desselben Accounts? | Spike B klärt das. Plan B: ein Context, N Tabs mit geteilten Cookies. |
+| O2 | Erlaubt IServ mehrere parallele Sessions desselben Accounts? | **Geklärt (Spike B, 2026-06-12):** Ja — 3/3 parallele unabhängige Logins + 3/3 Cookie-Sharing-Contexts, keine Invalidierung. Context-Pool mit unabhängigen Contexts. |
 | O3 | Exaktes Verhalten der offiziellen Counter-Seite (DOM, Fehlerfälle, Schüler-Wechsel) | Spike A erkundet das mit Test-Account + ausgemustertem Buch. |
 | O4 | Welcher Drucker (USB am Laptop? Netzwerk? Treiberlage unter Windows)? | Vor Ort prüfen; Spike C testet Silent-Print generisch. |
 | O5 | Bezahlstatus-Anzeige: genaue Quelle (`enrollments`/`payments` via Admin-API) und Sonderfälle (Befreiung/Ermäßigung) | In Phase 2 gegen echte Daten read-only verifizieren. |
@@ -145,22 +145,20 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
       Login, Schüler öffnen, Barcode eintragen, Submit, Erfolg/Fehler aus dem
       DOM auslesen. Test: ausgemustertes Buch auf Niklas' Account ausleihen
       **und zurücknehmen**.
-- [ ] **Spike B:** 2–3 parallele Contexts mit demselben Account (→ O2)
+- [x] **Spike B:** 2–3 parallele Contexts mit demselben Account (→ O2) — erledigt 2026-06-12
 - [ ] **Spike C:** Silent-Print eines PDFs unter Windows (→ O4)
 - [ ] **Spike D:** Reichweitentest im Schul-WLAN: Handy ↔ Laptop (→ O9)
 
 ### Phase 2 — Kern Modus A (KW 26–28)
 
-- [ ] FastAPI-Server: HTTPS, WebSocket-Hub, Session-/Rollenmodell
-- [ ] Leitstand-UI: Login, Klasse wählen, Schülerliste (alphabetische Queue
-      + Einzelauswahl für Tests), Live-Status aller Helfer-Sessions
-- [ ] Helfer-Scanner-UI: Schüleranzeige (angemeldet / bezahlt / bereits
-      vorhanden), Buch-Scan mit Sofort-Feedback (beep + visuell), Fehlerfälle
-      (falsches Buch, nicht angemeldet, schon ausgeliehen, nicht bezahlt)
-- [ ] Playwright-Worker produktionsreif: Context-Pool, Fehler-Mapping,
-      Recovery (Re-Login bei Session-Ablauf)
-- [ ] Leihschein-Druck nach Abschluss eines Schülers
-- [ ] End-to-End-Test mit ausgemusterten Büchern
+- [x] FastAPI-Server: HTTPS (selbstsigniert), WebSocket-Hub, Session-/Rollenmodell — 2026-06-12
+- [x] Leitstand-UI: Login, Klasse wählen, alphabetische Queue, Live-Status Helfer-Sessions — 2026-06-12
+- [x] Helfer-Scanner-UI: Token-basiert, Schüleranzeige (angemeldet/bezahlt/Bücher), Scan-Feedback — 2026-06-12
+- [x] Playwright-Worker: Context-Pool (N unabhängige Logins), Schülerkartei laden, Barcode staged (kein Submit) — 2026-06-12
+- [ ] Recovery (Re-Login bei Session-Ablauf) — TODO Phase 2 Rest
+- [ ] Fehlerfälle Scanner: falsches Buch, nicht angemeldet, schon ausgeliehen (braucht freigegebenen Buchungstest)
+- [ ] Leihschein-Druck nach Abschluss eines Schülers (Phase 3, Windows)
+- [ ] End-to-End-Test mit ausgemusterten Büchern (wartet auf Buchungstest-Freigabe)
 
 ### Phase 3 — Generalprobe Teil 1 (vor Ferienbeginn, Anfang Juli)
 

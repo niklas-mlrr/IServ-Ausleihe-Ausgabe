@@ -61,12 +61,14 @@ Testschüler für spätere Buchungstests ist **Niklas Müller**; jede Buchung au
 dem Live-System (auch Tests) nur nach expliziter Bestätigung von Niklas und
 Lukas. Der Buchungstest (`--issue`/`--return`) ist bis dahin zurückgestellt.
 
-### O2 — Parallele Sessions desselben Accounts (Spike B, hier mit erfassen)
+### O2 — Parallele Sessions desselben Accounts (→ Spike B)
 
 | Frage | Befund |
 |-------|--------|
-| 2–3 parallele Browser-Contexts gleichzeitig eingeloggt? | _offen_ |
-| Session-Invalidierung beim Zweit-Login? | _offen_ |
+| 2–3 parallele Browser-Contexts gleichzeitig eingeloggt? | **Ja, 3/3 OK** (Spike B, 2026-06-12) |
+| Session-Invalidierung beim Zweit-Login? | **Nein** — alle Contexts bleiben eingeloggt |
+
+Details: `docs/spikes/spike_b_protokoll.md`
 
 ## Rückbau-Plan (vor jedem Buchungstest ausfüllen)
 
