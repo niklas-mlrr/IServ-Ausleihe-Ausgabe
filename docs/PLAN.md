@@ -26,7 +26,7 @@ im Schul-WLAN:
 
 ## 2. Architektur
 
-```
+```text
 Helfer-/Schüler-Handy (Browser: Kamera-Scanner)      iPad (QR-Anzeige)
         │  HTTPS + WebSocket                              │
         ▼                                                 ▼
