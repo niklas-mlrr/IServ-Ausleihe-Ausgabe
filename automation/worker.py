@@ -173,31 +173,58 @@ class WorkerPool:
         self._contexts: list = []
         self._lock = asyncio.Lock()
 
+    async def _make_logged_in_context(self, label: str):
+        """Einen frischen Context anlegen und einloggen. Bei Fehler Context
+        wieder schließen (kein Leak) und Exception weiterreichen."""
+        context = await self._browser.new_context(ignore_https_errors=True)
+        page = await context.new_page()
+        try:
+            await self._login(page, label)
+            await page.close()
+            return context
+        except Exception:
+            try:
+                await context.close()
+            except Exception:
+                pass
+            raise
+
     async def start(self) -> None:
-        """Playwright starten, N Contexts öffnen, alle einloggen."""
+        """Playwright starten, N Contexts öffnen, alle einloggen. Fehlgeschlagene
+        Logins werden einmal nachgezogen, damit der Pool möglichst die Zielgröße
+        erreicht."""
         self._pw = await async_playwright().start()
         self._browser = await self._pw.chromium.launch(headless=True)
 
         t0 = time.monotonic()
-        contexts = [
-            await self._browser.new_context(ignore_https_errors=True)
-            for _ in range(self._n)
-        ]
-        pages = [await ctx.new_page() for ctx in contexts]
-
-        login_results = await asyncio.gather(
-            *[self._login(pages[i], f"worker_{i}") for i in range(self._n)],
+        results = await asyncio.gather(
+            *[self._make_logged_in_context(f"worker_{i}") for i in range(self._n)],
             return_exceptions=True,
         )
-        for i, r in enumerate(login_results):
+        for i, r in enumerate(results):
             if isinstance(r, Exception):
                 log.warning("Worker %d Login fehlgeschlagen: %s", i, r)
             else:
-                self._contexts.append(contexts[i])
-                await pages[i].close()
+                self._contexts.append(r)
+
+        # Einmal nachziehen, was beim ersten Versuch gescheitert ist.
+        missing = self._n - len(self._contexts)
+        if missing > 0:
+            log.info("%d Worker-Context(e) fehlen — Retry", missing)
+            retry = await asyncio.gather(
+                *[self._make_logged_in_context(f"worker_retry_{i}") for i in range(missing)],
+                return_exceptions=True,
+            )
+            for r in retry:
+                if isinstance(r, Exception):
+                    log.warning("Worker-Retry Login fehlgeschlagen: %s", r)
+                else:
+                    self._contexts.append(r)
 
         elapsed = (time.monotonic() - t0) * 1000
         log.info("%d/%d Worker-Contexts eingeloggt (%.0f ms)", len(self._contexts), self._n, elapsed)
+        if not self._contexts:
+            log.error("Kein einziger Worker-Context eingeloggt — Scannen wird scheitern")
 
     async def stop(self) -> None:
         if self._browser:

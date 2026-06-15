@@ -157,6 +157,8 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
 - [x] Playwright-Worker: Context-Pool (N unabhängige Logins), Schülerkartei laden, Barcode staged (kein Submit) — 2026-06-12
 - [x] Recovery (Re-Login bei Session-Ablauf) — 2026-06-15 (`automation/worker.py`, deterministisch getestet via `automation/recovery_test.py`)
 - [x] E2E-Smoke headless (read-only): voller Modus-A-Flow Leitstand→Scanner→Worker→Kartei→staged — 2026-06-15 (`automation/e2e_smoke.py`)
+- [x] 2-Helfer-Paralleltest: zwei Schüler gleichzeitig aktiv, beide Karteien parallel, unabhängiges Staging — 2026-06-15 (`automation/e2e_parallel.py`)
+- [x] Pool-Härtung: fehlgeschlagene Worker-Logins werden in `start()` einmal nachgezogen, geleakte Contexts geschlossen — 2026-06-15
 - [ ] Fehlerfälle Scanner: falsches Buch, nicht angemeldet, schon ausgeliehen (braucht freigegebenen Buchungstest)
 - [ ] Leihschein-Druck nach Abschluss eines Schülers (Phase 3, Windows)
 - [ ] End-to-End-Test mit ausgemusterten Büchern **inkl. Buchung** (wartet auf Buchungstest-Freigabe Niklas + Lukas)
