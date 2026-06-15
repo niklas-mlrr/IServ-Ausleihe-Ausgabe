@@ -20,6 +20,11 @@ class Config:
     # Modus B: harte Zugriffsentzug-Schwellen (Sekunden).
     pending_pairing_ttl_s: int = 300   # QR gescannt, aber nicht gepairt → verfällt
     paired_idle_ttl_s: int = 900       # gepairt, aber inaktiv → verfällt
+    # Leihschein-Druck (siehe server/printing.py).
+    print_backend: str = "auto"        # auto|file|lp|sumatra|win-default
+    printer_name: str | None = None    # leer = Standarddrucker
+    sumatra_path: str | None = None    # optionaler expliziter SumatraPDF-Pfad
+    print_output_dir: Path = field(default_factory=lambda: Path("automation/out/loan_slips"))
 
 
 _config: Config | None = None
@@ -42,6 +47,9 @@ def load_config(env_file: Path | None = None) -> Config:
         leitstand_password=req("LEITSTAND_PASSWORD"),
         port=int(os.environ.get("PORT", "3443")),
         worker_contexts=int(os.environ.get("WORKER_CONTEXTS", "2")),
+        print_backend=os.environ.get("PRINT_BACKEND", "auto").strip() or "auto",
+        printer_name=(os.environ.get("PRINTER_NAME", "").strip() or None),
+        sumatra_path=(os.environ.get("SUMATRA_PATH", "").strip() or None),
     )
     return _config
 

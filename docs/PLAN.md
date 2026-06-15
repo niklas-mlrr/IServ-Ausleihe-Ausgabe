@@ -117,7 +117,7 @@ Sicherheitsanforderungen (aus Klärung 2026-06-12, „keine Sicherheitslücken")
 | O1 | Modus A: Wie kommt ein Schüler auf ein bestimmtes Helfer-Handy? | Vorschlag: Helfer tippt „Nächster Schüler" → Server vergibt den nächsten aus der alphabetischen Queue; Leitstand kann manuell zuweisen/überschreiben. |
 | O2 | Erlaubt IServ mehrere parallele Sessions desselben Accounts? | **Geklärt (Spike B, 2026-06-12):** Ja — 3/3 parallele unabhängige Logins + 3/3 Cookie-Sharing-Contexts, keine Invalidierung. Context-Pool mit unabhängigen Contexts. |
 | O3 | Exaktes Verhalten der offiziellen Counter-Seite (DOM, Fehlerfälle, Schüler-Wechsel) | Spike A erkundet das mit Test-Account + ausgemustertem Buch. |
-| O4 | Welcher Drucker (USB am Laptop? Netzwerk? Treiberlage unter Windows)? | Vor Ort prüfen; Spike C testet Silent-Print generisch. |
+| O4 | Welcher Drucker (USB am Laptop? Netzwerk? Treiberlage unter Windows)? | **Teil-adressiert (2026-06-15):** Druck-Service gebaut (`server/printing.py`, Backends `file`/`lp`/`sumatra`/`win-default`/`auto`), read-only PDF-Abruf via `get_loan_slip_pdf`. Echter Silent-Print am Zielgerät (= Spike C) noch offen → `docs/test_status.md`, `docs/deployment.md`. |
 | O5 | Bezahlstatus-Anzeige: genaue Quelle (`enrollments`/`payments` via Admin-API) und Sonderfälle (Befreiung/Ermäßigung) | In Phase 2 gegen echte Daten read-only verifizieren. |
 | O6 | Modus B: Was passiert bei „nicht bezahlt"? (Buch zurücklegen, Helfer rufen?) | **Teil-geklärt (2026-06-15):** UI zeigt Bücher + „nicht bezahlt"-Banner; Leitstand kann beim Pairing per `override_payment` freigeben (Befreiung/Ermäßigung). Fachlicher Wortlaut/Workflow noch mit Hr. Pühn final. |
 | O7 | Deployment-Packaging für den Windows-Laptop (Python-Installation? portable venv? `start.bat`?) | Phase 3; Kandidat: `uv` + Lockfile + Start-Skript, alternativ portable Python. |
@@ -164,12 +164,16 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
 - [x] 2-Helfer-Paralleltest: zwei Schüler gleichzeitig aktiv, beide Karteien parallel, unabhängiges Staging — 2026-06-15 (`automation/e2e_parallel.py`)
 - [x] Pool-Härtung: fehlgeschlagene Worker-Logins werden in `start()` einmal nachgezogen, geleakte Contexts geschlossen — 2026-06-15
 - [ ] Fehlerfälle Scanner: falsches Buch, nicht angemeldet, schon ausgeliehen (braucht freigegebenen Buchungstest)
-- [ ] Leihschein-Druck nach Abschluss eines Schülers (Phase 3, Windows)
+- [x] Leihschein-Druck — Code fertig: read-only PDF-Abruf + Druck-Abstraktion
+      (`server/printing.py`, Endpoint `POST /api/print-loan-slip`, Leitstand-Button) —
+      2026-06-15. Echter Druck am Zielgerät noch zu verifizieren (`docs/test_status.md`).
 - [ ] End-to-End-Test mit ausgemusterten Büchern **inkl. Buchung** (wartet auf Buchungstest-Freigabe Niklas + Lukas)
 
 ### Phase 3 — Generalprobe Teil 1 (vor Ferienbeginn, Anfang Juli)
 
-- [ ] Deployment auf dem Ausleihe-Laptop (→ O7), `start`-Skript
+- [x] Deployment-Packaging (→ O7): `setup.bat`/`start.bat`/`start.sh` +
+      `docs/deployment.md` (Windows + Macbook, USB-Drucker) — 2026-06-15.
+      Lauf am echten Ausleihe-Laptop noch offen (`docs/test_status.md`).
 - [ ] Probelauf im Schul-WLAN mit echtem Drucker
 - [ ] Helfer-Kurzanleitung (1 Seite) + dokumentierter Fallback auf USB-Scanner
 - [ ] **Meilenstein: Einsatz bei der Stapelerstellung**
@@ -200,6 +204,8 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
 - Entscheidungen und Messergebnisse (Zeitersparnis!) fortlaufend in `docs/`
   festhalten — Spike-Ergebnisse, Architekturentscheidungen, Probelauf-Protokolle
   sind direkt verwertbares Material für die Seminarfacharbeit.
+- **`docs/test_status.md`** (lebend) führt Verifiziertes vs. Offenes; neue zu
+  testende Dinge dort eintragen.
 
 ## 6. Test- und Produktionsschutz
 

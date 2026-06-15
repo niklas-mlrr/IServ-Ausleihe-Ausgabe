@@ -125,3 +125,15 @@ class IsServClient:
                 "books_to_receive": books_to_receive,
             }
         return await asyncio.to_thread(_sync)
+
+    async def get_loan_slip_pdf(self, student_id: int, variant: str = "student") -> bytes:
+        """Leihschein als PDF-Bytes (read-only GET).
+
+        `variant="student"` → 1 Seite (Schüler-Beleg, Default),
+        `variant="student-always_school-auto"` → 2 Seiten (Schüler + Schule),
+        identisch zum Webseiten-Download.
+        """
+        def _sync() -> bytes:
+            client = self._get_client()
+            return client.get_loan_slip_pdf(student_id=student_id, variant=variant)
+        return await asyncio.to_thread(_sync)
