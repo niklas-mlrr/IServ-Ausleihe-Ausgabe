@@ -69,6 +69,7 @@ class StudentSessionB:
     state: StudentSessionState = "pending_pairing"
     ws: object | None = None  # WebSocket
     payment_overridden: bool = False
+    last_scan: str | None = None
     created_at: datetime = field(default_factory=datetime.now)
     paired_at: datetime | None = None
     last_activity: datetime = field(default_factory=datetime.now)
@@ -124,12 +125,14 @@ class AppState:
         return {t: h.as_dict() for t, h in self.helper_sessions.items()}
 
     def state_snapshot(self) -> dict:
+        from .config import get_config
         return {
             "type": "state",
             "active_form": self.active_form,
             "queue": self.queue_as_list(),
             "helpers": self.helpers_as_dict(),
             "modus_b": self.modus_b_snapshot(),
+            "allow_booking": get_config().allow_booking,
         }
 
     def modus_b_snapshot(self) -> dict:

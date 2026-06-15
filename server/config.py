@@ -25,6 +25,9 @@ class Config:
     printer_name: str | None = None    # leer = Standarddrucker
     sumatra_path: str | None = None    # optionaler expliziter SumatraPDF-Pfad
     print_output_dir: Path = field(default_factory=lambda: Path("automation/out/loan_slips"))
+    # Buchung gegen die IServ-Produktion (Enter auf der Counter-Seite).
+    # Default AUS — Buchung nur nach expliziter Freigabe Niklas + Lukas (PLAN §6).
+    allow_booking: bool = False
 
 
 _config: Config | None = None
@@ -50,6 +53,7 @@ def load_config(env_file: Path | None = None) -> Config:
         print_backend=os.environ.get("PRINT_BACKEND", "auto").strip() or "auto",
         printer_name=(os.environ.get("PRINTER_NAME", "").strip() or None),
         sumatra_path=(os.environ.get("SUMATRA_PATH", "").strip() or None),
+        allow_booking=os.environ.get("ALLOW_BOOKING", "").strip().lower() in ("1", "true", "yes"),
     )
     return _config
 

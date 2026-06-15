@@ -163,6 +163,12 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
 - [x] E2E-Smoke headless (read-only): voller Modus-A-Flow Leitstand→Scanner→Worker→Kartei→staged — 2026-06-15 (`automation/e2e_smoke.py`)
 - [x] 2-Helfer-Paralleltest: zwei Schüler gleichzeitig aktiv, beide Karteien parallel, unabhängiges Staging — 2026-06-15 (`automation/e2e_parallel.py`)
 - [x] Pool-Härtung: fehlgeschlagene Worker-Logins werden in `start()` einmal nachgezogen, geleakte Contexts geschlossen — 2026-06-15
+- [x] Buchender Submit-Pfad als Code vorhanden, **dreifach gated** — 2026-06-15:
+      `commit_barcode()` (Enter+Result-Parse) + `handle_commit()` + Endpoint
+      `POST /api/commit-book`. Gates: `ALLOW_BOOKING=false` (Default) + Leitstand-Auth
+      + `confirm:true`. Feuert ohne Freigabe **nie** gegen Produktion (verifiziert:
+      bei Default wird der Worker nicht berührt). Enter/Selektoren unverifiziert bis
+      zum freigegebenen Test.
 - [ ] Fehlerfälle Scanner: falsches Buch, nicht angemeldet, schon ausgeliehen (braucht freigegebenen Buchungstest)
 - [x] Leihschein-Druck — Code fertig: read-only PDF-Abruf + Druck-Abstraktion
       (`server/printing.py`, Endpoint `POST /api/print-loan-slip`, Leitstand-Button) —
@@ -194,7 +200,8 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
 - [x] Sicherheits-Review Token-Lebenszyklus (initial, E2E-verifiziert) —
       2026-06-15; iPad-Härtung (iOS-Kiosk) bleibt organisatorisch
 - [ ] Lasttest: 5 parallele Schüler-Sessions
-- [ ] Rate-Limit `/api/student/join` vor dem Piloten (DoS)
+- [x] Rate-Limit `/api/student/join` (pro-IP, 5/10 s, `server/ratelimit.py`) —
+      2026-06-15; Logik verifiziert, End-to-End-Drosselung noch im Lasttest zu prüfen.
 - [ ] O6 fachlich mit Hr. Pühn finalisieren
 - [ ] Generalprobe vor Schuljahresbeginn
 - [ ] **Meilenstein: Pilot mit Testklasse/-jahrgang**

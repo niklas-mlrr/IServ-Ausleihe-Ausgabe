@@ -8,11 +8,13 @@ from fastapi import APIRouter, Cookie, HTTPException, Request, Response
 
 from ..config import get_config
 from ..hub import get_hub
+from ..ratelimit import join_limiter
 from ..sessions import (
     broadcast_displays,
     create_student_session,
     end_student,
     gen_join_secret,
+    handle_commit,
     invalidate_session,
     load_and_push_paired_student,
     make_qr_data_url,
@@ -268,6 +270,53 @@ async def print_loan_slip(body: dict, session_id: str = Cookie(default=None)) ->
 
 
 # ---------------------------------------------------------------------------
+# Buchung (GATED — nur freigegebener Buchungstest, PLAN §6)
+# ---------------------------------------------------------------------------
+
+def _last_scan_for(state, student_id: int) -> str:
+    """Zuletzt gestageter Barcode des Schülers (Modus B Session oder Modus A Helfer)."""
+    sess = state.find_session_by_student(student_id)
+    if sess and sess.last_scan:
+        return sess.last_scan
+    helper = state.find_helper_for_student(student_id)
+    if helper and helper.last_scan:
+        return helper.last_scan
+    return ""
+
+
+@router.post("/api/commit-book")
+async def commit_book(body: dict, session_id: str = Cookie(default=None)) -> dict:
+    """Einen Barcode tatsächlich BUCHEN (Enter auf der IServ-Counter-Seite).
+
+    Dreifach gesperrt: Leitstand-Auth + `confirm:true` + Server-Flag
+    `allow_booking`. Default `ALLOW_BOOKING=false` → gesperrt; `handle_commit`
+    berührt den Worker dann gar nicht erst. Nur für den freigegebenen
+    Buchungstest (Niklas + Lukas, CLAUDE.md / PLAN §6).
+    """
+    _require_leitstand(session_id)              # Gate 2: Leitstand-Bestätigung
+    cfg = get_config()
+    if not cfg.allow_booking:                   # Gate 1: Server-Flag
+        raise HTTPException(403, "Buchung gesperrt (ALLOW_BOOKING=false)")
+    if not bool(body.get("confirm")):           # Gate 3: bewusster Extra-Schritt
+        raise HTTPException(400, "confirm:true erforderlich")
+
+    student_id = body.get("student_id")
+    if student_id is None:
+        raise HTTPException(400, "student_id fehlt")
+    student_id = int(student_id)
+
+    state = get_state()
+    hub = get_hub()
+    barcode = str(body.get("barcode", "")).strip() or _last_scan_for(state, student_id)
+    if not barcode:
+        raise HTTPException(400, "Kein Barcode (weder übergeben noch gestaged)")
+
+    result = await handle_commit(state, student_id, barcode)
+    await hub.broadcast_leitstand(state.state_snapshot())
+    return {"ok": result.get("status") in ("booked", "unknown"), "barcode": barcode, **result}
+
+
+# ---------------------------------------------------------------------------
 # Modus B — Live-Ausgabe
 # ---------------------------------------------------------------------------
 
@@ -343,12 +392,17 @@ async def display_authorize(body: dict, session_id: str = Cookie(default=None)) 
 
 
 @router.post("/api/student/join")
-async def student_join(body: dict) -> dict:
+async def student_join(body: dict, request: Request) -> dict:
     """Öffentlich (per allgemeinem QR erreichbar): neue Schüler-Session anlegen.
 
     Verlangt das aktuelle Join-Secret aus dem QR. Liefert den langen
     session_token (Zugang) + den 4-stelligen Pairing-Code (Zuordnung am Leitstand).
     """
+    # DoS-Schutz: pro-IP gedrosselt, noch vor jeder Prüfung (auch Falsch-Secret-Floods).
+    ip = request.client.host if request.client else "?"
+    if not join_limiter.hit(ip):
+        raise HTTPException(429, "Zu viele Anfragen — bitte kurz warten")
+
     state = get_state()
     secret = str(body.get("join_secret", "")).strip()
     if not state.modus_b_open or not state.modus_b_join_secret:

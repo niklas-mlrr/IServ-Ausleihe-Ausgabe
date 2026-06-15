@@ -83,6 +83,26 @@ async def handle_scan(state: AppState, student_id: int, barcode: str) -> dict:
         return {"status": "error", "msg": str(e)}
 
 
+async def handle_commit(state: AppState, student_id: int, barcode: str) -> dict:
+    """Barcode tatsächlich BUCHEN (Enter auf der Counter-Seite).
+
+    Erste Prüfung ist das Gate: ohne `allow_booking` wird der Worker NICHT
+    berührt (kein Enter, kein Produktionskontakt). Der Aufruf dieses Pfads ist
+    zusätzlich auf den Leitstand-Endpoint `/api/commit-book` (+ confirm)
+    beschränkt — Buchung nur nach Freigabe Niklas + Lukas (CLAUDE.md / PLAN §6).
+    """
+    if not get_config().allow_booking:
+        return {"status": "blocked", "msg": "Buchung gesperrt (ALLOW_BOOKING=false)"}
+    worker_session = state.student_worker_sessions.get(student_id)
+    if not worker_session:
+        return {"status": "error", "msg": "Worker-Session nicht bereit"}
+    try:
+        return await worker_session.commit_barcode(barcode)
+    except Exception as e:  # noqa: BLE001
+        log.exception("commit_barcode fehlgeschlagen")
+        return {"status": "error", "msg": str(e)}
+
+
 def release_worker(state: AppState, worker) -> None:
     """Worker-Context nach Abschluss zurück in den Pool (statt ihn zu verlieren).
 

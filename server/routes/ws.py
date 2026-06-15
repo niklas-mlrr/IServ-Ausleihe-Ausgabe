@@ -193,6 +193,7 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
                         "msg": "Noch nicht freigegeben",
                     })
                     continue
+                session.last_scan = barcode
                 result = await handle_scan(state, session.student_id, barcode)
                 await websocket.send_json({"type": "scan_result", "barcode": barcode, **result})
                 await hub.broadcast_leitstand(state.state_snapshot())

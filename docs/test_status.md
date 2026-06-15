@@ -20,6 +20,8 @@
 | V6 | Pool-Härtung (fehlgeschlagene Logins werden nachgezogen, kein Context-Leak) | `WorkerPool.start()` | 2026-06-15 | im Paralleltest mitverifiziert |
 | V7 | Phase-4 E2E Modus B (Pairing-Flow + harte Token-Invalidierung) | `automation/e2e_modus_b.py` | 2026-06-15 | bestanden inkl. Reconnect mit totem Token (Close 4006); `docs/phase4_modus_b_2026-06-15.md` §5 |
 | V8 | Druck-Backend-Logik `file`/`auto`-Resolution (ohne Drucker) | `server/printing.py` Smoke (py) | 2026-06-15 | auto→file auf Linux, PDF wird geschrieben (reiner Logik-Check, **kein** echter Druck) |
+| V9 | Rate-Limit-Logik (sliding window 5/10 s, pro-IP) | `server/ratelimit.py` Smoke | 2026-06-15 | erste 5 erlaubt, 6. gedrosselt; andere IP unbetroffen |
+| V10 | **Buchungs-Gate** — bei `ALLOW_BOOKING=false` wird der Worker (Enter) nie berührt | `handle_commit` Smoke (uv) | 2026-06-15 | Default→`blocked` ohne Worker-Zugriff; echter Config-Default `False`; Snapshot `False`. Beweist: kein Enter gegen Produktion |
 
 ## Offen / zu testen
 
@@ -42,16 +44,20 @@
 
 - [ ] **Lasttest: 5 parallele Schüler-Sessions** (Modus B) — `WORKER_CONTEXTS`
       erhöhen, Pool-Verhalten unter Last prüfen (PLAN §5 Phase 4).
-- [ ] **Rate-Limit `POST /api/student/join`** (DoS-Schutz) — implementieren + testen.
+- [ ] **Rate-Limit `/api/student/join` end-to-end** — Drosselung (429) im echten
+      Server unter Flut prüfen (Logik ist V9; HTTP-Pfad noch offen, ggf. im Lasttest).
 - [ ] **Generalprobe Modus A** im Schul-WLAN mit echtem Drucker (Phase 3).
 - [ ] **Spike D — Schul-WLAN-Reichweite / Client-Isolation** (O9), vor Ort.
 - [ ] iPad im geführten Zugriff (iOS-Kiosk) — organisatorisch (PLAN §3.4).
 
 ### Gesperrt — erst nach Buchungstest-Freigabe (Niklas + Lukas, PLAN §6)
 
-- [ ] **Buchender Submit-Pfad** (`submit_barcode` mit Enter) — Ausgabe + sofortige
-      Rücknahme eines ausgemusterten Buchs auf Niklas' Account; Rückbau-Plan
-      vorher ausfüllen (`docs/rueckbau_plan_VORLAGE.md`).
+- [ ] **Buchender Submit-Pfad** — Code **gebaut + gated** (`commit_barcode` mit
+      Enter, `/api/commit-book`, `ALLOW_BOOKING=false` default; Gate verifiziert = V10).
+      Noch zu testen (nur mit Freigabe Niklas + Lukas): `ALLOW_BOOKING=true`, echtes
+      Enter, **Erfolgs-/Fehler-Selektoren in `_read_booking_result()` bestätigen**
+      (bisher unverifiziert), Ausgabe + sofortige Rücknahme eines ausgemusterten
+      Buchs; Rückbau-Plan vorher ausfüllen (`docs/rueckbau_plan_VORLAGE.md`).
 - [ ] **Scanner-Fehlerfälle** aus dem DOM (falsche Serie, nicht angemeldet, schon
       verliehen, unbekannter Code) — beobachtbar erst im freigegebenen Buchungstest.
 - [ ] **End-to-End inkl. echter Buchung** (Modus A und B).

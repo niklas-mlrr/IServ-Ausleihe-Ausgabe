@@ -6,8 +6,11 @@ Login → App-Root → #/counter → Schüler per Typeahead öffnen → Barcode-
 
 SICHERHEITSREGELN (CLAUDE.md / PLAN §6):
   - Lukas' Admin-Account ist AUSSCHLIESSLICH lesend zu verwenden.
-  - submit_barcode() füllt das Feld mit fill(), drückt NIEMALS Enter.
-  - Kein Submit, keine Buchung, bis Niklas + Lukas explizit freigegeben haben.
+  - submit_barcode() füllt das Feld mit fill(), drückt NIEMALS Enter (staged).
+  - commit_barcode() drückt Enter und BUCHT gegen die Produktion — gated, nur im
+    freigegebenen Buchungstest (server-seitig dreifach gesperrt, s. handle_commit /
+    /api/commit-book). Im Normalbetrieb (ALLOW_BOOKING=false) nie erreichbar.
+  - Keine Buchung, bis Niklas + Lukas explizit freigegeben haben.
 """
 
 from __future__ import annotations
@@ -113,44 +116,105 @@ class StudentSession:
         self._card_loaded = True
         log.info("Kartei für Schüler %d geladen", self._student_id)
 
+    # Selektor des Counter-Eingabefeldes nach Schülerauswahl (Spike A).
+    _BARCODE_SEL = 'input.tt-input[placeholder*="Buch scannen"]'
+
+    async def _ensure_barcode_field(self):
+        """Barcode-Feld sichtbar machen, mit einmaliger Kartei-Recovery.
+
+        Gibt den Locator zurück oder wirft RuntimeError mit Klartext-Grund.
+        Gemeinsam genutzt von submit_barcode() (staged) und commit_barcode() (Buchung).
+        """
+        if not self._card_loaded:
+            raise RuntimeError("Schülerkartei noch nicht geladen")
+        field = self._page.locator(self._BARCODE_SEL)
+        try:
+            await field.wait_for(state="visible", timeout=5_000)
+            return field
+        except PlaywrightTimeout:
+            pass
+        # Feld weg — evtl. Session mitten im Vorgang abgelaufen: einmal erholen.
+        if await self._on_login_page() or self._relogin is not None:
+            log.warning("Barcode-Feld weg (Schüler %d) — Kartei neu laden", self._student_id)
+            await self.load_card()  # macht intern Re-Login bei Bedarf
+            field = self._page.locator(self._BARCODE_SEL)
+            await field.wait_for(state="visible", timeout=5_000)
+            return field
+        raise RuntimeError("Barcode-Feld nicht erreichbar")
+
     async def submit_barcode(self, barcode: str) -> dict:
         """Barcode ins Eingabefeld einfüllen — KEIN ENTER, keine Buchung.
 
         fill() überschreibt das Feld ohne Submit auszulösen. Enter würde
         c.evaluateInput() feuern und eine Buchung erzeugen (PLAN §6).
         """
-        if not self._card_loaded:
-            return {
-                "status": "error",
-                "msg": "Schülerkartei noch nicht geladen",
-            }
-
-        sel = 'input.tt-input[placeholder*="Buch scannen"]'
-        input_field = self._page.locator(sel)
         try:
-            await input_field.wait_for(state="visible", timeout=5_000)
-        except PlaywrightTimeout:
-            # Feld weg — evtl. Session mitten im Vorgang abgelaufen: einmal erholen.
-            if await self._on_login_page() or self._relogin is not None:
-                log.warning("Barcode-Feld weg (Schüler %d) — Kartei neu laden", self._student_id)
-                try:
-                    await self.load_card()  # macht intern Re-Login bei Bedarf
-                    input_field = self._page.locator(sel)
-                    await input_field.wait_for(state="visible", timeout=5_000)
-                except Exception as e:
-                    return {"status": "error", "msg": f"Recovery fehlgeschlagen: {e}"}
-            else:
-                return {"status": "error", "msg": "Barcode-Feld nicht erreichbar"}
-
+            field = await self._ensure_barcode_field()
+        except Exception as e:  # noqa: BLE001
+            return {"status": "error", "msg": str(e)}
         try:
-            await input_field.fill(barcode)
+            await field.fill(barcode)
             log.info("Barcode '%s' ins Feld gefüllt (kein Submit)", barcode)
         except PlaywrightTimeout:
             return {"status": "error", "msg": "Barcode-Feld nicht erreichbar"}
-
         return {
             "status": "staged",
             "msg": "Barcode im Feld — Submit zurückgestellt bis Freigabe (PLAN §6)",
+        }
+
+    async def commit_barcode(self, barcode: str) -> dict:
+        """!!! BUCHT GEGEN DIE IServ-PRODUKTION !!!  (Enter = c.evaluateInput()).
+
+        NUR im freigegebenen Buchungstest aufrufen (Freigabe Niklas + Lukas,
+        ALLOW_BOOKING=true). Diese Methode ist der reine Mechanismus und prüft das
+        Gate NICHT selbst — die Absicherung liegt serverseitig (handle_commit +
+        /api/commit-book, dreifach gated). Im Normalbetrieb nie erreichbar.
+
+        TODO: Die Erfolgs-/Fehler-Selektoren in _read_booking_result() sind nach
+        Spike-A-Doku best-effort und bis zum freigegebenen Test UNVERIFIZIERT.
+        """
+        try:
+            field = await self._ensure_barcode_field()
+        except Exception as e:  # noqa: BLE001
+            return {"status": "error", "msg": str(e)}
+        try:
+            await field.fill(barcode)
+            await field.press("Enter")  # löst die Buchung aus (ng-submit)
+            log.warning("Barcode '%s' GEBUCHT (Enter gedrückt) für Schüler %d",
+                        barcode, self._student_id)
+        except PlaywrightTimeout:
+            return {"status": "error", "msg": "Buchung: Barcode-Feld nicht erreichbar"}
+        await self._page.wait_for_timeout(1500)
+        return await self._read_booking_result(barcode)
+
+    async def _read_booking_result(self, barcode: str) -> dict:
+        """Best-effort Erfolg/Fehler aus dem DOM lesen (Spike A). UNVERIFIZIERT.
+
+        Selektoren sind bis zum freigegebenen Buchungstest nicht final bestätigt;
+        bei Unsicherheit `unknown` zurückgeben statt Erfolg vorzutäuschen.
+        """
+        page = self._page
+        # 1) Sichtbarer Fehlerhinweis? (Bootstrap-typische rote Meldungen)
+        for sel in (".alert-danger", ".text-danger", ".help-block"):
+            loc = page.locator(sel)
+            try:
+                if await loc.count() and await loc.first.is_visible():
+                    msg = (await loc.first.inner_text()).strip()
+                    if msg:
+                        return {"status": "error", "msg": msg[:200], "raw": sel}
+            except Exception:  # noqa: BLE001
+                continue
+        # 2) Buchcode in der Kartei-/Bücherliste aufgetaucht? (Indikator Erfolg)
+        try:
+            if await page.get_by_text(barcode, exact=False).count():
+                return {"status": "booked",
+                        "msg": "Buchung im DOM bestätigt (best-effort)", "raw": barcode}
+        except Exception:  # noqa: BLE001
+            pass
+        return {
+            "status": "unknown",
+            "msg": "Buchung ausgelöst, Ergebnis nicht eindeutig erkennbar "
+                   "(Selektoren unverifiziert — freigegebener Test nötig)",
         }
 
     async def close(self) -> None:

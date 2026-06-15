@@ -118,9 +118,10 @@ hintereinander auf demselben Pool laufen grün.
 
 **Bekannte Restpunkte (Pilot-Akzeptanz, nicht in diesem Schritt):**
 
-- Kein Rate-Limit auf `/api/student/join` (DoS-Vektor: viele Pending-Sessions).
-  Mitigation heute: `join_secret` nötig + Sweeper räumt nach 5 min auf.
-  Empfehlung: einfache Drossel pro IP vor dem Piloten.
+- ~~Kein Rate-Limit auf `/api/student/join`~~ **Erledigt (2026-06-15):** pro-IP
+  Drossel (5 Anfragen / 10 s, `server/ratelimit.py`) vor jeder Prüfung; zusätzlich
+  weiterhin `join_secret` nötig + Sweeper. End-to-End-Drosselung noch im Lasttest
+  zu bestätigen (`docs/test_status.md`).
 - WLAN-Client-Isolation (O9) weiter offen — vor Ort verifizieren.
 - 4-stelliger Code-Raum (10 000) reicht für Klassengröße; bei sehr vielen
   gleichzeitig Wartenden ggf. 5-stellig.

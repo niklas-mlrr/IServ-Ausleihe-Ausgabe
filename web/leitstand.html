@@ -253,6 +253,15 @@
     await fetch('/api/finish', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ student_id: studentId }) });
   }
 
+  async function commitBook(studentId) {
+    if (!confirm('Buchung gegen die IServ-PRODUKTION auslösen (letzter Scan)?\nNur im freigegebenen Buchungstest bestätigen!')) return;
+    showMsg('Buchung wird ausgelöst …');
+    const r = await fetch('/api/commit-book', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ student_id: studentId, confirm: true }) });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok) showMsg(`Buchung (${d.barcode}): ${d.status} — ${d.msg || ''}`);
+    else showMsg(d.detail || 'Buchung fehlgeschlagen');
+  }
+
   async function printLoanSlip(studentId) {
     showMsg('Leihschein wird geholt …');
     const r = await fetch('/api/print-loan-slip', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ student_id: studentId }) });
@@ -353,10 +362,13 @@
       const pairBtn = (state.modus_b && state.modus_b.open)
         ? `<button class="success" onclick="pairStudent(${s.student_id})">Pairing</button> ` : '';
       const printBtn = `<button class="secondary" onclick="printLoanSlip(${s.student_id})">Leihschein</button>`;
+      // Buchen-Button NUR wenn der Server ALLOW_BOOKING=true meldet (Default: aus).
+      const bookBtn = state.allow_booking
+        ? `<button class="danger" onclick="commitBook(${s.student_id})">Buchen</button> ` : '';
       const actions = s.status === 'pending'
         ? `${pairBtn}<button class="secondary" onclick="skipStudent(${s.student_id})">Überspringen</button>`
         : s.status === 'active'
-          ? `<button class="success" onclick="finishStudent(${s.student_id})">Abschließen</button> <button class="secondary" onclick="skipStudent(${s.student_id})">Abbrechen</button> ${printBtn}`
+          ? `${bookBtn}<button class="success" onclick="finishStudent(${s.student_id})">Abschließen</button> <button class="secondary" onclick="skipStudent(${s.student_id})">Abbrechen</button> ${printBtn}`
           : s.status === 'done'
             ? printBtn
             : '';
