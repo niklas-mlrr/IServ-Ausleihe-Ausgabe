@@ -155,10 +155,11 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
 - [x] Leitstand-UI: Login, Klasse wählen, alphabetische Queue, Live-Status Helfer-Sessions — 2026-06-12
 - [x] Helfer-Scanner-UI: Token-basiert, Schüleranzeige (angemeldet/bezahlt/Bücher), Scan-Feedback — 2026-06-12
 - [x] Playwright-Worker: Context-Pool (N unabhängige Logins), Schülerkartei laden, Barcode staged (kein Submit) — 2026-06-12
-- [ ] Recovery (Re-Login bei Session-Ablauf) — TODO Phase 2 Rest
+- [x] Recovery (Re-Login bei Session-Ablauf) — 2026-06-15 (`automation/worker.py`, deterministisch getestet via `automation/recovery_test.py`)
+- [x] E2E-Smoke headless (read-only): voller Modus-A-Flow Leitstand→Scanner→Worker→Kartei→staged — 2026-06-15 (`automation/e2e_smoke.py`)
 - [ ] Fehlerfälle Scanner: falsches Buch, nicht angemeldet, schon ausgeliehen (braucht freigegebenen Buchungstest)
 - [ ] Leihschein-Druck nach Abschluss eines Schülers (Phase 3, Windows)
-- [ ] End-to-End-Test mit ausgemusterten Büchern (wartet auf Buchungstest-Freigabe)
+- [ ] End-to-End-Test mit ausgemusterten Büchern **inkl. Buchung** (wartet auf Buchungstest-Freigabe Niklas + Lukas)
 
 ### Phase 3 — Generalprobe Teil 1 (vor Ferienbeginn, Anfang Juli)
 

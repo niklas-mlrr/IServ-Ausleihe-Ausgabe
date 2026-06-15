@@ -114,7 +114,7 @@
     function handleServerMessage(msg) {
       if (msg.type === 'student_info') {
         const s = msg.student;
-        studentPanel.style.display = '';
+        studentPanel.style.display = 'block';
         document.getElementById('s-name').textContent = `${s.lastname}, ${s.firstname}`;
         const paidClass = !s.enrolled ? 'badge-wait' : s.paid ? 'badge-paid' : 'badge-unpaid';
         const paidText = !s.enrolled ? 'Nicht angemeldet' : s.paid ? 'Bezahlt' : `Offen: ${s.amount_open} €`;

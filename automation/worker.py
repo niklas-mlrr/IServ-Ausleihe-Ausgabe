@@ -25,25 +25,59 @@ log = logging.getLogger(__name__)
 class StudentSession:
     """Playwright-Session für einen einzelnen Schüler auf der Counter-Seite."""
 
-    def __init__(self, context, page: Page, domain: str, student_id: int, student_name: str) -> None:
+    def __init__(
+        self,
+        context,
+        page: Page,
+        domain: str,
+        student_id: int,
+        student_name: str,
+        relogin=None,
+    ) -> None:
         self._context = context
         self._page = page
         self._domain = domain
         self._student_id = student_id
         self._student_name = student_name
         self._card_loaded = False
+        # async callable(page, label) — loggt den Context auf derselben Page neu ein.
+        self._relogin = relogin
+
+    async def _on_login_page(self) -> bool:
+        """True, wenn die Session abgelaufen ist (IServ-Login statt App)."""
+        url = self._page.url
+        if "iserv/login" in url or "iserv/auth" in url:
+            return True
+        try:
+            return await self._page.locator('input[name="_username"]').count() > 0
+        except Exception:
+            return False
+
+    async def _goto_authed(self, url: str, wait_ms: int) -> None:
+        """Navigieren mit Re-Login-Recovery: erkennt Login-Redirect und meldet
+        den Context (auf derselben Page = gleicher Cookie-Jar) neu an, dann
+        erneut zur Ziel-URL. Read-only — nur Login-Submit, keine Buchung."""
+        page = self._page
+        await page.goto(url, wait_until="domcontentloaded")
+        await page.wait_for_timeout(wait_ms)
+        if await self._on_login_page():
+            if not self._relogin:
+                raise RuntimeError(f"Session abgelaufen bei {url}, kein Re-Login verfügbar")
+            log.warning("Session abgelaufen bei %s — Re-Login", url)
+            await self._relogin(page, f"relogin-{self._student_id}")
+            await page.goto(url, wait_until="domcontentloaded")
+            await page.wait_for_timeout(wait_ms)
 
     async def load_card(self) -> None:
         """App-Root laden, Counter öffnen, Schüler per Typeahead suchen (read-only)."""
         page = self._page
         domain = self._domain
+        self._card_loaded = False
 
         # App-Root laden, Angular initialisiert dabei die Session (Spike A/B-Muster).
-        await page.goto(f"https://ausleihe.{domain}/", wait_until="domcontentloaded")
-        await page.wait_for_timeout(4000)
-
-        await page.goto(f"https://ausleihe.{domain}/#/counter", wait_until="domcontentloaded")
-        await page.wait_for_timeout(2000)
+        # _goto_authed fängt einen Login-Redirect ab (abgelaufene Session).
+        await self._goto_authed(f"https://ausleihe.{domain}/", 4000)
+        await self._goto_authed(f"https://ausleihe.{domain}/#/counter", 2000)
 
         search = page.locator('input.tt-input[name="input"]')
         try:
@@ -91,9 +125,24 @@ class StudentSession:
                 "msg": "Schülerkartei noch nicht geladen",
             }
 
-        input_field = self._page.locator('input.tt-input[placeholder*="Buch scannen"]')
+        sel = 'input.tt-input[placeholder*="Buch scannen"]'
+        input_field = self._page.locator(sel)
         try:
             await input_field.wait_for(state="visible", timeout=5_000)
+        except PlaywrightTimeout:
+            # Feld weg — evtl. Session mitten im Vorgang abgelaufen: einmal erholen.
+            if await self._on_login_page() or self._relogin is not None:
+                log.warning("Barcode-Feld weg (Schüler %d) — Kartei neu laden", self._student_id)
+                try:
+                    await self.load_card()  # macht intern Re-Login bei Bedarf
+                    input_field = self._page.locator(sel)
+                    await input_field.wait_for(state="visible", timeout=5_000)
+                except Exception as e:
+                    return {"status": "error", "msg": f"Recovery fehlgeschlagen: {e}"}
+            else:
+                return {"status": "error", "msg": "Barcode-Feld nicht erreichbar"}
+
+        try:
             await input_field.fill(barcode)
             log.info("Barcode '%s' ins Feld gefüllt (kein Submit)", barcode)
         except PlaywrightTimeout:
@@ -164,7 +213,9 @@ class WorkerPool:
             context = self._contexts.pop(0)
 
         page = await context.new_page()
-        session = StudentSession(context, page, self._domain, student_id, student_name)
+        session = StudentSession(
+            context, page, self._domain, student_id, student_name, relogin=self._login
+        )
         try:
             await session.load_card()
         except Exception as e:
