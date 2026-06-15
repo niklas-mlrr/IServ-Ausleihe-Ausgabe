@@ -1,5 +1,13 @@
 # Credentials — niemals committen (Produktions-Zugangsdaten!)
 .env
+.env.*
+!.env.example
+
+# Editor-Swap-/Backup-Dateien (z. B. Vim ..env.swp — kann .env-Inhalt enthalten!)
+*.swp
+*.swo
+*~
+.*.swp
 
 # Python
 .venv/
