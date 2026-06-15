@@ -63,7 +63,7 @@
 
   <!-- Pairing: 4-stelligen Code dem Betreuer zeigen -->
   <div class="view" id="view-pending">
-    <p class="pair-hint">Zeige diesen Code dem Betreuer am Leitstand:</p>
+    <p class="pair-hint">Zeige diesen Code dem Betreuer am Host:</p>
     <div class="pair-code" id="pair-code">····</div>
     <p class="spinner" id="pending-status">Warte auf Freigabe…</p>
   </div>
@@ -118,10 +118,15 @@
       error: document.getElementById('view-error'),
     };
     function show(name) { for (const k in views) views[k].classList.toggle('show', k === name); }
+    // IServ-Strings (Buchtitel etc.) nie ungefiltert per innerHTML einsetzen.
+    function escapeHtml(v) {
+      return String(v ?? '').replace(/[&<>"']/g, c =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
 
     const joinSecret = new URLSearchParams(location.search).get('j');
     let token = sessionStorage.getItem('mb_token');
-    let ws = null, finished = false, scannerStarted = false;
+    let ws = null, finished = false, scannerStarted = false, reconnectDelay = 2000;
 
     function showError(title, text) {
       if (title) document.getElementById('error-title').textContent = title;
@@ -154,7 +159,7 @@
 
     function connect() {
       ws = new WebSocket(`wss://${location.host}/ws/student/${token}`);
-      ws.onopen = () => { document.getElementById('dot').className = 'dot ok'; };
+      ws.onopen = () => { document.getElementById('dot').className = 'dot ok'; reconnectDelay = 2000; };
       ws.onmessage = e => { let m; try { m = JSON.parse(e.data); } catch (_) { return; } handleServerMessage(m); };
       ws.onerror = () => { document.getElementById('dot').className = 'dot err'; };
       ws.onclose = async (e) => {
@@ -167,7 +172,8 @@
           return;
         }
         document.getElementById('status-text').textContent = 'Getrennt — neu verbinden…';
-        setTimeout(connect, 2000);                   // Netzproblem → erneut
+        setTimeout(connect, reconnectDelay);         // Netzproblem → erneut (mit Backoff)
+        reconnectDelay = Math.min(Math.round(reconnectDelay * 1.6), 30000);  // Cap 30 s
       };
     }
 
@@ -204,14 +210,14 @@
         pay.innerHTML = '<span class="pay-badge paid">Bezahlt</span>';
       } else if (overridden) {
         head.classList.remove('unpaid');
-        pay.innerHTML = `<span class="pay-badge override">Vom Betreuer freigegeben</span> · offen: ${s.amount_open} €`;
+        pay.innerHTML = `<span class="pay-badge override">Vom Betreuer freigegeben</span> · offen: ${escapeHtml(s.amount_open)} €`;
       } else {
         head.classList.add('unpaid');
-        pay.innerHTML = `<span class="pay-badge unpaid">Nicht bezahlt — offen: ${s.amount_open} €</span>`;
+        pay.innerHTML = `<span class="pay-badge unpaid">Nicht bezahlt — offen: ${escapeHtml(s.amount_open)} €</span>`;
       }
       const items = (s.books_to_receive || []);
       document.getElementById('book-items').innerHTML = items.length
-        ? items.map(b => `<div class="book">${b.title || b.isbn}</div>`).join('')
+        ? items.map(b => `<div class="book">${escapeHtml(b.title || b.isbn)}</div>`).join('')
         : '<div class="book" style="opacity:.5">Keine Bücher hinterlegt</div>';
     }
 

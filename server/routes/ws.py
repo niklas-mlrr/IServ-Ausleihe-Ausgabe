@@ -19,15 +19,15 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.websocket("/ws/leitstand")
-async def ws_leitstand(websocket: WebSocket, session_id: str | None = Cookie(default=None)) -> None:
+@router.websocket("/ws/host")
+async def ws_host(websocket: WebSocket, session_id: str | None = Cookie(default=None)) -> None:
     state = get_state()
-    if not session_id or session_id not in state.leitstand_session_ids:
+    if not session_id or session_id not in state.host_session_ids:
         await websocket.close(code=4003, reason="Nicht authentifiziert")
         return
 
     await websocket.accept()
-    state.leitstand_ws_connections.append(websocket)
+    state.host_ws_connections.append(websocket)
     try:
         await websocket.send_json(state.state_snapshot())
         while True:
@@ -36,7 +36,7 @@ async def ws_leitstand(websocket: WebSocket, session_id: str | None = Cookie(def
         pass
     finally:
         try:
-            state.leitstand_ws_connections.remove(websocket)
+            state.host_ws_connections.remove(websocket)
         except ValueError:
             pass
 
@@ -68,7 +68,7 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
     else:
         await websocket.send_json({"type": "waiting", "msg": "Warte auf Schüler-Zuweisung"})
 
-    await hub.broadcast_leitstand(state.state_snapshot())
+    await hub.broadcast_host(state.state_snapshot())
 
     try:
         while True:
@@ -95,14 +95,14 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
 
             result = await handle_scan(state, student_id, barcode)
             await websocket.send_json({"type": "scan_result", "barcode": barcode, **result})
-            await hub.broadcast_leitstand(state.state_snapshot())
+            await hub.broadcast_host(state.state_snapshot())
 
     except WebSocketDisconnect:
         pass
     finally:
         helper.ws = None
         try:
-            await hub.broadcast_leitstand(state.state_snapshot())
+            await hub.broadcast_host(state.state_snapshot())
         except Exception:
             pass
 
@@ -121,7 +121,7 @@ async def ws_display(websocket: WebSocket) -> None:
     state.displays[display.display_id] = display
     display.ws = websocket
     await send_display_update(state, display)  # zeigt zunächst den Registrierungscode
-    await hub.broadcast_leitstand(state.state_snapshot())
+    await hub.broadcast_host(state.state_snapshot())
 
     try:
         while True:
@@ -132,7 +132,7 @@ async def ws_display(websocket: WebSocket) -> None:
     finally:
         state.displays.pop(display.display_id, None)
         try:
-            await hub.broadcast_leitstand(state.state_snapshot())
+            await hub.broadcast_host(state.state_snapshot())
         except Exception:
             pass
 
@@ -173,7 +173,7 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
         except Exception as e:
             await websocket.send_json({"type": "error", "msg": str(e)})
 
-    await hub.broadcast_leitstand(state.state_snapshot())
+    await hub.broadcast_host(state.state_snapshot())
 
     try:
         while True:
@@ -196,7 +196,7 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
                 session.last_scan = barcode
                 result = await handle_scan(state, session.student_id, barcode)
                 await websocket.send_json({"type": "scan_result", "barcode": barcode, **result})
-                await hub.broadcast_leitstand(state.state_snapshot())
+                await hub.broadcast_host(state.state_snapshot())
 
             elif mtype == "finish":
                 # Schüler schließt selbst ab → harter Zugriffsentzug.
@@ -217,6 +217,6 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
         if session.ws is websocket:
             session.ws = None
         try:
-            await hub.broadcast_leitstand(state.state_snapshot())
+            await hub.broadcast_host(state.state_snapshot())
         except Exception:
             pass

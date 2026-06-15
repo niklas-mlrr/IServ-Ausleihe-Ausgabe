@@ -1,4 +1,4 @@
-"""E2E-Test (Modus B / Live-Ausgabe): treibt leitstand.html + qr-display.html +
+"""E2E-Test (Modus B / Live-Ausgabe): treibt host.html + qr-display.html +
 student.html headless durch den vollen Pairing-Flow.
 
 Voraussetzung: Server laeuft (`uv run python -m server.main`).
@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
 PORT = os.environ.get("PORT", "3443")
 BASE = f"https://localhost:{PORT}"
-PW = os.environ["LEITSTAND_PASSWORD"]
+PW = os.environ["HOST_PASSWORD"]
 
 
 def log(*a):
@@ -38,8 +38,8 @@ async def main():
         ctx = await browser.new_context(ignore_https_errors=True)
         page = await ctx.new_page()
 
-        # 1. Leitstand-Login + WS + Klasse/Queue
-        await page.goto(f"{BASE}/leitstand.html", wait_until="domcontentloaded")
+        # 1. Host-Login + WS + Klasse/Queue
+        await page.goto(f"{BASE}/host.html", wait_until="domcontentloaded")
         await page.fill("#pw-input", PW)
         await page.click("#login-btn")
         await page.wait_for_selector("#main-view", state="visible", timeout=10_000)
@@ -53,7 +53,7 @@ async def main():
             "document.querySelectorAll('#queue-tbody tr').length > 0 && !document.querySelector('#queue-tbody td[colspan]')",
             timeout=15_000,
         )
-        log(f"OK  Leitstand bereit, Klasse '{chosen}' -> Queue aufgebaut")
+        log(f"OK  Host bereit, Klasse '{chosen}' -> Queue aufgebaut")
 
         # 2. Modus B oeffnen
         await page.click("#mb-open-btn")
@@ -63,7 +63,7 @@ async def main():
         secret = join_url.split("j=")[1]
         log("OK  Modus B geoeffnet (Join-URL vorhanden)")
 
-        # 3. iPad-Display: registrieren -> am Leitstand autorisieren -> QR erscheint
+        # 3. iPad-Display: registrieren -> am Host autorisieren -> QR erscheint
         dctx = await browser.new_context(ignore_https_errors=True)
         dpage = await dctx.new_page()
         await dpage.goto(f"{BASE}/qr-display.html", wait_until="domcontentloaded")
@@ -95,12 +95,12 @@ async def main():
         assert token and len(token) > 20, "session_token fehlt/zu kurz"
         log(f"OK  Schueler-Session: 4-stelliger Code angezeigt, langer Token gesetzt")
 
-        # Leitstand sieht offenen Code (ohne Schuelerdaten)
+        # Host sieht offenen Code (ohne Schuelerdaten)
         await page.wait_for_function(
             "document.getElementById('mb-pending').textContent.includes('Offene Codes: 1')", timeout=10_000)
-        log("OK  Leitstand zeigt 'Offene Codes: 1' (keine Schuelerdaten vor Pairing)")
+        log("OK  Host zeigt 'Offene Codes: 1' (keine Schuelerdaten vor Pairing)")
 
-        # 5. Pairing am Leitstand: Code -> erster pending-Schueler (mit O6-Override-Fallback)
+        # 5. Pairing am Host: Code -> erster pending-Schueler (mit O6-Override-Fallback)
         student_id = await page.evaluate(
             "() => (state.queue.find(q => q.status === 'pending') || {}).student_id")
         assert student_id, "kein pending-Schueler"

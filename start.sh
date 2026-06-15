@@ -13,7 +13,7 @@ fi
 if [ ! -f .env ]; then
   if [ -f .env.example ]; then
     cp .env.example .env
-    echo "  .env aus Vorlage erstellt — bitte ISERV_* und LEITSTAND_PASSWORD eintragen."
+    echo "  .env aus Vorlage erstellt — bitte ISERV_* und HOST_PASSWORD eintragen."
     exit 1
   fi
   echo "[FEHLER] .env fehlt." >&2
@@ -21,5 +21,5 @@ if [ ! -f .env ]; then
 fi
 
 echo "Starte Ausleihe-Ausgabe-Server (HTTPS, Port aus .env, Default 3443) ..."
-echo "Leitstand: https://localhost:3443/leitstand.html  (Beenden: Strg+C)"
+echo "Host: https://localhost:3443/host  (Beenden: Strg+C)"
 exec uv run python -m server.main

@@ -10,12 +10,12 @@ Erstausbau des Live-Ausgabe-Modus, in dem **Schüler am eigenen Gerät** ihre
 bestellten Bücher selbst scannen. Komponenten:
 
 - **iPad-QR-Anzeige** (`web/qr-display.html`): zeigt einen **allgemeinen,
-  anonymen** QR-Code; registriert sich per Code am Leitstand; **nie**
+  anonymen** QR-Code; registriert sich per Code am Host; **nie**
   Schülerdaten.
 - **Schüler-UI** (`web/student.html`, reduziert, aus `web/scan.html`): zeigt nach
   dem QR-Scan einen 4-stelligen Code, nach Freigabe die eigene Bestellliste +
   Bezahlstatus + Scanner + „Fertig".
-- **Leitstand** (`web/leitstand.html`): neue Karte „Live-Ausgabe (Modus B)" mit
+- **Host** (`web/host.html`): neue Karte „Live-Ausgabe (Modus B)" mit
   Öffnen/Schließen, iPad-/Code-Status; **Pairing-Button** pro wartendem Schüler.
 - **Server**: Session-Lebenszyklus + Endpunkte (`server/sessions.py`,
   `server/routes/api.py`, `server/routes/ws.py`), Timeout-Sweeper
@@ -30,7 +30,7 @@ PLAN §3.1 sah ursprünglich ein **personalisiertes Einmal-Token *im* QR** vor
 2. Schüler scannt → Browser ruft `POST /api/student/join` → Server legt eine
    Session an und liefert **`session_token` (lang, zufällig)** + **4-stelligen
    `pairing_code`**. Der Browser zeigt nur den 4-stelligen Code.
-3. Leitstand **ordnet den 4-stelligen Code einem Schüler aus der Queue zu**
+3. Host **ordnet den 4-stelligen Code einem Schüler aus der Queue zu**
    (`POST /api/student/pair`) → Session wird `paired` → erst jetzt fließen
    Schülerdaten.
 
@@ -39,9 +39,9 @@ PLAN §3.1 sah ursprünglich ein **personalisiertes Einmal-Token *im* QR** vor
 - Der **eigentliche Zugangs-Credential** ist der lange `session_token`
   (`secrets.token_urlsafe(32)`, ~256 bit), nicht der 4-stellige Code. 4 Ziffern
   wären brute-forcebar — sie dienen ausschließlich der **menschlich vermittelten
-  Zuordnung** am Leitstand und gewähren für sich genommen **nie** Datenzugriff.
+  Zuordnung** am Host und gewähren für sich genommen **nie** Datenzugriff.
 - Die Sicherheits-Leitplanken aus PLAN §3 bleiben erfüllt: serverseitiger
-  Zustand entscheidet, Doppel-Bestätigung durch den Leitstand, harter
+  Zustand entscheidet, Doppel-Bestätigung durch den Host, harter
   Zugriffsentzug, keine Persistenz.
 - **Datenschutz besser:** kein per-Schüler-QR, **keine** Namen/PII auf dem iPad
   (O8 = anonym, siehe §3). Kein Generieren/Anzeigen personalisierter QRs nötig.
@@ -50,21 +50,21 @@ PLAN §3.1 sah ursprünglich ein **personalisiertes Einmal-Token *im* QR** vor
 
 - **O8 (iPad zeigt Namen?) → anonym.** Das Display zeigt nur den allgemeinen QR,
   keinerlei Schülerinfo. Konsistent mit dem allgemeinen-QR-Modell.
-- **O6 (nicht bezahlt) → anzeigen + Leitstand entscheidet.** Beim Pairing eines
+- **O6 (nicht bezahlt) → anzeigen + Host entscheidet.** Beim Pairing eines
   nicht bezahlten Schülers antwortet `/api/student/pair` mit `409`
-  (`reason:"unpaid"` + offener Betrag). Der Leitstand kann mit
+  (`reason:"unpaid"` + offener Betrag). Der Host kann mit
   `override_payment:true` **trotzdem freigeben** (Befreiung/Ermäßigung). Die
   Schüler-UI zeigt dann ein „Vom Betreuer freigegeben"-/„nicht bezahlt"-Banner.
   Endgültige fachliche Abstimmung mit Hr. Pühn steht noch aus.
-- **Modus-Schaltung:** Modus B als **eigene Karte** im Leitstand neben der
+- **Modus-Schaltung:** Modus B als **eigene Karte** im Host neben der
   Helfer-Karte (Modus A); Klasse/Queue werden geteilt.
 
 ## 4. Architektur (Datenfluss)
 
 ```text
-iPad (qr-display.html)        Schüler-Handy (student.html)        Leitstand (Cookie-Auth)
+iPad (qr-display.html)        Schüler-Handy (student.html)        Host (Cookie-Auth)
    │ WS /ws/display              │ POST /api/student/join            │ POST /api/modus-b/open
-   │ Reg-Code → Leitstand        │   → {session_token, code}         │   → join_secret + QR
+   │ Reg-Code → Host        │   → {session_token, code}         │   → join_secret + QR
    │ ← allgemeiner QR            │ WS /ws/student/{session_token}    │ POST /api/display/authorize
    │ (nur QR, anonym)            │ zeigt 4-stelligen Code  ──────────┤ POST /api/student/pair
                                  │ ← (nach Pairing) Schülerinfo      │   (Code → Schüler, O6-Override)
@@ -87,18 +87,18 @@ hintereinander auf demselben Pool laufen grün.
 | Artefakt | Rolle | Eigenschaften |
 |----------|-------|---------------|
 | `session_token` | **einziger** Daten-Zugang | `secrets.token_urlsafe(32)` (~256 bit), opakes Handle, RAM-only |
-| `pairing_code` | Zuordnung am Leitstand | 4 Ziffern, nur in `pending_pairing` gültig, unter aktiven Sessions eindeutig (Kollision → neu würfeln), nach Bindung entwertet — **nie** Datenzugriff |
-| `join_secret` | gatet Session-Erzeugung | im allgemeinen QR; vom Leitstand rotierbar/schließbar |
-| `registration_code` | iPad-Display-Freischaltung | 4 Zeichen, am Leitstand bestätigt |
+| `pairing_code` | Zuordnung am Host | 4 Ziffern, nur in `pending_pairing` gültig, unter aktiven Sessions eindeutig (Kollision → neu würfeln), nach Bindung entwertet — **nie** Datenzugriff |
+| `join_secret` | gatet Session-Erzeugung | im allgemeinen QR; vom Host rotierbar/schließbar |
+| `registration_code` | iPad-Display-Freischaltung | 4 Zeichen, am Host bestätigt |
 
 **Lebenszyklus:** `pending_pairing` → `paired` → `completed` | `expired` |
-`revoked`. Übergang nach `paired` **nur** durch Leitstand-Bestätigung
+`revoked`. Übergang nach `paired` **nur** durch Host-Bestätigung
 (Doppel-Bestätigung, PLAN §3.3).
 
 **Geprüfte Eigenschaften (E2E `automation/e2e_modus_b.py`):**
 
 1. **Kein Datenabfluss vor Pairing:** Vor `paired` erhält weder iPad noch
-   Schüler-Browser Schülerdaten; der Leitstand sieht nur „Offene Codes: N"
+   Schüler-Browser Schülerdaten; der Host sieht nur „Offene Codes: N"
    (kein Name). ✔
 2. **Harter Zugriffsentzug (PLAN §3.2):** finish/skip/close/Timeout entwerten
    den Token, schließen den Worker-Context und die Schüler-WS (Close-Code 4006);
@@ -109,7 +109,7 @@ hintereinander auf demselben Pool laufen grün.
    nicht erkennbar). ✔
 4. **Server-autoritativ:** Gültigkeit entscheidet allein der Server-Zustand;
    Clients halten nur opake Tokens.
-5. **Pairing nur durch Leitstand:** `/api/student/pair` erfordert Leitstand-
+5. **Pairing nur durch Host:** `/api/student/pair` erfordert Host-
    Cookie → kein externes Zu-binden möglich.
 6. **Read-only/keine Buchung:** Scan bleibt `staged` (kein Enter), Worker nutzt
    ausschließlich den read-only Admin-Account (CLAUDE.md / PLAN §6). ✔

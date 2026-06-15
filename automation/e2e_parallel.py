@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
 PORT = os.environ.get("PORT", "3443")
 BASE = f"https://localhost:{PORT}"
-PW = os.environ["LEITSTAND_PASSWORD"]
+PW = os.environ["HOST_PASSWORD"]
 
 
 def log(*a):
@@ -55,7 +55,7 @@ async def main():
         page = await ctx.new_page()
 
         # Login + Klasse + Queue
-        await page.goto(f"{BASE}/leitstand.html", wait_until="domcontentloaded")
+        await page.goto(f"{BASE}/host.html", wait_until="domcontentloaded")
         await page.fill("#pw-input", PW)
         await page.click("#login-btn")
         await page.wait_for_selector("#main-view", state="visible", timeout=10_000)
@@ -94,12 +94,12 @@ async def main():
         assert name_a != name_b, "Beide Scanner zeigen denselben Schüler!"
         log(f"OK  Beide Scanner zeigen unterschiedliche Schüler ('{name_a}' / '{name_b}')")
 
-        # Leitstand: genau 2 aktiv
+        # Host: genau 2 aktiv
         active = await page.eval_on_selector_all(
             "#queue-tbody tr", "els => els.filter(r => r.textContent.includes('Aktiv')).length"
         )
         assert active == 2, f"erwartet 2 aktiv, war {active}"
-        log("OK  Leitstand: 2 Schüler 'Aktiv'")
+        log("OK  Host: 2 Schüler 'Aktiv'")
 
         # Beide scannen parallel -> beide staged, unabhängig
         await scan_a.evaluate("() => ws.send(JSON.stringify({type:'scan', value:'PARALLEL-A-0001'}))")

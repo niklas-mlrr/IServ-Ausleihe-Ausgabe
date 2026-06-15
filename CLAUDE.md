@@ -63,7 +63,7 @@ Produktion ist tabu.
   editable Install aus dem Schwesterprojekt `../ausleihe-api`.
 - `uv run playwright install chromium` — Browser für den Write-Pfad.
 - `.env` nach Vorlage `.env.example` (`ISERV_DOMAIN`, `ISERV_USERNAME`,
-  `ISERV_PASSWORD`, `LEITSTAND_PASSWORD`; optional `PORT`, `WORKER_CONTEXTS`
+  `ISERV_PASSWORD`, `HOST_PASSWORD`; optional `PORT`, `WORKER_CONTEXTS`
   sowie die Druck-Variablen `PRINT_BACKEND`, `PRINTER_NAME`, `SUMATRA_PATH`).
 
 ## Struktur

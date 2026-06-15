@@ -12,7 +12,7 @@ class Config:
     iserv_domain: str
     iserv_username: str
     iserv_password: str
-    leitstand_password: str
+    host_password: str
     port: int = 3443
     worker_contexts: int = 2
     tls_cert: Path = field(default_factory=lambda: Path("certs/server.crt"))
@@ -47,7 +47,7 @@ def load_config(env_file: Path | None = None) -> Config:
         iserv_domain=req("ISERV_DOMAIN"),
         iserv_username=req("ISERV_USERNAME"),
         iserv_password=req("ISERV_PASSWORD"),
-        leitstand_password=req("LEITSTAND_PASSWORD"),
+        host_password=req("HOST_PASSWORD"),
         port=int(os.environ.get("PORT", "3443")),
         worker_contexts=int(os.environ.get("WORKER_CONTEXTS", "2")),
         print_backend=os.environ.get("PRINT_BACKEND", "auto").strip() or "auto",

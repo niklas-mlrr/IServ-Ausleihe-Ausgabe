@@ -6,8 +6,8 @@ Buchausgabe der Schulbuchausleihe (IServ-Modul) ergänzt, nicht ersetzt.
 
 | Modus | Einsatz | Ablauf |
 |-------|---------|--------|
-| **A — Stapel** | Sommerferien, Stapelerstellung | Leitstand (Laptop) wählt Klasse, Schüler werden alphabetisch abgearbeitet; Helfer scannen Bücher per Handykamera; Buchung; Leihschein-Druck |
-| **B — Live-Ausgabe** (Pilot) | Schuljahresbeginn, Testklasse ab Jg. 9 | iPad zeigt **allgemeinen anonymen** QR → Schüler scannt → Handy zeigt 4-stelligen Code → Leitstand ordnet Code einem Schüler zu und bestätigt → Schüler scannt eigene Bücher |
+| **A — Stapel** | Sommerferien, Stapelerstellung | Host (Laptop) wählt Klasse, Schüler werden alphabetisch abgearbeitet; Helfer scannen Bücher per Handykamera; Buchung; Leihschein-Druck |
+| **B — Live-Ausgabe** (Pilot) | Schuljahresbeginn, Testklasse ab Jg. 9 | iPad zeigt **allgemeinen anonymen** QR → Schüler scannt → Handy zeigt 4-stelligen Code → Host ordnet Code einem Schüler zu und bestätigt → Schüler scannt eigene Bücher |
 
 Der vollständige Projektplan (Architektur, Sicherheitsmodell, Phasen, offene
 Punkte) steht in **[`docs/PLAN.md`](docs/PLAN.md)**.
@@ -19,7 +19,7 @@ Helfer-/Schüler-Handy (Kamera-Scanner)        iPad (QR-Anzeige)
         │ HTTPS + WebSocket                        │
         ▼                                          ▼
   Python-Server (FastAPI) — Windows-Laptop, Schul-WLAN, Port 3443
-  ├─ web/        statische UI (Leitstand, Scanner, QR-Display)
+  ├─ web/        statische UI (Host, Scanner, QR-Display)
   ├─ ausleihe-api  read-only: Klassen, Schüler, Anmeldungen,
   │                Bezahlstatus, Leihschein-PDF
   ├─ automation/ Playwright: Buchungen durch das OFFIZIELLE
@@ -42,7 +42,7 @@ Schwesterprojekt `ausleihe-api` als Checkout unter `../ausleihe-api`.
 ```bash
 uv sync                              # Umgebung + Dependencies
 uv run playwright install chromium   # Browser für den Write-Pfad
-cp .env.example .env                 # dann ISERV_* + LEITSTAND_PASSWORD eintragen
+cp .env.example .env                 # dann ISERV_* + HOST_PASSWORD eintragen
 ```
 
 Auf dem Ausleihe-Laptop (Windows) bzw. einem Macbook übernehmen das `setup.bat`

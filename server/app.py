@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import get_config
@@ -63,11 +64,28 @@ async def lifespan(app: FastAPI):
         log.info("WorkerPool gestoppt")
 
 
+# Seiten, die auch ohne ".html" erreichbar sein sollen (Clean URLs).
+_CLEAN_PAGES = ("host", "scan", "student", "qr-display")
+
+
+def _page_handler(path: Path):
+    """Handler ohne Parameter (sonst würde FastAPI einen Query-Param ableiten)."""
+    async def handler() -> FileResponse:
+        return FileResponse(path)
+    return handler
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="Ausleihe-Ausgabe", lifespan=lifespan)
     app.include_router(api_router)
     app.include_router(ws_router)
     if WEB_DIR.is_dir():
+        # Clean-URL-Routen VOR dem StaticFiles-Mount registrieren (der Mount auf "/"
+        # ist ein Catch-all). Die ".html"-URLs bleiben über StaticFiles gültig.
+        for page in _CLEAN_PAGES:
+            html = WEB_DIR / f"{page}.html"
+            if html.is_file():
+                app.add_api_route(f"/{page}", _page_handler(html), include_in_schema=False)
         app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
     return app
 

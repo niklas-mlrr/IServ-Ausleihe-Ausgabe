@@ -14,7 +14,7 @@
 |---|-----|--------------|-------|--------|
 | V1 | Spike A — Counter-Seite headless bedienbar (Login, Schülersuche, Kartei) | `automation/spike_a_counter.py --explore` | 2026-06-12 | Selektoren stabil; Login ohne 2FA/Captcha; `docs/spikes/spike_a_protokoll.md` |
 | V2 | Spike B — parallele Sessions desselben Accounts (O2) | `automation/spike_b_parallel.py` | 2026-06-12 | 3/3 Logins + 3/3 Cookie-Sharing, keine Invalidierung |
-| V3 | Phase-2 E2E-Smoke Modus A (Leitstand→Scanner→Worker→Kartei→staged) | `automation/e2e_smoke.py` | 2026-06-15 | bestanden; Bug in `scan.html` (Panel-Display) gefixt |
+| V3 | Phase-2 E2E-Smoke Modus A (Host→Scanner→Worker→Kartei→staged) | `automation/e2e_smoke.py` | 2026-06-15 | bestanden; Bug in `scan.html` (Panel-Display) gefixt |
 | V4 | Worker-Recovery (Re-Login bei Session-Ablauf) | `automation/recovery_test.py` | 2026-06-15 | deterministisch via `clear_cookies()`, bestanden |
 | V5 | 2-Helfer-Paralleltest (zwei Schüler gleichzeitig, getrennte Karteien) | `automation/e2e_parallel.py` | 2026-06-15 | bestanden, keine Vermischung |
 | V6 | Pool-Härtung (fehlgeschlagene Logins werden nachgezogen, kein Context-Leak) | `WorkerPool.start()` | 2026-06-15 | im Paralleltest mitverifiziert |
@@ -34,7 +34,7 @@
 - [ ] **Druck `lp` (macOS, USB-Drucker)** — echter Ausdruck auf dem Macbook.
 - [ ] **Druck `sumatra` / `win-default` (Windows)** — Silent-Print am
       Ausleihe-Laptop mit altem USB-Drucker (= Spike C / O4).
-- [ ] **Leitstand-Button „Leihschein"** (UI) löst Druck korrekt aus, Statusmeldung.
+- [ ] **Host-Button „Leihschein"** (UI) löst Druck korrekt aus, Statusmeldung.
 - [ ] **`setup.bat` / `start.bat`** am echten Windows-Laptop (uv vorhanden,
       `uv sync`, Playwright-Install, Start).
 - [ ] **`start.sh`** auf dem Macbook.
@@ -46,10 +46,20 @@
 - [ ] **Selektor-Drift-Canary** (`WorkerPool.check_selectors`, read-only) beim
       Server-Start: bestätigen, dass er `input.tt-input[name="input"]` findet und
       bei DOM-Änderung WARN loggt (echter IServ-Read, kein Submit).
-- [ ] **Worker-Status im Leitstand** (`Worker: x/y frei`) live prüfen, inkl.
+- [ ] **Worker-Status im Host** (`Worker: x/y frei`) live prüfen, inkl.
       Warnfarbe bei 0 Workern.
 - [ ] **`secure`-Cookie** + **Logfile-Rotation** (`logs/server.log`) im echten Lauf
       gegenchecken (kein Schülername im Log — PLAN §3.7).
+
+### Härtung 2026-06-15 (Frontend/TLS/Robustheit) — am Gerät zu prüfen
+
+- [ ] **TLS-Cert am Zielgerät:** Handy verbindet über `https://<Laptop-IP>:3443`
+      ohne CN/Host-Mismatch (SAN greift); Cert-Erzeugung ohne openssl-Binary
+      (jetzt via `cryptography`).
+- [ ] **`select-class`-Guard:** Klassenwechsel bei aktiven Sessions → 409 +
+      Host-Confirm → Force räumt Sessions sauber ab (keine Waisen).
+- [ ] **Reconnect-Backoff** (scan/student/qr-display): Trennung → exponentieller
+      Backoff bis 30 s, Reset bei Verbindung.
 
 ### Aus dem bisherigen Plan (Phase 3/4)
 
@@ -76,7 +86,7 @@
 ## Unit-Tests (pytest, `uv run pytest`)
 
 Reine Logik, kein IServ/Playwright/Server — schnell + produktionsneutral, als
-Regressions-Netz und QS-Beleg. **16 Tests, grün (2026-06-15).**
+Regressions-Netz und QS-Beleg. **18 Tests, grün (2026-06-15).**
 
 | Datei | Deckt ab |
 |-------|----------|
@@ -85,6 +95,7 @@ Regressions-Netz und QS-Beleg. **16 Tests, grün (2026-06-15).**
 | `tests/test_sessions.py` | Session-Lebenszyklus, Token/Code-Eindeutigkeit, harte Invalidierung |
 | `tests/test_printing.py` | Backend-Resolution (auto je Plattform) + `file`-Backend |
 | `tests/test_worker_pool.py` | `WorkerPool.stats()` (total/available/in_use) |
+| `tests/test_tls.py` | Cert hat SAN (localhost/127.0.0.1/cn), idempotent |
 
 ## Hinweise zum Testen (wenn es so weit ist)
 

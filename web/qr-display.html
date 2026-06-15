@@ -41,10 +41,10 @@
 <body>
   <div id="conn"><span class="dot" id="conn-dot"></span><span id="conn-text">verbinde…</span></div>
 
-  <!-- Registrierung (vor Autorisierung am Leitstand) -->
+  <!-- Registrierung (vor Autorisierung am Host) -->
   <div class="view" id="view-register">
     <div class="headline">Display registrieren</div>
-    <p class="muted">Diesen Code am Leitstand eingeben:</p>
+    <p class="muted">Diesen Code am Host eingeben:</p>
     <div class="reg-code" id="reg-code">····</div>
     <p class="muted">Danach erscheint hier der QR-Code.</p>
   </div>
@@ -59,7 +59,7 @@
   <!-- Ausgabe geschlossen -->
   <div class="view" id="view-closed">
     <div class="headline">Ausgabe geschlossen</div>
-    <p class="muted">Der Leitstand hat die Live-Ausgabe noch nicht geöffnet.</p>
+    <p class="muted">Der Host hat die Live-Ausgabe noch nicht geöffnet.</p>
   </div>
 
   <script>
@@ -75,12 +75,16 @@
 
     const connDot = document.getElementById('conn-dot');
     const connText = document.getElementById('conn-text');
-    let ws;
+    let ws, reconnectDelay = 2000;
 
     function connect() {
       ws = new WebSocket(`wss://${location.host}/ws/display`);
-      ws.onopen = () => { connDot.className = 'dot ok'; connText.textContent = 'verbunden'; };
-      ws.onclose = () => { connDot.className = 'dot err'; connText.textContent = 'getrennt — neu verbinden…'; setTimeout(connect, 2000); };
+      ws.onopen = () => { connDot.className = 'dot ok'; connText.textContent = 'verbunden'; reconnectDelay = 2000; };
+      ws.onclose = () => {
+        connDot.className = 'dot err'; connText.textContent = 'getrennt — neu verbinden…';
+        setTimeout(connect, reconnectDelay);
+        reconnectDelay = Math.min(Math.round(reconnectDelay * 1.6), 30000);  // Backoff, Cap 30 s
+      };
       ws.onerror = () => { connDot.className = 'dot err'; connText.textContent = 'Verbindungsfehler'; };
       ws.onmessage = e => {
         let msg; try { msg = JSON.parse(e.data); } catch (_) { return; }

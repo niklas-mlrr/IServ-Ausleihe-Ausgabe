@@ -12,7 +12,7 @@ im Schul-WLAN:
 | Modus | Einsatz | Wer scannt | Kern-Ablauf |
 |-------|---------|-----------|-------------|
 | **A — Stapel** (Teil 1) | Sommerferien, Stapelerstellung | Helfer mit eigenem Handy | Laptop wählt Klasse → Schüler alphabetisch abarbeiten → Helfer scannt Bücher per Handykamera → Buchung → Leihschein-Druck |
-| **B — Live-Ausgabe** (Teil 2, Pilot) | Schuljahresbeginn, Testklasse/-jahrgang ab Jg. 9 | Schüler mit eigenem Gerät | iPad zeigt allgemeinen QR → Schüler scannt → Handy zeigt 4-stelligen Code → Leitstand ordnet Code einem Schüler zu und bestätigt → Schüler sieht bestellte Bücher, scannt sie selbst → Buchung |
+| **B — Live-Ausgabe** (Teil 2, Pilot) | Schuljahresbeginn, Testklasse/-jahrgang ab Jg. 9 | Schüler mit eigenem Gerät | iPad zeigt allgemeinen QR → Schüler scannt → Handy zeigt 4-stelligen Code → Host ordnet Code einem Schüler zu und bestätigt → Schüler sieht bestellte Bücher, scannt sie selbst → Buchung |
 
 **Leitplanken aus der Skizze (nicht verhandelbar):**
 
@@ -34,7 +34,7 @@ Helfer-/Schüler-Handy (Browser: Kamera-Scanner)      iPad (QR-Anzeige)
 │  Python-Server (FastAPI) — Windows-Laptop, Schul-WLAN, Port 3443 │
 │                                                                  │
 │  ├─ Web-UI (statisch, vanilla JS):                               │
-│  │    leitstand.html   Laptop: Klasse/Schüler wählen, Pairing,   │
+│  │    host.html   Laptop: Klasse/Schüler wählen, Pairing,   │
 │  │                     Status aller Sessions, Skip-Funktion      │
 │  │    scan.html        Handy: Scanner-UI (aus Fork übernommen)   │
 │  │    qr-display.html  iPad: zeigt allgemeinen anonymen QR-Code  │
@@ -78,10 +78,10 @@ Helfer-/Schüler-Handy (Browser: Kamera-Scanner)      iPad (QR-Anzeige)
 
 | Rolle | Gerät | Zugang | Darf |
 |-------|-------|--------|------|
-| Leitstand | Laptop | Passwort-Login → Session-Cookie | alles: Klasse/Schüler wählen, Pairing bestätigen, Skip, Abbruch, Druck |
-| Helfer-Scanner (Modus A) | Helfer-Handy | Join-Code vom Leitstand (oder Passwort) | zugewiesenen Schüler sehen, Bücher scannen |
-| QR-Anzeige (Modus B) | iPad | Registrierung am Leitstand per Code; danach **nur** QR-Anzeige, keine Schülerdaten im Klartext | QR-Codes anzeigen |
-| Schüler-Session (Modus B) | Schüler-Handy | personalisierter QR mit **Einmal-Token** + 4-stelliger Pairing-Code, vom Leitstand bestätigt | nur eigene Bestelldaten sehen, nur eigene Bücher scannen |
+| Host | Laptop | Passwort-Login → Session-Cookie | alles: Klasse/Schüler wählen, Pairing bestätigen, Skip, Abbruch, Druck |
+| Helfer-Scanner (Modus A) | Helfer-Handy | Join-Code vom Host (oder Passwort) | zugewiesenen Schüler sehen, Bücher scannen |
+| QR-Anzeige (Modus B) | iPad | Registrierung am Host per Code; danach **nur** QR-Anzeige, keine Schülerdaten im Klartext | QR-Codes anzeigen |
+| Schüler-Session (Modus B) | Schüler-Handy | personalisierter QR mit **Einmal-Token** + 4-stelliger Pairing-Code, vom Host bestätigt | nur eigene Bestelldaten sehen, nur eigene Bücher scannen |
 
 Sicherheitsanforderungen (aus Klärung 2026-06-12, „keine Sicherheitslücken"):
 
@@ -90,20 +90,20 @@ Sicherheitsanforderungen (aus Klärung 2026-06-12, „keine Sicherheitslücken")
    anonymen** QR. Beim Scan mintet der Server pro Browser-Session einen langen,
    kryptographisch zufälligen `session_token` (~256 bit) — den **einzigen**
    Daten-Zugang — und einen 4-stelligen `pairing_code`. Der Code dient nur der
-   menschlich vermittelten Zuordnung am Leitstand und gewährt **nie** selbst
+   menschlich vermittelten Zuordnung am Host und gewährt **nie** selbst
    Datenzugriff. Server-seitiger Zustand entscheidet über Gültigkeit.
 2. **Harter Zugriffsentzug:** Nach erfolgreichem Abschluss des Ausgabe-Prozesses
-   (oder Timeout/Abbruch durch Leitstand) wird das Token serverseitig
+   (oder Timeout/Abbruch durch Host) wird das Token serverseitig
    invalidiert und die WebSocket-Session beendet. Erneuter Aufruf der URL →
    neutrale „Vorgang abgeschlossen"-Seite, keine Daten.
 3. **Doppelte Bestätigung:** Token allein reicht nicht — die Session wird erst
-   aktiv, wenn der Leitstand den 4-stelligen Pairing-Code dem Schüler zuordnet
+   aktiv, wenn der Host den 4-stelligen Pairing-Code dem Schüler zuordnet
    und bestätigt.
 4. **iPad-Absicherung:** Das QR-Display zeigt **ausschließlich** den allgemeinen
    QR-Code — **keine** Namen/Initialen (O8 geklärt: anonym, 2026-06-15). Die
    Display-Session ist eine eigene Rolle ohne Datenzugriff; Registrierung nur
-   über den Leitstand. iPads zusätzlich im geführten Zugriff (iOS Kiosk-Modus).
-5. **Skip-Funktion:** Leitstand kann Schüler überspringen (krank/abwesend);
+   über den Host. iPads zusätzlich im geführten Zugriff (iOS Kiosk-Modus).
+5. **Skip-Funktion:** Host kann Schüler überspringen (krank/abwesend);
    deren Tokens werden nie ausgegeben bzw. sofort invalidiert.
 6. **Transport:** HTTPS mit selbstsigniertem Zertifikat (Logik aus dem Fork
    nach Python portieren), nur im Schul-WLAN erreichbar.
@@ -114,12 +114,12 @@ Sicherheitsanforderungen (aus Klärung 2026-06-12, „keine Sicherheitslücken")
 
 | # | Frage | Vorschlag / nächster Schritt |
 |---|-------|------------------------------|
-| O1 | Modus A: Wie kommt ein Schüler auf ein bestimmtes Helfer-Handy? | Vorschlag: Helfer tippt „Nächster Schüler" → Server vergibt den nächsten aus der alphabetischen Queue; Leitstand kann manuell zuweisen/überschreiben. |
+| O1 | Modus A: Wie kommt ein Schüler auf ein bestimmtes Helfer-Handy? | Vorschlag: Helfer tippt „Nächster Schüler" → Server vergibt den nächsten aus der alphabetischen Queue; Host kann manuell zuweisen/überschreiben. |
 | O2 | Erlaubt IServ mehrere parallele Sessions desselben Accounts? | **Geklärt (Spike B, 2026-06-12):** Ja — 3/3 parallele unabhängige Logins + 3/3 Cookie-Sharing-Contexts, keine Invalidierung. Context-Pool mit unabhängigen Contexts. |
 | O3 | Exaktes Verhalten der offiziellen Counter-Seite (DOM, Fehlerfälle, Schüler-Wechsel) | Spike A erkundet das mit Test-Account + ausgemustertem Buch. |
 | O4 | Welcher Drucker (USB am Laptop? Netzwerk? Treiberlage unter Windows)? | **Teil-adressiert (2026-06-15):** Druck-Service gebaut (`server/printing.py`, Backends `file`/`lp`/`sumatra`/`win-default`/`auto`), read-only PDF-Abruf via `get_loan_slip_pdf`. Echter Silent-Print am Zielgerät (= Spike C) noch offen → `docs/test_status.md`, `docs/deployment.md`. |
 | O5 | Bezahlstatus-Anzeige: genaue Quelle (`enrollments`/`payments` via Admin-API) und Sonderfälle (Befreiung/Ermäßigung) | In Phase 2 gegen echte Daten read-only verifizieren. |
-| O6 | Modus B: Was passiert bei „nicht bezahlt"? (Buch zurücklegen, Helfer rufen?) | **Teil-geklärt (2026-06-15):** UI zeigt Bücher + „nicht bezahlt"-Banner; Leitstand kann beim Pairing per `override_payment` freigeben (Befreiung/Ermäßigung). Fachlicher Wortlaut/Workflow noch mit Hr. Pühn final. |
+| O6 | Modus B: Was passiert bei „nicht bezahlt"? (Buch zurücklegen, Helfer rufen?) | **Teil-geklärt (2026-06-15):** UI zeigt Bücher + „nicht bezahlt"-Banner; Host kann beim Pairing per `override_payment` freigeben (Befreiung/Ermäßigung). Fachlicher Wortlaut/Workflow noch mit Hr. Pühn final. |
 | O7 | Deployment-Packaging für den Windows-Laptop (Python-Installation? portable venv? `start.bat`?) | Phase 3; Kandidat: `uv` + Lockfile + Start-Skript, alternativ portable Python. |
 | O8 | Zeigt das QR-Display Namen/Initialen zur Orientierung oder nur anonyme QRs? | **Geklärt (2026-06-15): anonym.** Ein allgemeiner QR, keine Schülerdaten auf dem iPad (Mechanismus geändert → `docs/phase4_modus_b_2026-06-15.md`). |
 | O9 | Schul-WLAN: Client-Isolation zwischen Handy und Laptop? | Spike D; Erfahrung mit dem bisherigen Barcode-Scanner spricht dagegen, trotzdem vor Ort verifizieren. |
@@ -156,22 +156,22 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
 ### Phase 2 — Kern Modus A (KW 26–28)
 
 - [x] FastAPI-Server: HTTPS (selbstsigniert), WebSocket-Hub, Session-/Rollenmodell — 2026-06-12
-- [x] Leitstand-UI: Login, Klasse wählen, alphabetische Queue, Live-Status Helfer-Sessions — 2026-06-12
+- [x] Host-UI: Login, Klasse wählen, alphabetische Queue, Live-Status Helfer-Sessions — 2026-06-12
 - [x] Helfer-Scanner-UI: Token-basiert, Schüleranzeige (angemeldet/bezahlt/Bücher), Scan-Feedback — 2026-06-12
 - [x] Playwright-Worker: Context-Pool (N unabhängige Logins), Schülerkartei laden, Barcode staged (kein Submit) — 2026-06-12
 - [x] Recovery (Re-Login bei Session-Ablauf) — 2026-06-15 (`automation/worker.py`, deterministisch getestet via `automation/recovery_test.py`)
-- [x] E2E-Smoke headless (read-only): voller Modus-A-Flow Leitstand→Scanner→Worker→Kartei→staged — 2026-06-15 (`automation/e2e_smoke.py`)
+- [x] E2E-Smoke headless (read-only): voller Modus-A-Flow Host→Scanner→Worker→Kartei→staged — 2026-06-15 (`automation/e2e_smoke.py`)
 - [x] 2-Helfer-Paralleltest: zwei Schüler gleichzeitig aktiv, beide Karteien parallel, unabhängiges Staging — 2026-06-15 (`automation/e2e_parallel.py`)
 - [x] Pool-Härtung: fehlgeschlagene Worker-Logins werden in `start()` einmal nachgezogen, geleakte Contexts geschlossen — 2026-06-15
 - [x] Buchender Submit-Pfad als Code vorhanden, **dreifach gated** — 2026-06-15:
       `commit_barcode()` (Enter+Result-Parse) + `handle_commit()` + Endpoint
-      `POST /api/commit-book`. Gates: `ALLOW_BOOKING=false` (Default) + Leitstand-Auth
+      `POST /api/commit-book`. Gates: `ALLOW_BOOKING=false` (Default) + Host-Auth
       + `confirm:true`. Feuert ohne Freigabe **nie** gegen Produktion (verifiziert:
       bei Default wird der Worker nicht berührt). Enter/Selektoren unverifiziert bis
       zum freigegebenen Test.
 - [ ] Fehlerfälle Scanner: falsches Buch, nicht angemeldet, schon ausgeliehen (braucht freigegebenen Buchungstest)
 - [x] Leihschein-Druck — Code fertig: read-only PDF-Abruf + Druck-Abstraktion
-      (`server/printing.py`, Endpoint `POST /api/print-loan-slip`, Leitstand-Button) —
+      (`server/printing.py`, Endpoint `POST /api/print-loan-slip`, Host-Button) —
       2026-06-15. Echter Druck am Zielgerät noch zu verifizieren (`docs/test_status.md`).
 - [ ] End-to-End-Test mit ausgemusterten Büchern **inkl. Buchung** (wartet auf Buchungstest-Freigabe Niklas + Lukas)
 
@@ -189,10 +189,10 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
 > Initialer Aufbau erledigt 2026-06-15 (reiner Server-/Web-Code, keine Buchung).
 > Details + Sicherheits-Review: `docs/phase4_modus_b_2026-06-15.md`.
 
-- [x] QR-Display-Rolle (iPad): Registrierung, vom Leitstand gesteuerte Anzeige
+- [x] QR-Display-Rolle (iPad): Registrierung, vom Host gesteuerte Anzeige
       (`web/qr-display.html`, allgemeiner anonymer QR) — 2026-06-15
 - [x] Einmal-Token-System + Pairing-Flow (langer `session_token` + 4-stelliger
-      Code, Leitstand-Bestätigung; Mechanismus geändert, s. Doku) — 2026-06-15
+      Code, Host-Bestätigung; Mechanismus geändert, s. Doku) — 2026-06-15
 - [x] Schüler-UI: reduziert und selbsterklärend (`web/student.html`:
       Bestellliste, Scan, Abschluss) — 2026-06-15
 - [x] Harter Zugriffsentzug (Token-Invalidierung + WS-Close + Worker zu) —

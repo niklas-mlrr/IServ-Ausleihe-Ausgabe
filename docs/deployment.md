@@ -19,14 +19,14 @@ setup.bat
 ```
 
 Führt aus: `uv sync` → `uv run playwright install chromium` → legt `.env` aus der
-Vorlage an. Danach `.env` öffnen und `ISERV_*` + `LEITSTAND_PASSWORD` eintragen.
+Vorlage an. Danach `.env` öffnen und `ISERV_*` + `HOST_PASSWORD` eintragen.
 
 ### macOS / Linux
 
 ```bash
 uv sync
 uv run playwright install chromium
-cp .env.example .env      # dann ISERV_* + LEITSTAND_PASSWORD eintragen
+cp .env.example .env      # dann ISERV_* + HOST_PASSWORD eintragen
 ```
 
 ## 3. Starten
@@ -38,7 +38,8 @@ cp .env.example .env      # dann ISERV_* + LEITSTAND_PASSWORD eintragen
 | manuell   | `uv run python -m server.main` | alle Plattformen |
 
 Beim ersten Start erzeugt `server/tls.py` ein selbstsigniertes Zertifikat
-(`certs/`). Leitstand: `https://localhost:3443/leitstand.html`. Auf den Handys das
+(`certs/`). Host: `https://localhost:3443/host` (Clean URL ohne `.html`;
+die `.html`-Pfade bleiben zusätzlich gültig). Auf den Handys das
 Zertifikat einmal als Ausnahme bestätigen (selbstsigniert, nur Schul-WLAN).
 
 Konfiguration via `.env`: `PORT` (Default 3443), `WORKER_CONTEXTS` (parallele
@@ -67,7 +68,7 @@ Weitere `.env`-Variablen: `PRINTER_NAME` (leer = Standarddrucker),
 2. **[SumatraPDF](https://www.sumatrapdfreader.org/)** installieren (klein, kostenlos)
    — ermöglicht echten Silent-Print ohne Dialog. Ohne Sumatra fällt der Service
    automatisch auf `win-default` zurück (öffnet kurz das PDF-Programm).
-3. Testdruck über den Leitstand-Button **„Leihschein"** an einem Schüler.
+3. Testdruck über den Host-Button **„Leihschein"** an einem Schüler.
 
 ### macOS-Drucker (Macbook)
 

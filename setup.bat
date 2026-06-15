@@ -31,7 +31,7 @@ if errorlevel 1 ( echo [FEHLER] playwright install fehlgeschlagen. & pause & exi
 echo [3/3] .env pruefen ...
 if not exist ".env" (
   copy ".env.example" ".env" >nul
-  echo   .env aus Vorlage erstellt - bitte jetzt ISERV_* und LEITSTAND_PASSWORD eintragen!
+  echo   .env aus Vorlage erstellt - bitte jetzt ISERV_* und HOST_PASSWORD eintragen!
 ) else (
   echo   .env vorhanden.
 )

@@ -11,19 +11,19 @@ log = logging.getLogger(__name__)
 
 
 class Hub:
-    """WebSocket-Verteiler für Leitstand- und Scanner-Verbindungen."""
+    """WebSocket-Verteiler für Host- und Scanner-Verbindungen."""
 
-    async def broadcast_leitstand(self, msg: dict, state: AppState | None = None) -> None:
+    async def broadcast_host(self, msg: dict, state: AppState | None = None) -> None:
         s = state or get_state()
         dead = []
-        for ws in list(s.leitstand_ws_connections):
+        for ws in list(s.host_ws_connections):
             try:
                 await ws.send_json(msg)
             except Exception:
                 dead.append(ws)
         for ws in dead:
             try:
-                s.leitstand_ws_connections.remove(ws)
+                s.host_ws_connections.remove(ws)
             except ValueError:
                 pass
 

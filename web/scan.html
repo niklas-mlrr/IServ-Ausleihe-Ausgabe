@@ -107,7 +107,13 @@
     const dotEl = document.getElementById('dot');
     const studentPanel = document.getElementById('student-panel');
     const scanResults = document.getElementById('scan-results');
-    let ws;
+    let ws, reconnectDelay = 2000;
+
+    // IServ-Strings nie ungefiltert per innerHTML einsetzen.
+    function escapeHtml(v) {
+      return String(v ?? '').replace(/[&<>"']/g, c =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
 
     const token = new URLSearchParams(location.search).get('token');
 
@@ -117,7 +123,7 @@
         studentPanel.style.display = 'block';
         document.getElementById('s-name').textContent = `${s.lastname}, ${s.firstname}`;
         const paidClass = !s.enrolled ? 'badge-wait' : s.paid ? 'badge-paid' : 'badge-unpaid';
-        const paidText = !s.enrolled ? 'Nicht angemeldet' : s.paid ? 'Bezahlt' : `Offen: ${s.amount_open} €`;
+        const paidText = !s.enrolled ? 'Nicht angemeldet' : s.paid ? 'Bezahlt' : `Offen: ${escapeHtml(s.amount_open)} €`;
         const booksHave = (s.current_books || []).length;
         const booksExpected = (s.books_to_receive || []).length;
         document.getElementById('s-meta').innerHTML =
@@ -141,13 +147,17 @@
 
     function connect() {
       if (!token) {
-        statusEl.textContent = 'Kein Token in der URL — vom Leitstand QR-Code scannen';
+        statusEl.textContent = 'Kein Token in der URL — vom Host QR-Code scannen';
         dotEl.className = 'dot err';
         return;
       }
       ws = new WebSocket(`wss://${location.host}/ws/scanner/${token}`);
-      ws.onopen  = () => { dotEl.className = 'dot ok'; statusEl.textContent = 'Verbunden'; };
-      ws.onclose = () => { dotEl.className = 'dot err'; statusEl.textContent = 'Getrennt — neu verbinden…'; setTimeout(connect, 2000); };
+      ws.onopen  = () => { dotEl.className = 'dot ok'; statusEl.textContent = 'Verbunden'; reconnectDelay = 2000; };
+      ws.onclose = () => {
+        dotEl.className = 'dot err'; statusEl.textContent = 'Getrennt — neu verbinden…';
+        setTimeout(connect, reconnectDelay);
+        reconnectDelay = Math.min(Math.round(reconnectDelay * 1.6), 30000);  // Backoff, Cap 30 s
+      };
       ws.onerror = () => { dotEl.className = 'dot err'; statusEl.textContent = 'Verbindungsfehler'; };
       ws.onmessage = e => { try { handleServerMessage(JSON.parse(e.data)); } catch (_) {} };
     }

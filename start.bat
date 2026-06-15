@@ -11,7 +11,7 @@ if errorlevel 1 ( echo [FEHLER] 'uv' nicht gefunden - bitte setup.bat ausfuehren
 if not exist ".env" ( echo [FEHLER] .env fehlt - bitte setup.bat ausfuehren. & pause & exit /b 1 )
 
 echo Starte Ausleihe-Ausgabe-Server (HTTPS, Port aus .env, Default 3443) ...
-echo Leitstand:  https://localhost:3443/leitstand.html
+echo Host:  https://localhost:3443/host
 echo Beenden mit Strg+C.
 echo.
 call uv run python -m server.main

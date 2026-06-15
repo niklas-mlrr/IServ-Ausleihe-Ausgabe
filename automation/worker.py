@@ -95,7 +95,8 @@ class StudentSession:
 
         suggestion = page.locator(".tt-suggestion").first
         if not await suggestion.count():
-            log.warning("Kein Typeahead-Vorschlag für '%s'", search_name)
+            # Kein Schülername ins Log (PLAN §3.7) — nur die ID.
+            log.warning("Kein Typeahead-Vorschlag für Schüler %d", self._student_id)
             # Kartei über direkte URL als Fallback laden
             await page.goto(
                 f"https://ausleihe.{domain}/#/counter/student/{self._student_id}",
@@ -293,7 +294,7 @@ class WorkerPool:
             log.error("Kein einziger Worker-Context eingeloggt — Scannen wird scheitern")
 
     def stats(self) -> dict:
-        """Pool-Auslastung für den Leitstand: total / frei / in Benutzung."""
+        """Pool-Auslastung für den Host: total / frei / in Benutzung."""
         available = len(self._contexts)
         return {
             "total": self._total,
@@ -307,9 +308,11 @@ class WorkerPool:
         geändert hat (der Write-Pfad hängt an diesen Selektoren).
 
         Reines Browsing — kein Schüler, kein Submit (CLAUDE.md erlaubt Lesen)."""
-        if not self._contexts:
-            return {"ok": False, "msg": "kein Worker-Context"}
-        context = self._contexts[0]
+        # Context unter Lock leihen (gegen Race mit open_student) und danach zurück.
+        async with self._lock:
+            if not self._contexts:
+                return {"ok": False, "msg": "kein Worker-Context"}
+            context = self._contexts.pop(0)
         page = await context.new_page()
         sel = 'input.tt-input[name="input"]'
         try:
@@ -332,6 +335,8 @@ class WorkerPool:
                 await page.close()
             except Exception:
                 pass
+            async with self._lock:
+                self._contexts.append(context)
 
     async def stop(self) -> None:
         if self._browser:

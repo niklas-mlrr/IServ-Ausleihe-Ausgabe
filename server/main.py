@@ -35,8 +35,8 @@ def main() -> None:
     cfg = load_config()
     generate_selfsigned_cert(cfg.tls_cert, cfg.tls_key, cn=cfg.iserv_domain)
 
-    print(f"\nLeitstand: https://localhost:{cfg.port}/leitstand.html")
-    print(f"Scanner:   https://<IP>:{cfg.port}/scan.html?token=<TOKEN>\n")
+    print(f"\nHost: https://localhost:{cfg.port}/host")
+    print(f"Scanner:   https://<IP>:{cfg.port}/scan?token=<TOKEN>\n")
 
     uvicorn.run(
         "server.app:app",

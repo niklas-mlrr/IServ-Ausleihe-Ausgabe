@@ -1,10 +1,10 @@
-"""E2E-Smoke-Test (Modus A): treibt leitstand.html + scan.html headless durch.
+"""E2E-Smoke-Test (Modus A): treibt host.html + scan.html headless durch.
 
 Voraussetzung: Server laeuft (`uv run python -m server.main`).
 Aufruf:        `uv run python -m automation.e2e_smoke`
 
 Read-only gegenueber IServ: laedt nur eine Schuelerkartei (kein Submit/Enter).
-Liest LEITSTAND_PASSWORD aus .env. Keine Schuelernamen in dauerhaften Logs
+Liest HOST_PASSWORD aus .env. Keine Schuelernamen in dauerhaften Logs
 (PLAN 3.7) — der Name erscheint nur fluechtig in der Test-Ausgabe.
 """
 from __future__ import annotations
@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
 PORT = os.environ.get("PORT", "3443")
 BASE = f"https://localhost:{PORT}"
-PW = os.environ["LEITSTAND_PASSWORD"]
+PW = os.environ["HOST_PASSWORD"]
 
 console_errors: list[str] = []
 
@@ -34,19 +34,19 @@ async def main():
         browser = await p.chromium.launch(headless=True)
         ctx = await browser.new_context(ignore_https_errors=True)
         page = await ctx.new_page()
-        page.on("console", lambda m: console_errors.append(f"[leitstand:{m.type}] {m.text}") if m.type in ("error", "warning") else None)
-        page.on("pageerror", lambda e: console_errors.append(f"[leitstand:pageerror] {e}"))
+        page.on("console", lambda m: console_errors.append(f"[host:{m.type}] {m.text}") if m.type in ("error", "warning") else None)
+        page.on("pageerror", lambda e: console_errors.append(f"[host:pageerror] {e}"))
 
         # 1. Login
-        await page.goto(f"{BASE}/leitstand.html", wait_until="domcontentloaded")
+        await page.goto(f"{BASE}/host.html", wait_until="domcontentloaded")
         await page.fill("#pw-input", PW)
         await page.click("#login-btn")
         await page.wait_for_selector("#main-view", state="visible", timeout=10_000)
         log("OK  Login -> main-view sichtbar")
 
-        # 2. Leitstand-WS verbunden?
+        # 2. Host-WS verbunden?
         await page.wait_for_function("document.getElementById('ws-dot').className.includes('ok')", timeout=10_000)
-        log("OK  Leitstand-WS verbunden")
+        log("OK  Host-WS verbunden")
 
         # 3. Klassen geladen, Queue aufbauen
         await page.wait_for_function("document.querySelectorAll('#class-select option').length > 1", timeout=15_000)
@@ -89,7 +89,7 @@ async def main():
             "Array.from(document.querySelectorAll('#helper-tbody td')).some(t => t.textContent.includes('verbunden'))",
             timeout=10_000,
         )
-        log("OK  Helfer im Leitstand als 'verbunden' sichtbar")
+        log("OK  Helfer im Host als 'verbunden' sichtbar")
 
         # 6. Naechster Schueler -> Worker laedt Kartei (read-only) -> Scanner zeigt Schueler
         await page.click("#helper-tbody button.success")

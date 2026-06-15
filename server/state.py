@@ -11,11 +11,11 @@ if TYPE_CHECKING:
 
 # Modus-B-Lebenszyklus einer Schüler-Session.
 StudentSessionState = Literal[
-    "pending_pairing",  # QR gescannt, Code angezeigt, wartet auf Leitstand-Zuordnung
-    "paired",           # vom Leitstand einem Schüler zugeordnet → Daten/Scan frei
+    "pending_pairing",  # QR gescannt, Code angezeigt, wartet auf Host-Zuordnung
+    "paired",           # vom Host einem Schüler zugeordnet → Daten/Scan frei
     "completed",        # regulär abgeschlossen
     "expired",          # Timeout
-    "revoked",          # vom Leitstand abgebrochen / Ausgabe geschlossen
+    "revoked",          # vom Host abgebrochen / Ausgabe geschlossen
 ]
 
 
@@ -65,7 +65,7 @@ class StudentSessionB:
 
     `session_token` ist der eigentliche Zugangs-Credential (lang, zufällig).
     `pairing_code` ist nur die menschlich vermittelte Zuordnungshilfe am
-    Leitstand und gewährt für sich genommen NIE Datenzugriff.
+    Host und gewährt für sich genommen NIE Datenzugriff.
     """
 
     session_token: str
@@ -80,7 +80,7 @@ class StudentSessionB:
     last_activity: datetime = field(default_factory=datetime.now)
 
     def as_dict_public(self) -> dict:
-        """Für den Leitstand sichtbar — bewusst OHNE Schülerdaten.
+        """Für den Host sichtbar — bewusst OHNE Schülerdaten.
 
         Solange nicht `paired`, kennt der Server keinen Schülerbezug; selbst
         danach reicht hier die ID (Namen kommen aus der Queue, nicht von hier).
@@ -110,8 +110,8 @@ class AppState:
         self.active_form: str | None = None
         self.queue: list[QueueStudent] = []
         self.helper_sessions: dict[str, HelperSession] = {}
-        self.leitstand_session_ids: set[str] = set()
-        self.leitstand_ws_connections: list[object] = []
+        self.host_session_ids: set[str] = set()
+        self.host_ws_connections: list[object] = []
         self.worker_pool: "WorkerPool | None" = None
         self.iserv: "IsServClient | None" = None
         self.student_worker_sessions: dict[int, "StudentSession"] = {}  # student_id -> Session
@@ -119,7 +119,7 @@ class AppState:
         self.modus_b_open: bool = False
         self.modus_b_join_secret: str | None = None
         self.modus_b_join_url: str | None = None
-        self.modus_b_join_qr: str | None = None  # PNG-Data-URL für iPad/Leitstand
+        self.modus_b_join_qr: str | None = None  # PNG-Data-URL für iPad/Host
         self.student_sessions: dict[str, StudentSessionB] = {}  # session_token -> Session
         self.displays: dict[str, DisplaySession] = {}           # display_id -> Display
 

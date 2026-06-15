@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Ausleihe-Leitstand</title>
+  <title>Ausleihe-Host</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -93,10 +93,10 @@
 
 <!-- Login -->
 <div id="login-view">
-  <h1>Ausleihe-Leitstand</h1>
+  <h1>Ausleihe-Host</h1>
   <div class="card">
     <label>Passwort</label>
-    <input type="password" id="pw-input" placeholder="Leitstand-Passwort" autocomplete="current-password">
+    <input type="password" id="pw-input" placeholder="Host-Passwort" autocomplete="current-password">
     <button id="login-btn" onclick="doLogin()">Einloggen</button>
     <div id="login-msg" style="margin-top:8px;font-size:.85rem;color:#ff6b6b"></div>
   </div>
@@ -105,7 +105,7 @@
 <!-- Haupt-UI (nach Login) -->
 <div id="main-view" style="display:none">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-    <h1>Leitstand <span class="ws-dot" id="ws-dot"></span>
+    <h1>Host <span class="ws-dot" id="ws-dot"></span>
       <span id="worker-status" style="font-size:.8rem;opacity:.6;font-weight:normal;margin-left:10px"></span>
     </h1>
     <button class="secondary" onclick="doLogout()">Abmelden</button>
@@ -198,7 +198,7 @@
 
   // ---- WebSocket ----
   function connectWs() {
-    ws = new WebSocket(`wss://${location.host}/ws/leitstand`);
+    ws = new WebSocket(`wss://${location.host}/ws/host`);
     const dot = document.getElementById('ws-dot');
     ws.onopen  = () => { dot.className = 'ws-dot ok'; };
     ws.onclose = () => { dot.className = 'ws-dot err'; setTimeout(connectWs, 3000); };
@@ -209,6 +209,13 @@
     };
   }
 
+  // HTML-Escaping für alle Strings, die per innerHTML eingesetzt werden
+  // (Namen/Klassen/Titel kommen aus IServ — nicht ungefiltert interpolieren).
+  function escapeHtml(v) {
+    return String(v ?? '').replace(/[&<>"']/g, c =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
   // ---- Klassen ----
   async function loadClasses() {
     const r = await fetch('/api/classes');
@@ -216,16 +223,21 @@
     const { classes } = await r.json();
     const sel = document.getElementById('class-select');
     sel.innerHTML = '<option value="">-- Klasse wählen --</option>' +
-      classes.map(c => `<option value="${c}">${c}</option>`).join('');
+      classes.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
   }
 
-  async function selectClass() {
+  async function selectClass(force = false) {
     const form = document.getElementById('class-select').value;
     if (!form) return;
     showMsg('Lade Schüler…');
-    const r = await fetch('/api/select-class', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ form }) });
+    const r = await fetch('/api/select-class', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ form, force }) });
     const d = await r.json();
-    showMsg(r.ok ? `${d.count} Schüler geladen` : d.detail);
+    if (r.status === 409 && d.detail && d.detail.reason === 'active_sessions') {
+      if (confirm(`${d.detail.msg}\n\nTrotzdem Klasse wechseln?`)) return selectClass(true);
+      showMsg('Klassenwechsel abgebrochen');
+      return;
+    }
+    showMsg(r.ok ? `${d.count} Schüler geladen` : (d.detail?.msg || d.detail || 'Fehler'));
   }
 
   // ---- Helfer ----
@@ -348,11 +360,11 @@
     }
     tbody.innerHTML = helpers.map(h => {
       const student = h.student_id ? state.queue.find(q => q.student_id === h.student_id) : null;
-      const studentName = student ? `${student.lastname}, ${student.firstname}` : '–';
+      const studentName = student ? `${escapeHtml(student.lastname)}, ${escapeHtml(student.firstname)}` : '–';
       const connDot = h.connected ? '<span style="color:#30d158">●</span>' : '<span style="color:#888">○</span>';
       const hasStudent = h.student_id !== null;
       return `<tr>
-        <td>${h.name}</td>
+        <td>${escapeHtml(h.name)}</td>
         <td>${connDot} ${h.connected ? 'verbunden' : 'getrennt'}</td>
         <td>${studentName}</td>
         <td>${hasStudent ? '' : `<button class="success" onclick="nextStudent('${h.token}')">Nächster</button>`}</td>
@@ -388,8 +400,8 @@
             ? printBtn
             : '';
       return `<tr>
-        <td>${s.lastname}, ${s.firstname}</td>
-        <td>${s.form}</td>
+        <td>${escapeHtml(s.lastname)}, ${escapeHtml(s.firstname)}</td>
+        <td>${escapeHtml(s.form)}</td>
         <td><span class="badge ${badgeClass}">${statusLabel}</span></td>
         <td>${actions}</td>
       </tr>`;

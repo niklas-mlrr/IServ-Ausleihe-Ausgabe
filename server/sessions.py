@@ -2,9 +2,9 @@
 
 Sicherheitsmodell (PLAN §3): Der `session_token` ist der einzige
 Daten-Zugangs-Credential (lang, kryptografisch zufällig). Der 4-stellige
-`pairing_code` dient nur der menschlich vermittelten Zuordnung am Leitstand und
+`pairing_code` dient nur der menschlich vermittelten Zuordnung am Host und
 gewährt für sich genommen NIE Datenzugriff. Schülerdaten fließen erst nach
-Leitstand-Bestätigung (`state == "paired"`). Beim Abschluss/Abbruch/Timeout wird
+Host-Bestätigung (`state == "paired"`). Beim Abschluss/Abbruch/Timeout wird
 der Token hart entwertet: Worker-Context zu, WebSocket zu, Token aus dem RAM.
 """
 
@@ -89,7 +89,7 @@ async def handle_commit(state: AppState, student_id: int, barcode: str) -> dict:
 
     Erste Prüfung ist das Gate: ohne `allow_booking` wird der Worker NICHT
     berührt (kein Enter, kein Produktionskontakt). Der Aufruf dieses Pfads ist
-    zusätzlich auf den Leitstand-Endpoint `/api/commit-book` (+ confirm)
+    zusätzlich auf den Host-Endpoint `/api/commit-book` (+ confirm)
     beschränkt — Buchung nur nach Freigabe Niklas + Lukas (CLAUDE.md / PLAN §6).
     """
     if not get_config().allow_booking:
@@ -191,7 +191,7 @@ async def end_student(
         if worker:
             release_worker(state, worker)
 
-    await hub.broadcast_leitstand(state.state_snapshot())
+    await hub.broadcast_host(state.state_snapshot())
 
 
 async def load_and_push_paired_student(
@@ -226,7 +226,7 @@ async def load_and_push_paired_student(
             )
         except Exception:
             pass
-    await hub.broadcast_leitstand(state.state_snapshot())
+    await hub.broadcast_host(state.state_snapshot())
 
 
 # ---------------------------------------------------------------------------
@@ -288,4 +288,4 @@ async def sweep_expired_sessions() -> None:
             else:
                 await invalidate_session(state, session, "expired", reason="timeout")
         if expired:
-            await hub.broadcast_leitstand(state.state_snapshot())
+            await hub.broadcast_host(state.state_snapshot())
