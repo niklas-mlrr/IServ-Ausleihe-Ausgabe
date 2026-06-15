@@ -49,6 +49,12 @@ Auf dem Ausleihe-Laptop (Windows) bzw. einem Macbook übernehmen das `setup.bat`
 (einmalig) und `start.bat`/`start.sh` (Start); Details inkl. USB-Drucker-Setup
 in **[`docs/deployment.md`](docs/deployment.md)**.
 
+Unit-Tests (reine Logik, kein IServ/Playwright):
+
+```bash
+uv run pytest
+```
+
 Smoke-Test (read-only):
 
 ```bash

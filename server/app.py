@@ -38,6 +38,11 @@ async def lifespan(app: FastAPI):
         await pool.start()
         state.worker_pool = pool
         log.info("WorkerPool gestartet (%d Contexts)", cfg.worker_contexts)
+        # Read-only Selektor-Drift-Check (non-fatal) — warnt, falls IServ-DOM sich änderte.
+        try:
+            await pool.check_selectors()
+        except Exception:
+            log.exception("Selektor-Canary fehlgeschlagen (non-fatal)")
     except Exception:
         log.exception("WorkerPool-Start fehlgeschlagen — weiter ohne Playwright")
         state.worker_pool = None

@@ -21,6 +21,7 @@ import qrcode
 
 from .config import get_config
 from .hub import get_hub
+from .ratelimit import join_limiter
 from .state import AppState, DisplaySession, StudentSessionB, get_state
 
 log = logging.getLogger(__name__)
@@ -267,6 +268,7 @@ async def sweep_expired_sessions() -> None:
     hub = get_hub()
     while True:
         await asyncio.sleep(30)
+        join_limiter.sweep()  # Rate-Limit-Buckets aufräumen (kein unbegrenztes Wachstum)
         state = get_state()
         now = datetime.now()
         expired: list[StudentSessionB] = []

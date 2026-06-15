@@ -52,7 +52,8 @@ async def login(body: dict, response: Response) -> dict:
         raise HTTPException(403, "Falsches Passwort")
     sid = str(uuid.uuid4())
     get_state().leitstand_session_ids.add(sid)
-    response.set_cookie("session_id", sid, httponly=True, samesite="lax")
+    # secure=True: Cookie nur über HTTPS (der Server läuft ausschließlich über TLS).
+    response.set_cookie("session_id", sid, httponly=True, samesite="lax", secure=True)
     return {"ok": True}
 
 

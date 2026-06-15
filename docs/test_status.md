@@ -22,6 +22,7 @@
 | V8 | Druck-Backend-Logik `file`/`auto`-Resolution (ohne Drucker) | `server/printing.py` Smoke (py) | 2026-06-15 | auto→file auf Linux, PDF wird geschrieben (reiner Logik-Check, **kein** echter Druck) |
 | V9 | Rate-Limit-Logik (sliding window 5/10 s, pro-IP) | `server/ratelimit.py` Smoke | 2026-06-15 | erste 5 erlaubt, 6. gedrosselt; andere IP unbetroffen |
 | V10 | **Buchungs-Gate** — bei `ALLOW_BOOKING=false` wird der Worker (Enter) nie berührt | `handle_commit` Smoke (uv) | 2026-06-15 | Default→`blocked` ohne Worker-Zugriff; echter Config-Default `False`; Snapshot `False`. Beweist: kein Enter gegen Produktion |
+| V11 | Härtung: `WorkerPool.stats()`, `worker_pool` im Snapshot, Limiter-`sweep()` | uv-Smoke | 2026-06-15 | stats total/available/in_use korrekt; sweep leert alte/leere Buckets; Snapshot enthält `worker_pool` |
 
 ## Offen / zu testen
 
@@ -39,6 +40,16 @@
 - [ ] **`start.sh`** auf dem Macbook.
 - [ ] Leihschein `variant="student-always_school-auto"` (2-Seiten-Beleg) prüfen,
       falls Schul-Beleg gewünscht.
+
+### Härtung 2026-06-15 (gegen IServ / im Betrieb zu prüfen)
+
+- [ ] **Selektor-Drift-Canary** (`WorkerPool.check_selectors`, read-only) beim
+      Server-Start: bestätigen, dass er `input.tt-input[name="input"]` findet und
+      bei DOM-Änderung WARN loggt (echter IServ-Read, kein Submit).
+- [ ] **Worker-Status im Leitstand** (`Worker: x/y frei`) live prüfen, inkl.
+      Warnfarbe bei 0 Workern.
+- [ ] **`secure`-Cookie** + **Logfile-Rotation** (`logs/server.log`) im echten Lauf
+      gegenchecken (kein Schülername im Log — PLAN §3.7).
 
 ### Aus dem bisherigen Plan (Phase 3/4)
 
@@ -61,6 +72,19 @@
 - [ ] **Scanner-Fehlerfälle** aus dem DOM (falsche Serie, nicht angemeldet, schon
       verliehen, unbekannter Code) — beobachtbar erst im freigegebenen Buchungstest.
 - [ ] **End-to-End inkl. echter Buchung** (Modus A und B).
+
+## Unit-Tests (pytest, `uv run pytest`)
+
+Reine Logik, kein IServ/Playwright/Server — schnell + produktionsneutral, als
+Regressions-Netz und QS-Beleg. **16 Tests, grün (2026-06-15).**
+
+| Datei | Deckt ab |
+|-------|----------|
+| `tests/test_ratelimit.py` | Drossel (allow/throttle, Fenster-Ablauf, pro-IP, sweep) |
+| `tests/test_booking_gate.py` | Buchungs-Gate: ohne Flag kein Worker-/Enter-Zugriff |
+| `tests/test_sessions.py` | Session-Lebenszyklus, Token/Code-Eindeutigkeit, harte Invalidierung |
+| `tests/test_printing.py` | Backend-Resolution (auto je Plattform) + `file`-Backend |
+| `tests/test_worker_pool.py` | `WorkerPool.stats()` (total/available/in_use) |
 
 ## Hinweise zum Testen (wenn es so weit ist)
 

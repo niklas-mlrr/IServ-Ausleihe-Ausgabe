@@ -35,6 +35,17 @@ class SlidingWindowLimiter:
         dq.append(now)
         return True
 
+    def sweep(self) -> None:
+        """Veraltete/leere Einträge entfernen (gegen Wachstum bei vielen distinkten
+        IPs, die je nur einmal anfragen). Periodisch aus dem Session-Sweeper gerufen."""
+        cutoff = time.monotonic() - self._window
+        for key in list(self._hits.keys()):
+            dq = self._hits[key]
+            while dq and dq[0] < cutoff:
+                dq.popleft()
+            if not dq:
+                del self._hits[key]
+
 
 # Modul-Level-Instanz für /api/student/join.
 join_limiter = SlidingWindowLimiter(max_hits=5, window_s=10.0)

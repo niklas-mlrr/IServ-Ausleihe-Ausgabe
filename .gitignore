@@ -12,3 +12,6 @@ certs/
 
 # Spike-/Automation-Ausgaben (Screenshots, DOM-Dumps, Traces)
 automation/out/
+
+# Laufzeit-Logs (rotierend, server.log*)
+logs/

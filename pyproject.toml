@@ -21,3 +21,7 @@ iserv-ausleihe-api = { path = "../ausleihe-api", editable = true }
 
 [tool.uv]
 package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

@@ -105,7 +105,9 @@
 <!-- Haupt-UI (nach Login) -->
 <div id="main-view" style="display:none">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-    <h1>Leitstand <span class="ws-dot" id="ws-dot"></span></h1>
+    <h1>Leitstand <span class="ws-dot" id="ws-dot"></span>
+      <span id="worker-status" style="font-size:.8rem;opacity:.6;font-weight:normal;margin-left:10px"></span>
+    </h1>
     <button class="secondary" onclick="doLogout()">Abmelden</button>
   </div>
 
@@ -322,6 +324,19 @@
     renderHelpers();
     renderQueue();
     renderModusB();
+    renderWorkerStatus();
+  }
+
+  function renderWorkerStatus() {
+    const wp = state.worker_pool || { total: 0, available: 0, in_use: 0 };
+    const el = document.getElementById('worker-status');
+    if (!wp.total) {
+      el.textContent = '⚠ keine Worker (Buchung/Scan nicht möglich)';
+      el.style.color = '#ff6b6b';
+    } else {
+      el.textContent = `Worker: ${wp.available}/${wp.total} frei`;
+      el.style.color = wp.available === 0 ? '#ffd60a' : '';
+    }
   }
 
   function renderHelpers() {

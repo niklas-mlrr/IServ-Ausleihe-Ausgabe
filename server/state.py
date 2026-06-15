@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from automation.worker import StudentSession, WorkerPool
+
+    from .iserv_client import IsServClient
 
 # Modus-B-Lebenszyklus einer Schüler-Session.
 StudentSessionState = Literal[
@@ -107,9 +112,9 @@ class AppState:
         self.helper_sessions: dict[str, HelperSession] = {}
         self.leitstand_session_ids: set[str] = set()
         self.leitstand_ws_connections: list[object] = []
-        self.worker_pool: object | None = None   # automation.worker.WorkerPool
-        self.iserv: object | None = None         # server.iserv_client.IsServClient
-        self.student_worker_sessions: dict[int, object] = {}  # student_id -> StudentSession
+        self.worker_pool: "WorkerPool | None" = None
+        self.iserv: "IsServClient | None" = None
+        self.student_worker_sessions: dict[int, "StudentSession"] = {}  # student_id -> Session
         # --- Modus B (Live-Ausgabe) ---
         self.modus_b_open: bool = False
         self.modus_b_join_secret: str | None = None
@@ -126,6 +131,11 @@ class AppState:
 
     def state_snapshot(self) -> dict:
         from .config import get_config
+        pool = self.worker_pool
+        worker_stats = (
+            pool.stats() if pool is not None and hasattr(pool, "stats")
+            else {"total": 0, "available": 0, "in_use": 0}
+        )
         return {
             "type": "state",
             "active_form": self.active_form,
@@ -133,6 +143,7 @@ class AppState:
             "helpers": self.helpers_as_dict(),
             "modus_b": self.modus_b_snapshot(),
             "allow_booking": get_config().allow_booking,
+            "worker_pool": worker_stats,
         }
 
     def modus_b_snapshot(self) -> dict:

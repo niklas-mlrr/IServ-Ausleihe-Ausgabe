@@ -235,6 +235,7 @@ class WorkerPool:
         self._pw = None       # Playwright-Instanz
         self._browser = None
         self._contexts: list = []
+        self._total = 0       # erfolgreich eingeloggte Contexts (für stats())
         self._lock = asyncio.Lock()
 
     async def _make_logged_in_context(self, label: str):
@@ -286,9 +287,51 @@ class WorkerPool:
                     self._contexts.append(r)
 
         elapsed = (time.monotonic() - t0) * 1000
-        log.info("%d/%d Worker-Contexts eingeloggt (%.0f ms)", len(self._contexts), self._n, elapsed)
+        self._total = len(self._contexts)
+        log.info("%d/%d Worker-Contexts eingeloggt (%.0f ms)", self._total, self._n, elapsed)
         if not self._contexts:
             log.error("Kein einziger Worker-Context eingeloggt — Scannen wird scheitern")
+
+    def stats(self) -> dict:
+        """Pool-Auslastung für den Leitstand: total / frei / in Benutzung."""
+        available = len(self._contexts)
+        return {
+            "total": self._total,
+            "available": available,
+            "in_use": max(0, self._total - available),
+        }
+
+    async def check_selectors(self) -> dict:
+        """Read-only Drift-Check beim Start: Counter-Seite laden und prüfen, ob die
+        erwarteten Selektoren noch existieren. Warnt früh, falls IServ sein Frontend
+        geändert hat (der Write-Pfad hängt an diesen Selektoren).
+
+        Reines Browsing — kein Schüler, kein Submit (CLAUDE.md erlaubt Lesen)."""
+        if not self._contexts:
+            return {"ok": False, "msg": "kein Worker-Context"}
+        context = self._contexts[0]
+        page = await context.new_page()
+        sel = 'input.tt-input[name="input"]'
+        try:
+            await page.goto(f"https://ausleihe.{self._domain}/", wait_until="domcontentloaded")
+            await page.wait_for_timeout(4000)
+            await page.goto(f"https://ausleihe.{self._domain}/#/counter", wait_until="domcontentloaded")
+            await page.wait_for_timeout(2000)
+            try:
+                await page.locator(sel).wait_for(state="visible", timeout=10_000)
+                log.info("Selektor-Canary OK: '%s' vorhanden", sel)
+                return {"ok": True, "selector": sel}
+            except PlaywrightTimeout:
+                log.warning(
+                    "Selektor-Canary FEHLGESCHLAGEN: '%s' nicht gefunden — "
+                    "IServ-DOM evtl. geändert, Write-Pfad prüfen!", sel
+                )
+                return {"ok": False, "selector": sel, "msg": "Selektor nicht gefunden"}
+        finally:
+            try:
+                await page.close()
+            except Exception:
+                pass
 
     async def stop(self) -> None:
         if self._browser:
