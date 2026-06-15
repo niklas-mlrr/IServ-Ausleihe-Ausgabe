@@ -17,6 +17,9 @@ class Config:
     worker_contexts: int = 2
     tls_cert: Path = field(default_factory=lambda: Path("certs/server.crt"))
     tls_key: Path = field(default_factory=lambda: Path("certs/server.key"))
+    # Modus B: harte Zugriffsentzug-Schwellen (Sekunden).
+    pending_pairing_ttl_s: int = 300   # QR gescannt, aber nicht gepairt → verfällt
+    paired_idle_ttl_s: int = 900       # gepairt, aber inaktiv → verfällt
 
 
 _config: Config | None = None

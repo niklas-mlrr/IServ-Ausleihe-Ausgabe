@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -11,6 +12,7 @@ from .config import get_config
 from .iserv_client import IsServClient
 from .routes.api import router as api_router
 from .routes.ws import router as ws_router
+from .sessions import sweep_expired_sessions
 from .state import get_state
 
 log = logging.getLogger(__name__)
@@ -40,7 +42,16 @@ async def lifespan(app: FastAPI):
         log.exception("WorkerPool-Start fehlgeschlagen — weiter ohne Playwright")
         state.worker_pool = None
 
+    sweeper = asyncio.create_task(sweep_expired_sessions())
+    log.info("Modus-B-Timeout-Sweeper gestartet")
+
     yield
+
+    sweeper.cancel()
+    try:
+        await sweeper
+    except asyncio.CancelledError:
+        pass
 
     if state.worker_pool:
         await state.worker_pool.stop()

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Ausleihe — QR-Anzeige</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #fff;
+      color: #111;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      overflow: hidden;
+      padding: 24px;
+    }
+    /* Display zeigt NIEMALS Schülerdaten — nur QR / Registrierung / Status. */
+    .headline { font-size: 2rem; font-weight: 600; margin-bottom: 24px; }
+    #qr-img { width: min(70vh, 80vw); height: auto; image-rendering: pixelated; }
+    .sub { font-size: 1.3rem; opacity: .6; margin-top: 24px; }
+    .reg-code {
+      font-size: 4rem; font-weight: 700; letter-spacing: .3em;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      background: #f2f2f7; border-radius: 16px; padding: 16px 32px; margin: 16px 0;
+    }
+    .muted { opacity: .5; font-size: 1.1rem; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; background: #bbb; margin-right: 8px; }
+    .dot.ok { background: #30d158; }
+    .dot.err { background: #ff3b30; }
+    #conn { position: fixed; top: 12px; right: 16px; font-size: .85rem; opacity: .5; }
+    .view { display: none; flex-direction: column; align-items: center; }
+    .view.show { display: flex; }
+  </style>
+</head>
+<body>
+  <div id="conn"><span class="dot" id="conn-dot"></span><span id="conn-text">verbinde…</span></div>
+
+  <!-- Registrierung (vor Autorisierung am Leitstand) -->
+  <div class="view" id="view-register">
+    <div class="headline">Display registrieren</div>
+    <p class="muted">Diesen Code am Leitstand eingeben:</p>
+    <div class="reg-code" id="reg-code">····</div>
+    <p class="muted">Danach erscheint hier der QR-Code.</p>
+  </div>
+
+  <!-- QR-Anzeige (nach Autorisierung + Ausgabe offen) -->
+  <div class="view" id="view-qr">
+    <div class="headline">Bitte scannen</div>
+    <img id="qr-img" src="" alt="QR-Code">
+    <div class="sub">Scanne den Code mit deinem Handy</div>
+  </div>
+
+  <!-- Ausgabe geschlossen -->
+  <div class="view" id="view-closed">
+    <div class="headline">Ausgabe geschlossen</div>
+    <p class="muted">Der Leitstand hat die Live-Ausgabe noch nicht geöffnet.</p>
+  </div>
+
+  <script>
+    const views = {
+      register: document.getElementById('view-register'),
+      qr: document.getElementById('view-qr'),
+      closed: document.getElementById('view-closed'),
+    };
+    function show(name) {
+      for (const k in views) views[k].classList.toggle('show', k === name);
+    }
+    show('closed');
+
+    const connDot = document.getElementById('conn-dot');
+    const connText = document.getElementById('conn-text');
+    let ws;
+
+    function connect() {
+      ws = new WebSocket(`wss://${location.host}/ws/display`);
+      ws.onopen = () => { connDot.className = 'dot ok'; connText.textContent = 'verbunden'; };
+      ws.onclose = () => { connDot.className = 'dot err'; connText.textContent = 'getrennt — neu verbinden…'; setTimeout(connect, 2000); };
+      ws.onerror = () => { connDot.className = 'dot err'; connText.textContent = 'Verbindungsfehler'; };
+      ws.onmessage = e => {
+        let msg; try { msg = JSON.parse(e.data); } catch (_) { return; }
+        if (msg.type === 'registration') {
+          document.getElementById('reg-code').textContent = msg.code;
+          show('register');
+        } else if (msg.type === 'qr') {
+          document.getElementById('qr-img').src = msg.qr;
+          show('qr');
+        } else if (msg.type === 'closed') {
+          show('closed');
+        }
+      };
+    }
+    connect();
+  </script>
+</body>
+</html>

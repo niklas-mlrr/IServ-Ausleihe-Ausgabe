@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Bücherausgabe</title>
+  <script src="/html5-qrcode.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0f0f0f; color: #fff; min-height: 100vh;
+      display: flex; flex-direction: column; align-items: center; padding: 20px;
+    }
+    h1 { font-size: 1.2rem; font-weight: 600; margin-bottom: 16px; opacity: .85; }
+    .view { display: none; width: 100%; max-width: 340px; flex-direction: column; align-items: center; }
+    .view.show { display: flex; }
+    /* Pairing */
+    .pair-hint { opacity: .7; text-align: center; margin-bottom: 12px; }
+    .pair-code {
+      font-size: 4.5rem; font-weight: 700; letter-spacing: .25em;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      background: #1c1c1e; border-radius: 16px; padding: 16px 28px; margin: 8px 0 16px;
+    }
+    .spinner { opacity: .5; font-size: .9rem; }
+    /* Active */
+    #student-head { width: 100%; background: #1a2a1a; border: 1px solid #2a4a2a; border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; }
+    #student-head.unpaid { background: #2a2410; border-color: #5a4a1a; }
+    .pay-badge { font-weight: 600; }
+    .pay-badge.paid { color: #4caf50; }
+    .pay-badge.unpaid { color: #ffb300; }
+    .pay-badge.override { color: #5ac8fa; }
+    .booklist { width: 100%; background: #1a1a1a; border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; font-size: .9rem; }
+    .booklist h2 { font-size: .8rem; opacity: .5; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px; }
+    .booklist .book { padding: 5px 0; border-bottom: 1px solid #2a2a2a; }
+    .booklist .book:last-child { border-bottom: none; }
+    #reader { width: 100%; border-radius: 12px; overflow: hidden; box-shadow: 0 0 0 0 #4caf50; transition: box-shadow .6s ease-out; }
+    #reader.scan-success { box-shadow: 0 0 0 3px #4caf50; transition: none; }
+    #scan-results { width: 100%; margin-top: 10px; }
+    .scan-item { padding: 8px 12px; border-radius: 7px; margin-bottom: 6px; font-size: .85rem; }
+    .scan-item.staged { background: #1a3a1a; color: #4caf50; }
+    .scan-item.error  { background: #3a1a1a; color: #f44336; }
+    #status { margin-top: 14px; padding: 10px 16px; border-radius: 8px; font-size: .9rem; background: #1e1e1e; width: 100%; text-align: center; }
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; background: #888; }
+    .dot.ok { background: #4caf50; } .dot.err { background: #f44336; }
+    .controls { margin-top: 12px; display: grid; gap: 8px; width: 100%; }
+    #camera-row { grid-template-columns: 1fr auto; }
+    #sound-row  { grid-template-columns: 1fr 1fr; }
+    button, select { width: 100%; padding: 12px 10px; border: none; border-radius: 8px; background: #2a2a2a; color: #fff; font-size: .95rem; cursor: pointer; }
+    button:active { background: #4a4a4a; }
+    #reload-btn { padding: 12px 14px; font-size: 1.1rem; width: auto; }
+    #finish-btn { margin-top: 14px; background: #30d158; color: #000; font-weight: 600; font-size: 1.05rem; padding: 14px; }
+    .torch-on, .sound-on { background: #4caf50 !important; }
+    /* Done / Error */
+    .big-msg { text-align: center; margin-top: 60px; }
+    .big-msg .icon { font-size: 3rem; margin-bottom: 12px; }
+    .big-msg .title { font-size: 1.4rem; font-weight: 600; margin-bottom: 8px; }
+    .big-msg .text { opacity: .6; }
+  </style>
+</head>
+<body>
+  <h1>Bücherausgabe</h1>
+
+  <!-- Pairing: 4-stelligen Code dem Betreuer zeigen -->
+  <div class="view" id="view-pending">
+    <p class="pair-hint">Zeige diesen Code dem Betreuer am Leitstand:</p>
+    <div class="pair-code" id="pair-code">····</div>
+    <p class="spinner" id="pending-status">Warte auf Freigabe…</p>
+  </div>
+
+  <!-- Aktiv: Bestellliste + Scanner -->
+  <div class="view" id="view-active">
+    <div id="student-head">
+      <div id="s-name" style="font-weight:600;font-size:1.05rem;margin-bottom:4px">–</div>
+      <div id="s-pay"></div>
+    </div>
+    <div class="booklist">
+      <h2>Deine bestellten Bücher</h2>
+      <div id="book-items"></div>
+    </div>
+    <div id="reader"></div>
+    <div id="status"><span class="dot" id="dot"></span><span id="status-text">Verbinde…</span></div>
+    <div id="scan-results"></div>
+    <div class="controls" id="camera-row">
+      <select id="camera-select"><option>Kameras laden…</option></select>
+      <button id="reload-btn" title="Kamera neu laden">&#x21BA;</button>
+    </div>
+    <div class="controls" id="sound-row">
+      <button id="sound-btn">Ton: aus</button>
+      <button id="torch-btn">Licht: aus</button>
+    </div>
+    <button id="finish-btn">Fertig — Vorgang abschließen</button>
+  </div>
+
+  <!-- Abgeschlossen (neutral, keine Daten) -->
+  <div class="view" id="view-done">
+    <div class="big-msg">
+      <div class="icon">✓</div>
+      <div class="title">Vorgang abgeschlossen</div>
+      <div class="text">Du kannst dieses Fenster schließen.</div>
+    </div>
+  </div>
+
+  <!-- Fehler -->
+  <div class="view" id="view-error">
+    <div class="big-msg">
+      <div class="icon">⚠</div>
+      <div class="title" id="error-title">Kein gültiger Zugang</div>
+      <div class="text" id="error-text">Bitte scanne den QR-Code am Display erneut.</div>
+    </div>
+  </div>
+
+  <script>
+    const views = {
+      pending: document.getElementById('view-pending'),
+      active: document.getElementById('view-active'),
+      done: document.getElementById('view-done'),
+      error: document.getElementById('view-error'),
+    };
+    function show(name) { for (const k in views) views[k].classList.toggle('show', k === name); }
+
+    const joinSecret = new URLSearchParams(location.search).get('j');
+    let token = sessionStorage.getItem('mb_token');
+    let ws = null, finished = false, scannerStarted = false;
+
+    function showError(title, text) {
+      if (title) document.getElementById('error-title').textContent = title;
+      if (text) document.getElementById('error-text').textContent = text;
+      show('error');
+    }
+    function clearToken() { token = null; sessionStorage.removeItem('mb_token'); }
+
+    async function join() {
+      if (!joinSecret) { showError('Kein QR-Code', 'Bitte scanne den QR-Code am Display.'); return false; }
+      try {
+        const r = await fetch('/api/student/join', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ join_secret: joinSecret }),
+        });
+        if (!r.ok) {
+          showError('Ausgabe geschlossen', 'Die Live-Ausgabe ist derzeit nicht geöffnet.');
+          return false;
+        }
+        const d = await r.json();
+        token = d.session_token;
+        sessionStorage.setItem('mb_token', token);
+        document.getElementById('pair-code').textContent = d.pairing_code;
+        return true;
+      } catch (_) {
+        showError('Verbindungsfehler', 'Bitte erneut versuchen.');
+        return false;
+      }
+    }
+
+    function connect() {
+      ws = new WebSocket(`wss://${location.host}/ws/student/${token}`);
+      ws.onopen = () => { document.getElementById('dot').className = 'dot ok'; };
+      ws.onmessage = e => { let m; try { m = JSON.parse(e.data); } catch (_) { return; } handleServerMessage(m); };
+      ws.onerror = () => { document.getElementById('dot').className = 'dot err'; };
+      ws.onclose = async (e) => {
+        document.getElementById('dot').className = 'dot err';
+        if (finished) return;                       // regulär abgeschlossen
+        if (e.code === 4006) {                       // Token ungültig/entwertet
+          clearToken();
+          if (joinSecret) { if (await join()) connect(); }
+          else show('done');
+          return;
+        }
+        document.getElementById('status-text').textContent = 'Getrennt — neu verbinden…';
+        setTimeout(connect, 2000);                   // Netzproblem → erneut
+      };
+    }
+
+    function handleServerMessage(msg) {
+      if (msg.type === 'pending') {
+        document.getElementById('pair-code').textContent = msg.pairing_code;
+        show('pending');
+      } else if (msg.type === 'student_info') {
+        renderStudent(msg.student, msg.payment_overridden);
+        show('active');
+        startScanner();
+      } else if (msg.type === 'scan_result') {
+        const cls = msg.status === 'staged' ? 'staged' : 'error';
+        const item = document.createElement('div');
+        item.className = `scan-item ${cls}`;
+        item.textContent = `${msg.barcode} — ${msg.msg || msg.status}`;
+        document.getElementById('scan-results').prepend(item);
+      } else if (msg.type === 'closed') {
+        finished = true; clearToken(); show('done');
+      } else if (msg.type === 'error') {
+        document.getElementById('status-text').textContent = 'Fehler: ' + (msg.msg || '');
+      }
+    }
+
+    function renderStudent(s, overridden) {
+      document.getElementById('s-name').textContent = `${s.lastname}, ${s.firstname}`;
+      const head = document.getElementById('student-head');
+      const pay = document.getElementById('s-pay');
+      if (!s.enrolled) {
+        head.classList.add('unpaid');
+        pay.innerHTML = '<span class="pay-badge unpaid">Nicht angemeldet</span>';
+      } else if (s.paid) {
+        head.classList.remove('unpaid');
+        pay.innerHTML = '<span class="pay-badge paid">Bezahlt</span>';
+      } else if (overridden) {
+        head.classList.remove('unpaid');
+        pay.innerHTML = `<span class="pay-badge override">Vom Betreuer freigegeben</span> · offen: ${s.amount_open} €`;
+      } else {
+        head.classList.add('unpaid');
+        pay.innerHTML = `<span class="pay-badge unpaid">Nicht bezahlt — offen: ${s.amount_open} €</span>`;
+      }
+      const items = (s.books_to_receive || []);
+      document.getElementById('book-items').innerHTML = items.length
+        ? items.map(b => `<div class="book">${b.title || b.isbn}</div>`).join('')
+        : '<div class="book" style="opacity:.5">Keine Bücher hinterlegt</div>';
+    }
+
+    // ---- Finish ----
+    document.getElementById('finish-btn').addEventListener('click', () => {
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'finish' }));
+    });
+
+    // ================= Scanner (aus scan.html übernommen) =================
+    let lastValue = '', cooldown = false, html5QrCode = null, currentCameraId = null,
+        isTorchOn = false, isRestarting = false, soundEnabled = false;
+    const statusEl = document.getElementById('status-text');
+    const cameraSelect = document.getElementById('camera-select');
+    const torchBtn = document.getElementById('torch-btn');
+    const soundBtn = document.getElementById('sound-btn');
+    const reloadBtn = document.getElementById('reload-btn');
+    const readerEl = document.getElementById('reader');
+    let scanFlashTimeout = null, audioCtx = null, audioBuffer = null;
+
+    async function initAudio() {
+      if (audioBuffer) return;
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const silence = audioCtx.createBuffer(1, 1, audioCtx.sampleRate);
+      const silSrc = audioCtx.createBufferSource();
+      silSrc.buffer = silence; silSrc.connect(audioCtx.destination); silSrc.start(0);
+      await audioCtx.resume();
+      const resp = await fetch('/beep.mp3');
+      audioBuffer = await audioCtx.decodeAudioData(await resp.arrayBuffer());
+    }
+    function playBeep() {
+      if (!audioCtx || !audioBuffer) return;
+      const src = audioCtx.createBufferSource();
+      src.buffer = audioBuffer; src.connect(audioCtx.destination); src.start(0);
+    }
+    soundBtn.addEventListener('click', async () => {
+      soundEnabled = !soundEnabled;
+      soundBtn.textContent = soundEnabled ? 'Ton: an' : 'Ton: aus';
+      soundBtn.classList.toggle('sound-on', soundEnabled);
+      if (soundEnabled) { await initAudio(); playBeep(); }
+    });
+
+    function onScanSuccess(value) {
+      if (cooldown || value === lastValue) return;
+      if (soundEnabled) playBeep();
+      lastValue = value; cooldown = true;
+      setTimeout(() => { cooldown = false; lastValue = ''; }, 2000);
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'scan', value }));
+      if (navigator.vibrate) navigator.vibrate(80);
+      readerEl.classList.add('scan-success');
+      clearTimeout(scanFlashTimeout);
+      scanFlashTimeout = setTimeout(() => readerEl.classList.remove('scan-success'), 1200);
+    }
+
+    function startScanner() {
+      if (scannerStarted) return;
+      scannerStarted = true;
+      Html5Qrcode.getCameras().then(cameras => {
+        const preferred = cameras.find(c => /back dual wide/i.test(c.label))
+          || cameras.find(c => /back/i.test(c.label)) || cameras[0];
+        cameraSelect.innerHTML = cameras.map(c => `<option value="${c.id}" ${c === preferred ? 'selected' : ''}>${c.label}</option>`).join('');
+        currentCameraId = preferred?.id;
+        initScanner(currentCameraId);
+      }).catch(() => { cameraSelect.innerHTML = '<option>Keine Kamera</option>'; cameraSelect.disabled = true; });
+    }
+
+    async function initScanner(cameraId) {
+      if (isRestarting) return;
+      isRestarting = true; reloadBtn.disabled = true; reloadBtn.textContent = '…';
+      statusEl.textContent = 'Kamera startet…';
+      if (html5QrCode) { try { await html5QrCode.stop(); } catch (e) {} try { html5QrCode.clear(); } catch (e) {} html5QrCode = null; }
+      html5QrCode = new Html5Qrcode('reader');
+      try {
+        await html5QrCode.start(cameraId, { fps: 15, qrbox: { width: 240, height: 160 }, aspectRatio: 1.0 }, onScanSuccess, () => {});
+        currentCameraId = cameraId; isTorchOn = false;
+        torchBtn.textContent = 'Licht: aus'; torchBtn.classList.remove('torch-on');
+        statusEl.textContent = 'Bereit — Buch scannen';
+        const video = document.querySelector('#reader video');
+        if (video && video.srcObject) {
+          const caps = video.srcObject.getVideoTracks()[0].getCapabilities?.();
+          torchBtn.disabled = !(caps && caps.torch);
+        }
+      } catch (err) { statusEl.textContent = 'Kamerafehler — ↺ tippen'; document.getElementById('dot').className = 'dot err'; }
+      reloadBtn.textContent = '↺'; reloadBtn.disabled = false; isRestarting = false;
+    }
+
+    cameraSelect.addEventListener('change', () => initScanner(cameraSelect.value));
+    reloadBtn.addEventListener('click', () => { if (currentCameraId) initScanner(currentCameraId); });
+    torchBtn.addEventListener('click', async () => {
+      const video = document.querySelector('#reader video');
+      if (!video || !video.srcObject) return;
+      const track = video.srcObject.getVideoTracks()[0];
+      try { await track.applyConstraints({ advanced: [{ torch: !isTorchOn }] }); isTorchOn = !isTorchOn;
+        torchBtn.textContent = isTorchOn ? 'Licht: an' : 'Licht: aus'; torchBtn.classList.toggle('torch-on', isTorchOn); } catch (e) {}
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && currentCameraId && scannerStarted) setTimeout(() => initScanner(currentCameraId), 300);
+    });
+    setInterval(() => {
+      if (document.hidden || isRestarting || !currentCameraId || !scannerStarted) return;
+      const video = document.querySelector('#reader video');
+      if (video && (video.paused || video.ended || video.readyState < 2)) initScanner(currentCameraId);
+    }, 3000);
+
+    // ================= Bootstrap =================
+    (async function boot() {
+      if (token) { connect(); }            // bestehender Token → verbinden (Server prüft Gültigkeit)
+      else if (await join()) { connect(); } // sonst per QR-Secret neue Session
+    })();
+  </script>
+</body>
+</html>

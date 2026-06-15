@@ -1,16 +1,23 @@
 from __future__ import annotations
 
 import asyncio
-import base64
-import io
 import logging
 import uuid
 
-import qrcode
 from fastapi import APIRouter, Cookie, HTTPException, Request, Response
 
 from ..config import get_config
 from ..hub import get_hub
+from ..sessions import (
+    broadcast_displays,
+    create_student_session,
+    end_student,
+    gen_join_secret,
+    invalidate_session,
+    load_and_push_paired_student,
+    make_qr_data_url,
+    send_display_update,
+)
 from ..state import HelperSession, get_state
 
 log = logging.getLogger(__name__)
@@ -126,15 +133,7 @@ async def add_helper(body: dict, request: Request, session_id: str = Cookie(defa
     state = get_state()
     state.helper_sessions[token] = HelperSession(token=token, name=name)
     url = f"{_base_url(request)}/scan.html?token={token}"
-
-    # QR-Code als PNG-Daten-URL generieren
-    qr = qrcode.QRCode(box_size=6, border=2)
-    qr.add_data(url)
-    qr.make(fit=True)
-    img = qr.make_image(fill_color="black", back_color="white")
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    qr_data_url = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+    qr_data_url = make_qr_data_url(url)
 
     await get_hub().broadcast_leitstand(get_state().state_snapshot())
     return {"ok": True, "token": token, "url": url, "qr": qr_data_url}
@@ -203,16 +202,8 @@ async def skip_student(body: dict, session_id: str = Cookie(default=None)) -> di
     if student.status in ("done", "skipped"):
         raise HTTPException(409, f"Schüler bereits als {student.status} markiert")
 
-    # Ggf. Worker-Session schließen
-    _cleanup_student_session(state, int(student_id))
-
-    old_helper_token = student.assigned_helper
-    student.status = "skipped"
-    student.assigned_helper = None
-    if old_helper_token and old_helper_token in state.helper_sessions:
-        state.helper_sessions[old_helper_token].student_id = None
-
-    await hub.broadcast_leitstand(state.state_snapshot())
+    # Setzt Queue-Status, löst Helfer und entwertet eine Modus-B-Session hart.
+    await end_student(state, hub, int(student_id), queue_status="skipped", session_state="revoked")
     return {"ok": True}
 
 
@@ -229,26 +220,167 @@ async def finish_student(body: dict, session_id: str = Cookie(default=None)) -> 
     if not student:
         raise HTTPException(404, "Schüler nicht in der Queue")
 
-    _cleanup_student_session(state, int(student_id))
+    await end_student(state, hub, int(student_id), queue_status="done", session_state="completed")
+    return {"ok": True}
 
-    old_helper_token = student.assigned_helper
-    student.status = "done"
-    student.assigned_helper = None
-    if old_helper_token and old_helper_token in state.helper_sessions:
-        state.helper_sessions[old_helper_token].student_id = None
 
+# ---------------------------------------------------------------------------
+# Modus B — Live-Ausgabe
+# ---------------------------------------------------------------------------
+
+@router.post("/api/modus-b/open")
+async def modus_b_open(request: Request, session_id: str = Cookie(default=None)) -> dict:
+    """Live-Ausgabe öffnen: allgemeines Join-Secret + QR erzeugen und an iPads pushen."""
+    _require_leitstand(session_id)
+    state = get_state()
+    state.modus_b_open = True
+    state.modus_b_join_secret = gen_join_secret()
+    state.modus_b_join_url = f"{_base_url(request)}/student.html?j={state.modus_b_join_secret}"
+    state.modus_b_join_qr = make_qr_data_url(state.modus_b_join_url)
+
+    await broadcast_displays(state)
+    await get_hub().broadcast_leitstand(state.state_snapshot())
+    return {"ok": True, "join_url": state.modus_b_join_url, "qr": state.modus_b_join_qr}
+
+
+@router.post("/api/modus-b/close")
+async def modus_b_close(session_id: str = Cookie(default=None)) -> dict:
+    """Live-Ausgabe schließen: Join-Secret entwerten, offene pending-Sessions revoken.
+
+    Bereits gepairte (aktive) Sessions laufen weiter, bis sie regulär abgeschlossen
+    werden.
+    """
+    _require_leitstand(session_id)
+    state = get_state()
+    hub = get_hub()
+    state.modus_b_open = False
+    state.modus_b_join_secret = None
+    state.modus_b_join_url = None
+    state.modus_b_join_qr = None
+
+    for sess in list(state.student_sessions.values()):
+        if sess.state == "pending_pairing":
+            await invalidate_session(state, sess, "revoked", reason="ausgabe-geschlossen")
+
+    await broadcast_displays(state)
     await hub.broadcast_leitstand(state.state_snapshot())
     return {"ok": True}
+
+
+@router.get("/api/modus-b/qr")
+async def modus_b_qr(session_id: str = Cookie(default=None)) -> dict:
+    """QR/URL für den Leitstand nachladen (z. B. nach Reconnect)."""
+    _require_leitstand(session_id)
+    state = get_state()
+    return {
+        "open": state.modus_b_open,
+        "join_url": state.modus_b_join_url,
+        "qr": state.modus_b_join_qr,
+    }
+
+
+@router.post("/api/display/authorize")
+async def display_authorize(body: dict, session_id: str = Cookie(default=None)) -> dict:
+    """iPad-Display per Registrierungscode autorisieren (Registrierung am Leitstand)."""
+    _require_leitstand(session_id)
+    code = str(body.get("registration_code", "")).strip().upper()
+    if not code:
+        raise HTTPException(400, "registration_code fehlt")
+    state = get_state()
+    display = next(
+        (d for d in state.displays.values() if d.registration_code == code and not d.authorized),
+        None,
+    )
+    if not display:
+        raise HTTPException(404, "Kein Display mit diesem Code (oder bereits autorisiert)")
+    display.authorized = True
+    await send_display_update(state, display)
+    await get_hub().broadcast_leitstand(state.state_snapshot())
+    return {"ok": True, "display_id": display.display_id}
+
+
+@router.post("/api/student/join")
+async def student_join(body: dict) -> dict:
+    """Öffentlich (per allgemeinem QR erreichbar): neue Schüler-Session anlegen.
+
+    Verlangt das aktuelle Join-Secret aus dem QR. Liefert den langen
+    session_token (Zugang) + den 4-stelligen Pairing-Code (Zuordnung am Leitstand).
+    """
+    state = get_state()
+    secret = str(body.get("join_secret", "")).strip()
+    if not state.modus_b_open or not state.modus_b_join_secret:
+        raise HTTPException(403, "Live-Ausgabe ist geschlossen")
+    if secret != state.modus_b_join_secret:
+        raise HTTPException(403, "Ungültiger oder abgelaufener QR")
+
+    session = create_student_session(state)
+    await get_hub().broadcast_leitstand(state.state_snapshot())
+    return {"session_token": session.session_token, "pairing_code": session.pairing_code}
+
+
+@router.post("/api/student/pair")
+async def student_pair(body: dict, session_id: str = Cookie(default=None)) -> dict:
+    """Leitstand ordnet einen 4-stelligen Code einem Schüler zu (Doppel-Bestätigung)."""
+    _require_leitstand(session_id)
+    state = get_state()
+    hub = get_hub()
+
+    code = str(body.get("pairing_code", "")).strip()
+    student_id = body.get("student_id")
+    override = bool(body.get("override_payment", False))
+    if not code or student_id is None:
+        raise HTTPException(400, "pairing_code und student_id erforderlich")
+    student_id = int(student_id)
+
+    session = state.find_session_by_code(code)
+    if not session:
+        raise HTTPException(404, "Code unbekannt oder abgelaufen")
+
+    student = state.find_student(student_id)
+    if not student:
+        raise HTTPException(404, "Schüler nicht in der Queue")
+    if student.status not in ("pending",):
+        raise HTTPException(409, f"Schüler nicht verfügbar (Status: {student.status})")
+    if state.find_session_by_student(student_id):
+        raise HTTPException(409, "Schüler hat bereits eine Live-Session")
+
+    try:
+        info = await state.iserv.get_student_info(student_id)
+    except Exception as e:
+        log.exception("Schülerinfo (Pairing) für %d fehlgeschlagen", student_id)
+        raise HTTPException(502, f"IServ-Fehler: {e}")
+
+    # O6: nicht bezahlt → Leitstand muss explizit freigeben.
+    if not info.get("paid") and not override:
+        raise HTTPException(
+            409,
+            detail={
+                "reason": "unpaid",
+                "amount_open": info.get("amount_open"),
+                "msg": "Schüler nicht bezahlt",
+            },
+        )
+
+    # Binden — ab jetzt gilt der session_token als freigegeben.
+    session.student_id = student_id
+    session.state = "paired"
+    session.paired_at = _now()
+    session.last_activity = _now()
+    session.payment_overridden = bool(not info.get("paid") and override)
+    student.status = "active"
+
+    await hub.broadcast_leitstand(state.state_snapshot())
+    asyncio.create_task(load_and_push_paired_student(state, hub, session, student, info))
+    return {"ok": True, "student_id": student_id}
 
 
 # ---------------------------------------------------------------------------
 # Interne Helpers
 # ---------------------------------------------------------------------------
 
-def _cleanup_student_session(state, student_id: int) -> None:
-    session = state.student_worker_sessions.pop(student_id, None)
-    if session:
-        asyncio.create_task(session.close())
+def _now():
+    from datetime import datetime
+    return datetime.now()
 
 
 async def _load_and_push_student(state, hub, student, helper) -> None:

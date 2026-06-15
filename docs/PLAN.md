@@ -12,7 +12,7 @@ im Schul-WLAN:
 | Modus | Einsatz | Wer scannt | Kern-Ablauf |
 |-------|---------|-----------|-------------|
 | **A — Stapel** (Teil 1) | Sommerferien, Stapelerstellung | Helfer mit eigenem Handy | Laptop wählt Klasse → Schüler alphabetisch abarbeiten → Helfer scannt Bücher per Handykamera → Buchung → Leihschein-Druck |
-| **B — Live-Ausgabe** (Teil 2, Pilot) | Schuljahresbeginn, Testklasse/-jahrgang ab Jg. 9 | Schüler mit eigenem Gerät | iPad zeigt personalisierten QR → Schüler scannt QR → 4-stelliger Pairing-Code wird am Laptop bestätigt → Schüler sieht bestellte Bücher, scannt sie selbst → Buchung |
+| **B — Live-Ausgabe** (Teil 2, Pilot) | Schuljahresbeginn, Testklasse/-jahrgang ab Jg. 9 | Schüler mit eigenem Gerät | iPad zeigt allgemeinen QR → Schüler scannt → Handy zeigt 4-stelligen Code → Leitstand ordnet Code einem Schüler zu und bestätigt → Schüler sieht bestellte Bücher, scannt sie selbst → Buchung |
 
 **Leitplanken aus der Skizze (nicht verhandelbar):**
 
@@ -37,7 +37,7 @@ Helfer-/Schüler-Handy (Browser: Kamera-Scanner)      iPad (QR-Anzeige)
 │  │    leitstand.html   Laptop: Klasse/Schüler wählen, Pairing,   │
 │  │                     Status aller Sessions, Skip-Funktion      │
 │  │    scan.html        Handy: Scanner-UI (aus Fork übernommen)   │
-│  │    qr-display.html  iPad: zeigt personalisierte QR-Codes      │
+│  │    qr-display.html  iPad: zeigt allgemeinen anonymen QR-Code  │
 │  │                                                              │
 │  ├─ ausleihe-api (read-only, Admin-Account):                     │
 │  │    Klassen/Schüler, Anmeldungen, Bezahlstatus,               │
@@ -85,9 +85,13 @@ Helfer-/Schüler-Handy (Browser: Kamera-Scanner)      iPad (QR-Anzeige)
 
 Sicherheitsanforderungen (aus Klärung 2026-06-12, „keine Sicherheitslücken"):
 
-1. **Einmal-Tokens:** Der QR enthält ein serverseitig generiertes, kurzlebiges,
-   an genau einen Schüler gebundenes Token (kryptographisch zufällig, kein
-   erratbares Muster). Server-seitiger Zustand entscheidet über Gültigkeit.
+1. **Einmal-Tokens:** _(Mechanismus geändert 2026-06-15, siehe
+   `docs/phase4_modus_b_2026-06-15.md`.)_ Das iPad zeigt einen **allgemeinen,
+   anonymen** QR. Beim Scan mintet der Server pro Browser-Session einen langen,
+   kryptographisch zufälligen `session_token` (~256 bit) — den **einzigen**
+   Daten-Zugang — und einen 4-stelligen `pairing_code`. Der Code dient nur der
+   menschlich vermittelten Zuordnung am Leitstand und gewährt **nie** selbst
+   Datenzugriff. Server-seitiger Zustand entscheidet über Gültigkeit.
 2. **Harter Zugriffsentzug:** Nach erfolgreichem Abschluss des Ausgabe-Prozesses
    (oder Timeout/Abbruch durch Leitstand) wird das Token serverseitig
    invalidiert und die WebSocket-Session beendet. Erneuter Aufruf der URL →
@@ -95,10 +99,10 @@ Sicherheitsanforderungen (aus Klärung 2026-06-12, „keine Sicherheitslücken")
 3. **Doppelte Bestätigung:** Token allein reicht nicht — die Session wird erst
    aktiv, wenn der Leitstand den 4-stelligen Pairing-Code dem Schüler zuordnet
    und bestätigt.
-4. **iPad-Absicherung:** Das QR-Display zeigt ausschließlich QR-Codes (+ ggf.
-   Vorname/Initialen zur Orientierung — zu entscheiden). Die Display-Session
-   ist eine eigene Rolle ohne Datenzugriff; Registrierung nur über den
-   Leitstand. iPads zusätzlich im geführten Zugriff (iOS Kiosk-Modus).
+4. **iPad-Absicherung:** Das QR-Display zeigt **ausschließlich** den allgemeinen
+   QR-Code — **keine** Namen/Initialen (O8 geklärt: anonym, 2026-06-15). Die
+   Display-Session ist eine eigene Rolle ohne Datenzugriff; Registrierung nur
+   über den Leitstand. iPads zusätzlich im geführten Zugriff (iOS Kiosk-Modus).
 5. **Skip-Funktion:** Leitstand kann Schüler überspringen (krank/abwesend);
    deren Tokens werden nie ausgegeben bzw. sofort invalidiert.
 6. **Transport:** HTTPS mit selbstsigniertem Zertifikat (Logik aus dem Fork
@@ -115,9 +119,9 @@ Sicherheitsanforderungen (aus Klärung 2026-06-12, „keine Sicherheitslücken")
 | O3 | Exaktes Verhalten der offiziellen Counter-Seite (DOM, Fehlerfälle, Schüler-Wechsel) | Spike A erkundet das mit Test-Account + ausgemustertem Buch. |
 | O4 | Welcher Drucker (USB am Laptop? Netzwerk? Treiberlage unter Windows)? | Vor Ort prüfen; Spike C testet Silent-Print generisch. |
 | O5 | Bezahlstatus-Anzeige: genaue Quelle (`enrollments`/`payments` via Admin-API) und Sonderfälle (Befreiung/Ermäßigung) | In Phase 2 gegen echte Daten read-only verifizieren. |
-| O6 | Modus B: Was passiert bei „nicht bezahlt"? (Buch zurücklegen, Helfer rufen?) | Mit Hr. Pühn abstimmen; UI braucht definierten Fehlerzustand. |
+| O6 | Modus B: Was passiert bei „nicht bezahlt"? (Buch zurücklegen, Helfer rufen?) | **Teil-geklärt (2026-06-15):** UI zeigt Bücher + „nicht bezahlt"-Banner; Leitstand kann beim Pairing per `override_payment` freigeben (Befreiung/Ermäßigung). Fachlicher Wortlaut/Workflow noch mit Hr. Pühn final. |
 | O7 | Deployment-Packaging für den Windows-Laptop (Python-Installation? portable venv? `start.bat`?) | Phase 3; Kandidat: `uv` + Lockfile + Start-Skript, alternativ portable Python. |
-| O8 | Zeigt das QR-Display Namen/Initialen zur Orientierung oder nur anonyme QRs? | Datenschutz-Abwägung, Entscheidung vor Phase 4. |
+| O8 | Zeigt das QR-Display Namen/Initialen zur Orientierung oder nur anonyme QRs? | **Geklärt (2026-06-15): anonym.** Ein allgemeiner QR, keine Schülerdaten auf dem iPad (Mechanismus geändert → `docs/phase4_modus_b_2026-06-15.md`). |
 | O9 | Schul-WLAN: Client-Isolation zwischen Handy und Laptop? | Spike D; Erfahrung mit dem bisherigen Barcode-Scanner spricht dagegen, trotzdem vor Ort verifizieren. |
 
 ## 5. Phasenplan
@@ -172,12 +176,22 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
 
 ### Phase 4 — Modus B: Live-Ausgabe-Pilot (Juli–August)
 
-- [ ] QR-Display-Rolle (iPad): Registrierung, vom Leitstand gesteuerte Anzeige
-- [ ] Einmal-Token-System + Pairing-Flow (4-stelliger Code, Leitstand-Bestätigung)
-- [ ] Schüler-UI: reduziert und selbsterklärend (Bestellliste, Scan, Abschluss)
-- [ ] Harter Zugriffsentzug + Skip-Funktion (Sicherheitsmodell §3 vollständig)
-- [ ] Sicherheits-Review (Token-Lebenszyklus, Rollen-Grenzen, iPad-Härtung)
+> Initialer Aufbau erledigt 2026-06-15 (reiner Server-/Web-Code, keine Buchung).
+> Details + Sicherheits-Review: `docs/phase4_modus_b_2026-06-15.md`.
+
+- [x] QR-Display-Rolle (iPad): Registrierung, vom Leitstand gesteuerte Anzeige
+      (`web/qr-display.html`, allgemeiner anonymer QR) — 2026-06-15
+- [x] Einmal-Token-System + Pairing-Flow (langer `session_token` + 4-stelliger
+      Code, Leitstand-Bestätigung; Mechanismus geändert, s. Doku) — 2026-06-15
+- [x] Schüler-UI: reduziert und selbsterklärend (`web/student.html`:
+      Bestellliste, Scan, Abschluss) — 2026-06-15
+- [x] Harter Zugriffsentzug (Token-Invalidierung + WS-Close + Worker zu) —
+      2026-06-15; Skip-Funktion deckt Modus B mit ab
+- [x] Sicherheits-Review Token-Lebenszyklus (initial, E2E-verifiziert) —
+      2026-06-15; iPad-Härtung (iOS-Kiosk) bleibt organisatorisch
 - [ ] Lasttest: 5 parallele Schüler-Sessions
+- [ ] Rate-Limit `/api/student/join` vor dem Piloten (DoS)
+- [ ] O6 fachlich mit Hr. Pühn finalisieren
 - [ ] Generalprobe vor Schuljahresbeginn
 - [ ] **Meilenstein: Pilot mit Testklasse/-jahrgang**
 

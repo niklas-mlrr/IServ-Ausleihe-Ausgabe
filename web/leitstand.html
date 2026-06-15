@@ -132,6 +132,23 @@
     </table>
   </div>
 
+  <!-- Live-Ausgabe (Modus B) -->
+  <div class="card">
+    <h2>Live-Ausgabe (Modus B)</h2>
+    <div class="row" style="margin-bottom:12px">
+      <button id="mb-open-btn" class="success" onclick="openModusB()">Ausgabe öffnen</button>
+      <button id="mb-close-btn" class="danger" onclick="closeModusB()" style="display:none">Ausgabe schließen</button>
+      <span id="mb-status" style="flex:1;opacity:.7;font-size:.9rem">geschlossen</span>
+    </div>
+    <div id="mb-info" style="display:none;font-size:.85rem">
+      <span id="mb-pending" style="color:#5ac8fa"></span>
+      <span id="mb-displays" style="opacity:.6;margin-left:12px"></span>
+      <div style="margin-top:8px">
+        <button class="secondary" onclick="showMbQr()">QR für iPad anzeigen</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Schüler-Queue -->
   <div class="card">
     <h2>Schüler-Queue <span id="queue-count" style="opacity:.5;font-weight:400"></span></h2>
@@ -153,7 +170,8 @@
 
 <script>
   let ws = null;
-  let state = { active_form: null, queue: [], helpers: {} };
+  let state = { active_form: null, queue: [], helpers: {}, modus_b: { open: false, pending: [], pending_count: 0, displays: [], join_url: null } };
+  let mbQrDataUrl = null;
 
   // ---- Login ----
   document.getElementById('pw-input').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
@@ -235,11 +253,58 @@
     await fetch('/api/finish', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ student_id: studentId }) });
   }
 
+  // ---- Modus B ----
+  async function openModusB() {
+    const r = await fetch('/api/modus-b/open', { method: 'POST' });
+    if (r.ok) { const d = await r.json(); mbQrDataUrl = d.qr; showMbQr(); }
+  }
+  async function closeModusB() {
+    await fetch('/api/modus-b/close', { method: 'POST' });
+    mbQrDataUrl = null;
+  }
+  async function showMbQr() {
+    if (!mbQrDataUrl) {
+      const r = await fetch('/api/modus-b/qr');
+      if (r.ok) { const d = await r.json(); mbQrDataUrl = d.qr; }
+    }
+    if (mbQrDataUrl) showQr(mbQrDataUrl, state.modus_b.join_url || '');
+  }
+  async function pairStudent(studentId) {
+    const code = (prompt('4-stelligen Code des Schülers eingeben:') || '').trim();
+    if (!code) return;
+    let r = await fetch('/api/student/pair', { method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ student_id: studentId, pairing_code: code }) });
+    if (r.status === 409) {
+      const d = await r.json();
+      const det = d.detail;
+      if (det && det.reason === 'unpaid') {
+        if (!confirm(`Schüler nicht bezahlt (offen: ${det.amount_open} €). Trotzdem freigeben?`)) return;
+        r = await fetch('/api/student/pair', { method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ student_id: studentId, pairing_code: code, override_payment: true }) });
+      } else { showMsg((det && det.msg) || d.detail || 'Pairing fehlgeschlagen'); return; }
+    }
+    if (!r.ok) { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Pairing fehlgeschlagen'); }
+  }
+
+  function renderModusB() {
+    const mb = state.modus_b || { open: false, pending: [], displays: [] };
+    document.getElementById('mb-open-btn').style.display = mb.open ? 'none' : '';
+    document.getElementById('mb-close-btn').style.display = mb.open ? '' : 'none';
+    document.getElementById('mb-status').textContent = mb.open ? 'geöffnet' : 'geschlossen';
+    document.getElementById('mb-info').style.display = mb.open ? '' : 'none';
+    document.getElementById('mb-pending').textContent = `Offene Codes: ${mb.pending_count || 0}`;
+    const auth = (mb.displays || []).filter(d => d.authorized && d.connected).length;
+    const total = (mb.displays || []).length;
+    document.getElementById('mb-displays').textContent = `iPads: ${auth} aktiv / ${total} verbunden`;
+  }
+
   // ---- State rendering ----
   function applyState(s) {
     state = s;
+    if (!state.modus_b) state.modus_b = { open: false, pending: [], pending_count: 0, displays: [] };
     renderHelpers();
     renderQueue();
+    renderModusB();
   }
 
   function renderHelpers() {
@@ -277,8 +342,10 @@
     tbody.innerHTML = queue.map(s => {
       const badgeClass = { pending: 'badge-pending', active: 'badge-active', done: 'badge-done', skipped: 'badge-skipped' }[s.status] || '';
       const statusLabel = { pending: 'Wartend', active: 'Aktiv', done: 'Fertig', skipped: 'Übersprungen' }[s.status] || s.status;
+      const pairBtn = (state.modus_b && state.modus_b.open)
+        ? `<button class="success" onclick="pairStudent(${s.student_id})">Pairing</button> ` : '';
       const actions = s.status === 'pending'
-        ? `<button class="secondary" onclick="skipStudent(${s.student_id})">Überspringen</button>`
+        ? `${pairBtn}<button class="secondary" onclick="skipStudent(${s.student_id})">Überspringen</button>`
         : s.status === 'active'
           ? `<button class="success" onclick="finishStudent(${s.student_id})">Abschließen</button> <button class="secondary" onclick="skipStudent(${s.student_id})">Abbrechen</button>`
           : '';
