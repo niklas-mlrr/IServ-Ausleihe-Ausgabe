@@ -26,6 +26,19 @@
 
 ## Offen / zu testen
 
+### Neu 2026-06-16 (Scanner-UI-Redesign + Buch-Daten-Anreicherung)
+
+- [ ] **Scanner-Layout am Gerät** (`scan.html` + `student.html`): obere Leiste
+      Zahnrad/Kamera-Streifen/Taschenlampe+Ton, volle Statuszeile, großer Name mit
+      Bezahlstatus rechtsbündig, scrollbare Bücher-Tabelle — auf dem Handy prüfen
+      (Querformat-Kamerastreifen + Scan funktioniert, nur Tabelle scrollt).
+- [ ] **Bücher-Tabelle mit echten Daten:** Spalten Fach | Titel | Status-Icon;
+      vorgemerkt (gelb/orange, ⏳) oben, ausgeliehen (hellgrün/dunkelgrün, ✓) unten;
+      Titel + Fach korrekt aus `client.series` aufgelöst (Niklas' Test-Schüler).
+- [ ] **Serien-Katalog-Cache** (`IsServClient._get_series_map`, read-only
+      `GET /series`): erste Schülerauswahl lädt den Katalog einmalig; Titel/Fach
+      auch für bereits ausgeliehene Bücher (nur `code`+`isbn` im Roh-Payload) gefüllt.
+
 ### Neu in dieser Session (Druck + Packaging)
 
 - [ ] **Leihschein-Druck `file`-Backend** end-to-end über den Endpoint
@@ -58,6 +71,10 @@
       (jetzt via `cryptography`).
 - [ ] **`select-class`-Guard:** Klassenwechsel bei aktiven Sessions → 409 +
       Host-Confirm → Force räumt Sessions sauber ab (keine Waisen).
+- [ ] **Einzelschüler-Reiter (2026-06-16):** Reiter *Einzelne Schüler* →
+      `GET /api/students-for-class` lädt Liste, `POST /api/add-student` hängt
+      einzeln an die Queue an (auch klassenübergreifend); Duplikat → 409;
+      bestehende Queue/Sessions bleiben unangetastet.
 - [ ] **Reconnect-Backoff** (scan/student/qr-display): Trennung → exponentieller
       Backoff bis 30 s, Reset bei Verbindung.
 

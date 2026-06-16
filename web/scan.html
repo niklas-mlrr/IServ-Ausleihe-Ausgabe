@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="de">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <title>Barcode Scanner</title>
   <script src="/html5-qrcode.min.js"></script>
   <style>
@@ -11,102 +11,121 @@
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       background: #0f0f0f;
       color: #fff;
-      min-height: 100vh;
+      height: 100dvh;
+      overflow: hidden;
       display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 20px;
+      justify-content: center;
+      padding: 12px;
     }
-    h1 { font-size: 1.2rem; font-weight: 600; margin-bottom: 16px; opacity: 0.8; }
-    #student-panel {
-      width: 100%; max-width: 320px;
-      background: #1a2a1a;
-      border: 1px solid #2a4a2a;
-      border-radius: 10px;
-      padding: 12px 14px;
-      margin-bottom: 12px;
-      font-size: 0.9rem;
-      display: none;
+    .app {
+      width: 100%; max-width: 420px; height: 100%;
+      display: flex; flex-direction: column;
     }
-    #student-panel .s-name { font-size: 1.05rem; font-weight: 600; margin-bottom: 4px; }
-    #student-panel .s-meta { opacity: .7; font-size: 0.8rem; }
-    #student-panel .badge-paid   { color: #4caf50; }
-    #student-panel .badge-unpaid { color: #f44336; }
-    #student-panel .badge-wait   { color: #888; }
-    #scan-results { width: 100%; max-width: 320px; margin-top: 10px; }
-    .scan-item {
-      padding: 8px 12px; border-radius: 7px; margin-bottom: 6px; font-size: 0.85rem;
+
+    /* ---- Obere Leiste: Zahnrad | Kamera | Torch/Sound ---- */
+    .top-bar { display: flex; gap: 8px; align-items: stretch; }
+    .gear-wrap { position: relative; display: flex; }
+    #reader {
+      flex: 1; height: 120px; border-radius: 12px; overflow: hidden;
+      box-shadow: 0 0 0 0 #4caf50; transition: box-shadow .6s ease-out;
+      background: #000;
     }
-    .scan-item.staged { background: #1a3a1a; color: #4caf50; }
-    .scan-item.error  { background: #3a1a1a; color: #f44336; }
-    .scan-item.wait   { background: #1e1e1e; color: #888; }
-    #reader { width: 100%; max-width: 320px; border-radius: 12px; overflow: hidden; box-shadow: 0 0 0 0px #4caf50; transition: box-shadow 0.6s ease-out; }
+    #reader video { width: 100%; height: 100%; object-fit: cover; }
     #reader.scan-success { box-shadow: 0 0 0 3px #4caf50; transition: none; }
+    .right-col { display: flex; flex-direction: column; gap: 8px; width: 52px; }
+    .right-col button { flex: 1; }
+
+    button, select {
+      border: none; border-radius: 8px; background: #2a2a2a; color: #fff;
+      font-size: .95rem; cursor: pointer; transition: background .2s;
+    }
+    button:hover, select:hover { background: #3a3a3a; }
+    button:active { background: #4a4a4a; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    #gear-btn { width: 52px; font-size: 1.5rem; }
+    .right-col button { font-size: 1.4rem; }
+    .torch-on { background: #4caf50 !important; }
+    .sound-on { background: #4caf50 !important; }
+
+    /* ---- Kamera-Dropdown (über Zahnrad) ---- */
+    .cam-dropdown {
+      position: absolute; top: calc(100% + 6px); left: 0; z-index: 30;
+      display: none; width: 240px;
+      background: #1c1c1e; border: 1px solid #333; border-radius: 10px;
+      padding: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.5);
+    }
+    .cam-dropdown.open { display: flex; gap: 8px; }
+    .cam-dropdown select { flex: 1; padding: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .cam-dropdown #reload-btn { padding: 10px 12px; font-size: 1.1rem; }
+
+    /* ---- Statuszeile (volle Breite) ---- */
     #status {
-      margin-top: 16px;
-      padding: 10px 16px;
-      border-radius: 8px;
-      font-size: 0.9rem;
-      background: #1e1e1e;
-      width: 100%; max-width: 320px;
-      text-align: center;
+      margin-top: 10px; padding: 9px 14px; border-radius: 8px;
+      font-size: .9rem; background: #1e1e1e; text-align: center;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; background: #888; }
     .dot.ok { background: #4caf50; }
     .dot.err { background: #f44336; }
-    .controls {
-      margin-top: 16px;
-      display: grid;
-      gap: 8px;
-      width: 100%; max-width: 320px;
+
+    /* ---- Name (groß, ohne Box) + Bezahlstatus rechtsbündig ---- */
+    .name-row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin: 12px 2px 8px; }
+    .s-name { font-size: 1.5rem; font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .s-pay  { font-size: .85rem; opacity: .9; text-align: right; flex-shrink: 0; }
+    .s-pay .paid   { color: #4caf50; }
+    .s-pay .unpaid { color: #ffb300; }
+    .s-pay .wait   { color: #888; }
+
+    /* ---- Bücher-Tabelle (einziger Scroll-Bereich) ---- */
+    .book-table-wrap { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+    .book-row {
+      display: grid; grid-template-columns: 5rem 1fr 1.8rem; align-items: center;
+      gap: 8px; padding: 8px 10px; margin-bottom: 6px;
+      border-radius: 8px; border: 3px solid transparent; font-size: .9rem;
     }
-    #camera-row { grid-template-columns: 1fr auto; }
-    #sound-row  { grid-template-columns: 1fr 1fr; }
-    button, select {
-      width: 100%;
-      padding: 12px 10px;
-      border: none;
-      border-radius: 8px;
-      background: #2a2a2a;
-      color: #fff;
-      font-size: 0.95rem;
-      cursor: pointer;
-      transition: background 0.2s;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    button:hover, select:hover { background: #3a3a3a; }
-    button:active { background: #4a4a4a; }
-    button:disabled { opacity: 0.5; cursor: not-allowed; }
-    .torch-on { background: #4caf50 !important; }
-    .sound-on { background: #4caf50 !important; }
-    #reload-btn { padding: 12px 14px; font-size: 1.1rem; width: auto; }
+    .book-row .b-fach { font-weight: 600; }
+    .book-row .b-title { overflow: hidden; text-overflow: ellipsis; }
+    .book-row .b-icon { text-align: center; font-size: 1.1rem; }
+    .row-vorgemerkt  { background: #fff3b0; color: #d35400; border-color: #e67e22; }
+    .row-ausgeliehen { background: #c8f0c8; color: #1b5e20; border-color: #2e7d32; }
+    .book-empty { opacity: .4; padding: 14px 4px; font-size: .9rem; }
   </style>
 </head>
 <body>
-  <h1>Barcode Scanner</h1>
-  <div id="student-panel">
-    <div class="s-name" id="s-name">–</div>
-    <div class="s-meta" id="s-meta"></div>
-  </div>
-  <div id="reader"></div>
-  <div id="status"><span class="dot" id="dot"></span><span id="status-text">Connecting...</span></div>
-  <div id="scan-results"></div>
-  <div class="controls" id="camera-row">
-    <select id="camera-select"><option>Loading cameras...</option></select>
-    <button id="reload-btn" title="Reload camera">&#x21BA;</button>
-  </div>
-  <div class="controls" id="sound-row">
-    <button id="sound-btn">Sound: off</button>
-    <button id="torch-btn">Light: off</button>
+  <div class="app">
+    <div class="top-bar">
+      <div class="gear-wrap">
+        <button id="gear-btn" title="Einstellungen / Kamera">&#x2699;</button>
+        <div class="cam-dropdown" id="cam-dropdown">
+          <select id="camera-select"><option>Kameras laden…</option></select>
+          <button id="reload-btn" title="Kamera neu laden">&#x21BA;</button>
+        </div>
+      </div>
+      <div id="reader"></div>
+      <div class="right-col">
+        <button id="torch-btn" title="Taschenlampe">&#x1F526;</button>
+        <button id="sound-btn" title="Scan-Ton">&#x1F507;</button>
+      </div>
+    </div>
+
+    <div id="status"><span class="dot" id="dot"></span><span id="status-text">Verbinde…</span></div>
+
+    <div class="name-row">
+      <div class="s-name" id="s-name">–</div>
+      <div class="s-pay" id="s-pay"></div>
+    </div>
+
+    <div class="book-table-wrap">
+      <div id="book-rows"></div>
+    </div>
   </div>
 
   <script>
     const statusEl = document.getElementById('status-text');
     const dotEl = document.getElementById('dot');
-    const studentPanel = document.getElementById('student-panel');
-    const scanResults = document.getElementById('scan-results');
+    const sNameEl = document.getElementById('s-name');
+    const sPayEl = document.getElementById('s-pay');
+    const bookRowsEl = document.getElementById('book-rows');
     let ws, reconnectDelay = 2000;
 
     // IServ-Strings nie ungefiltert per innerHTML einsetzen.
@@ -117,27 +136,35 @@
 
     const token = new URLSearchParams(location.search).get('token');
 
+    function renderBooks(books) {
+      if (!books || !books.length) {
+        bookRowsEl.innerHTML = '<div class="book-empty">Keine Bücher hinterlegt</div>';
+        return;
+      }
+      bookRowsEl.innerHTML = books.map(b => {
+        const icon = b.status === 'ausgeliehen' ? '✓' : '⏳';
+        return `<div class="book-row row-${b.status === 'ausgeliehen' ? 'ausgeliehen' : 'vorgemerkt'}">`
+          + `<div class="b-fach">${escapeHtml(b.subject)}</div>`
+          + `<div class="b-title">${escapeHtml(b.title)}</div>`
+          + `<div class="b-icon">${icon}</div></div>`;
+      }).join('');
+    }
+
     function handleServerMessage(msg) {
       if (msg.type === 'student_info') {
         const s = msg.student;
-        studentPanel.style.display = 'block';
-        document.getElementById('s-name').textContent = `${s.lastname}, ${s.firstname}`;
-        const paidClass = !s.enrolled ? 'badge-wait' : s.paid ? 'badge-paid' : 'badge-unpaid';
+        sNameEl.textContent = `${s.lastname}, ${s.firstname}`;
+        const paidClass = !s.enrolled ? 'wait' : s.paid ? 'paid' : 'unpaid';
         const paidText = !s.enrolled ? 'Nicht angemeldet' : s.paid ? 'Bezahlt' : `Offen: ${escapeHtml(s.amount_open)} €`;
-        const booksHave = (s.current_books || []).length;
-        const booksExpected = (s.books_to_receive || []).length;
-        document.getElementById('s-meta').innerHTML =
-          `<span class="${paidClass}">${paidText}</span> · ${booksHave}/${booksExpected} Bücher`;
-        statusEl.textContent = 'Bereit — Buch scannen';
+        sPayEl.innerHTML = `<span class="${paidClass}">${paidText}</span>`;
+        renderBooks(s.books);
+        statusEl.textContent = 'Scanner bereit — Buch scannen';
       } else if (msg.type === 'scan_result') {
-        const cls = msg.status === 'staged' ? 'staged' : 'error';
-        const item = document.createElement('div');
-        item.className = `scan-item ${cls}`;
-        item.textContent = `${msg.barcode} — ${msg.msg || msg.status}`;
-        scanResults.prepend(item);
-        if (scanResults.children.length > 10) scanResults.lastChild.remove();
+        statusEl.textContent = `${escapeHtml(msg.barcode)} — ${escapeHtml(msg.msg || msg.status)}`;
       } else if (msg.type === 'waiting') {
-        studentPanel.style.display = 'none';
+        sNameEl.textContent = '–';
+        sPayEl.innerHTML = '';
+        bookRowsEl.innerHTML = '';
         statusEl.textContent = msg.msg || 'Warte auf Schüler-Zuweisung';
       } else if (msg.type === 'error') {
         statusEl.textContent = 'Fehler: ' + (msg.msg || '');
@@ -168,6 +195,8 @@
     const torchBtn = document.getElementById('torch-btn');
     const soundBtn = document.getElementById('sound-btn');
     const reloadBtn = document.getElementById('reload-btn');
+    const gearBtn = document.getElementById('gear-btn');
+    const camDropdown = document.getElementById('cam-dropdown');
     const readerEl = document.getElementById('reader');
     let scanFlashTimeout = null;
 
@@ -197,24 +226,30 @@
     soundBtn.addEventListener('click', async () => {
       soundEnabled = !soundEnabled;
       if (soundEnabled) {
-        soundBtn.textContent = 'Sound: on';
+        soundBtn.innerHTML = '\u{1F50A}';
         soundBtn.classList.add('sound-on');
         await initAudio();
         playBeep();
       } else {
-        soundBtn.textContent = 'Sound: off';
+        soundBtn.innerHTML = '\u{1F507}';
         soundBtn.classList.remove('sound-on');
       }
     });
 
-
+    // Zahnrad: Kamera-Dropdown auf/zu
+    gearBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      camDropdown.classList.toggle('open');
+    });
+    camDropdown.addEventListener('click', (e) => e.stopPropagation());
+    document.addEventListener('click', () => camDropdown.classList.remove('open'));
 
     function onScanSuccess(value) {
       if (cooldown || value === lastValue) return;
       if (soundEnabled) playBeep();
       lastValue = value; cooldown = true;
       setTimeout(() => { cooldown = false; lastValue = ''; }, 2000);
-      statusEl.textContent = 'Sent: ' + value;
+      statusEl.textContent = 'Gesendet: ' + value;
       if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'scan', value }));
       if (navigator.vibrate) navigator.vibrate(80);
       readerEl.classList.add('scan-success');
@@ -232,7 +267,7 @@
       currentCameraId = preferred?.id;
       initScanner(currentCameraId);
     }).catch(err => {
-      cameraSelect.innerHTML = '<option>No cameras found</option>';
+      cameraSelect.innerHTML = '<option>Keine Kamera gefunden</option>';
       cameraSelect.disabled = true;
     });
 
@@ -242,7 +277,7 @@
       isCameraRunning = false;
       reloadBtn.disabled = true;
       reloadBtn.textContent = '...';
-      statusEl.textContent = 'Starting camera...';
+      statusEl.textContent = 'Kamera startet…';
 
       if (html5QrCode) {
         try { await html5QrCode.stop(); } catch (e) {}
@@ -254,16 +289,15 @@
       try {
         await html5QrCode.start(
           cameraId,
-          { fps: 15, qrbox: { width: 240, height: 160 }, aspectRatio: 1.0 },
+          { fps: 15, qrbox: { width: 260, height: 90 }, aspectRatio: 2.0 },
           onScanSuccess,
           () => {}
         );
         isCameraRunning = true;
         currentCameraId = cameraId;
         isTorchOn = false;
-        torchBtn.textContent = 'Light: off';
         torchBtn.classList.remove('torch-on');
-        statusEl.textContent = ws && ws.readyState === WebSocket.OPEN ? 'Connected — ready to scan' : 'Reconnecting...';
+        statusEl.textContent = ws && ws.readyState === WebSocket.OPEN ? 'Scanner bereit' : 'Neu verbinden…';
         const video = document.querySelector('#reader video');
         if (video && video.srcObject) {
           const track = video.srcObject.getVideoTracks()[0];
@@ -272,7 +306,7 @@
         }
       } catch (err) {
         console.error('Camera error:', err);
-        statusEl.textContent = 'Camera error — tap ↺ to retry';
+        statusEl.textContent = 'Kamerafehler — ↺ zum Neuladen';
         dotEl.className = 'dot err';
       }
 
@@ -285,8 +319,8 @@
     cameraSelect.addEventListener('change', () => {
       initScanner(cameraSelect.value);
       isTorchOn = false;
-      torchBtn.textContent = 'Light: off';
       torchBtn.classList.remove('torch-on');
+      camDropdown.classList.remove('open');
     });
 
     // Torch toggle
@@ -298,7 +332,6 @@
       try {
         await track.applyConstraints({ advanced: [{ torch: !isTorchOn }] });
         isTorchOn = !isTorchOn;
-        torchBtn.textContent = isTorchOn ? 'Light: on' : 'Light: off';
         torchBtn.classList.toggle('torch-on', isTorchOn);
       } catch (e) {
         console.log('Torch not supported');
