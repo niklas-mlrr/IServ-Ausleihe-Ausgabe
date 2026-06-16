@@ -132,6 +132,57 @@ async def select_class(body: dict, session_id: str = Cookie(default=None)) -> di
     return {"ok": True, "count": len(state.queue)}
 
 
+@router.get("/api/students-for-class")
+async def students_for_class(form: str, session_id: str = Cookie(default=None)) -> dict:
+    """Schülerliste einer Klasse für die Einzel-Auswahl (ohne die Queue anzufassen)."""
+    _require_host(session_id)
+    form = form.strip()
+    if not form:
+        raise HTTPException(400, "form fehlt")
+    state = get_state()
+    try:
+        students = await state.iserv.get_students_for_form(form)
+    except Exception as e:
+        log.exception("Schüler konnten nicht geladen werden")
+        raise HTTPException(502, f"IServ-Fehler: {e}")
+    return {"students": students}
+
+
+@router.post("/api/add-student")
+async def add_student_to_queue(body: dict, session_id: str = Cookie(default=None)) -> dict:
+    """Einen einzelnen Schüler an die bestehende Queue anhängen (klassenübergreifend).
+
+    Im Gegensatz zu `/api/select-class` wird die Queue NICHT ersetzt und es
+    werden keine laufenden Sessions angefasst.
+    """
+    _require_host(session_id)
+    state = get_state()
+    hub = get_hub()
+
+    try:
+        student_id = int(body.get("student_id"))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "student_id fehlt/ungültig")
+    lastname = str(body.get("lastname", "")).strip()
+    firstname = str(body.get("firstname", "")).strip()
+    form = str(body.get("form", "")).strip()
+    if not lastname and not firstname:
+        raise HTTPException(400, "Name fehlt")
+
+    if state.find_student(student_id):
+        raise HTTPException(409, "Schüler bereits in der Queue")
+
+    from ..state import QueueStudent
+    state.queue.append(
+        QueueStudent(student_id=student_id, lastname=lastname, firstname=firstname, form=form)
+    )
+    if state.active_form is None:
+        state.active_form = form or None
+
+    await hub.broadcast_host(state.state_snapshot())
+    return {"ok": True, "count": len(state.queue)}
+
+
 # ---------------------------------------------------------------------------
 # State
 # ---------------------------------------------------------------------------

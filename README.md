@@ -36,18 +36,70 @@ jederzeit als Fallback nutzbar.
 
 ## Setup
 
-Voraussetzungen: Python ≥ 3.12, [uv](https://docs.astral.sh/uv/), das
-Schwesterprojekt `ausleihe-api` als Checkout unter `../ausleihe-api`.
+Voraussetzungen: [uv](https://docs.astral.sh/uv/) (bringt Python ≥ 3.12 bei
+Bedarf selbst mit) und das Schwesterprojekt `ausleihe-api` als Checkout
+**direkt neben** diesem Repo unter `../ausleihe-api`.
+
+> **Verzeichnis-Layout (zwingend):** `uv sync` installiert `ausleihe-api` als
+> editable Dependency aus `../ausleihe-api`. Beide Repos müssen nebeneinander
+> liegen:
+> ```
+> projects/
+> ├── ausleihe-ausgabe/   (dieses Repo)
+> └── ausleihe-api/       (Schwester-Repo)
+> ```
+
+### macOS
 
 ```bash
-uv sync                              # Umgebung + Dependencies
+# 1) uv installieren (falls noch nicht vorhanden), danach neues Terminal öffnen
+curl -LsSf https://astral.sh/uv/install.sh | sh        # oder: brew install uv
+
+# 2) Schwester-Repo daneben klonen
+cd <ordner-über-ausleihe-ausgabe>
+git clone https://github.com/niklas-mlrr/IServ-Ausleihe-API.git ausleihe-api
+
+# 3) Projekt einrichten
+cd ausleihe-ausgabe
+uv sync                              # Umgebung + Dependencies (zieht Python ≥3.12)
 uv run playwright install chromium   # Browser für den Write-Pfad
-cp .env.example .env                 # dann ISERV_* + HOST_PASSWORD eintragen
+cp .env.example .env                 # dann ISERV_* + HOST_PASSWORD eintragen (nano .env)
+
+# 4) Starten (Vordergrund, Strg+C beendet)
+./start.sh
 ```
 
-Auf dem Ausleihe-Laptop (Windows) bzw. einem Macbook übernehmen das `setup.bat`
-(einmalig) und `start.bat`/`start.sh` (Start); Details inkl. USB-Drucker-Setup
-in **[`docs/deployment.md`](docs/deployment.md)**.
+Druck auf macOS: `PRINT_BACKEND=auto` nutzt automatisch `lp`/CUPS (vorinstalliert);
+`PRINTER_NAME` leer = Standarddrucker.
+
+### Windows (Ausleihe-Laptop)
+
+```powershell
+# 1) uv installieren (PowerShell), danach neues Terminal öffnen
+irm https://astral.sh/uv/install.ps1 | iex
+
+# 2) Schwester-Repo daneben klonen
+cd <ordner-über-ausleihe-ausgabe>
+git clone https://github.com/niklas-mlrr/IServ-Ausleihe-API.git ausleihe-api
+```
+
+Dann im Ordner `ausleihe-ausgabe`:
+
+1. **`setup.bat`** doppelklicken (einmalig) — erledigt `uv sync`, Playwright-Chromium
+   und legt `.env` aus der Vorlage an.
+2. **`.env`** öffnen und `ISERV_*` + `HOST_PASSWORD` eintragen.
+3. **`start.bat`** doppelklicken — startet den Server (Beenden mit Strg+C).
+
+Silent-Print (Leihschein): USB-Drucker als Standarddrucker setzen, ggf.
+SumatraPDF installieren. Details inkl. Drucker-Setup in
+**[`docs/deployment.md`](docs/deployment.md)**.
+
+### Aufrufen
+
+Nach dem Start ist die Host-UI erreichbar unter **`https://localhost:3443/host`**
+(im Schul-WLAN auch über die LAN-IP des Laptops, z. B. `https://192.168.x.y:3443/host`).
+Immer **https** — das selbstsignierte Zertifikat einmal bestätigen
+(„Erweitert → trotzdem fortfahren"). `ALLOW_BOOKING` im Normalbetrieb auf `false` lassen.
 
 Unit-Tests (reine Logik, kein IServ/Playwright):
 

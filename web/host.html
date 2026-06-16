@@ -50,6 +50,11 @@
     button.secondary:hover { background: #4a4a4c; }
     button.success { background: #30d158; color: #000; }
     button.success:hover { background: #28b84e; }
+    .tabs { display: flex; gap: 4px; margin-bottom: 14px; border-bottom: 1px solid #2a2a2c; }
+    .tab { background: transparent; color: #888; padding: 8px 14px; border-radius: 8px 8px 0 0; font-size: 0.9rem; }
+    .tab:hover { background: #2a2a2c; }
+    .tab.active { background: #2a2a2c; color: #eee; }
+    .hint { font-size: 0.78rem; opacity: 0.45; margin-top: 8px; }
     .row { display: flex; gap: 8px; align-items: center; }
     .row > * { flex: 1 }
     .row > button { flex: 0 0 auto; }
@@ -111,13 +116,34 @@
     <button class="secondary" onclick="doLogout()">Abmelden</button>
   </div>
 
-  <!-- Klassen-Auswahl -->
+  <!-- Queue-Aufbau (Reiter) -->
   <div class="card">
-    <h2>Klasse</h2>
-    <div class="row">
-      <select id="class-select"><option value="">-- Klassen werden geladen… --</option></select>
-      <button onclick="selectClass()">Queue aufbauen</button>
+    <div class="tabs">
+      <button class="tab active" id="tab-class" onclick="switchTab('class')">Ganze Klasse</button>
+      <button class="tab" id="tab-student" onclick="switchTab('student')">Einzelne Schüler</button>
     </div>
+
+    <!-- Reiter: Ganze Klasse -->
+    <div id="panel-class">
+      <div class="row">
+        <select id="class-select"><option value="">-- Klassen werden geladen… --</option></select>
+        <button onclick="selectClass()">Queue aufbauen</button>
+      </div>
+      <p class="hint">Ersetzt die komplette Queue durch alle Schüler der gewählten Klasse.</p>
+    </div>
+
+    <!-- Reiter: Einzelne Schüler -->
+    <div id="panel-student" style="display:none">
+      <div class="row" style="margin-bottom:8px">
+        <select id="single-class-select" onchange="loadStudentsForClass()"><option value="">-- Klasse wählen --</option></select>
+      </div>
+      <div class="row">
+        <select id="single-student-select" onchange="onSingleStudentChange()" disabled><option value="">-- erst Klasse wählen --</option></select>
+        <button id="add-student-btn" class="success" onclick="addSingleStudent()" disabled>+ Hinzufügen</button>
+      </div>
+      <p class="hint">Hängt einzelne Schüler an die bestehende Queue an — auch klassenübergreifend.</p>
+    </div>
+
     <div id="msg"></div>
   </div>
 
@@ -174,6 +200,7 @@
   let ws = null;
   let state = { active_form: null, queue: [], helpers: {}, modus_b: { open: false, pending: [], pending_count: 0, displays: [], join_url: null } };
   let mbQrDataUrl = null;
+  let singleStudents = [];  // Schülerliste der aktuell im Einzel-Reiter gewählten Klasse
 
   // ---- Login ----
   document.getElementById('pw-input').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
@@ -216,14 +243,69 @@
       ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
+  // ---- Reiter ----
+  function switchTab(name) {
+    const isClass = name === 'class';
+    document.getElementById('tab-class').classList.toggle('active', isClass);
+    document.getElementById('tab-student').classList.toggle('active', !isClass);
+    document.getElementById('panel-class').style.display = isClass ? '' : 'none';
+    document.getElementById('panel-student').style.display = isClass ? 'none' : '';
+  }
+
   // ---- Klassen ----
   async function loadClasses() {
     const r = await fetch('/api/classes');
     if (!r.ok) return;
     const { classes } = await r.json();
-    const sel = document.getElementById('class-select');
-    sel.innerHTML = '<option value="">-- Klasse wählen --</option>' +
+    const opts = '<option value="">-- Klasse wählen --</option>' +
       classes.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+    document.getElementById('class-select').innerHTML = opts;
+    document.getElementById('single-class-select').innerHTML = opts;
+  }
+
+  // ---- Einzelne Schüler ----
+  async function loadStudentsForClass() {
+    const form = document.getElementById('single-class-select').value;
+    const sel = document.getElementById('single-student-select');
+    const btn = document.getElementById('add-student-btn');
+    btn.disabled = true;
+    singleStudents = [];
+    if (!form) {
+      sel.disabled = true;
+      sel.innerHTML = '<option value="">-- erst Klasse wählen --</option>';
+      return;
+    }
+    sel.disabled = true;
+    sel.innerHTML = '<option value="">-- lädt… --</option>';
+    const r = await fetch('/api/students-for-class?form=' + encodeURIComponent(form));
+    if (!r.ok) { sel.innerHTML = '<option value="">-- Fehler beim Laden --</option>'; return; }
+    const { students } = await r.json();
+    singleStudents = students;
+    sel.innerHTML = '<option value="">-- Schüler wählen --</option>' +
+      students.map((s, i) => `<option value="${i}">${escapeHtml(s.lastname)}, ${escapeHtml(s.firstname)}</option>`).join('');
+    sel.disabled = false;
+  }
+
+  function onSingleStudentChange() {
+    const idx = document.getElementById('single-student-select').value;
+    document.getElementById('add-student-btn').disabled = (idx === '');
+  }
+
+  async function addSingleStudent() {
+    const idx = document.getElementById('single-student-select').value;
+    if (idx === '') return;
+    const s = singleStudents[idx];
+    if (!s) return;
+    const r = await fetch('/api/add-student', { method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ student_id: s.student_id, lastname: s.lastname, firstname: s.firstname, form: s.form }) });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok) {
+      showMsg(`${s.lastname}, ${s.firstname} hinzugefügt (${d.count} in Queue)`);
+      document.getElementById('single-student-select').value = '';
+      document.getElementById('add-student-btn').disabled = true;
+    } else {
+      showMsg(d.detail || 'Konnte nicht hinzufügen');
+    }
   }
 
   async function selectClass(force = false) {
