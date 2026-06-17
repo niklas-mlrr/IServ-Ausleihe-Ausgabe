@@ -73,6 +73,11 @@
     .badge-active   { background: #0a3d6b; color: #5ac8fa; }
     .badge-done     { background: #1a3a1a; color: #30d158; }
     .badge-skipped  { background: #3a1a1a; color: #ff6b6b; }
+    .code-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #1e1e1e; flex-wrap: wrap; }
+    .code-row:last-child { border-bottom: none; }
+    .code-val { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1.25rem; font-weight: 700; letter-spacing: .12em; color: #5ac8fa; }
+    .code-meta { opacity: .55; font-size: .78rem; }
+    .code-chip { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1.1rem; font-weight: 700; letter-spacing: .1em; padding: 6px 12px; }
     .ws-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; background: #888; }
     .ws-dot.ok { background: #30d158; }
     .ws-dot.err { background: #ff3b30; }
@@ -189,6 +194,8 @@
     <div id="mb-info" style="display:none;font-size:.85rem">
       <span id="mb-pending" style="color:#5ac8fa"></span>
       <span id="mb-displays" style="opacity:.6;margin-left:12px"></span>
+      <div id="mb-arm-banner" style="display:none;margin-top:8px;padding:6px 10px;border-radius:8px;background:#0a3d6b;color:#5ac8fa"></div>
+      <div id="mb-codes" style="margin-top:8px"></div>
       <div style="margin-top:8px">
         <button class="secondary" onclick="showMbQr()">QR für iPad anzeigen</button>
       </div>
@@ -218,6 +225,7 @@
   let ws = null;
   let state = { active_form: null, queue: [], helpers: {}, modus_b: { open: false, pending: [], pending_count: 0, displays: [], join_url: null } };
   let mbQrDataUrl = null;
+  let armedStudentId = null;  // Schüler, der per "Pairing"-Button scharfgestellt ist (Code-Klick ordnet zu)
   let singleStudents = [];  // Schülerliste der aktuell im Einzel-Reiter gewählten Klasse
 
   // ---- Login ----
@@ -445,9 +453,10 @@
     }
     if (mbQrDataUrl) showQr(mbQrDataUrl, state.modus_b.join_url || '');
   }
-  async function pairStudent(studentId) {
-    const code = (prompt('4-stelligen Code des Schülers eingeben:') || '').trim();
-    if (!code) return;
+  // Gemeinsame Pairing-Funktion: ordnet einen wartenden Code einem Schüler zu.
+  async function doPair(studentId, code) {
+    if (!studentId || !code) return;
+    armedStudentId = null;
     let r = await fetch('/api/student/pair', { method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ student_id: studentId, pairing_code: code }) });
     if (r.status === 409) {
@@ -462,6 +471,16 @@
     if (!r.ok) { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Pairing fehlgeschlagen'); }
   }
 
+  // Schüler-zuerst: "Pairing"-Button stellt den Schüler scharf; danach Code in der Liste klicken.
+  function pairStudent(studentId) {
+    const pending = (state.modus_b && state.modus_b.pending) || [];
+    if (!pending.length) { showMsg('Kein wartender Code — Schüler muss erst den QR scannen'); return; }
+    armedStudentId = (armedStudentId === studentId) ? null : studentId;
+    renderModusB();
+  }
+
+  function cancelArm() { armedStudentId = null; renderModusB(); }
+
   function renderModusB() {
     const mb = state.modus_b || { open: false, pending: [], displays: [] };
     document.getElementById('mb-open-btn').style.display = mb.open ? 'none' : '';
@@ -472,6 +491,50 @@
     const auth = (mb.displays || []).filter(d => d.authorized && d.connected).length;
     const total = (mb.displays || []).length;
     document.getElementById('mb-displays').textContent = `iPads: ${auth} aktiv / ${total} verbunden`;
+
+    const pending = mb.pending || [];
+    const pendingStudents = state.queue.filter(q => q.status === 'pending');
+
+    // Scharfgestellter Schüler muss noch wartend sein, sonst zurücksetzen.
+    const armed = armedStudentId ? pendingStudents.find(q => q.student_id === armedStudentId) : null;
+    if (armedStudentId && !armed) armedStudentId = null;
+
+    const banner = document.getElementById('mb-arm-banner');
+    if (armed) {
+      banner.style.display = '';
+      banner.innerHTML = `Code für <b>${escapeHtml(armed.lastname)}, ${escapeHtml(armed.firstname)}</b> wählen — `
+        + `<a href="#" onclick="cancelArm();return false" style="color:#fff">Abbrechen</a>`;
+    } else {
+      banner.style.display = 'none';
+    }
+
+    const codesEl = document.getElementById('mb-codes');
+    if (!pending.length) {
+      codesEl.innerHTML = '<div style="opacity:.4">Noch keine wartenden Codes</div>';
+      return;
+    }
+    const studentOpts = pendingStudents
+      .map(q => `<option value="${q.student_id}">${escapeHtml(q.lastname)}, ${escapeHtml(q.firstname)}</option>`)
+      .join('');
+    codesEl.innerHTML = pending.map(p => {
+      const dot = p.connected ? '<span style="color:#30d158">●</span>' : '<span style="color:#888">○</span>';
+      const meta = `<span class="code-meta">${dot} ${p.age_s}s</span>`;
+      if (armed) {
+        // Schüler-zuerst: Code-Chip direkt anklickbar.
+        return `<div class="code-row">
+          <button class="success code-chip" onclick="doPair(${armed.student_id}, '${p.pairing_code}')">${p.pairing_code}</button>
+          ${meta}
+        </div>`;
+      }
+      // Code-zuerst: Schüler im Select wählen + Zuordnen.
+      const selId = `mb-sel-${p.pairing_code}`;
+      return `<div class="code-row">
+        <span class="code-val">${p.pairing_code}</span>
+        ${meta}
+        <select id="${selId}" style="flex:1;min-width:140px">${studentOpts}</select>
+        <button class="success" onclick="doPair(parseInt(document.getElementById('${selId}').value), '${p.pairing_code}')" ${pendingStudents.length ? '' : 'disabled'}>Zuordnen</button>
+      </div>`;
+    }).join('');
   }
 
   // ---- State rendering ----

@@ -254,7 +254,28 @@ async def advance_helper(state: AppState, hub, helper) -> dict:
 async def load_and_push_paired_student(
     state: AppState, hub, session: StudentSessionB, student, info: dict
 ) -> None:
-    """Nach erfolgreichem Pairing: Worker öffnen und Schülerinfo ans Handy pushen."""
+    """Nach erfolgreichem Pairing: Schülerinfo SOFORT ans Handy pushen, Worker danach.
+
+    `info` ist bereits im Endpoint geladen — das Handy kann seine Bestellliste
+    also unmittelbar rendern. Das Öffnen der Playwright-Worker-Session
+    (`open_student` → Browser-Navigation, mehrere Sekunden) blockiert die
+    Handy-Anzeige NICHT mehr; es läuft im Anschluss. Scannt der Schüler, bevor
+    der Worker bereit ist, meldet `handle_scan` sauber „Worker nicht bereit"
+    (der Schüler liest ohnehin erst die Liste → Worker ist rechtzeitig da).
+    """
+    info["form"] = getattr(student, "form", "")
+    if session.ws is not None:
+        try:
+            await session.ws.send_json(
+                {
+                    "type": "student_info",
+                    "student": info,
+                    "payment_overridden": session.payment_overridden,
+                }
+            )
+        except Exception:
+            pass
+
     if state.worker_pool:
         try:
             worker_session = await state.worker_pool.open_student(
@@ -272,18 +293,6 @@ async def load_and_push_paired_student(
                 except Exception:
                     pass
 
-    info["form"] = getattr(student, "form", "")
-    if session.ws is not None:
-        try:
-            await session.ws.send_json(
-                {
-                    "type": "student_info",
-                    "student": info,
-                    "payment_overridden": session.payment_overridden,
-                }
-            )
-        except Exception:
-            pass
     await hub.broadcast_host(state.state_snapshot())
 
 

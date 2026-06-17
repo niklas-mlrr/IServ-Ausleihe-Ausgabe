@@ -211,6 +211,17 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
       (`web/qr-display.html`, allgemeiner anonymer QR) — 2026-06-15
 - [x] Einmal-Token-System + Pairing-Flow (langer `session_token` + 4-stelliger
       Code, Host-Bestätigung; Mechanismus geändert, s. Doku) — 2026-06-15
+- [x] Host-Pairing-UI ohne Tippen (2026-06-17): wartende Codes werden am Host
+      **angezeigt** und per Klick zugeordnet (`web/host.html`, rein Frontend).
+      Zwei Wege: *Code-zuerst* (Codes-Liste in der Modus-B-Karte mit
+      Schüler-`<select>` + „Zuordnen") und *Schüler-zuerst* (Pairing-Button
+      stellt Schüler scharf → Code-Chip klicken). Gemeinsame `doPair()` inkl.
+      O6-Override. `prompt()` entfällt. Daten kamen schon aus
+      `modus_b_snapshot().pending` + `/api/student/pair` — kein Server-Change.
+- [x] Pairing-Latenz-Fix (2026-06-17): `student_info` wird in
+      `load_and_push_paired_student` **vor** dem Worker-Open ans Handy gepusht
+      (Worker-`load_card` lief vorher davor und blockierte die Anzeige ~7 s).
+      Sicher, weil `handle_scan` „Worker nicht bereit" sauber meldet.
 - [x] Schüler-UI: reduziert und selbsterklärend (`web/student.html`:
       Bestellliste, Scan, Abschluss) — 2026-06-15
 - [x] Harter Zugriffsentzug (Token-Invalidierung + WS-Close + Worker zu) —
