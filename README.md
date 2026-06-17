@@ -79,7 +79,7 @@ Druck auf macOS: `PRINT_BACKEND=auto` nutzt automatisch `lp`/CUPS (vorinstallier
 irm https://astral.sh/uv/install.ps1 | iex
 
 # 2) Schwester-Repo daneben klonen
-cd <ordner-über-ausleihe-ausgabe>
+cd ..
 git clone https://github.com/niklas-mlrr/IServ-Ausleihe-API.git ausleihe-api
 ```
 
