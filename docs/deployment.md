@@ -45,6 +45,16 @@ Zertifikat einmal als Ausnahme bestätigen (selbstsigniert, nur Schul-WLAN).
 Konfiguration via `.env`: `PORT` (Default 3443), `WORKER_CONTEXTS` (parallele
 Playwright-Contexts), Druck-Variablen (s. u.).
 
+### Playwright-Debug (optional, nur Geräte mit Display)
+
+| `.env` | Wirkung |
+|--------|---------|
+| `HEADLESS=false` | Browserfenster sichtbar machen (eins pro `WORKER_CONTEXTS`); Default `true` = unsichtbar |
+| `SLOW_MO_MS=300` | Playwright wartet X ms vor jeder Aktion (Klick/Tippen/Navigieren); nur sinnvoll mit `HEADLESS=false`; Default `0` |
+
+Auf einem headless-Server (kein Display) bräuchte `HEADLESS=false` ein
+virtuelles Display (`xvfb-run …`) und ist nur für Screenshots/Traces nützlich.
+
 ## 4. Leihschein-Druck (USB-Drucker)
 
 Der Server holt den Leihschein **read-only** über die ausleihe-api
@@ -87,3 +97,20 @@ ergänzt, ersetzt nicht (PLAN §1).
 - Echter Silent-Print am Zielgerät noch nicht verifiziert → `docs/test_status.md`
   (Spike C / O4).
 - Schul-WLAN-Client-Isolation (O9, Spike D) vor Ort prüfen.
+
+## 7. Feld-Gotcha: macOS lädt IServ am Hotspot nicht
+
+Symptom (2026-06-17): Am Macbook lud IServ **nur am iPhone-Hotspot** nicht
+(auch im normalen Browser), am WLAN problemlos; anderes Gerät am selben Hotspot
+lud normal → gerätespezifisch, **kein** IP-/Account-Block. Ursache war **iCloud
+Private Relay / „Limit IP Address Tracking"** für dieses Netz. Fix: in
+*Wi-Fi → (i) am Netz* „Limit IP Address Tracking" aus (bzw. Apple-ID → iCloud →
+Private Relay aus), dann DNS flushen:
+
+```bash
+sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder
+```
+
+Schnell-Diagnose, falls es wiederkommt: `curl -4` vs `curl -6` gegen
+`https://iserv-trg-oha.de/iserv/login` (IPv6-only-Pfad?), `dig`, und im
+sichtbaren Browser auf Captive-Portal prüfen.

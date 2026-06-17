@@ -39,7 +39,7 @@ lesen). Scheitert das, muss der Write-Pfad neu diskutiert werden
 | Frage | Befund |
 |-------|--------|
 | URL/Route der Counter-Ansicht | `https://ausleihe.<domain>/#/counter` („Aus- u. Rückgabe"); Schülerkartei: `#/counter/student/<id>` (numerische Student-ID wie in der ausleihe-api) |
-| Selektor Schülersuche | `input.tt-input[name="input"]` — Placeholder „Ausweis scannen oder Namen eingeben"; sf-typeahead (Twitter Typeahead), Vorschläge als `.tt-suggestion`. Tippen mit `press_sequentially` (fill() triggert das Typeahead nicht zuverlässig), Vorschlag anklicken |
+| Selektor Schülersuche | `input.tt-input[name="input"]` — Placeholder „Ausweis scannen oder Namen eingeben"; sf-typeahead (Twitter Typeahead), Vorschläge als `.tt-suggestion`. Tippen mit `press_sequentially` (fill() triggert das Typeahead nicht zuverlässig), Vorschlag anklicken. **Update 2026-06-17:** Im Produktiv-Worker abgelöst — Kartei wird direkt über die ID-Route `#/counter/student/<id>` geladen (eindeutig, keine Namenssuche); dieser Selektor wird nicht mehr genutzt. |
 | Selektor Barcode-Eingabefeld | **dasselbe Feld** — nach Schülerauswahl wechselt der Placeholder auf „Buch scannen oder neuen Schüler über Ausweis oder Namen aufrufen" (guter Indikator „Kartei geladen") |
 | Submit-Mechanik | Enter im Eingabefeld → `ng-submit="c.evaluateInput()"`; das Feld unterscheidet selbst zwischen Buchcode und Schülersuche. **Enter mit Buchcode = Buchung!** |
 | Erfolgs-/Status-Feedback im DOM | Bücherliste rechts: pro Buch Titel, Code, „Ausgegeben am"; Validierungs-Hinweise inline und rot (z. B. „Nicht für dieses Buch angemeldet"). Kartei links: Anmeldestatus pro Schuljahr („Bezahlt" grün / „NICHT ANGEMELDET" rot) |

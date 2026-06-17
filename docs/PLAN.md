@@ -172,6 +172,11 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
       Scanner-Statuszeile auf Kamerafeld-Breite, flankiert von Drucker-Button
       (Platzhalter) + Weiter-Button; Status-Punkt entfernt.
 - [x] Playwright-Worker: Context-Pool (N unabhängige Logins), Schülerkartei laden, Barcode staged (kein Submit) — 2026-06-12
+      - Kartei seit 2026-06-17 **direkt per Schüler-ID-Route**
+        (`#/counter/student/<id>` via `_goto_authed`) statt Nachnamen-Typeahead —
+        eindeutig pro Schüler, keine Namensgleichheit/Tippfehler (`38c5094`).
+      - Debug: `.env` `HEADLESS=false` (sichtbarer Browser) + `SLOW_MO_MS`
+        (verlangsamt jede Aktion) — nur auf Geräten mit Display (`c77436c`).
 - [x] Recovery (Re-Login bei Session-Ablauf) — 2026-06-15 (`automation/worker.py`, deterministisch getestet via `automation/recovery_test.py`)
 - [x] E2E-Smoke headless (read-only): voller Modus-A-Flow Host→Scanner→Worker→Kartei→staged — 2026-06-15 (`automation/e2e_smoke.py`)
 - [x] 2-Helfer-Paralleltest: zwei Schüler gleichzeitig aktiv, beide Karteien parallel, unabhängiges Staging — 2026-06-15 (`automation/e2e_parallel.py`)
