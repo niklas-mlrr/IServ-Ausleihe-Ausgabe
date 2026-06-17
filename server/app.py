@@ -34,6 +34,8 @@ async def lifespan(app: FastAPI):
         domain=cfg.iserv_domain,
         username=cfg.iserv_username,
         password=cfg.iserv_password,
+        headless=cfg.headless,
+        slow_mo_ms=cfg.slow_mo_ms,
     )
     try:
         await pool.start()

@@ -15,6 +15,10 @@ class Config:
     host_password: str
     port: int = 3443
     worker_contexts: int = 2
+    # Playwright sichtbar machen (Debug). Default headless. Auf headless-Servern
+    # braucht headful ein Display (z. B. xvfb-run).
+    headless: bool = True
+    slow_mo_ms: int = 0                 # >0 verlangsamt Playwright-Aktionen (Debug)
     tls_cert: Path = field(default_factory=lambda: Path("certs/server.crt"))
     tls_key: Path = field(default_factory=lambda: Path("certs/server.key"))
     # Modus B: harte Zugriffsentzug-Schwellen (Sekunden).
@@ -50,6 +54,8 @@ def load_config(env_file: Path | None = None) -> Config:
         host_password=req("HOST_PASSWORD"),
         port=int(os.environ.get("PORT", "3443")),
         worker_contexts=int(os.environ.get("WORKER_CONTEXTS", "2")),
+        headless=os.environ.get("HEADLESS", "true").strip().lower() not in ("0", "false", "no"),
+        slow_mo_ms=int(os.environ.get("SLOW_MO_MS", "0")),
         print_backend=os.environ.get("PRINT_BACKEND", "auto").strip() or "auto",
         printer_name=(os.environ.get("PRINTER_NAME", "").strip() or None),
         sumatra_path=(os.environ.get("SUMATRA_PATH", "").strip() or None),

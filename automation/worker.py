@@ -228,11 +228,14 @@ class StudentSession:
 class WorkerPool:
     """Pool von N Browser-Contexts — je eigener Login, je eigener Cookie-Jar."""
 
-    def __init__(self, n: int, domain: str, username: str, password: str) -> None:
+    def __init__(self, n: int, domain: str, username: str, password: str,
+                 headless: bool = True, slow_mo_ms: int = 0) -> None:
         self._n = n
         self._domain = domain
         self._username = username
         self._password = password
+        self._headless = headless
+        self._slow_mo_ms = slow_mo_ms
         self._pw = None       # Playwright-Instanz
         self._browser = None
         self._contexts: list = []
@@ -260,7 +263,11 @@ class WorkerPool:
         Logins werden einmal nachgezogen, damit der Pool möglichst die Zielgröße
         erreicht."""
         self._pw = await async_playwright().start()
-        self._browser = await self._pw.chromium.launch(headless=True)
+        self._browser = await self._pw.chromium.launch(
+            headless=self._headless, slow_mo=self._slow_mo_ms
+        )
+        if not self._headless:
+            log.info("Playwright headful (sichtbar) — slow_mo=%d ms", self._slow_mo_ms)
 
         t0 = time.monotonic()
         results = await asyncio.gather(
