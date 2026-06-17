@@ -22,6 +22,7 @@ from ..sessions import (
     send_display_update,
 )
 from ..state import HelperSession, get_state
+from ..tls import _local_ipv4s
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -39,7 +40,19 @@ def _require_host(session_id: str | None = Cookie(default=None)) -> str:
 
 
 def _base_url(request: Request) -> str:
-    return f"https://{request.headers.get('host', 'localhost')}"
+    host = request.headers.get("host", "localhost")
+    # Host-Rechner ruft die Seite oft über localhost auf (Server läuft lokal).
+    # Ein QR mit localhost/127.0.0.1 ist für Schüler-/Helfer-Geräte nutzlos —
+    # stattdessen die LAN-IP des Host-Rechners einsetzen.
+    hostname, _, port = host.partition(":")
+    if hostname in ("localhost", "127.0.0.1", "::1", ""):
+        local_ips = _local_ipv4s()
+        if local_ips:
+            new_host = local_ips[0]
+            if not port:
+                port = str(get_config().port)
+            host = f"{new_host}:{port}" if port else new_host
+    return f"https://{host}"
 
 
 # ---------------------------------------------------------------------------

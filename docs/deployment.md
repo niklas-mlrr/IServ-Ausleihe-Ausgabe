@@ -114,3 +114,24 @@ sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder
 Schnell-Diagnose, falls es wiederkommt: `curl -4` vs `curl -6` gegen
 `https://iserv-trg-oha.de/iserv/login` (IPv6-only-Pfad?), `dig`, und im
 sichtbaren Browser auf Captive-Portal prüfen.
+
+## 8. Gotcha: QR-Code zeigt `localhost` statt LAN-IP (2026-06-17)
+
+Symptom: Öffnet der Host die Seite lokal über `https://localhost:3443/host`
+(Server läuft auf demselben Laptop), enthielten die generierten QR-Codes
+(Helfer-Pairing `/scan?token=…`, Modus-B-Join `/student?j=…`) die Adresse
+`https://localhost:3443/…` — für Schüler-/Helfer-Geräte unbrauchbar.
+
+Ursache: `_base_url()` (`server/routes/api.py`) baute die URL aus dem
+`Host`-HTTP-Header; bei lokalem Aufruf ist der eben `localhost`.
+
+Fix: `_base_url()` erkennt `localhost`/`127.0.0.1`/`::1` und ersetzt den
+Hostnamen durch die primäre LAN-IP des Host-Rechners (`_local_ipv4s()[0]`
+aus `server/tls.py` — dieselbe Quelle wie die Cert-SANs); der Port aus dem
+Header bleibt, sonst Fallback `cfg.port`. Ruft der Host bereits über die IP
+auf, bleibt alles unverändert.
+
+Rest-Gotcha: `_local_ipv4s()[0]` ist die ausgehende Primär-IP (UDP-Trick).
+Bei mehreren Interfaces (z. B. WLAN **und** iPhone-Hotspot gleichzeitig) kann
+das die „falsche" Schnittstelle treffen → dann gezielter wählen oder am
+Gerät nur das gewünschte Netz aktiv lassen.
