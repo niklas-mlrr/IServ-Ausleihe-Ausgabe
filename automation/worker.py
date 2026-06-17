@@ -80,31 +80,12 @@ class StudentSession:
         # App-Root laden, Angular initialisiert dabei die Session (Spike A/B-Muster).
         # _goto_authed fängt einen Login-Redirect ab (abgelaufene Session).
         await self._goto_authed(f"https://ausleihe.{domain}/", 4000)
-        await self._goto_authed(f"https://ausleihe.{domain}/#/counter", 2000)
 
-        search = page.locator('input.tt-input[name="input"]')
-        try:
-            await search.wait_for(state="visible", timeout=15_000)
-        except PlaywrightTimeout:
-            raise RuntimeError("Counter-Eingabefeld nicht erschienen — Login oder Routing fehlgeschlagen")
-
-        # Nachname für Typeahead (alles vor dem ersten Komma)
-        search_name = self._student_name.split(",")[0].strip()
-        await search.press_sequentially(search_name, delay=50)
-        await page.wait_for_timeout(2000)
-
-        suggestion = page.locator(".tt-suggestion").first
-        if not await suggestion.count():
-            # Kein Schülername ins Log (PLAN §3.7) — nur die ID.
-            log.warning("Kein Typeahead-Vorschlag für Schüler %d", self._student_id)
-            # Kartei über direkte URL als Fallback laden
-            await page.goto(
-                f"https://ausleihe.{domain}/#/counter/student/{self._student_id}",
-                wait_until="domcontentloaded",
-            )
-            await page.wait_for_timeout(3000)
-        else:
-            await suggestion.click()
+        # Kartei direkt über die Schüler-ID-Route öffnen (kein Nachnamen-Typeahead
+        # mehr). Eindeutig pro Schüler, unabhängig von Namensgleichheit/Tippfehlern.
+        await self._goto_authed(
+            f"https://ausleihe.{domain}/#/counter/student/{self._student_id}", 3000
+        )
 
         # Warten bis Barcode-Feld mit neuem Placeholder erscheint (= Kartei geladen)
         try:
