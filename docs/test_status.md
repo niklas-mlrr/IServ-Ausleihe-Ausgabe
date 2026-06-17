@@ -26,6 +26,17 @@
 
 ## Offen / zu testen
 
+### Neu 2026-06-17 (Host: Reiter „Test Config")
+
+- [ ] **Reiter „Test Config"** (`host.html`): Auswahl des Reiters fügt die festen
+      Testschüler automatisch an die Queue an (`switchTab('test')` →
+      `addTestStudents()`); Button als manueller Re-Trigger. IDs fest verdrahtet
+      in `TEST_STUDENTS` (`server/routes/api.py`), **keine** IServ-Abfrage:
+      Niklas Müller (2159), Lukas Podleschny (2164), Lucas Stolpe (2167).
+      Idempotent (Duplikate übersprungen), bestehende Queue/Sessions unangetastet.
+      *Server nach Route-Änderung neu starten — `reload=False`; ein POST auf eine
+      noch nicht registrierte Route liefert 405 (StaticFiles-Catch-all), nicht 404.*
+
 ### Neu 2026-06-17 (Scanner: Dark/Light + Klasse + transparente Zeilen)
 
 - [ ] **Dark-/Light-Mode am Gerät** (`scan.html` + `student.html`): folgt

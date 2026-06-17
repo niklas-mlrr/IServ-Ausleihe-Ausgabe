@@ -237,6 +237,44 @@ async def add_student_to_queue(body: dict, session_id: str = Cookie(default=None
     return {"ok": True, "count": len(state.queue)}
 
 
+# Fest verdrahtete Testschüler für den "Test Config"-Reiter (IDs einmalig per
+# read-only Namenssuche ermittelt, siehe Git-Historie). Klassen-Angabe nur
+# informativ — die Queue arbeitet rein über student_id.
+TEST_STUDENTS = [
+    {"student_id": 2159, "firstname": "Niklas", "lastname": "Müller", "form": "Klasse 12Slw"},
+    {"student_id": 2164, "firstname": "Lukas", "lastname": "Podleschny", "form": "Klasse 12Mk"},
+    {"student_id": 2167, "firstname": "Lucas", "lastname": "Stolpe", "form": "Klasse 12Slw"},
+]
+
+
+@router.post("/api/add-test-students")
+async def add_test_students(session_id: str = Cookie(default=None)) -> dict:
+    """Die fest definierten Testschüler an die Queue anhängen (ohne IServ-Abfrage)."""
+    _require_host(session_id)
+    state = get_state()
+    hub = get_hub()
+
+    from ..state import QueueStudent
+    added = 0
+    for s in TEST_STUDENTS:
+        if state.find_student(s["student_id"]):
+            continue
+        state.queue.append(
+            QueueStudent(
+                student_id=s["student_id"],
+                lastname=s["lastname"],
+                firstname=s["firstname"],
+                form=s["form"],
+            )
+        )
+        if state.active_form is None:
+            state.active_form = s["form"] or None
+        added += 1
+
+    await hub.broadcast_host(state.state_snapshot())
+    return {"ok": True, "added": added, "count": len(state.queue)}
+
+
 # ---------------------------------------------------------------------------
 # State
 # ---------------------------------------------------------------------------
@@ -617,6 +655,13 @@ async def _load_and_push_student(state, hub, student, helper) -> None:
         await hub.send_scanner(helper.token, {"type": "error", "msg": f"IServ-Fehler: {e}"})
         return
 
+    # Schülerinfo SOFORT an den Scanner pushen — unabhängig vom (langsamen)
+    # Öffnen der Playwright-Worker-Session. Sonst sieht der Helfer den Schüler
+    # erst nach Abschluss von open_student bzw. erst nach manuellem Reload.
+    info["form"] = getattr(student, "form", "")
+    await hub.send_scanner(helper.token, {"type": "student_info", "student": info})
+    await hub.broadcast_host(state.state_snapshot())
+
     if state.worker_pool:
         try:
             worker_session = await state.worker_pool.open_student(
@@ -630,7 +675,3 @@ async def _load_and_push_student(state, hub, student, helper) -> None:
                 helper.token,
                 {"type": "error", "msg": f"Playwright-Fehler: {e}. Buchung manuell."},
             )
-
-    info["form"] = getattr(student, "form", "")
-    await hub.send_scanner(helper.token, {"type": "student_info", "student": info})
-    await hub.broadcast_host(state.state_snapshot())

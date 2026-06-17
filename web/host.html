@@ -130,6 +130,7 @@
     <div class="tabs">
       <button class="tab active" id="tab-class" onclick="switchTab('class')">Ganze Klasse</button>
       <button class="tab" id="tab-student" onclick="switchTab('student')">Einzelne Schüler</button>
+      <button class="tab" id="tab-test" onclick="switchTab('test')">Test Config</button>
     </div>
 
     <!-- Reiter: Ganze Klasse -->
@@ -151,6 +152,14 @@
         <button id="add-student-btn" class="success" onclick="addSingleStudent()" disabled>+ Hinzufügen</button>
       </div>
       <p class="hint">Hängt einzelne Schüler an die bestehende Queue an — auch klassenübergreifend.</p>
+    </div>
+
+    <!-- Reiter: Test Config -->
+    <div id="panel-test" style="display:none">
+      <div class="row">
+        <button class="success" onclick="addTestStudents()">Testschüler hinzufügen</button>
+      </div>
+      <p class="hint">Hängt die Testschüler <strong>Niklas Müller</strong>, <strong>Lukas Podleschny</strong> und <strong>Lucas Stolpe</strong> an die Queue an.</p>
     </div>
 
     <div id="msg"></div>
@@ -255,11 +264,21 @@
 
   // ---- Reiter ----
   function switchTab(name) {
-    const isClass = name === 'class';
-    document.getElementById('tab-class').classList.toggle('active', isClass);
-    document.getElementById('tab-student').classList.toggle('active', !isClass);
-    document.getElementById('panel-class').style.display = isClass ? '' : 'none';
-    document.getElementById('panel-student').style.display = isClass ? 'none' : '';
+    for (const t of ['class', 'student', 'test']) {
+      document.getElementById('tab-' + t).classList.toggle('active', t === name);
+      document.getElementById('panel-' + t).style.display = t === name ? '' : 'none';
+    }
+    if (name === 'test') addTestStudents();
+  }
+
+  async function addTestStudents() {
+    const r = await fetch('/api/add-test-students', { method: 'POST' });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok) {
+      showMsg(`${d.added} Testschüler hinzugefügt (${d.count} in Queue)`);
+    } else {
+      showMsg(d.detail || 'Konnte Testschüler nicht hinzufügen');
+    }
   }
 
   // ---- Schuljahr ----
