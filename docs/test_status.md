@@ -26,6 +26,17 @@
 
 ## Offen / zu testen
 
+### Neu 2026-06-17 (Scanner: Dark/Light + Klasse + transparente Zeilen)
+
+- [ ] **Dark-/Light-Mode am Gerät** (`scan.html` + `student.html`): folgt
+      `prefers-color-scheme` (erst Browser-Override, dann System); kein Toggle.
+      In DevTools (*Rendering → Emulate prefers-color-scheme*) und am echten
+      Handy beide Themes auf Lesbarkeit prüfen (Kontraste, native Controls).
+- [ ] **Buchzeilen transparent:** Tint + Rand statt Vollfläche — vorgemerkt
+      (orange) / ausgeliehen (grün) in beiden Themes noch erkennbar.
+- [ ] **Klasse über Bezahlstatus:** zeigt z. B. „10c" **ohne** „Klasse"-Präfix;
+      erscheint erst nach Schüler-Zuweisung/Pairing (kommt aus der Queue).
+
 ### Neu 2026-06-16 (Scanner-UI-Redesign + Buch-Daten-Anreicherung)
 
 - [ ] **Scanner-Layout am Gerät** (`scan.html` + `student.html`): obere Leiste
