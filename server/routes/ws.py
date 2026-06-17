@@ -59,7 +59,8 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
         student = state.find_student(helper.student_id)
         if student and state.iserv:
             try:
-                info = await state.iserv.get_student_info(helper.student_id)
+                info = await state.iserv.get_student_info(helper.student_id, state.selected_schoolyear)
+                info["form"] = student.form
                 await websocket.send_json({"type": "student_info", "student": info})
             except Exception as e:
                 await websocket.send_json({"type": "error", "msg": str(e)})
@@ -164,7 +165,9 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
     elif session.state == "paired" and session.student_id is not None:
         # Reconnect nach Pairing: Schülerinfo erneut senden.
         try:
-            info = await state.iserv.get_student_info(session.student_id)
+            info = await state.iserv.get_student_info(session.student_id, state.selected_schoolyear)
+            qs = state.find_student(session.student_id)
+            info["form"] = qs.form if qs else ""
             await websocket.send_json({
                 "type": "student_info",
                 "student": info,

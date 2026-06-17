@@ -215,6 +215,7 @@ async def load_and_push_paired_student(
                 except Exception:
                     pass
 
+    info["form"] = getattr(student, "form", "")
     if session.ws is not None:
         try:
             await session.ws.send_json(

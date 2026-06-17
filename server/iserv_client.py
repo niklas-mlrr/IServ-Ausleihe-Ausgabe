@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import date
 from urllib.parse import quote
 
 from ausleihe import AusleiheClient
@@ -8,6 +9,14 @@ from ausleihe import AusleiheClient
 
 def _enc(sy: str) -> str:
     return quote(sy, safe="")
+
+
+def _sy_date(s: object) -> date | None:
+    """ISO-String ('2025-08-01T…') → date; tolerant gegenüber fehlenden Werten."""
+    try:
+        return date.fromisoformat(str(s)[:10])
+    except (ValueError, TypeError):
+        return None
 
 
 class IsServClient:
@@ -20,6 +29,8 @@ class IsServClient:
         self._client: AusleiheClient | None = None
         # ISBN -> Series, einmalig (read-only GET /series) für Titel + Fach.
         self._series_map: dict | None = None
+        # Default-Schuljahr (laufend, sonst nächstes); lazy + prozessweit gecacht.
+        self._default_sy_id: str | None = None
 
     def _get_client(self) -> AusleiheClient:
         if self._client is None:
@@ -30,6 +41,68 @@ class IsServClient:
                 allow_writes=False,
             )
         return self._client
+
+    def _active_years(self, client: AusleiheClient) -> list[dict]:
+        """Nicht-archivierte Schuljahre (read-only GET /schoolyears)."""
+        return [y for y in client.admin.get_schoolyears() if not y.get("archived_at")]
+
+    def _pick_default(self, years: list[dict], client: AusleiheClient) -> str:
+        """Default-Schuljahr: das aktuell laufende; läuft keines, das nächste.
+
+        „Laufend" = heute liegt zwischen `begin` und `end`. Gibt es keine
+        Überschneidung (z.B. Sommerpause vor Schuljahresbeginn), wird das
+        Jahr mit dem nächstgelegenen künftigen Beginn gewählt. Fallback
+        (alle Jahre vergangen): `/schoolyears/current`.
+        """
+        today = date.today()
+        dated = [
+            (y, _sy_date(y.get("begin")), _sy_date(y.get("end")))
+            for y in years
+        ]
+        dated = [(y, b, e) for (y, b, e) in dated if b and e]
+
+        running = [y for (y, b, e) in dated if b <= today <= e]
+        if running:
+            # Bei (untypischer) Überschneidung das jüngste laufende Jahr.
+            return max(running, key=lambda y: _sy_date(y["begin"]))["id"]
+
+        upcoming = [(y, b) for (y, b, e) in dated if b > today]
+        if upcoming:
+            return min(upcoming, key=lambda t: t[1])[0]["id"]
+
+        return client.schoolyears.get_current()["id"]
+
+    def _resolve_sy(self, client: AusleiheClient, schoolyear: str | None) -> str:
+        """Explizit gewähltes Schuljahr oder das gecachte Default-Jahr."""
+        if schoolyear:
+            return schoolyear
+        if self._default_sy_id is None:
+            self._default_sy_id = self._pick_default(self._active_years(client), client)
+        return self._default_sy_id
+
+    async def get_schoolyears(self) -> list[dict]:
+        """Auswählbare (nicht-archivierte) Schuljahre, neuestes zuerst.
+
+        Liefert pro Jahr `id` (z.B. '2025/2026'), `name` und `default`-Flag
+        (genau ein Jahr ist Default: das laufende bzw. – wenn keines läuft –
+        das nächste).
+        """
+        def _sync() -> list[dict]:
+            client = self._get_client()
+            years = self._active_years(client)
+            default_id = self._pick_default(years, client)
+            self._default_sy_id = default_id  # Cache mitnehmen
+            out = [
+                {
+                    "id": y["id"],
+                    "name": y.get("name") or y["id"],
+                    "default": y["id"] == default_id,
+                }
+                for y in years
+            ]
+            out.sort(key=lambda y: y["id"], reverse=True)
+            return out
+        return await asyncio.to_thread(_sync)
 
     def _get_series_map(self) -> dict:
         """Serien-Katalog (ISBN -> Series) prozessweit gecacht.
@@ -42,12 +115,12 @@ class IsServClient:
             self._series_map = {s.isbn: s for s in client.series.get_all()}
         return self._series_map
 
-    async def get_forms(self) -> list[dict]:
-        """Alle Klassen des aktuellen Schuljahrs mit Schüler-Members."""
+    async def get_forms(self, schoolyear: str | None = None) -> list[dict]:
+        """Alle Klassen des (gewählten oder aktuellen) Schuljahrs mit Members."""
         def _sync() -> list[dict]:
             client = self._get_client()
-            sy = client.schoolyears.get_current()
-            forms = client.get(f"/schoolyears/{_enc(sy['id'])}/forms")
+            sy_id = self._resolve_sy(client, schoolyear)
+            forms = client.get(f"/schoolyears/{_enc(sy_id)}/forms")
             # Nur Klassen mit mehreren Mitgliedern (>= 5) — filtert Puffer-Klassen heraus.
             return sorted(
                 [f for f in forms if len(f.get("members", [])) >= 5],
@@ -55,16 +128,18 @@ class IsServClient:
             )
         return await asyncio.to_thread(_sync)
 
-    async def get_class_names(self) -> list[str]:
-        forms = await self.get_forms()
+    async def get_class_names(self, schoolyear: str | None = None) -> list[str]:
+        forms = await self.get_forms(schoolyear)
         return [f["name"] for f in forms]
 
-    async def get_students_for_form(self, form_name: str) -> list[dict]:
+    async def get_students_for_form(
+        self, form_name: str, schoolyear: str | None = None
+    ) -> list[dict]:
         """Alphabetisch sortierte Schüler einer Klasse."""
         def _sync() -> list[dict]:
             client = self._get_client()
-            sy = client.schoolyears.get_current()
-            forms = client.get(f"/schoolyears/{_enc(sy['id'])}/forms")
+            sy_id = self._resolve_sy(client, schoolyear)
+            forms = client.get(f"/schoolyears/{_enc(sy_id)}/forms")
             for f in forms:
                 if f["name"] == form_name:
                     return sorted(
@@ -82,7 +157,9 @@ class IsServClient:
             return []
         return await asyncio.to_thread(_sync)
 
-    async def get_student_info(self, student_id: int) -> dict:
+    async def get_student_info(
+        self, student_id: int, schoolyear: str | None = None
+    ) -> dict:
         """Schüler-Daten für die Scanner-UI: Anmeldestatus, Zahlungsstatus, Bücher."""
         def _sync() -> dict:
             client = self._get_client()
@@ -98,7 +175,7 @@ class IsServClient:
                 s = series_map.get(isbn)
                 return (s.title if s else "") or fallback or isbn
 
-            sy_id = client.schoolyears.get_current()["id"]
+            sy_id = self._resolve_sy(client, schoolyear)
             detail = client.students.get_detail(
                 student_id,
                 enrollments=True,

@@ -116,6 +116,15 @@
     <button class="secondary" onclick="doLogout()">Abmelden</button>
   </div>
 
+  <!-- Schuljahr -->
+  <div class="card">
+    <h2>Schuljahr</h2>
+    <div class="row">
+      <select id="schoolyear-select" onchange="selectSchoolyear()"><option value="">-- wird geladen… --</option></select>
+    </div>
+    <p class="hint">Bestimmt, aus welchem Schuljahr Klassen, Anmeldungen und Bücherlisten geladen werden. Ein Wechsel setzt die Queue zurück.</p>
+  </div>
+
   <!-- Queue-Aufbau (Reiter) -->
   <div class="card">
     <div class="tabs">
@@ -211,6 +220,7 @@
     if (r.ok) {
       document.getElementById('login-view').style.display = 'none';
       document.getElementById('main-view').style.display = '';
+      loadSchoolyears();
       loadClasses();
       connectWs();
     } else {
@@ -250,6 +260,40 @@
     document.getElementById('tab-student').classList.toggle('active', !isClass);
     document.getElementById('panel-class').style.display = isClass ? '' : 'none';
     document.getElementById('panel-student').style.display = isClass ? 'none' : '';
+  }
+
+  // ---- Schuljahr ----
+  async function loadSchoolyears() {
+    const sel = document.getElementById('schoolyear-select');
+    const r = await fetch('/api/schoolyears');
+    if (!r.ok) { sel.innerHTML = '<option value="">-- Fehler beim Laden --</option>'; return; }
+    const { schoolyears, selected } = await r.json();
+    // value="" = Default-Schuljahr (selected===null im State; laufend bzw. nächstes).
+    sel.innerHTML = schoolyears.map(y => {
+      const tag = y.default ? ' (aktuell)' : '';
+      const val = y.default ? '' : escapeHtml(y.id);
+      const isSel = (selected === null && y.default) || selected === y.id;
+      return `<option value="${val}"${isSel ? ' selected' : ''}>${escapeHtml(y.name)}${tag}</option>`;
+    }).join('');
+  }
+
+  async function selectSchoolyear(force = false) {
+    const schoolyear = document.getElementById('schoolyear-select').value || null;
+    showMsg('Wechsle Schuljahr…');
+    const r = await fetch('/api/select-schoolyear', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ schoolyear, force }) });
+    const d = await r.json();
+    if (r.status === 409 && d.detail && d.detail.reason === 'active_sessions') {
+      if (confirm(`${d.detail.msg}\n\nTrotzdem Schuljahr wechseln?`)) return selectSchoolyear(true);
+      showMsg('Schuljahreswechsel abgebrochen');
+      loadSchoolyears();  // Dropdown auf tatsächlichen State zurücksetzen
+      return;
+    }
+    if (r.ok) {
+      showMsg('Schuljahr gewechselt');
+      loadClasses();
+    } else {
+      showMsg(d.detail?.msg || d.detail || 'Fehler');
+    }
   }
 
   // ---- Klassen ----
@@ -415,6 +459,10 @@
   function applyState(s) {
     state = s;
     if (!state.modus_b) state.modus_b = { open: false, pending: [], pending_count: 0, displays: [] };
+    // Dropdown mit dem tatsächlichen Server-State synchron halten
+    // (z.B. wenn ein anderer Host das Schuljahr wechselt). '' = aktuelles Jahr.
+    const syEl = document.getElementById('schoolyear-select');
+    if (syEl && syEl.options.length) syEl.value = state.selected_schoolyear || '';
     renderHelpers();
     renderQueue();
     renderModusB();
@@ -511,6 +559,7 @@
       document.getElementById('login-view').style.display = 'none';
       document.getElementById('main-view').style.display = '';
       r.json().then(s => { applyState(s); });
+      loadSchoolyears();
       loadClasses();
       connectWs();
     }

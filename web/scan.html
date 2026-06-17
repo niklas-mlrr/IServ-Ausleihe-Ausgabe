@@ -7,10 +7,25 @@
   <script src="/html5-qrcode.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    /* Dark als Default; Light greift, wenn Browser/System es vorgeben
+       (prefers-color-scheme folgt zuerst dem Browser-Override, sonst dem System). */
+    :root {
+      color-scheme: light dark;
+      --bg:#0f0f0f; --fg:#fff; --surface:#1e1e1e; --surface-2:#2a2a2a;
+      --surface-3:#3a3a3a; --surface-4:#4a4a4a; --dropdown:#1c1c1e;
+      --border:#333; --shadow:rgba(0,0,0,.5);
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg:#f2f2f7; --fg:#1c1c1e; --surface:#fff; --surface-2:#e5e5ea;
+        --surface-3:#d8d8dd; --surface-4:#c7c7cc; --dropdown:#fff;
+        --border:#d0d0d5; --shadow:rgba(0,0,0,.18);
+      }
+    }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #0f0f0f;
-      color: #fff;
+      background: var(--bg);
+      color: var(--fg);
       height: 100dvh;
       overflow: hidden;
       display: flex;
@@ -36,11 +51,11 @@
     .right-col button { flex: 1; }
 
     button, select {
-      border: none; border-radius: 8px; background: #2a2a2a; color: #fff;
+      border: none; border-radius: 8px; background: var(--surface-2); color: var(--fg);
       font-size: .95rem; cursor: pointer; transition: background .2s;
     }
-    button:hover, select:hover { background: #3a3a3a; }
-    button:active { background: #4a4a4a; }
+    button:hover, select:hover { background: var(--surface-3); }
+    button:active { background: var(--surface-4); }
     button:disabled { opacity: .5; cursor: not-allowed; }
     #gear-btn { width: 52px; font-size: 1.5rem; }
     .right-col button { font-size: 1.4rem; }
@@ -51,8 +66,8 @@
     .cam-dropdown {
       position: absolute; top: calc(100% + 6px); left: 0; z-index: 30;
       display: none; width: 240px;
-      background: #1c1c1e; border: 1px solid #333; border-radius: 10px;
-      padding: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.5);
+      background: var(--dropdown); border: 1px solid var(--border); border-radius: 10px;
+      padding: 10px; box-shadow: 0 8px 24px var(--shadow);
     }
     .cam-dropdown.open { display: flex; gap: 8px; }
     .cam-dropdown select { flex: 1; padding: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -61,33 +76,36 @@
     /* ---- Statuszeile (volle Breite) ---- */
     #status {
       margin-top: 10px; padding: 9px 14px; border-radius: 8px;
-      font-size: .9rem; background: #1e1e1e; text-align: center;
+      font-size: .9rem; background: var(--surface); text-align: center;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; background: #888; }
     .dot.ok { background: #4caf50; }
     .dot.err { background: #f44336; }
 
-    /* ---- Name (groß, ohne Box) + Bezahlstatus rechtsbündig ---- */
-    .name-row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin: 12px 2px 8px; }
-    .s-name { font-size: 1.5rem; font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .s-pay  { font-size: .85rem; opacity: .9; text-align: right; flex-shrink: 0; }
+    /* ---- Name (groß, ohne Box) + Klasse/Bezahlstatus rechtsbündig ---- */
+    .name-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin: 12px 2px 8px; }
+    .s-name { font-size: 1.5rem; font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.2; }
+    .s-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; flex-shrink: 0; }
+    .s-form { font-size: 1rem; font-weight: 700; line-height: 1.2; }
+    .s-pay  { font-size: .85rem; opacity: .9; text-align: right; }
     .s-pay .paid   { color: #4caf50; }
-    .s-pay .unpaid { color: #ffb300; }
+    .s-pay .unpaid { color: #e69500; }
     .s-pay .wait   { color: #888; }
 
     /* ---- Bücher-Tabelle (einziger Scroll-Bereich) ---- */
     .book-table-wrap { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
     .book-row {
       display: grid; grid-template-columns: 5rem 1fr 1.8rem; align-items: center;
-      gap: 8px; padding: 8px 10px; margin-bottom: 6px;
-      border-radius: 8px; border: 3px solid transparent; font-size: .9rem;
+      gap: 8px; padding: 8px 10px; margin-bottom: 6px; color: var(--fg);
+      border-radius: 8px; border: 2px solid transparent; font-size: .9rem;
     }
     .book-row .b-fach { font-weight: 600; }
     .book-row .b-title { overflow: hidden; text-overflow: ellipsis; }
     .book-row .b-icon { text-align: center; font-size: 1.1rem; }
-    .row-vorgemerkt  { background: #fff3b0; color: #d35400; border-color: #e67e22; }
-    .row-ausgeliehen { background: #c8f0c8; color: #1b5e20; border-color: #2e7d32; }
+    /* Transparenter Hintergrund, Farbe nur dezent (faint tint + Rand) — in beiden Themes lesbar. */
+    .row-vorgemerkt  { background: rgba(230,126,34,.14); border-color: rgba(230,126,34,.55); }
+    .row-ausgeliehen { background: rgba(46,125,50,.16);  border-color: rgba(46,125,50,.55); }
     .book-empty { opacity: .4; padding: 14px 4px; font-size: .9rem; }
   </style>
 </head>
@@ -112,7 +130,10 @@
 
     <div class="name-row">
       <div class="s-name" id="s-name">–</div>
-      <div class="s-pay" id="s-pay"></div>
+      <div class="s-meta">
+        <div class="s-form" id="s-form"></div>
+        <div class="s-pay" id="s-pay"></div>
+      </div>
     </div>
 
     <div class="book-table-wrap">
@@ -124,6 +145,7 @@
     const statusEl = document.getElementById('status-text');
     const dotEl = document.getElementById('dot');
     const sNameEl = document.getElementById('s-name');
+    const sFormEl = document.getElementById('s-form');
     const sPayEl = document.getElementById('s-pay');
     const bookRowsEl = document.getElementById('book-rows');
     let ws, reconnectDelay = 2000;
@@ -154,6 +176,7 @@
       if (msg.type === 'student_info') {
         const s = msg.student;
         sNameEl.textContent = `${s.lastname}, ${s.firstname}`;
+        sFormEl.textContent = (s.form || '').replace(/^Klasse\s+/i, '');
         const paidClass = !s.enrolled ? 'wait' : s.paid ? 'paid' : 'unpaid';
         const paidText = !s.enrolled ? 'Nicht angemeldet' : s.paid ? 'Bezahlt' : `Offen: ${escapeHtml(s.amount_open)} €`;
         sPayEl.innerHTML = `<span class="${paidClass}">${paidText}</span>`;
@@ -163,6 +186,7 @@
         statusEl.textContent = `${escapeHtml(msg.barcode)} — ${escapeHtml(msg.msg || msg.status)}`;
       } else if (msg.type === 'waiting') {
         sNameEl.textContent = '–';
+        sFormEl.textContent = '';
         sPayEl.innerHTML = '';
         bookRowsEl.innerHTML = '';
         statusEl.textContent = msg.msg || 'Warte auf Schüler-Zuweisung';

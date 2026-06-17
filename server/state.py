@@ -108,6 +108,8 @@ class DisplaySession:
 class AppState:
     def __init__(self) -> None:
         self.active_form: str | None = None
+        # Gewähltes Schuljahr (ID wie '2025/2026'); None = aktuelles Schuljahr.
+        self.selected_schoolyear: str | None = None
         self.queue: list[QueueStudent] = []
         self.helper_sessions: dict[str, HelperSession] = {}
         self.host_session_ids: set[str] = set()
@@ -139,6 +141,7 @@ class AppState:
         return {
             "type": "state",
             "active_form": self.active_form,
+            "selected_schoolyear": self.selected_schoolyear,
             "queue": self.queue_as_list(),
             "helpers": self.helpers_as_dict(),
             "modus_b": self.modus_b_snapshot(),

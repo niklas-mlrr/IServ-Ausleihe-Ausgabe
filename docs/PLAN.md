@@ -157,6 +157,11 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
 
 - [x] FastAPI-Server: HTTPS (selbstsigniert), WebSocket-Hub, Session-/Rollenmodell — 2026-06-12
 - [x] Host-UI: Login, Klasse wählen, alphabetische Queue, Live-Status Helfer-Sessions — 2026-06-12
+- [x] Host-UI: Schuljahr auswählbar (`GET /api/schoolyears` + `POST /api/select-schoolyear`,
+      read-only) — 2026-06-17. Default = laufendes Jahr, sonst das nächste
+      (deterministisch aus `begin`/`end`, nicht blind `/schoolyears/current`);
+      Wechsel resettet Queue/Klasse mit Active-Session-Guard. Schuljahr wird durch
+      Klassen-/Schüler-/Karteiabrufe durchgereicht.
 - [x] Helfer-Scanner-UI: Token-basiert, Schüleranzeige (angemeldet/bezahlt/Bücher), Scan-Feedback — 2026-06-12
 - [x] Playwright-Worker: Context-Pool (N unabhängige Logins), Schülerkartei laden, Barcode staged (kein Submit) — 2026-06-12
 - [x] Recovery (Re-Login bei Session-Ablauf) — 2026-06-15 (`automation/worker.py`, deterministisch getestet via `automation/recovery_test.py`)

@@ -66,6 +66,60 @@ async def logout(response: Response, session_id: str | None = Cookie(default=Non
 
 
 # ---------------------------------------------------------------------------
+# Schuljahr
+# ---------------------------------------------------------------------------
+
+@router.get("/api/schoolyears")
+async def get_schoolyears(session_id: str = Cookie(default=None)) -> dict:
+    """Auswählbare Schuljahre + aktuell gewähltes (None = aktuelles Jahr)."""
+    _require_host(session_id)
+    state = get_state()
+    try:
+        years = await state.iserv.get_schoolyears()
+    except Exception as e:
+        log.exception("Schuljahre konnten nicht geladen werden")
+        raise HTTPException(502, f"IServ-Fehler: {e}")
+    return {"schoolyears": years, "selected": state.selected_schoolyear}
+
+
+@router.post("/api/select-schoolyear")
+async def select_schoolyear(body: dict, session_id: str = Cookie(default=None)) -> dict:
+    """Schuljahr wählen. Setzt die Queue/Klasse zurück, da Klassen jahresspezifisch sind.
+
+    `schoolyear=null` (oder leer) → aktuelles Schuljahr.
+    """
+    _require_host(session_id)
+    state = get_state()
+    hub = get_hub()
+
+    raw = body.get("schoolyear")
+    schoolyear = str(raw).strip() if raw else None
+
+    # Guard: laufende Sessions würden durch den Wechsel verwaist.
+    active_q = [s for s in state.queue if s.status == "active"]
+    live_b = [s for s in state.student_sessions.values() if s.state in ("pending_pairing", "paired")]
+    if (active_q or live_b) and not body.get("force"):
+        raise HTTPException(409, detail={
+            "reason": "active_sessions",
+            "msg": f"{len(active_q)} aktive Schüler / {len(live_b)} Live-Session(s) — "
+                   "Schuljahreswechsel bricht sie ab.",
+        })
+
+    # Laufende Sessions sauber beenden (keine verwaisten Sessions).
+    for sess in list(state.student_sessions.values()):
+        if sess.state in ("pending_pairing", "paired"):
+            await invalidate_session(state, sess, "revoked", reason="schuljahreswechsel")
+    for helper in state.helper_sessions.values():
+        helper.student_id = None
+
+    state.selected_schoolyear = schoolyear
+    state.active_form = None
+    state.queue = []
+    await hub.broadcast_host(state.state_snapshot())
+    return {"ok": True, "selected": schoolyear}
+
+
+# ---------------------------------------------------------------------------
 # Klassen
 # ---------------------------------------------------------------------------
 
@@ -74,7 +128,7 @@ async def get_classes(session_id: str = Cookie(default=None)) -> dict:
     _require_host(session_id)
     state = get_state()
     try:
-        classes = await state.iserv.get_class_names()
+        classes = await state.iserv.get_class_names(state.selected_schoolyear)
     except Exception as e:
         log.exception("IServ-Klassen konnten nicht geladen werden")
         raise HTTPException(502, f"IServ-Fehler: {e}")
@@ -105,7 +159,7 @@ async def select_class(body: dict, session_id: str = Cookie(default=None)) -> di
         })
 
     try:
-        students = await state.iserv.get_students_for_form(form)
+        students = await state.iserv.get_students_for_form(form, state.selected_schoolyear)
     except Exception as e:
         log.exception("Schüler konnten nicht geladen werden")
         raise HTTPException(502, f"IServ-Fehler: {e}")
@@ -141,7 +195,7 @@ async def students_for_class(form: str, session_id: str = Cookie(default=None)) 
         raise HTTPException(400, "form fehlt")
     state = get_state()
     try:
-        students = await state.iserv.get_students_for_form(form)
+        students = await state.iserv.get_students_for_form(form, state.selected_schoolyear)
     except Exception as e:
         log.exception("Schüler konnten nicht geladen werden")
         raise HTTPException(502, f"IServ-Fehler: {e}")
@@ -516,7 +570,7 @@ async def student_pair(body: dict, session_id: str = Cookie(default=None)) -> di
         raise HTTPException(409, "Schüler hat bereits eine Live-Session")
 
     try:
-        info = await state.iserv.get_student_info(student_id)
+        info = await state.iserv.get_student_info(student_id, state.selected_schoolyear)
     except Exception as e:
         log.exception("Schülerinfo (Pairing) für %d fehlgeschlagen", student_id)
         raise HTTPException(502, f"IServ-Fehler: {e}")
@@ -557,7 +611,7 @@ def _now():
 async def _load_and_push_student(state, hub, student, helper) -> None:
     """Im Hintergrund: Schülerinfo laden, Worker-Session öffnen, Scanner informieren."""
     try:
-        info = await state.iserv.get_student_info(student.student_id)
+        info = await state.iserv.get_student_info(student.student_id, state.selected_schoolyear)
     except Exception as e:
         log.exception("Schülerinfo für %d konnte nicht geladen werden", student.student_id)
         await hub.send_scanner(helper.token, {"type": "error", "msg": f"IServ-Fehler: {e}"})
@@ -577,5 +631,6 @@ async def _load_and_push_student(state, hub, student, helper) -> None:
                 {"type": "error", "msg": f"Playwright-Fehler: {e}. Buchung manuell."},
             )
 
+    info["form"] = getattr(student, "form", "")
     await hub.send_scanner(helper.token, {"type": "student_info", "student": info})
     await hub.broadcast_host(state.state_snapshot())
