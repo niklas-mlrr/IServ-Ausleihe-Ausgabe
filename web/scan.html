@@ -156,6 +156,22 @@
     const sPayEl = document.getElementById('s-pay');
     const bookRowsEl = document.getElementById('book-rows');
     let ws, reconnectDelay = 2000;
+    let studentActive = false;          // ist gerade ein Schüler zugewiesen?
+    let queueSize = null;               // zuletzt gemeldete Warteschlangengröße
+    let waitingMsg = 'Warte auf Schüler-Zuweisung';
+
+    function renderWaitingStatus() {
+      statusEl.textContent = (typeof queueSize === 'number')
+        ? `Warteschlange: ${queueSize}`
+        : waitingMsg;
+    }
+
+    // Ruhezustand der Statuszeile: solange kein Schüler geladen ist (und keiner
+    // gerade geladen wird), zeigt die Statuszeile immer die Warteschlangenlänge.
+    function setReadyStatus() {
+      if (studentActive) statusEl.textContent = 'Scanner bereit — Buch scannen';
+      else renderWaitingStatus();
+    }
 
     // IServ-Strings nie ungefiltert per innerHTML einsetzen.
     function escapeHtml(v) {
@@ -181,6 +197,7 @@
 
     function handleServerMessage(msg) {
       if (msg.type === 'student_info') {
+        studentActive = true;
         const s = msg.student;
         sNameEl.textContent = `${s.lastname}, ${s.firstname}`;
         sFormEl.textContent = (s.form || '').replace(/^Klasse\s+/i, '');
@@ -192,14 +209,17 @@
       } else if (msg.type === 'scan_result') {
         statusEl.textContent = `${escapeHtml(msg.barcode)} — ${escapeHtml(msg.msg || msg.status)}`;
       } else if (msg.type === 'waiting') {
+        studentActive = false;
         sNameEl.textContent = '';
         sFormEl.textContent = '';
         sPayEl.innerHTML = '';
         bookRowsEl.innerHTML = '';
-        const n = msg.queue_size;
-        statusEl.textContent = (typeof n === 'number')
-          ? `Warteschlange: ${n} · ${msg.msg || 'Warte auf Schüler-Zuweisung'}`
-          : (msg.msg || 'Warte auf Schüler-Zuweisung');
+        if (typeof msg.queue_size === 'number') queueSize = msg.queue_size;
+        if (msg.msg) waitingMsg = msg.msg;
+        renderWaitingStatus();
+      } else if (msg.type === 'queue_update') {
+        if (typeof msg.queue_size === 'number') queueSize = msg.queue_size;
+        if (!studentActive) renderWaitingStatus();
       } else if (msg.type === 'error') {
         statusEl.textContent = 'Fehler: ' + (msg.msg || '');
         dotEl.className = 'dot err';
@@ -213,7 +233,7 @@
         return;
       }
       ws = new WebSocket(`wss://${location.host}/ws/scanner/${token}`);
-      ws.onopen  = () => { dotEl.className = 'dot ok'; statusEl.textContent = 'Verbunden'; reconnectDelay = 2000; };
+      ws.onopen  = () => { dotEl.className = 'dot ok'; setReadyStatus(); reconnectDelay = 2000; };
       ws.onclose = () => {
         dotEl.className = 'dot err'; statusEl.textContent = 'Getrennt — neu verbinden…';
         setTimeout(connect, reconnectDelay);
@@ -244,7 +264,7 @@
     // der neue Schüler serverseitig noch geladen wird.
     nextBtn.addEventListener('click', () => {
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
-      sNameEl.textContent = '–';
+      sNameEl.textContent = '';
       sFormEl.textContent = '';
       sPayEl.innerHTML = '';
       bookRowsEl.innerHTML = '';
@@ -349,7 +369,8 @@
         currentCameraId = cameraId;
         isTorchOn = false;
         torchBtn.classList.remove('torch-on');
-        statusEl.textContent = ws && ws.readyState === WebSocket.OPEN ? 'Scanner bereit' : 'Neu verbinden…';
+        if (ws && ws.readyState === WebSocket.OPEN) setReadyStatus();
+        else statusEl.textContent = 'Neu verbinden…';
         const video = document.querySelector('#reader video');
         if (video && video.srcObject) {
           const track = video.srcObject.getVideoTracks()[0];

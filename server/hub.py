@@ -26,6 +26,19 @@ class Hub:
                 s.host_ws_connections.remove(ws)
             except ValueError:
                 pass
+        # Jede Host-Statusänderung kann die Warteschlange verändert haben –
+        # darum die aktuelle Größe live an alle unzugewiesenen Scanner schicken.
+        await self.broadcast_queue_size(s)
+
+    async def broadcast_queue_size(self, state: AppState | None = None) -> None:
+        s = state or get_state()
+        qsize = s.pending_count()
+        for helper in list(s.helper_sessions.values()):
+            if helper.student_id is None and helper.ws is not None:
+                try:
+                    await helper.ws.send_json({"type": "queue_update", "queue_size": qsize})
+                except Exception:
+                    helper.ws = None
 
     async def send_scanner(self, token: str, msg: dict, state: AppState | None = None) -> None:
         s = state or get_state()
