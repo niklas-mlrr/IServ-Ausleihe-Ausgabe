@@ -73,22 +73,31 @@ Druck auf macOS: `PRINT_BACKEND=auto` nutzt automatisch `lp`/CUPS (vorinstallier
 `PRINTER_NAME` leer = Standarddrucker.
 
 ### Windows (Ausleihe-Laptop)
-
 ```powershell
-# 1) uv installieren (PowerShell), danach neues Terminal öffnen
+# 1) uv installieren (PowerShell)
 irm https://astral.sh/uv/install.ps1 | iex
 
-# 2) Schwester-Repo daneben klonen
-cd ..
+```
+-> Neues Terminal öffnen
+
+```powershell
+# 2) Dieses GitHub Repo klonen
+git clone https://github.com/niklas-mlrr/IServ-Ausleihe-Ausgabe.git ausleihe-ausgabe
+
+# 3) API-Repo daneben klonen
 git clone https://github.com/niklas-mlrr/IServ-Ausleihe-API.git ausleihe-api
+
+# 4) In den geklonten Haupt-Ordner navigieren
+cd ausleihe-ausgabe
+
+# 5) Setup Skript ausführen - Erledigt `uv sync`, Playwright-Chromium und legt `.env` aus der Vorlage an.
+setup.bat
+
 ```
 
 Dann im Ordner `ausleihe-ausgabe`:
-
-1. **`setup.bat`** doppelklicken (einmalig) — erledigt `uv sync`, Playwright-Chromium
-   und legt `.env` aus der Vorlage an.
-2. **`.env`** öffnen und `ISERV_*` + `HOST_PASSWORD` eintragen.
-3. **`start.bat`** doppelklicken — startet den Server (Beenden mit Strg+C).
+1. **`.env`** öffnen und `ISERV_*` + `HOST_PASSWORD` eintragen.
+2. **`start.bat`** doppelklicken — startet den Server (Beenden mit Strg+C).
 
 Silent-Print (Leihschein): USB-Drucker als Standarddrucker setzen, ggf.
 SumatraPDF installieren. Details inkl. Drucker-Setup in
