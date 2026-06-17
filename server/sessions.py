@@ -240,7 +240,7 @@ async def advance_helper(state: AppState, hub, helper) -> dict:
 
     student = state.next_pending()
     if not student:
-        await hub.send_scanner(helper.token, {"type": "waiting", "msg": "Warteschlange leer"})
+        await hub.send_scanner(helper.token, {"type": "waiting", "msg": "Warteschlange leer", "queue_size": state.pending_count()})
         return {"ok": False, "reason": "empty"}
 
     student.status = "active"

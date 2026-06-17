@@ -346,10 +346,18 @@ class WorkerPool:
                 self._contexts.append(context)
 
     async def stop(self) -> None:
+        # Defensiv: bei Ctrl+C / Treiber-Abbruch ist der Transport evtl. schon
+        # tot — close()/stop() sollen die App-Shutdown-Sequenz nicht crashen.
         if self._browser:
-            await self._browser.close()
+            try:
+                await self._browser.close()
+            except Exception as e:
+                log.warning("Browser.close beim Shutdown fehlgeschlagen: %s", e)
         if self._pw:
-            await self._pw.stop()
+            try:
+                await self._pw.stop()
+            except Exception as e:
+                log.warning("Playwright.stop beim Shutdown fehlgeschlagen: %s", e)
 
     async def open_student(self, student_id: int, student_name: str) -> StudentSession:
         """Einen freien Context holen und Schülerkartei laden."""

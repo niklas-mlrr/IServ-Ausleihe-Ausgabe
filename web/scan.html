@@ -136,7 +136,7 @@
     </div>
 
     <div class="name-row">
-      <div class="s-name" id="s-name">–</div>
+      <div class="s-name" id="s-name"></div>
       <div class="s-meta">
         <div class="s-form" id="s-form"></div>
         <div class="s-pay" id="s-pay"></div>
@@ -192,11 +192,14 @@
       } else if (msg.type === 'scan_result') {
         statusEl.textContent = `${escapeHtml(msg.barcode)} — ${escapeHtml(msg.msg || msg.status)}`;
       } else if (msg.type === 'waiting') {
-        sNameEl.textContent = '–';
+        sNameEl.textContent = '';
         sFormEl.textContent = '';
         sPayEl.innerHTML = '';
         bookRowsEl.innerHTML = '';
-        statusEl.textContent = msg.msg || 'Warte auf Schüler-Zuweisung';
+        const n = msg.queue_size;
+        statusEl.textContent = (typeof n === 'number')
+          ? `Warteschlange: ${n} · ${msg.msg || 'Warte auf Schüler-Zuweisung'}`
+          : (msg.msg || 'Warte auf Schüler-Zuweisung');
       } else if (msg.type === 'error') {
         statusEl.textContent = 'Fehler: ' + (msg.msg || '');
         dotEl.className = 'dot err';

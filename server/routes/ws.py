@@ -66,9 +66,9 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
             except Exception as e:
                 await websocket.send_json({"type": "error", "msg": str(e)})
         elif student is None:
-            await websocket.send_json({"type": "waiting", "msg": "Warte auf Schüler-Zuweisung"})
+            await websocket.send_json({"type": "waiting", "msg": "Warte auf Schüler-Zuweisung", "queue_size": state.pending_count()})
     else:
-        await websocket.send_json({"type": "waiting", "msg": "Warte auf Schüler-Zuweisung"})
+        await websocket.send_json({"type": "waiting", "msg": "Warte auf Schüler-Zuweisung", "queue_size": state.pending_count()})
 
     await hub.broadcast_host(state.state_snapshot())
 

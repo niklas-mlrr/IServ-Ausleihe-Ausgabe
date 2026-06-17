@@ -201,6 +201,9 @@ class AppState:
     def next_pending(self) -> QueueStudent | None:
         return next((s for s in self.queue if s.status == "pending"), None)
 
+    def pending_count(self) -> int:
+        return sum(1 for s in self.queue if s.status == "pending")
+
     def find_student(self, student_id: int) -> QueueStudent | None:
         return next((s for s in self.queue if s.student_id == student_id), None)
 
