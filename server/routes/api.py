@@ -385,6 +385,60 @@ async def skip_student(body: dict, session_id: str = Cookie(default=None)) -> di
     return {"ok": True}
 
 
+@router.post("/api/disconnect")
+async def disconnect_student(body: dict, session_id: str = Cookie(default=None)) -> dict:
+    """Schüler von Helfer/Schüler-Session trennen und auf 'Wartend' zurücksetzen.
+
+    Anders als /api/skip wird der Schüler NICHT übersprungen, sondern bleibt als
+    `pending` in der Queue (kann erneut zugeordnet werden). Für `pending`-Schüler
+    ohne Verbindung ist es ein harmloser No-op.
+    """
+    _require_host(session_id)
+    student_id = body.get("student_id")
+    if student_id is None:
+        raise HTTPException(400, "student_id fehlt")
+    state = get_state()
+    hub = get_hub()
+    student = state.find_student(int(student_id))
+    if not student:
+        raise HTTPException(404, "Schüler nicht in der Queue")
+    if student.status in ("done", "skipped"):
+        raise HTTPException(409, f"Schüler ist {student.status}")
+    await end_student(state, hub, int(student_id), queue_status="pending", session_state="revoked")
+    return {"ok": True}
+
+
+@router.post("/api/disconnect-all")
+async def disconnect_all(session_id: str = Cookie(default=None)) -> dict:
+    """Alle aktiven Verbindungen (Modus A + B) trennen, Schüler zurück auf 'Wartend'."""
+    _require_host(session_id)
+    state = get_state()
+    hub = get_hub()
+    active_ids = [s.student_id for s in state.queue if s.status == "active"]
+    for sid in active_ids:
+        await end_student(state, hub, sid, queue_status="pending", session_state="revoked")
+    await hub.broadcast_host(state.state_snapshot())
+    return {"ok": True, "count": len(active_ids)}
+
+
+@router.post("/api/reset-queue")
+async def reset_queue(session_id: str = Cookie(default=None)) -> dict:
+    """Queue-Status zurücksetzen: ALLE Schüler zurück auf 'pending'.
+
+    Trennt aktive Verbindungen (wie disconnect) und setzt zusätzlich
+    `done`/`skipped`-Schüler zurück auf `pending`. Die Schüler bleiben in der
+    Queue (kein Neuladen der Klasse).
+    """
+    _require_host(session_id)
+    state = get_state()
+    hub = get_hub()
+    changed = [s.student_id for s in state.queue if s.status != "pending"]
+    for sid in changed:
+        await end_student(state, hub, sid, queue_status="pending", session_state="revoked")
+    await hub.broadcast_host(state.state_snapshot())
+    return {"ok": True, "count": len(changed)}
+
+
 @router.post("/api/finish")
 async def finish_student(body: dict, session_id: str = Cookie(default=None)) -> dict:
     _require_host(session_id)
@@ -547,6 +601,19 @@ async def modus_b_qr(session_id: str = Cookie(default=None)) -> dict:
     }
 
 
+@router.get("/api/display/qr")
+async def display_qr(request: Request, session_id: str = Cookie(default=None)) -> dict:
+    """QR, mit dem ein iPad die QR-Display-Seite (`/qr-display`) öffnet.
+
+    Anders als der Schüler-Join-QR (`modus_b_join_qr`) zeigt dieser QR nur auf
+    die statische Display-Seite — keine Schülerdaten, kein Join-Secret. Die
+    LAN-IP-Korrektur aus `_base_url` macht den QR für das iPad erreichbar.
+    """
+    _require_host(session_id)
+    url = f"{_base_url(request)}/qr-display"
+    return {"url": url, "qr": make_qr_data_url(url)}
+
+
 @router.post("/api/display/authorize")
 async def display_authorize(body: dict, session_id: str = Cookie(default=None)) -> dict:
     """iPad-Display per Registrierungscode autorisieren (Registrierung am Host)."""
@@ -646,9 +713,30 @@ async def student_pair(body: dict, session_id: str = Cookie(default=None)) -> di
     session.payment_overridden = bool(not info.get("paid") and override)
     student.status = "active"
 
+    # Zugeordneter Schüler ist „durch" → frischen Join-QR fürs iPad erzeugen,
+    # damit der nächste Schüler einen neuen Code scannt (alter Screenshot wird ungültig).
+    await _rotate_join_secret(state)
+
     await hub.broadcast_host(state.state_snapshot())
     asyncio.create_task(load_and_push_paired_student(state, hub, session, student, info))
     return {"ok": True, "student_id": student_id}
+
+
+async def _rotate_join_secret(state) -> None:
+    """Neues Join-Secret + QR erzeugen und an die iPad-Displays pushen.
+
+    Die Basis-URL (mit korrekter LAN-IP) wird aus der bestehenden
+    `modus_b_join_url` übernommen — nur der `j=`-Parameter wird ersetzt.
+    Bereits gejointe Sessions haben ihren `session_token` und laufen weiter;
+    nur künftige Scans des alten QR werden ungültig.
+    """
+    if not state.modus_b_open or not state.modus_b_join_url:
+        return
+    base = state.modus_b_join_url.split("?", 1)[0]
+    state.modus_b_join_secret = gen_join_secret()
+    state.modus_b_join_url = f"{base}?j={state.modus_b_join_secret}"
+    state.modus_b_join_qr = make_qr_data_url(state.modus_b_join_url)
+    await broadcast_displays(state)
 
 
 # ---------------------------------------------------------------------------

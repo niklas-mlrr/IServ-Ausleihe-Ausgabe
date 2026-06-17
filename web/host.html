@@ -50,6 +50,12 @@
     button.secondary:hover { background: #4a4a4c; }
     button.success { background: #30d158; color: #000; }
     button.success:hover { background: #28b84e; }
+    /* Dezenter Text-Link-Stil für selten genutzte, „gefährliche" Aktionen */
+    button.link-muted {
+      background: none; border: none; padding: 2px 4px; border-radius: 0;
+      color: #777; font-size: 0.75rem; text-decoration: underline; transition: color .15s;
+    }
+    button.link-muted:hover { background: none; color: #ff6b6b; }
     .tabs { display: flex; gap: 4px; margin-bottom: 14px; border-bottom: 1px solid #2a2a2c; }
     .tab { background: transparent; color: #888; padding: 8px 14px; border-radius: 8px 8px 0 0; font-size: 0.9rem; }
     .tab:hover { background: #2a2a2c; }
@@ -185,7 +191,7 @@
 
   <!-- Live-Ausgabe (Modus B) -->
   <div class="card">
-    <h2>Live-Ausgabe (Modus B)</h2>
+    <h2>Schüler</h2>
     <div class="row" style="margin-bottom:12px">
       <button id="mb-open-btn" class="success" onclick="openModusB()">Ausgabe öffnen</button>
       <button id="mb-close-btn" class="danger" onclick="closeModusB()" style="display:none">Ausgabe schließen</button>
@@ -195,16 +201,28 @@
       <span id="mb-pending" style="color:#5ac8fa"></span>
       <span id="mb-displays" style="opacity:.6;margin-left:12px"></span>
       <div id="mb-arm-banner" style="display:none;margin-top:8px;padding:6px 10px;border-radius:8px;background:#0a3d6b;color:#5ac8fa"></div>
+      <div id="mb-display-auth" class="row" style="margin-top:8px;display:none">
+        <span style="opacity:.7">iPad freischalten — Code vom iPad eingeben:</span>
+        <input id="mb-display-code" type="text" inputmode="latin" autocapitalize="characters"
+               placeholder="z. B. ABCD" style="width:110px;text-transform:uppercase"
+               onkeydown="if(event.key==='Enter')authorizeDisplay()">
+        <button class="success" onclick="authorizeDisplay()">Freischalten</button>
+      </div>
       <div id="mb-codes" style="margin-top:8px"></div>
-      <div style="margin-top:8px">
-        <button class="secondary" onclick="showMbQr()">QR für iPad anzeigen</button>
+      <div class="row" style="margin-top:8px">
+        <button class="secondary" onclick="showMbQr()">QR für Schüler anzeigen</button>
+        <button class="secondary" onclick="showDisplayQr()">QR für iPad anzeigen</button>
       </div>
     </div>
   </div>
 
   <!-- Schüler-Queue -->
   <div class="card">
-    <h2>Schüler-Queue <span id="queue-count" style="opacity:.5;font-weight:400"></span></h2>
+    <div class="row" style="align-items:center">
+      <h2 style="flex:1;margin:0">Schüler-Queue <span id="queue-count" style="opacity:.5;font-weight:400"></span></h2>
+      <button class="link-muted" onclick="resetQueue()">Queue Status zurücksetzen</button>
+      <button class="link-muted" onclick="disconnectAll()">Alle Verbindungen zu Helfern &amp; Schülern trennen</button>
+    </div>
     <table id="queue-table">
       <thead><tr><th>Name</th><th>Klasse</th><th>Status</th><th></th></tr></thead>
       <tbody id="queue-tbody"></tbody>
@@ -416,6 +434,30 @@
     await fetch('/api/skip', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ student_id: studentId }) });
   }
 
+  // Einzelnen Schüler trennen: Helfer-/Schüler-Verbindung lösen, zurück auf "Wartend".
+  async function disconnectStudent(studentId) {
+    const r = await fetch('/api/disconnect', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ student_id: studentId }) });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Trennen fehlgeschlagen'); }
+  }
+
+  // Alle aktiven Verbindungen (Helfer + Schüler-Sessions) trennen.
+  async function disconnectAll() {
+    if (!confirm('Wirklich ALLE Verbindungen zu Helfern & Schülern trennen? Betroffene Schüler kehren auf "Wartend" zurück.')) return;
+    if (!confirm('Bitte bestätigen: Alle Verbindungen jetzt trennen?')) return;
+    const r = await fetch('/api/disconnect-all', { method: 'POST' });
+    if (r.ok) { const d = await r.json().catch(() => ({})); showMsg(`${d.count || 0} Verbindung(en) getrennt`); }
+    else { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Trennen fehlgeschlagen'); }
+  }
+
+  // Queue-Status zurücksetzen: ALLE Schüler (aktiv/fertig/übersprungen) zurück auf "Wartend".
+  async function resetQueue() {
+    if (!confirm('Queue-Status wirklich zurücksetzen? Alle Schüler kehren auf "Wartend" zurück (Verbindungen werden getrennt).')) return;
+    if (!confirm('Bitte bestätigen: Queue-Status jetzt zurücksetzen?')) return;
+    const r = await fetch('/api/reset-queue', { method: 'POST' });
+    if (r.ok) { const d = await r.json().catch(() => ({})); showMsg(`Queue zurückgesetzt (${d.count || 0} geändert)`); }
+    else { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Zurücksetzen fehlgeschlagen'); }
+  }
+
   async function finishStudent(studentId) {
     await fetch('/api/finish', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ student_id: studentId }) });
   }
@@ -440,18 +482,35 @@
   // ---- Modus B ----
   async function openModusB() {
     const r = await fetch('/api/modus-b/open', { method: 'POST' });
-    if (r.ok) { const d = await r.json(); mbQrDataUrl = d.qr; showMbQr(); }
+    // QR nicht sofort anzeigen — der Host öffnet ihn bei Bedarf über die Buttons.
+    if (r.ok) { const d = await r.json(); mbQrDataUrl = d.qr; }
   }
   async function closeModusB() {
     await fetch('/api/modus-b/close', { method: 'POST' });
     mbQrDataUrl = null;
   }
   async function showMbQr() {
-    if (!mbQrDataUrl) {
-      const r = await fetch('/api/modus-b/qr');
-      if (r.ok) { const d = await r.json(); mbQrDataUrl = d.qr; }
-    }
+    // Immer frisch holen — der Join-QR rotiert nach jeder Zuordnung.
+    const r = await fetch('/api/modus-b/qr');
+    if (r.ok) { const d = await r.json(); mbQrDataUrl = d.qr; }
     if (mbQrDataUrl) showQr(mbQrDataUrl, state.modus_b.join_url || '');
+  }
+  // iPad-Display per Registrierungscode (vom iPad-Bildschirm) freischalten.
+  async function authorizeDisplay() {
+    const el = document.getElementById('mb-display-code');
+    const code = (el.value || '').trim();
+    if (!code) return;
+    const r = await fetch('/api/display/authorize', { method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ registration_code: code }) });
+    if (r.ok) { el.value = ''; showMsg('iPad freigeschaltet'); }
+    else { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Freischalten fehlgeschlagen'); }
+  }
+  // QR, mit dem ein iPad die Display-Seite (/qr-display) öffnet.
+  async function showDisplayQr() {
+    const r = await fetch('/api/display/qr');
+    if (!r.ok) { showMsg('QR für iPad konnte nicht geladen werden'); return; }
+    const d = await r.json();
+    showQr(d.qr, d.url || '');
   }
   // Gemeinsame Pairing-Funktion: ordnet einen wartenden Code einem Schüler zu.
   async function doPair(studentId, code) {
@@ -491,6 +550,9 @@
     const auth = (mb.displays || []).filter(d => d.authorized && d.connected).length;
     const total = (mb.displays || []).length;
     document.getElementById('mb-displays').textContent = `iPads: ${auth} aktiv / ${total} verbunden`;
+    // Freischalt-Feld nur zeigen, wenn ein iPad verbunden, aber noch nicht autorisiert ist.
+    const needsAuth = (mb.displays || []).some(d => d.connected && !d.authorized);
+    document.getElementById('mb-display-auth').style.display = needsAuth ? '' : 'none';
 
     const pending = mb.pending || [];
     const pendingStudents = state.queue.filter(q => q.status === 'pending');
@@ -604,10 +666,12 @@
       // Buchen-Button NUR wenn der Server ALLOW_BOOKING=true meldet (Default: aus).
       const bookBtn = state.allow_booking
         ? `<button class="danger" onclick="commitBook(${s.student_id})">Buchen</button> ` : '';
+      // Trennen: löst Helfer-/Schüler-Verbindung und setzt den Schüler zurück auf "Wartend".
+      const disconnectBtn = `<button class="secondary" onclick="disconnectStudent(${s.student_id})">Trennen</button>`;
       const actions = s.status === 'pending'
-        ? `${pairBtn}<button class="secondary" onclick="skipStudent(${s.student_id})">Überspringen</button>`
+        ? `${pairBtn}<button class="secondary" onclick="skipStudent(${s.student_id})">Überspringen</button> ${disconnectBtn}`
         : s.status === 'active'
-          ? `${bookBtn}<button class="success" onclick="finishStudent(${s.student_id})">Abschließen</button> <button class="secondary" onclick="skipStudent(${s.student_id})">Abbrechen</button> ${printBtn}`
+          ? `${bookBtn}<button class="success" onclick="finishStudent(${s.student_id})">Abschließen</button> <button class="secondary" onclick="skipStudent(${s.student_id})">Abbrechen</button> ${disconnectBtn} ${printBtn}`
           : s.status === 'done'
             ? printBtn
             : '';

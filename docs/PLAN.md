@@ -222,6 +222,20 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
       `load_and_push_paired_student` **vor** dem Worker-Open ans Handy gepusht
       (Worker-`load_card` lief vorher davor und blockierte die Anzeige ~7 s).
       Sicher, weil `handle_scan` „Worker nicht bereit" sauber meldet.
+- [x] iPad-Display am Host bedienbar (2026-06-17b): Button „QR für iPad anzeigen"
+      (`GET /api/display/qr` → QR auf `/qr-display`, host-auth) + Freischalt-Feld
+      für den iPad-Registrierungscode (`POST /api/display/authorize`, erscheint
+      nur bei verbundenem, unautorisiertem iPad). Bestehender Button → „QR für
+      Schüler anzeigen"; Karte „Live-Ausgabe (Modus B)" → „Schüler".
+- [x] Join-QR rotiert nach jeder Zuordnung (2026-06-17b): `_rotate_join_secret`
+      erzeugt nach `/api/student/pair` neues Secret + QR und pusht es an die
+      iPads → nächster Schüler scannt frisch; alte Screenshots werden ungültig.
+      „Ausgabe öffnen" zeigt den QR nicht mehr automatisch.
+- [x] Queue-Steuerung erweitert (2026-06-17b): pro Schüler „Trennen"
+      (`/api/disconnect` → zurück auf „Wartend", trennt Helfer/Session), global
+      „Alle Verbindungen … trennen" (`/api/disconnect-all`) und „Queue Status
+      zurücksetzen" (`/api/reset-queue`, alle → pending). Beide global mit
+      doppelter Bestätigung, dezenter Link-Stil. Alle bauen auf `end_student`.
 - [x] Schüler-UI: reduziert und selbsterklärend (`web/student.html`:
       Bestellliste, Scan, Abschluss) — 2026-06-15
 - [x] Harter Zugriffsentzug (Token-Invalidierung + WS-Close + Worker zu) —
