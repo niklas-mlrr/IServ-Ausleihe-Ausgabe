@@ -16,6 +16,7 @@ from ..sessions import (
     gen_join_secret,
     handle_commit,
     invalidate_session,
+    load_and_push_helper_student,
     load_and_push_paired_student,
     make_qr_data_url,
     send_display_update,
@@ -345,7 +346,7 @@ async def next_student(body: dict, session_id: str = Cookie(default=None)) -> di
     helper.student_id = student.student_id
 
     await hub.broadcast_host(state.state_snapshot())
-    asyncio.create_task(_load_and_push_student(state, hub, student, helper))
+    asyncio.create_task(load_and_push_helper_student(state, hub, student, helper))
 
     return {"ok": True, "student_id": student.student_id,
             "name": f"{student.lastname}, {student.firstname}"}
@@ -646,32 +647,4 @@ def _now():
     return datetime.now()
 
 
-async def _load_and_push_student(state, hub, student, helper) -> None:
-    """Im Hintergrund: Schülerinfo laden, Worker-Session öffnen, Scanner informieren."""
-    try:
-        info = await state.iserv.get_student_info(student.student_id, state.selected_schoolyear)
-    except Exception as e:
-        log.exception("Schülerinfo für %d konnte nicht geladen werden", student.student_id)
-        await hub.send_scanner(helper.token, {"type": "error", "msg": f"IServ-Fehler: {e}"})
-        return
-
-    # Schülerinfo SOFORT an den Scanner pushen — unabhängig vom (langsamen)
-    # Öffnen der Playwright-Worker-Session. Sonst sieht der Helfer den Schüler
-    # erst nach Abschluss von open_student bzw. erst nach manuellem Reload.
-    info["form"] = getattr(student, "form", "")
-    await hub.send_scanner(helper.token, {"type": "student_info", "student": info})
-    await hub.broadcast_host(state.state_snapshot())
-
-    if state.worker_pool:
-        try:
-            worker_session = await state.worker_pool.open_student(
-                student.student_id,
-                f"{student.lastname}, {student.firstname}",
-            )
-            state.student_worker_sessions[student.student_id] = worker_session
-        except Exception as e:
-            log.exception("Worker-Session für Schüler %d fehlgeschlagen", student.student_id)
-            await hub.send_scanner(
-                helper.token,
-                {"type": "error", "msg": f"Playwright-Fehler: {e}. Buchung manuell."},
-            )
+# Modus-A-Schülerladen liegt jetzt zentral in sessions.load_and_push_helper_student.

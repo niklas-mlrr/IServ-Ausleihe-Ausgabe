@@ -114,7 +114,7 @@ Sicherheitsanforderungen (aus Klärung 2026-06-12, „keine Sicherheitslücken")
 
 | # | Frage | Vorschlag / nächster Schritt |
 |---|-------|------------------------------|
-| O1 | Modus A: Wie kommt ein Schüler auf ein bestimmtes Helfer-Handy? | Vorschlag: Helfer tippt „Nächster Schüler" → Server vergibt den nächsten aus der alphabetischen Queue; Host kann manuell zuweisen/überschreiben. |
+| O1 | Modus A: Wie kommt ein Schüler auf ein bestimmtes Helfer-Handy? | **Umgesetzt (2026-06-17):** Helfer tippt den „Weiter"-Button (⏭) im Scanner → WS `{type:"next"}` → `sessions.advance_helper`: schließt den aktuellen Schüler ab (`end_student`, **kein** Browser-Submit) und vergibt den nächsten Pending aus der Queue. Host kann weiterhin via „Nächster Schüler" zuweisen. |
 | O2 | Erlaubt IServ mehrere parallele Sessions desselben Accounts? | **Geklärt (Spike B, 2026-06-12):** Ja — 3/3 parallele unabhängige Logins + 3/3 Cookie-Sharing-Contexts, keine Invalidierung. Context-Pool mit unabhängigen Contexts. |
 | O3 | Exaktes Verhalten der offiziellen Counter-Seite (DOM, Fehlerfälle, Schüler-Wechsel) | Spike A erkundet das mit Test-Account + ausgemustertem Buch. |
 | O4 | Welcher Drucker (USB am Laptop? Netzwerk? Treiberlage unter Windows)? | **Teil-adressiert (2026-06-15):** Druck-Service gebaut (`server/printing.py`, Backends `file`/`lp`/`sumatra`/`win-default`/`auto`), read-only PDF-Abruf via `get_loan_slip_pdf`. Echter Silent-Print am Zielgerät (= Spike C) noch offen → `docs/test_status.md`, `docs/deployment.md`. |
@@ -163,6 +163,14 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
       Wechsel resettet Queue/Klasse mit Active-Session-Guard. Schuljahr wird durch
       Klassen-/Schüler-/Karteiabrufe durchgereicht.
 - [x] Helfer-Scanner-UI: Token-basiert, Schüleranzeige (angemeldet/bezahlt/Bücher), Scan-Feedback — 2026-06-12
+- [x] Scanner-„Weiter"-Button (⏭): Helfer schließt aktuellen Schüler ab + lädt
+      nächsten aus der Queue selbst (O1) — WS `{type:"next"}` → `advance_helper`;
+      **kein** Browser-Submit (`end_student`→`release_worker`→`page.close()`).
+      Schüler verschwindet sofort, Statuszeile „Wird geladen…" — 2026-06-17.
+      Status-Push jetzt **vor** Worker-Aufbau (sofort sichtbar statt erst nach
+      Reload); Modus-A-Laden zentral in `sessions.load_and_push_helper_student`.
+      Scanner-Statuszeile auf Kamerafeld-Breite, flankiert von Drucker-Button
+      (Platzhalter) + Weiter-Button; Status-Punkt entfernt.
 - [x] Playwright-Worker: Context-Pool (N unabhängige Logins), Schülerkartei laden, Barcode staged (kein Submit) — 2026-06-12
 - [x] Recovery (Re-Login bei Session-Ablauf) — 2026-06-15 (`automation/worker.py`, deterministisch getestet via `automation/recovery_test.py`)
 - [x] E2E-Smoke headless (read-only): voller Modus-A-Flow Host→Scanner→Worker→Kartei→staged — 2026-06-15 (`automation/e2e_smoke.py`)

@@ -37,6 +37,18 @@
       *Server nach Route-Änderung neu starten — `reload=False`; ein POST auf eine
       noch nicht registrierte Route liefert 405 (StaticFiles-Catch-all), nicht 404.*
 
+### Neu 2026-06-17 (Scanner: Weiter-Button + Statuszeilen-Layout)
+
+- [ ] **Weiter-Button (⏭) am Gerät** (`scan.html`, nur Helfer): schließt den
+      aktuellen Schüler ab und lädt den nächsten aus der Queue; alter Schüler
+      verschwindet **sofort**, Statuszeile zeigt „Wird geladen…", neuer Schüler
+      erscheint nach kurzem Laden. Leere Queue → „Warteschlange leer".
+      **Wichtig:** dabei darf im simulierten Browser nichts gebucht werden
+      (Worker-Page wird nur geschlossen, kein Submit).
+- [ ] **Statuszeilen-Layout:** Statuszeile nur so breit wie das Kamerafeld,
+      links Drucker-Button (Funktion folgt), rechts Weiter-Button; Name vertikal
+      mittig zu Klasse/Bezahlt; farbiger Status-Punkt in beiden Clients entfernt.
+
 ### Neu 2026-06-17 (Scanner: Dark/Light + Klasse + transparente Zeilen)
 
 - [ ] **Dark-/Light-Mode am Gerät** (`scan.html` + `student.html`): folgt

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Cookie, WebSocket, WebSocketDisconnect
 
 from ..hub import get_hub
 from ..sessions import (
+    advance_helper,
     end_student,
     gen_registration_code,
     handle_scan,
@@ -74,7 +75,15 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
     try:
         while True:
             raw = await websocket.receive_json()
-            if raw.get("type") != "scan":
+            mtype = raw.get("type")
+
+            if mtype == "next":
+                # Aktuellen Schüler abschließen (kein Browser-Submit) und
+                # nächsten Wartenden auf diesen Helfer setzen.
+                await advance_helper(state, hub, helper)
+                continue
+
+            if mtype != "scan":
                 continue
 
             barcode = str(raw.get("value", "")).strip()
