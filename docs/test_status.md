@@ -139,15 +139,17 @@
 ## Unit-Tests (pytest, `uv run pytest`)
 
 Reine Logik, kein IServ/Playwright/Server — schnell + produktionsneutral, als
-Regressions-Netz und QS-Beleg. **44 Tests, grün (2026-06-18).** Coverage
+Regressions-Netz und QS-Beleg. **50 Tests, grün (2026-06-18).** Coverage
 (`uv run pytest`, jetzt mit `pytest-cov` als dev-dep + `--cov=server` in
-`addopts`): **37 %** gesamt (vorher 20 %); Kernlogik deutlich höher —
-`sessions.py` 49 %, `state.py` 92 %, `routes/api.py` 34 %, `config.py` 98 %.
+`addopts`): **39 %** gesamt (vorher 37 % / initial 20 %); Kernlogik deutlich
+höher — `hub.py` 93 %, `state.py` 92 %, `sessions.py` 49 %, `routes/api.py`
+34 %, `config.py` 98 %.
 Bewusst niedrig bleiben IServ-/Playwright-/Wiring-Module (`iserv_client.py`,
 `routes/ws.py`, `app.py`, `main.py`) — die decken die E2E-Skripte V3–V7 ab.
 
 | Datei | Deckt ab |
 |-------|----------|
+| `tests/test_hub.py` | WS-Verteiler: `broadcast_host` (Auslieferung + tote Host-Sockets entfernt), `queue_update` nur an unzugewiesene Scanner, `broadcast_queue_size`/`send_scanner` lösen tote Scanner-Sockets (`ws=None`, kein Leak), no-op bei unbekanntem Token |
 | `tests/test_ratelimit.py` | Drossel (allow/throttle, Fenster-Ablauf, pro-IP, sweep) |
 | `tests/test_booking_gate.py` | Buchungs-Gate: ohne Flag kein Worker-/Enter-Zugriff |
 | `tests/test_sessions.py` | Session-Lebenszyklus, Token/Code-Eindeutigkeit, harte Invalidierung |
