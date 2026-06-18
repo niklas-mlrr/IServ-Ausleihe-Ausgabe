@@ -75,7 +75,7 @@ Druck auf macOS: `PRINT_BACKEND=auto` nutzt automatisch `lp`/CUPS (vorinstallier
 ### Windows (Ausleihe-Laptop)
 ```powershell
 # 1) uv installieren (PowerShell)
-irm https://astral.sh/uv/install.ps1 | iex
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 
 ```
 -> Neues Terminal öffnen
