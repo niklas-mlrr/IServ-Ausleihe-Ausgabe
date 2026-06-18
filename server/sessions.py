@@ -182,11 +182,15 @@ async def end_student(
     *,
     queue_status: str,
     session_state: str,
+    broadcast: bool = True,
 ) -> None:
     """Schüler beenden (Abschluss/Skip/Abbruch) für Modus A UND B.
 
     Setzt den Queue-Status, löst die Helfer-Zuordnung (Modus A) und entwertet
     eine etwaige Modus-B-Session hart. Schließt in jedem Fall den Worker-Context.
+
+    `broadcast=False` unterdrückt den Host-Snapshot-Push — für Batch-Aufrufe
+    (disconnect-all/reset-queue), die am Ende einmal selbst broadcasten.
     """
     student = state.find_student(student_id)
     if student:
@@ -204,7 +208,8 @@ async def end_student(
         if worker:
             release_worker(state, worker)
 
-    await hub.broadcast_host(state.state_snapshot())
+    if broadcast:
+        await hub.broadcast_host(state.state_snapshot())
 
 
 async def load_and_push_helper_student(state: AppState, hub, student, helper) -> None:

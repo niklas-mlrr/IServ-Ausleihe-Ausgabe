@@ -117,6 +117,29 @@ def _print_win_default(tmp_pdf: Path) -> dict:
     return {"ok": True, "backend": "win-default", "detail": "an Standard-PDF-Handler gesendet"}
 
 
+def cleanup_stale_print_tempfiles(max_age_h: float = 6.0) -> int:
+    """Liegengebliebene Leihschein-Temp-PDFs aus dem System-Temp-Verzeichnis räumen.
+
+    Das `win-default`-Backend (`os.startfile(..., "print")`) kann seine Temp-Datei
+    nicht löschen, weil der verknüpfte PDF-Handler sie evtl. noch braucht — über
+    einen Ausgabetag sammeln sich so `leihschein_*.pdf` an. Beim Serverstart
+    (siehe app.lifespan) räumen wir alte Reste best-effort weg. Gibt die Anzahl
+    der gelöschten Dateien zurück."""
+    tmp = Path(tempfile.gettempdir())
+    cutoff = datetime.now().timestamp() - max_age_h * 3600
+    removed = 0
+    for p in tmp.glob("leihschein_*.pdf"):
+        try:
+            if p.stat().st_mtime < cutoff:
+                p.unlink(missing_ok=True)
+                removed += 1
+        except OSError:
+            continue
+    if removed:
+        log.info("%d liegengebliebene Leihschein-Temp-PDF(s) entfernt", removed)
+    return removed
+
+
 async def print_pdf(
     data: bytes,
     *,

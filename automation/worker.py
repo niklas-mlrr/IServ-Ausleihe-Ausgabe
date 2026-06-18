@@ -18,7 +18,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from pathlib import Path
 
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeout, async_playwright
 
@@ -376,6 +375,9 @@ class WorkerPool:
         await page.click('button[type="submit"]')
         await page.wait_for_load_state("domcontentloaded")
         await page.wait_for_timeout(2500)
-        if "login" in page.url and "auth" in page.url:
+        # Noch auf einer Login-/Auth-Seite → Login fehlgeschlagen. Konsistent zu
+        # _on_login_page() (OR statt AND): ein Fehl-Login landet u. U. nur auf
+        # iserv/login ODER iserv/auth, nicht zwingend auf beidem.
+        if "iserv/login" in page.url or "iserv/auth" in page.url:
             raise RuntimeError(f"[{label}] Login fehlgeschlagen (noch auf {page.url})")
         log.debug("[%s] Login OK", label)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from datetime import datetime
 
 from fastapi import APIRouter, Cookie, HTTPException, Request, Response
 
@@ -39,6 +40,20 @@ def _require_host(session_id: str | None = Cookie(default=None)) -> str:
     return session_id
 
 
+# Auto-erkannte LAN-IP einmalig cachen — ändert sich im Betrieb nicht und
+# spart pro QR-Request einen UDP-Socket + DNS-Lookup (_local_ipv4s).
+_auto_lan_ip: str | None = None
+_auto_lan_ip_resolved = False
+
+
+def _detect_lan_ip() -> str | None:
+    global _auto_lan_ip, _auto_lan_ip_resolved
+    if not _auto_lan_ip_resolved:
+        _auto_lan_ip = next(iter(_local_ipv4s()), None)
+        _auto_lan_ip_resolved = True
+    return _auto_lan_ip
+
+
 def _base_url(request: Request) -> str:
     host = request.headers.get("host", "localhost")
     # Host-Rechner ruft die Seite oft über localhost auf (Server läuft lokal).
@@ -49,7 +64,7 @@ def _base_url(request: Request) -> str:
         cfg = get_config()
         # Expliziter Override (HOST_IP) vor der heuristischen Auto-Erkennung —
         # bei mehreren Interfaces wählt local_ips[0] sonst evtl. das falsche Netz.
-        new_host = cfg.host_ip or next(iter(_local_ipv4s()), None)
+        new_host = cfg.host_ip or _detect_lan_ip()
         if new_host:
             if not port:
                 port = str(cfg.port)
@@ -418,8 +433,11 @@ async def disconnect_all(session_id: str | None = Cookie(default=None)) -> dict:
     hub = get_hub()
     active_ids = [s.student_id for s in state.queue if s.status == "active"]
     for sid in active_ids:
-        await end_student(state, hub, sid, queue_status="pending", session_state="revoked")
-    # end_student broadcastet je Iteration bereits den finalen Zustand.
+        await end_student(state, hub, sid, queue_status="pending",
+                          session_state="revoked", broadcast=False)
+    # Einmal am Ende broadcasten statt pro Schüler (sonst N Snapshots).
+    if active_ids:
+        await hub.broadcast_host(state.state_snapshot())
     return {"ok": True, "count": len(active_ids)}
 
 
@@ -436,8 +454,11 @@ async def reset_queue(session_id: str | None = Cookie(default=None)) -> dict:
     hub = get_hub()
     changed = [s.student_id for s in state.queue if s.status != "pending"]
     for sid in changed:
-        await end_student(state, hub, sid, queue_status="pending", session_state="revoked")
-    # end_student broadcastet je Iteration bereits den finalen Zustand.
+        await end_student(state, hub, sid, queue_status="pending",
+                          session_state="revoked", broadcast=False)
+    # Einmal am Ende broadcasten statt pro Schüler (sonst N Snapshots).
+    if changed:
+        await hub.broadcast_host(state.state_snapshot())
     return {"ok": True, "count": len(changed)}
 
 
@@ -745,8 +766,8 @@ async def student_pair(body: dict, session_id: str | None = Cookie(default=None)
     # Binden — ab jetzt gilt der session_token als freigegeben.
     session.student_id = student_id
     session.state = "paired"
-    session.paired_at = _now()
-    session.last_activity = _now()
+    session.paired_at = datetime.now()
+    session.last_activity = datetime.now()
     session.payment_overridden = bool(not info.get("paid") and override)
     student.status = "active"
 
@@ -774,15 +795,6 @@ async def _rotate_join_secret(state) -> None:
     state.modus_b_join_url = f"{base}?j={state.modus_b_join_secret}"
     state.modus_b_join_qr = make_qr_data_url(state.modus_b_join_url)
     await broadcast_displays(state)
-
-
-# ---------------------------------------------------------------------------
-# Interne Helpers
-# ---------------------------------------------------------------------------
-
-def _now():
-    from datetime import datetime
-    return datetime.now()
 
 
 # Modus-A-Schülerladen liegt jetzt zentral in sessions.load_and_push_helper_student.

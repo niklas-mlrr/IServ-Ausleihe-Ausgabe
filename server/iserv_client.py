@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date
+from datetime import date, datetime
 from urllib.parse import quote
+
+# Default-Schuljahr neu bestimmen, wenn der Cache älter als das ist. Fängt den
+# upcoming→running-Übergang ab, falls der Server über einen Schuljahresbeginn
+# hinweg läuft, ohne pro Anfrage neu aufzulösen.
+_DEFAULT_SY_TTL_S = 6 * 3600
 
 from ausleihe import AusleiheClient
 
@@ -29,8 +34,10 @@ class IsServClient:
         self._client: AusleiheClient | None = None
         # ISBN -> Series, einmalig (read-only GET /series) für Titel + Fach.
         self._series_map: dict | None = None
-        # Default-Schuljahr (laufend, sonst nächstes); lazy + prozessweit gecacht.
+        # Default-Schuljahr (laufend, sonst nächstes); lazy gecacht mit TTL, damit
+        # der upcoming→running-Übergang nicht erst nach einem Neustart greift.
         self._default_sy_id: str | None = None
+        self._default_sy_at: datetime | None = None
 
     def _get_client(self) -> AusleiheClient:
         if self._client is None:
@@ -73,11 +80,17 @@ class IsServClient:
         return client.schoolyears.get_current()["id"]
 
     def _resolve_sy(self, client: AusleiheClient, schoolyear: str | None) -> str:
-        """Explizit gewähltes Schuljahr oder das gecachte Default-Jahr."""
+        """Explizit gewähltes Schuljahr oder das gecachte Default-Jahr (mit TTL)."""
         if schoolyear:
             return schoolyear
-        if self._default_sy_id is None:
+        now = datetime.now()
+        stale = (
+            self._default_sy_at is None
+            or (now - self._default_sy_at).total_seconds() > _DEFAULT_SY_TTL_S
+        )
+        if self._default_sy_id is None or stale:
             self._default_sy_id = self._pick_default(self._active_years(client), client)
+            self._default_sy_at = now
         return self._default_sy_id
 
     async def get_schoolyears(self) -> list[dict]:
@@ -92,6 +105,7 @@ class IsServClient:
             years = self._active_years(client)
             default_id = self._pick_default(years, client)
             self._default_sy_id = default_id  # Cache mitnehmen
+            self._default_sy_at = datetime.now()
             out = [
                 {
                     "id": y["id"],

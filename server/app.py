@@ -28,6 +28,13 @@ async def lifespan(app: FastAPI):
 
     state.iserv = IsServClient(cfg.iserv_domain, cfg.iserv_username, cfg.iserv_password)
 
+    # Liegengebliebene Druck-Temp-PDFs vom letzten Lauf wegräumen (win-default-Leak).
+    from .printing import cleanup_stale_print_tempfiles
+    try:
+        cleanup_stale_print_tempfiles()
+    except Exception:
+        log.exception("Aufräumen alter Druck-Temp-PDFs fehlgeschlagen (non-fatal)")
+
     from automation.worker import WorkerPool
     pool = WorkerPool(
         n=cfg.worker_contexts,

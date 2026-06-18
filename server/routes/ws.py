@@ -119,7 +119,11 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
     except WebSocketDisconnect:
         pass
     finally:
-        helper.ws = None
+        # WS-Referenz nur lösen, wenn es noch unsere Verbindung ist — bei einem
+        # Reconnect hat die neue Verbindung helper.ws bereits übernommen
+        # (analog ws_student), sonst würde der alte Disconnect sie wegräumen.
+        if helper.ws is websocket:
+            helper.ws = None
         try:
             await hub.broadcast_host(state.state_snapshot())
         except Exception:
