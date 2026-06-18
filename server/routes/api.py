@@ -439,6 +439,29 @@ async def reset_queue(session_id: str = Cookie(default=None)) -> dict:
     return {"ok": True, "count": len(changed)}
 
 
+@router.post("/api/clear-queue")
+async def clear_queue(session_id: str = Cookie(default=None)) -> dict:
+    """Queue komplett LEEREN: alle Schüler aus der Queue entfernen.
+
+    Anders als `/api/reset-queue` (setzt nur den Status zurück) wird die Queue
+    hier ganz geleert. Laufende Live-Sessions werden sauber beendet und
+    Helfer-Zuordnungen gelöst (analog zu `/api/select-class`).
+    """
+    _require_host(session_id)
+    state = get_state()
+    hub = get_hub()
+    count = len(state.queue)
+    for sess in list(state.student_sessions.values()):
+        if sess.state in ("pending_pairing", "paired"):
+            await invalidate_session(state, sess, "revoked", reason="queue-leeren")
+    for helper in state.helper_sessions.values():
+        helper.student_id = None
+    state.active_form = None
+    state.queue = []
+    await hub.broadcast_host(state.state_snapshot())
+    return {"ok": True, "count": count}
+
+
 @router.post("/api/finish")
 async def finish_student(body: dict, session_id: str = Cookie(default=None)) -> dict:
     _require_host(session_id)

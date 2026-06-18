@@ -5,18 +5,47 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Ausleihe-Host</title>
   <style>
+    /* Farb-Palette als CSS-Variablen — Dark als Default, Light per
+       prefers-color-scheme (System-Einstellung) weiter unten überschrieben.
+       Saturierte Akzente (Buttons danger/success, Badges, Dots) bleiben fix. */
+    :root {
+      --bg: #111;
+      --text: #eee;
+      --surface: #1c1c1e;       /* Karten, Status-Bar, Modal, Toast, Tabellenkopf */
+      --surface-2: #2a2a2c;     /* Inputs, Secondary-Button, Badge-pending, Hover-Flächen */
+      --surface-3: #3a3a3c;     /* Borders, Input-Border, Secondary-Hover */
+      --border: #2a2a2c;
+      --border-faint: #1e1e1e;
+      --input-bg: #2a2a2c;
+      --alert-bg: #2a1a1a;
+      color-scheme: dark;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f2f2f7;
+        --text: #1c1c1e;
+        --surface: #ffffff;
+        --surface-2: #e9e9ee;
+        --surface-3: #d2d2d8;
+        --border: #dcdce1;
+        --border-faint: #ececf0;
+        --input-bg: #ffffff;
+        --alert-bg: #ffe5e3;
+        color-scheme: light;
+      }
+    }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #111;
-      color: #eee;
+      background: var(--bg);
+      color: var(--text);
       min-height: 100vh;
       padding: 24px 16px;
     }
     h1 { font-size: 1.4rem; margin-bottom: 20px; opacity: 0.85; }
     h2 { font-size: 1rem; font-weight: 600; margin: 20px 0 8px; opacity: 0.7; text-transform: uppercase; letter-spacing: .05em; }
     .card {
-      background: #1c1c1e;
+      background: var(--surface);
       border-radius: 10px;
       padding: 16px;
       margin-bottom: 16px;
@@ -25,9 +54,9 @@
     input, select {
       width: 100%;
       padding: 10px 12px;
-      background: #2a2a2c;
-      color: #eee;
-      border: 1px solid #3a3a3c;
+      background: var(--input-bg);
+      color: var(--text);
+      border: 1px solid var(--surface-3);
       border-radius: 8px;
       font-size: 1rem;
       margin-bottom: 10px;
@@ -46,27 +75,36 @@
     button:disabled { background: #444; cursor: not-allowed; }
     button.danger { background: #ff3b30; }
     button.danger:hover { background: #d43028; }
-    button.secondary { background: #3a3a3c; }
-    button.secondary:hover { background: #4a4a4c; }
+    button.secondary { background: var(--surface-3); color: var(--text); }
+    button.secondary:hover { background: var(--surface-2); }
     button.success { background: #30d158; color: #000; }
     button.success:hover { background: #28b84e; }
-    /* Dezenter Text-Link-Stil für selten genutzte, „gefährliche" Aktionen */
-    button.link-muted {
-      background: none; border: none; padding: 2px 4px; border-radius: 0;
-      color: #777; font-size: 0.75rem; text-decoration: underline; transition: color .15s;
+    /* Dezente Outline-Buttons für selten genutzte Wartungs-/„gefährliche" Aktionen */
+    button.ghost {
+      background: transparent; border: 1px solid var(--surface-3);
+      color: var(--text); opacity: .72; padding: 6px 12px;
+      border-radius: 8px; font-size: 0.8rem;
+      display: inline-flex; align-items: center; gap: 6px;
+      transition: opacity .15s, background .15s, border-color .15s, color .15s;
     }
-    button.link-muted:hover { background: none; color: #ff6b6b; }
-    .tabs { display: flex; gap: 4px; margin-bottom: 14px; border-bottom: 1px solid #2a2a2c; }
+    button.ghost:hover { background: var(--surface-2); opacity: 1; }
+    /* Destruktive Variante: erst beim Hover rot — signalisiert „Vorsicht" */
+    button.ghost.warn:hover {
+      border-color: #ff3b30; color: #ff6b6b;
+      background: color-mix(in srgb, #ff3b30 10%, transparent);
+    }
+    button.ghost .ghost-ico { font-size: .95em; opacity: .8; }
+    .tabs { display: flex; gap: 4px; margin-bottom: 14px; border-bottom: 1px solid var(--border); }
     .tab { background: transparent; color: #888; padding: 8px 14px; border-radius: 8px 8px 0 0; font-size: 0.9rem; }
-    .tab:hover { background: #2a2a2c; }
-    .tab.active { background: #2a2a2c; color: #eee; }
+    .tab:hover { background: var(--surface-2); }
+    .tab.active { background: var(--surface-2); color: var(--text); }
     .hint { font-size: 0.78rem; opacity: 0.45; margin-top: 8px; }
     .row { display: flex; gap: 8px; align-items: center; }
     .row > * { flex: 1 }
     .row > button { flex: 0 0 auto; }
     table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-    th { text-align: left; padding: 6px 8px; opacity: 0.5; font-weight: 500; border-bottom: 1px solid #2a2a2c; }
-    td { padding: 7px 8px; border-bottom: 1px solid #1e1e1e; }
+    th { text-align: left; padding: 6px 8px; opacity: 0.5; font-weight: 500; border-bottom: 1px solid var(--border); }
+    td { padding: 7px 8px; border-bottom: 1px solid var(--border-faint); }
     tr:last-child td { border-bottom: none; }
     .badge {
       display: inline-block;
@@ -75,11 +113,11 @@
       font-size: 0.75rem;
       font-weight: 600;
     }
-    .badge-pending  { background: #2c2c2e; color: #888; }
+    .badge-pending  { background: var(--surface-2); color: #888; }
     .badge-active   { background: #0a3d6b; color: #5ac8fa; }
     .badge-done     { background: #1a3a1a; color: #30d158; }
     .badge-skipped  { background: #3a1a1a; color: #ff6b6b; }
-    .code-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #1e1e1e; flex-wrap: wrap; }
+    .code-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border-faint); flex-wrap: wrap; }
     .code-row:last-child { border-bottom: none; }
     .code-val { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1.25rem; font-weight: 700; letter-spacing: .12em; color: #5ac8fa; }
     .code-meta { opacity: .55; font-size: .78rem; }
@@ -110,7 +148,7 @@
       position: sticky; top: 0; z-index: 50;
       display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
       max-width: 1125px; margin: 0 auto 18px;
-      background: #1c1c1e; border: 1px solid #2a2a2c;
+      background: var(--surface); border: 1px solid var(--border);
       border-radius: 10px; padding: 10px 16px;
     }
     #status-bar .sb-item { font-size: .85rem; opacity: .8; white-space: nowrap; }
@@ -128,12 +166,17 @@
     }
     details#setup-col > summary {
       cursor: pointer; font-size: .8rem; text-transform: uppercase;
-      letter-spacing: .06em; opacity: .55; margin: 0 4px 10px;
+      letter-spacing: .06em; margin: 0 4px 10px;
       list-style: none; user-select: none;
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 12px; border-radius: 8px;
+      background: var(--surface-2); border: 1px solid var(--surface-3);
+      color: var(--text); opacity: .85; transition: background .15s, opacity .15s;
     }
+    details#setup-col > summary:hover { opacity: 1; background: var(--surface-3); }
     details#setup-col > summary::-webkit-details-marker { display: none; }
-    details#setup-col > summary::before { content: '▾ '; }
-    details#setup-col:not([open]) > summary::before { content: '▸ '; }
+    details#setup-col > summary::before { content: '▾'; font-size: 1.3em; line-height: 1; }
+    details#setup-col:not([open]) > summary::before { content: '▸'; }
     /* nowrap: sonst kollabiert die Tabellenspalte (auto-layout) auf Breite eines Buttons */
     .row-actions { display: flex; gap: 6px; flex-wrap: nowrap; align-items: center; }
     #queue-table td:last-child { white-space: nowrap; }
@@ -147,7 +190,7 @@
     #toast {
       position: fixed; bottom: 20px; right: 20px; z-index: 200;
       max-width: 360px; padding: 12px 16px; border-radius: 10px;
-      background: #2a2a2c; color: #eee; font-size: .9rem;
+      background: var(--surface-2); color: var(--text); font-size: .9rem;
       box-shadow: 0 6px 24px rgba(0, 0, 0, .5);
       opacity: 0; transform: translateY(8px); pointer-events: none;
       transition: opacity .2s, transform .2s;
@@ -157,9 +200,9 @@
        border-collapse:separate, sonst bleibt der th-Hintergrund nicht deckend (Chrome-Bug). */
     #queue-table { border-collapse: separate; border-spacing: 0; }
     /* opacity:1 (statt der globalen th-Regel mit .5) — sonst scheinen Zeilen durch den Kopf */
-    #queue-table thead th { position: sticky; top: 0; background: #1c1c1e; z-index: 2; opacity: 1; color: #777; }
+    #queue-table thead th { position: sticky; top: 0; background: var(--surface); z-index: 2; opacity: 1; color: #777; }
     /* Status-Bar Alarm-Zustand: keine Worker -> ganze Leiste rot tönen */
-    #status-bar.alert { border-color: #ff3b30; background: #2a1a1a; }
+    #status-bar.alert { border-color: #ff3b30; background: var(--alert-bg); }
     /* Bestätigungs-Dialog (ersetzt native confirm-Ketten) */
     .modal {
       display: none; position: fixed; inset: 0; z-index: 150;
@@ -167,7 +210,7 @@
     }
     .modal.show { display: flex; }
     .modal-box {
-      background: #1c1c1e; border: 1px solid #3a3a3c; border-radius: 12px;
+      background: var(--surface); border: 1px solid var(--surface-3); border-radius: 12px;
       padding: 22px; max-width: 420px; width: calc(100% - 32px);
     }
     .modal-box p { font-size: .95rem; line-height: 1.45; white-space: pre-line; margin-bottom: 18px; }
@@ -297,10 +340,11 @@
 
   <!-- Schüler-Queue -->
   <div class="card">
-    <div class="row" style="align-items:center">
-      <h2 style="flex:1;margin:0">Schüler-Queue <span id="queue-count" style="opacity:.5;font-weight:400"></span></h2>
-      <button class="link-muted" onclick="resetQueue()">Queue Status zurücksetzen</button>
-      <button class="link-muted" onclick="disconnectAll()">Alle Verbindungen zu Helfern &amp; Schülern trennen</button>
+    <h2 style="margin:0 0 8px">Schüler-Queue <span id="queue-count" style="opacity:.5;font-weight:400"></span></h2>
+    <div class="row" style="align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px">
+      <button class="ghost" onclick="resetQueue()"><span class="ghost-ico">↺</span> Status zurücksetzen</button>
+      <button class="ghost warn" onclick="clearQueue()"><span class="ghost-ico">✕</span> Queue leeren</button>
+      <button class="ghost warn" onclick="disconnectAll()"><span class="ghost-ico">⏏</span> Alle Verbindungen trennen</button>
     </div>
     <div class="table-scroll">
       <table id="queue-table">
@@ -554,6 +598,22 @@
     const r = await fetch('/api/reset-queue', { method: 'POST' });
     if (r.ok) { const d = await r.json().catch(() => ({})); showMsg(`Queue zurückgesetzt (${d.count || 0} geändert)`); }
     else { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Zurücksetzen fehlgeschlagen'); }
+  }
+
+  // Queue komplett LEEREN (alle Schüler entfernen). Bewusst zweistufige
+  // Bestätigung, da die ganze Queue verloren geht und neu aufgebaut werden muss.
+  async function clearQueue() {
+    const n = (state.queue || []).length;
+    if (!n) { showMsg('Queue ist bereits leer'); return; }
+    if (!await confirmDialog(
+      `Wirklich die GESAMTE Queue leeren?\n\nAlle ${n} Schüler werden entfernt — die Queue muss danach neu aufgebaut werden (Klasse/Schüler erneut wählen).`,
+      'Weiter')) return;
+    if (!await confirmDialog(
+      'Letzte Bestätigung: Queue endgültig leeren?\n\nLaufende Live-Sessions werden getrennt. Dieser Schritt lässt sich nicht rückgängig machen.',
+      'Queue leeren')) return;
+    const r = await fetch('/api/clear-queue', { method: 'POST' });
+    if (r.ok) { const d = await r.json().catch(() => ({})); showMsg(`Queue geleert (${d.count || 0} entfernt)`); }
+    else { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Leeren fehlgeschlagen'); }
   }
 
   async function finishStudent(studentId) {
