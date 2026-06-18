@@ -116,6 +116,19 @@ def release_worker(state: AppState, worker) -> None:
         asyncio.create_task(worker.close())
 
 
+def set_worker_session(state: AppState, student_id: int, worker_session) -> None:
+    """Worker-Session eines Schülers registrieren — vorhandene zuvor freigeben.
+
+    Ohne diese Freigabe würde ein Überschreiben (z. B. zwei `open_student`-Läufe
+    für denselben Schüler) den alten Context aus dem Pool verlieren — bei nur
+    wenigen Contexts (Default 2) sind so nach kurzer Zeit alle weg.
+    """
+    old = state.student_worker_sessions.get(student_id)
+    if old is not None and old is not worker_session:
+        release_worker(state, old)
+    state.student_worker_sessions[student_id] = worker_session
+
+
 # ---------------------------------------------------------------------------
 # Modus-B-Session-Lebenszyklus
 # ---------------------------------------------------------------------------
@@ -217,7 +230,7 @@ async def load_and_push_helper_student(state: AppState, hub, student, helper) ->
                 student.student_id,
                 f"{student.lastname}, {student.firstname}",
             )
-            state.student_worker_sessions[student.student_id] = worker_session
+            set_worker_session(state, student.student_id, worker_session)
         except Exception as e:  # noqa: BLE001
             log.exception("Worker-Session für Schüler %d fehlgeschlagen", student.student_id)
             await hub.send_scanner(
@@ -282,7 +295,7 @@ async def load_and_push_paired_student(
                 student.student_id,
                 f"{student.lastname}, {student.firstname}",
             )
-            state.student_worker_sessions[student.student_id] = worker_session
+            set_worker_session(state, student.student_id, worker_session)
         except Exception as e:  # noqa: BLE001
             log.exception("Worker-Session (Modus B) für %d fehlgeschlagen", student.student_id)
             if session.ws is not None:
@@ -337,6 +350,7 @@ async def sweep_expired_sessions() -> None:
         await asyncio.sleep(30)
         join_limiter.sweep()  # Rate-Limit-Buckets aufräumen (kein unbegrenztes Wachstum)
         state = get_state()
+        state.sweep_host_sessions(cfg.host_session_ttl_s)  # abgelaufene Host-Logins entfernen
         now = datetime.now()
         expired: list[StudentSessionB] = []
         for session in list(state.student_sessions.values()):

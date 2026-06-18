@@ -23,7 +23,8 @@ router = APIRouter()
 @router.websocket("/ws/host")
 async def ws_host(websocket: WebSocket, session_id: str | None = Cookie(default=None)) -> None:
     state = get_state()
-    if not session_id or session_id not in state.host_session_ids:
+    from ..config import get_config
+    if not state.is_host_session_valid(session_id, get_config().host_session_ttl_s):
         await websocket.close(code=4003, reason="Nicht authentifiziert")
         return
 
@@ -53,6 +54,14 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
 
     await websocket.accept()
     helper = state.helper_sessions[token]
+    # Reconnect (Seite erneut geöffnet): die alte Verbindung sauber schließen,
+    # statt sie verwaist offen zu lassen.
+    old_ws = helper.ws
+    if old_ws is not None and old_ws is not websocket:
+        try:
+            await old_ws.close(code=4009, reason="Neue Verbindung")
+        except Exception:
+            pass
     helper.ws = websocket
 
     # Schüler bereits zugewiesen? Info sofort schicken.
@@ -166,6 +175,13 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
         return
 
     await websocket.accept()
+    # Reconnect: vorherige Verbindung derselben Session sauber schließen.
+    old_ws = session.ws
+    if old_ws is not None and old_ws is not websocket:
+        try:
+            await old_ws.close(code=4009, reason="Neue Verbindung")
+        except Exception:
+            pass
     session.ws = websocket
     session.last_activity = datetime.now()
 

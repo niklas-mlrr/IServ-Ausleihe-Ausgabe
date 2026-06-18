@@ -34,7 +34,7 @@ router = APIRouter()
 
 def _require_host(session_id: str | None = Cookie(default=None)) -> str:
     state = get_state()
-    if not session_id or session_id not in state.host_session_ids:
+    if not state.is_host_session_valid(session_id, get_config().host_session_ttl_s):
         raise HTTPException(403, "Nicht eingeloggt")
     return session_id
 
@@ -46,11 +46,13 @@ def _base_url(request: Request) -> str:
     # stattdessen die LAN-IP des Host-Rechners einsetzen.
     hostname, _, port = host.partition(":")
     if hostname in ("localhost", "127.0.0.1", "::1", ""):
-        local_ips = _local_ipv4s()
-        if local_ips:
-            new_host = local_ips[0]
+        cfg = get_config()
+        # Expliziter Override (HOST_IP) vor der heuristischen Auto-Erkennung —
+        # bei mehreren Interfaces wählt local_ips[0] sonst evtl. das falsche Netz.
+        new_host = cfg.host_ip or next(iter(_local_ipv4s()), None)
+        if new_host:
             if not port:
-                port = str(get_config().port)
+                port = str(cfg.port)
             host = f"{new_host}:{port}" if port else new_host
     return f"https://{host}"
 
@@ -65,7 +67,7 @@ async def login(body: dict, response: Response) -> dict:
     if body.get("password") != cfg.host_password:
         raise HTTPException(403, "Falsches Passwort")
     sid = str(uuid.uuid4())
-    get_state().host_session_ids.add(sid)
+    get_state().add_host_session(sid)
     # secure=True: Cookie nur über HTTPS (der Server läuft ausschließlich über TLS).
     response.set_cookie("session_id", sid, httponly=True, samesite="lax", secure=True)
     return {"ok": True}
@@ -74,7 +76,7 @@ async def login(body: dict, response: Response) -> dict:
 @router.post("/api/logout")
 async def logout(response: Response, session_id: str | None = Cookie(default=None)) -> dict:
     if session_id:
-        get_state().host_session_ids.discard(session_id)
+        get_state().remove_host_session(session_id)
     response.delete_cookie("session_id")
     return {"ok": True}
 
@@ -84,7 +86,7 @@ async def logout(response: Response, session_id: str | None = Cookie(default=Non
 # ---------------------------------------------------------------------------
 
 @router.get("/api/schoolyears")
-async def get_schoolyears(session_id: str = Cookie(default=None)) -> dict:
+async def get_schoolyears(session_id: str | None = Cookie(default=None)) -> dict:
     """Auswählbare Schuljahre + aktuell gewähltes (None = aktuelles Jahr)."""
     _require_host(session_id)
     state = get_state()
@@ -97,7 +99,7 @@ async def get_schoolyears(session_id: str = Cookie(default=None)) -> dict:
 
 
 @router.post("/api/select-schoolyear")
-async def select_schoolyear(body: dict, session_id: str = Cookie(default=None)) -> dict:
+async def select_schoolyear(body: dict, session_id: str | None = Cookie(default=None)) -> dict:
     """Schuljahr wählen. Setzt die Queue/Klasse zurück, da Klassen jahresspezifisch sind.
 
     `schoolyear=null` (oder leer) → aktuelles Schuljahr.
@@ -138,7 +140,7 @@ async def select_schoolyear(body: dict, session_id: str = Cookie(default=None)) 
 # ---------------------------------------------------------------------------
 
 @router.get("/api/classes")
-async def get_classes(session_id: str = Cookie(default=None)) -> dict:
+async def get_classes(session_id: str | None = Cookie(default=None)) -> dict:
     _require_host(session_id)
     state = get_state()
     try:
@@ -154,7 +156,7 @@ async def get_classes(session_id: str = Cookie(default=None)) -> dict:
 # ---------------------------------------------------------------------------
 
 @router.post("/api/select-class")
-async def select_class(body: dict, session_id: str = Cookie(default=None)) -> dict:
+async def select_class(body: dict, session_id: str | None = Cookie(default=None)) -> dict:
     _require_host(session_id)
     form = body.get("form", "").strip()
     if not form:
@@ -201,7 +203,7 @@ async def select_class(body: dict, session_id: str = Cookie(default=None)) -> di
 
 
 @router.get("/api/students-for-class")
-async def students_for_class(form: str, session_id: str = Cookie(default=None)) -> dict:
+async def students_for_class(form: str, session_id: str | None = Cookie(default=None)) -> dict:
     """Schülerliste einer Klasse für die Einzel-Auswahl (ohne die Queue anzufassen)."""
     _require_host(session_id)
     form = form.strip()
@@ -217,7 +219,7 @@ async def students_for_class(form: str, session_id: str = Cookie(default=None)) 
 
 
 @router.post("/api/add-student")
-async def add_student_to_queue(body: dict, session_id: str = Cookie(default=None)) -> dict:
+async def add_student_to_queue(body: dict, session_id: str | None = Cookie(default=None)) -> dict:
     """Einen einzelnen Schüler an die bestehende Queue anhängen (klassenübergreifend).
 
     Im Gegensatz zu `/api/select-class` wird die Queue NICHT ersetzt und es
@@ -262,7 +264,7 @@ TEST_STUDENTS = [
 
 
 @router.post("/api/add-test-students")
-async def add_test_students(session_id: str = Cookie(default=None)) -> dict:
+async def add_test_students(session_id: str | None = Cookie(default=None)) -> dict:
     """Die fest definierten Testschüler an die Queue anhängen (ohne IServ-Abfrage)."""
     _require_host(session_id)
     state = get_state()
@@ -294,7 +296,7 @@ async def add_test_students(session_id: str = Cookie(default=None)) -> dict:
 # ---------------------------------------------------------------------------
 
 @router.get("/api/state")
-async def get_state_endpoint(session_id: str = Cookie(default=None)) -> dict:
+async def get_state_endpoint(session_id: str | None = Cookie(default=None)) -> dict:
     _require_host(session_id)
     return get_state().state_snapshot()
 
@@ -304,7 +306,7 @@ async def get_state_endpoint(session_id: str = Cookie(default=None)) -> dict:
 # ---------------------------------------------------------------------------
 
 @router.post("/api/add-helper")
-async def add_helper(body: dict, request: Request, session_id: str = Cookie(default=None)) -> dict:
+async def add_helper(body: dict, request: Request, session_id: str | None = Cookie(default=None)) -> dict:
     _require_host(session_id)
     name = body.get("name", "Helfer").strip() or "Helfer"
     token = str(uuid.uuid4()).replace("-", "")[:16]
@@ -318,7 +320,7 @@ async def add_helper(body: dict, request: Request, session_id: str = Cookie(defa
 
 
 @router.delete("/api/helper/{token}")
-async def remove_helper(token: str, session_id: str = Cookie(default=None)) -> dict:
+async def remove_helper(token: str, session_id: str | None = Cookie(default=None)) -> dict:
     _require_host(session_id)
     state = get_state()
     helper = state.helper_sessions.pop(token, None)
@@ -338,7 +340,7 @@ async def remove_helper(token: str, session_id: str = Cookie(default=None)) -> d
 # ---------------------------------------------------------------------------
 
 @router.post("/api/next-student")
-async def next_student(body: dict, session_id: str = Cookie(default=None)) -> dict:
+async def next_student(body: dict, session_id: str | None = Cookie(default=None)) -> dict:
     _require_host(session_id)
     helper_token = body.get("helper_token", "").strip()
     state = get_state()
@@ -366,7 +368,7 @@ async def next_student(body: dict, session_id: str = Cookie(default=None)) -> di
 
 
 @router.post("/api/skip")
-async def skip_student(body: dict, session_id: str = Cookie(default=None)) -> dict:
+async def skip_student(body: dict, session_id: str | None = Cookie(default=None)) -> dict:
     _require_host(session_id)
     student_id = body.get("student_id")
     if student_id is None:
@@ -386,7 +388,7 @@ async def skip_student(body: dict, session_id: str = Cookie(default=None)) -> di
 
 
 @router.post("/api/disconnect")
-async def disconnect_student(body: dict, session_id: str = Cookie(default=None)) -> dict:
+async def disconnect_student(body: dict, session_id: str | None = Cookie(default=None)) -> dict:
     """Schüler von Helfer/Schüler-Session trennen und auf 'Wartend' zurücksetzen.
 
     Anders als /api/skip wird der Schüler NICHT übersprungen, sondern bleibt als
@@ -409,7 +411,7 @@ async def disconnect_student(body: dict, session_id: str = Cookie(default=None))
 
 
 @router.post("/api/disconnect-all")
-async def disconnect_all(session_id: str = Cookie(default=None)) -> dict:
+async def disconnect_all(session_id: str | None = Cookie(default=None)) -> dict:
     """Alle aktiven Verbindungen (Modus A + B) trennen, Schüler zurück auf 'Wartend'."""
     _require_host(session_id)
     state = get_state()
@@ -417,12 +419,12 @@ async def disconnect_all(session_id: str = Cookie(default=None)) -> dict:
     active_ids = [s.student_id for s in state.queue if s.status == "active"]
     for sid in active_ids:
         await end_student(state, hub, sid, queue_status="pending", session_state="revoked")
-    await hub.broadcast_host(state.state_snapshot())
+    # end_student broadcastet je Iteration bereits den finalen Zustand.
     return {"ok": True, "count": len(active_ids)}
 
 
 @router.post("/api/reset-queue")
-async def reset_queue(session_id: str = Cookie(default=None)) -> dict:
+async def reset_queue(session_id: str | None = Cookie(default=None)) -> dict:
     """Queue-Status zurücksetzen: ALLE Schüler zurück auf 'pending'.
 
     Trennt aktive Verbindungen (wie disconnect) und setzt zusätzlich
@@ -435,12 +437,12 @@ async def reset_queue(session_id: str = Cookie(default=None)) -> dict:
     changed = [s.student_id for s in state.queue if s.status != "pending"]
     for sid in changed:
         await end_student(state, hub, sid, queue_status="pending", session_state="revoked")
-    await hub.broadcast_host(state.state_snapshot())
+    # end_student broadcastet je Iteration bereits den finalen Zustand.
     return {"ok": True, "count": len(changed)}
 
 
 @router.post("/api/clear-queue")
-async def clear_queue(session_id: str = Cookie(default=None)) -> dict:
+async def clear_queue(session_id: str | None = Cookie(default=None)) -> dict:
     """Queue komplett LEEREN: alle Schüler aus der Queue entfernen.
 
     Anders als `/api/reset-queue` (setzt nur den Status zurück) wird die Queue
@@ -463,7 +465,7 @@ async def clear_queue(session_id: str = Cookie(default=None)) -> dict:
 
 
 @router.post("/api/finish")
-async def finish_student(body: dict, session_id: str = Cookie(default=None)) -> dict:
+async def finish_student(body: dict, session_id: str | None = Cookie(default=None)) -> dict:
     _require_host(session_id)
     student_id = body.get("student_id")
     if student_id is None:
@@ -484,7 +486,7 @@ async def finish_student(body: dict, session_id: str = Cookie(default=None)) -> 
 # ---------------------------------------------------------------------------
 
 @router.post("/api/print-loan-slip")
-async def print_loan_slip(body: dict, session_id: str = Cookie(default=None)) -> dict:
+async def print_loan_slip(body: dict, session_id: str | None = Cookie(default=None)) -> dict:
     """Leihschein eines Schülers holen (read-only) und lokal drucken.
 
     Kein Schreibzugriff auf IServ — `get_loan_slip_pdf` ist ein reiner GET, das
@@ -538,7 +540,7 @@ def _last_scan_for(state, student_id: int) -> str:
 
 
 @router.post("/api/commit-book")
-async def commit_book(body: dict, session_id: str = Cookie(default=None)) -> dict:
+async def commit_book(body: dict, session_id: str | None = Cookie(default=None)) -> dict:
     """Einen Barcode tatsächlich BUCHEN (Enter auf der IServ-Counter-Seite).
 
     Dreifach gesperrt: Host-Auth + `confirm:true` + Server-Flag
@@ -566,7 +568,9 @@ async def commit_book(body: dict, session_id: str = Cookie(default=None)) -> dic
 
     result = await handle_commit(state, student_id, barcode)
     await hub.broadcast_host(state.state_snapshot())
-    return {"ok": result.get("status") in ("booked", "unknown"), "barcode": barcode, **result}
+    # Nur "booked" gilt als Erfolg. "unknown" (Selektoren unverifiziert) darf
+    # KEINE Buchung vortäuschen — der Host muss dann manuell prüfen.
+    return {"ok": result.get("status") == "booked", "barcode": barcode, **result}
 
 
 # ---------------------------------------------------------------------------
@@ -574,7 +578,7 @@ async def commit_book(body: dict, session_id: str = Cookie(default=None)) -> dic
 # ---------------------------------------------------------------------------
 
 @router.post("/api/modus-b/open")
-async def modus_b_open(request: Request, session_id: str = Cookie(default=None)) -> dict:
+async def modus_b_open(request: Request, session_id: str | None = Cookie(default=None)) -> dict:
     """Live-Ausgabe öffnen: allgemeines Join-Secret + QR erzeugen und an iPads pushen."""
     _require_host(session_id)
     state = get_state()
@@ -589,7 +593,7 @@ async def modus_b_open(request: Request, session_id: str = Cookie(default=None))
 
 
 @router.post("/api/modus-b/close")
-async def modus_b_close(session_id: str = Cookie(default=None)) -> dict:
+async def modus_b_close(session_id: str | None = Cookie(default=None)) -> dict:
     """Live-Ausgabe schließen: Join-Secret entwerten, offene pending-Sessions revoken.
 
     Bereits gepairte (aktive) Sessions laufen weiter, bis sie regulär abgeschlossen
@@ -613,7 +617,7 @@ async def modus_b_close(session_id: str = Cookie(default=None)) -> dict:
 
 
 @router.get("/api/modus-b/qr")
-async def modus_b_qr(session_id: str = Cookie(default=None)) -> dict:
+async def modus_b_qr(session_id: str | None = Cookie(default=None)) -> dict:
     """QR/URL für den Host nachladen (z. B. nach Reconnect)."""
     _require_host(session_id)
     state = get_state()
@@ -625,7 +629,7 @@ async def modus_b_qr(session_id: str = Cookie(default=None)) -> dict:
 
 
 @router.get("/api/display/qr")
-async def display_qr(request: Request, session_id: str = Cookie(default=None)) -> dict:
+async def display_qr(request: Request, session_id: str | None = Cookie(default=None)) -> dict:
     """QR, mit dem ein iPad die QR-Display-Seite (`/qr-display`) öffnet.
 
     Anders als der Schüler-Join-QR (`modus_b_join_qr`) zeigt dieser QR nur auf
@@ -638,7 +642,7 @@ async def display_qr(request: Request, session_id: str = Cookie(default=None)) -
 
 
 @router.post("/api/display/authorize")
-async def display_authorize(body: dict, session_id: str = Cookie(default=None)) -> dict:
+async def display_authorize(body: dict, session_id: str | None = Cookie(default=None)) -> dict:
     """iPad-Display per Registrierungscode autorisieren (Registrierung am Host)."""
     _require_host(session_id)
     code = str(body.get("registration_code", "")).strip().upper()
@@ -686,7 +690,7 @@ async def student_join(body: dict, request: Request) -> dict:
 
 
 @router.post("/api/student/pair")
-async def student_pair(body: dict, session_id: str = Cookie(default=None)) -> dict:
+async def student_pair(body: dict, session_id: str | None = Cookie(default=None)) -> dict:
     """Host ordnet einen 4-stelligen Code einem Schüler zu (Doppel-Bestätigung)."""
     _require_host(session_id)
     state = get_state()
@@ -716,6 +720,16 @@ async def student_pair(body: dict, session_id: str = Cookie(default=None)) -> di
     except Exception as e:
         log.exception("Schülerinfo (Pairing) für %d fehlgeschlagen", student_id)
         raise HTTPException(502, f"IServ-Fehler: {e}")
+
+    # Re-Check nach dem await (TOCTOU): während des IServ-Calls könnte eine
+    # parallele Anfrage denselben Code/Schüler gebunden oder die Session
+    # entwertet haben. Erneut prüfen, bevor wir verbindlich binden.
+    if session.state != "pending_pairing" or state.find_session_by_code(code) is not session:
+        raise HTTPException(409, "Code zwischenzeitlich vergeben oder abgelaufen")
+    if student.status not in ("pending",):
+        raise HTTPException(409, f"Schüler nicht verfügbar (Status: {student.status})")
+    if state.find_session_by_student(student_id):
+        raise HTTPException(409, "Schüler hat bereits eine Live-Session")
 
     # O6: nicht bezahlt → Host muss explizit freigeben.
     if not info.get("paid") and not override:

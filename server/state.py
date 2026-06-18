@@ -112,7 +112,8 @@ class AppState:
         self.selected_schoolyear: str | None = None
         self.queue: list[QueueStudent] = []
         self.helper_sessions: dict[str, HelperSession] = {}
-        self.host_session_ids: set[str] = set()
+        # session_id -> letzter Zugriff (für gleitendes TTL, siehe Methoden unten).
+        self.host_sessions: dict[str, datetime] = {}
         self.host_ws_connections: list[object] = []
         self.worker_pool: "WorkerPool | None" = None
         self.iserv: "IsServClient | None" = None
@@ -124,6 +125,33 @@ class AppState:
         self.modus_b_join_qr: str | None = None  # PNG-Data-URL für iPad/Host
         self.student_sessions: dict[str, StudentSessionB] = {}  # session_token -> Session
         self.displays: dict[str, DisplaySession] = {}           # display_id -> Display
+
+    # --- Host-Login-Sessions (gleitendes TTL) ---
+    def add_host_session(self, sid: str) -> None:
+        self.host_sessions[sid] = datetime.now()
+
+    def remove_host_session(self, sid: str) -> None:
+        self.host_sessions.pop(sid, None)
+
+    def is_host_session_valid(self, sid: str | None, ttl_s: int) -> bool:
+        """Gültig, wenn bekannt und nicht abgelaufen. Bei Gültigkeit gleitend
+        verlängert (aktive Hosts werden nicht ausgeloggt)."""
+        if not sid:
+            return False
+        seen = self.host_sessions.get(sid)
+        if seen is None:
+            return False
+        if (datetime.now() - seen).total_seconds() > ttl_s:
+            self.host_sessions.pop(sid, None)
+            return False
+        self.host_sessions[sid] = datetime.now()
+        return True
+
+    def sweep_host_sessions(self, ttl_s: int) -> None:
+        now = datetime.now()
+        for sid, seen in list(self.host_sessions.items()):
+            if (now - seen).total_seconds() > ttl_s:
+                del self.host_sessions[sid]
 
     def queue_as_list(self) -> list[dict]:
         return [s.as_dict() for s in self.queue]
