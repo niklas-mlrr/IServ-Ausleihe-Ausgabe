@@ -81,7 +81,7 @@ Helfer-/Schüler-Handy (Browser: Kamera-Scanner)      iPad (QR-Anzeige)
 | Host | Laptop | Passwort-Login → Session-Cookie | alles: Klasse/Schüler wählen, Pairing bestätigen, Skip, Abbruch, Druck |
 | Helfer-Scanner (Modus A) | Helfer-Handy | Join-Code vom Host (oder Passwort) | zugewiesenen Schüler sehen, Bücher scannen |
 | QR-Anzeige (Modus B) | iPad | Registrierung am Host per Code; danach **nur** QR-Anzeige, keine Schülerdaten im Klartext | QR-Codes anzeigen |
-| Schüler-Session (Modus B) | Schüler-Handy | personalisierter QR mit **Einmal-Token** + 4-stelliger Pairing-Code, vom Host bestätigt | nur eigene Bestelldaten sehen, nur eigene Bücher scannen |
+| Schüler-Session (Modus B) | Schüler-Handy | allgemeiner **konstanter** Join-QR (festes Secret, kein Rotieren) → Server mintet pro Browser-Session `session_token` + 4-stelligen Pairing-Code, vom Host bestätigt | nur eigene Bestelldaten sehen, nur eigene Bücher scannen |
 
 Sicherheitsanforderungen (aus Klärung 2026-06-12, „keine Sicherheitslücken"):
 
@@ -227,10 +227,17 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
       für den iPad-Registrierungscode (`POST /api/display/authorize`, erscheint
       nur bei verbundenem, unautorisiertem iPad). Bestehender Button → „QR für
       Schüler anzeigen"; Karte „Live-Ausgabe (Modus B)" → „Schüler".
-- [x] Join-QR rotiert nach jeder Zuordnung (2026-06-17b): `_rotate_join_secret`
-      erzeugt nach `/api/student/pair` neues Secret + QR und pusht es an die
-      iPads → nächster Schüler scannt frisch; alte Screenshots werden ungültig.
-      „Ausgabe öffnen" zeigt den QR nicht mehr automatisch.
+- [x] Join-QR rotierte nach jeder Zuordnung (2026-06-17b). **Pro-Zuordnung-
+      Rotation entfernt (2026-06-18):** Das Join-Secret wird jetzt **bei jedem
+      Öffnen der Ausgabe** neu erzeugt (`gen_join_secret()` in `/api/modus-b/open`)
+      und bleibt **innerhalb** einer Ausgabe konstant — der Schüler-QR ändert sich
+      nicht mehr mitten in der Ausgabe. `_rotate_join_secret` ist entfallen.
+      Schutz liegt weiter auf `modus_b_open`-Gate + Per-IP-Ratelimit + **manueller
+      Host-Zuordnung** (Pairing). Trade-off: ein Screenshot des QR bleibt gültig,
+      solange dieselbe Ausgabe offen ist — neue Joins erzeugen aber nur ungepairte
+      pending-Sessions (verfallen per TTL). Alte QRs aus einer früheren Ausgabe
+      werden mit dem nächsten Öffnen ungültig. „Ausgabe öffnen" zeigt den QR nicht
+      automatisch. Auch der QR-Anzeige-Text (`#qr-url`) zeigt die aktuelle Join-URL.
 - [x] Queue-Steuerung erweitert (2026-06-17b): pro Schüler „Trennen"
       (`/api/disconnect` → zurück auf „Wartend", trennt Helfer/Session), global
       „Alle Verbindungen … trennen" (`/api/disconnect-all`) und „Queue Status

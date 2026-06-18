@@ -604,6 +604,9 @@ async def modus_b_open(request: Request, session_id: str | None = Cookie(default
     _require_host(session_id)
     state = get_state()
     state.modus_b_open = True
+    # Frisches Join-Secret bei jedem Öffnen → alte Screenshots/QRs aus einer
+    # früheren Ausgabe werden ungültig. Innerhalb einer Ausgabe bleibt es konstant
+    # (rotiert NICHT mehr pro Zuordnung, 2026-06-18).
     state.modus_b_join_secret = gen_join_secret()
     state.modus_b_join_url = f"{_base_url(request)}/student?j={state.modus_b_join_secret}"
     state.modus_b_join_qr = make_qr_data_url(state.modus_b_join_url)
@@ -771,30 +774,12 @@ async def student_pair(body: dict, session_id: str | None = Cookie(default=None)
     session.payment_overridden = bool(not info.get("paid") and override)
     student.status = "active"
 
-    # Zugeordneter Schüler ist „durch" → frischen Join-QR fürs iPad erzeugen,
-    # damit der nächste Schüler einen neuen Code scannt (alter Screenshot wird ungültig).
-    await _rotate_join_secret(state)
+    # Join-Secret ist konstant (PLAN §3, 2026-06-18) → kein Rotieren mehr.
+    # Der QR bleibt unverändert; bereits angezeigte Displays brauchen kein Update.
 
     await hub.broadcast_host(state.state_snapshot())
     asyncio.create_task(load_and_push_paired_student(state, hub, session, student, info))
     return {"ok": True, "student_id": student_id}
-
-
-async def _rotate_join_secret(state) -> None:
-    """Neues Join-Secret + QR erzeugen und an die iPad-Displays pushen.
-
-    Die Basis-URL (mit korrekter LAN-IP) wird aus der bestehenden
-    `modus_b_join_url` übernommen — nur der `j=`-Parameter wird ersetzt.
-    Bereits gejointe Sessions haben ihren `session_token` und laufen weiter;
-    nur künftige Scans des alten QR werden ungültig.
-    """
-    if not state.modus_b_open or not state.modus_b_join_url:
-        return
-    base = state.modus_b_join_url.split("?", 1)[0]
-    state.modus_b_join_secret = gen_join_secret()
-    state.modus_b_join_url = f"{base}?j={state.modus_b_join_secret}"
-    state.modus_b_join_qr = make_qr_data_url(state.modus_b_join_url)
-    await broadcast_displays(state)
 
 
 # Modus-A-Schülerladen liegt jetzt zentral in sessions.load_and_push_helper_student.

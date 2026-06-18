@@ -120,6 +120,8 @@ class AppState:
         self.student_worker_sessions: dict[int, "StudentSession"] = {}  # student_id -> Session
         # --- Modus B (Live-Ausgabe) ---
         self.modus_b_open: bool = False
+        # Neu bei jedem Öffnen der Ausgabe erzeugt; rotiert NICHT mehr pro
+        # Zuordnung (PLAN §3, 2026-06-18).
         self.modus_b_join_secret: str | None = None
         self.modus_b_join_url: str | None = None
         self.modus_b_join_qr: str | None = None  # PNG-Data-URL für iPad/Host

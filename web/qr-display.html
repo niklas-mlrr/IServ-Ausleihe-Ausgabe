@@ -23,7 +23,12 @@
     /* Display zeigt NIEMALS Schülerdaten — nur QR / Registrierung / Status. */
     .headline { font-size: 2rem; font-weight: 600; margin-bottom: 24px; }
     #qr-img { width: min(70vh, 80vw); height: auto; image-rendering: pixelated; }
-    .sub { font-size: 1.3rem; opacity: .6; margin-top: 24px; }
+    .url {
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: .9rem; opacity: .4; margin-top: 12px;
+      word-break: break-all; max-width: 80vw;
+    }
+    .sub { font-size: 1.3rem; opacity: .6; margin-top: 16px; }
     .reg-code {
       font-size: 4rem; font-weight: 700; letter-spacing: .3em;
       font-family: ui-monospace, "SF Mono", Menlo, monospace;
@@ -53,6 +58,7 @@
   <div class="view" id="view-qr">
     <div class="headline">Bitte scannen</div>
     <img id="qr-img" src="" alt="QR-Code">
+    <div class="url" id="qr-url"></div>
     <div class="sub">Scanne den Code mit deinem Handy</div>
   </div>
 
@@ -93,6 +99,7 @@
           show('register');
         } else if (msg.type === 'qr') {
           document.getElementById('qr-img').src = msg.qr;
+          document.getElementById('qr-url').textContent = msg.url || '';
           show('qr');
         } else if (msg.type === 'closed') {
           show('closed');
