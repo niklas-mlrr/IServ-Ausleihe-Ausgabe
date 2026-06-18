@@ -385,6 +385,9 @@
   let ws = null;
   let state = { active_form: null, queue: [], helpers: {}, modus_b: { open: false, pending: [], pending_count: 0, displays: [], join_url: null } };
   let mbQrDataUrl = null;
+  // QR-Modal-Beobachter: schließt das Popup automatisch, sobald der gezeigte QR gescannt wurde.
+  // { kind: 'student'|'display', baseline: <Zählerstand beim Öffnen> }
+  let qrWatch = null;
   let armedStudentId = null;  // Schüler, der per "Pairing"-Button scharfgestellt ist (Code-Klick ordnet zu)
   let singleStudents = [];  // Schülerliste der aktuell im Einzel-Reiter gewählten Klasse
 
@@ -655,7 +658,11 @@
     // Immer frisch holen — der Join-QR rotiert nach jeder Zuordnung.
     const r = await fetch('/api/modus-b/qr');
     if (r.ok) { const d = await r.json(); mbQrDataUrl = d.qr; }
-    if (mbQrDataUrl) showQr(mbQrDataUrl, state.modus_b.join_url || '');
+    if (mbQrDataUrl) {
+      // Beim nächsten Scan kommt ein neuer Pairing-Code rein -> pending_count steigt.
+      qrWatch = { kind: 'student', baseline: (state.modus_b && state.modus_b.pending_count) || 0 };
+      showQr(mbQrDataUrl, state.modus_b.join_url || '');
+    }
   }
   // iPad-Display per Registrierungscode (vom iPad-Bildschirm) freischalten.
   async function authorizeDisplay() {
@@ -672,6 +679,8 @@
     const r = await fetch('/api/display/qr');
     if (!r.ok) { showMsg('QR für iPad konnte nicht geladen werden'); return; }
     const d = await r.json();
+    // Scannt das iPad den QR, verbindet sich ein neues Display -> displays-Liste wächst.
+    qrWatch = { kind: 'display', baseline: ((state.modus_b && state.modus_b.displays) || []).length };
     showQr(d.qr, d.url || '');
   }
   // Gemeinsame Pairing-Funktion: ordnet einen wartenden Code einem Schüler zu.
@@ -768,11 +777,23 @@
     // (z.B. wenn ein anderer Host das Schuljahr wechselt). '' = aktuelles Jahr.
     const syEl = document.getElementById('schoolyear-select');
     if (syEl && syEl.options.length) syEl.value = state.selected_schoolyear || '';
+    maybeCloseQrOnScan();
     renderHelpers();
     renderQueue();
     renderModusB();
     renderWorkerStatus();
     renderStatusBar();
+  }
+
+  // QR-Popup automatisch schließen, sobald der gezeigte Code gescannt wurde
+  // (neuer Pairing-Code beim Schüler-QR bzw. neues Display beim iPad-QR).
+  function maybeCloseQrOnScan() {
+    if (!qrWatch) return;
+    const mb = state.modus_b || {};
+    const grown = qrWatch.kind === 'student'
+      ? (mb.pending_count || 0) > qrWatch.baseline
+      : ((mb.displays || []).length) > qrWatch.baseline;
+    if (grown) closeQr();
   }
 
   // Konsolidierte Status-Bar: Modus B, Queue-Zähler und iPad-Stand.
@@ -872,6 +893,7 @@
   }
   function closeQr() {
     document.getElementById('qr-modal').classList.remove('show');
+    qrWatch = null;
   }
 
   // ---- Util ----
