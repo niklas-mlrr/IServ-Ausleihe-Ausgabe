@@ -33,7 +33,9 @@
       `addTestStudents()`); Button als manueller Re-Trigger. IDs fest verdrahtet
       in `TEST_STUDENTS` (`server/routes/api.py`), **keine** IServ-Abfrage:
       Niklas Müller (2159), Lukas Podleschny (2164), Lucas Stolpe (2167).
-      Idempotent (Duplikate übersprungen), bestehende Queue/Sessions unangetastet.
+      Idempotent (Duplikate übersprungen) — **Unit-getestet** in
+      `tests/test_api_guards.py::test_add_test_students_idempotent` (2026-06-18);
+      bestehende Queue/Sessions unangetastet (am Gerät noch zu sichten).
       *Server nach Route-Änderung neu starten — `reload=False`; ein POST auf eine
       noch nicht registrierte Route liefert 405 (StaticFiles-Catch-all), nicht 404.*
 
@@ -137,13 +139,20 @@
 ## Unit-Tests (pytest, `uv run pytest`)
 
 Reine Logik, kein IServ/Playwright/Server — schnell + produktionsneutral, als
-Regressions-Netz und QS-Beleg. **18 Tests, grün (2026-06-15).**
+Regressions-Netz und QS-Beleg. **44 Tests, grün (2026-06-18).** Coverage
+(`uv run pytest`, jetzt mit `pytest-cov` als dev-dep + `--cov=server` in
+`addopts`): **37 %** gesamt (vorher 20 %); Kernlogik deutlich höher —
+`sessions.py` 49 %, `state.py` 92 %, `routes/api.py` 34 %, `config.py` 98 %.
+Bewusst niedrig bleiben IServ-/Playwright-/Wiring-Module (`iserv_client.py`,
+`routes/ws.py`, `app.py`, `main.py`) — die decken die E2E-Skripte V3–V7 ab.
 
 | Datei | Deckt ab |
 |-------|----------|
 | `tests/test_ratelimit.py` | Drossel (allow/throttle, Fenster-Ablauf, pro-IP, sweep) |
 | `tests/test_booking_gate.py` | Buchungs-Gate: ohne Flag kein Worker-/Enter-Zugriff |
 | `tests/test_sessions.py` | Session-Lebenszyklus, Token/Code-Eindeutigkeit, harte Invalidierung |
+| `tests/test_queue_flow.py` | Queue-Übergänge: `gen_pairing_code` (skip/Erschöpfung), `end_student` (Status/Helfer-Lösung/Worker-Release), `advance_helper` (leer + nächster), harte Worker-Freigabe |
+| `tests/test_api_guards.py` | Endpunkt-Logik: Auth-Guard (`_require_host`), Login, `add-student` (Validierung/Duplikat 409), `add-test-students`-Idempotenz, skip/finish-Validierung, Buchungs-Gate HTTP-Ebene (403), `_base_url`/`_last_scan_for` |
 | `tests/test_printing.py` | Backend-Resolution (auto je Plattform) + `file`-Backend |
 | `tests/test_worker_pool.py` | `WorkerPool.stats()` (total/available/in_use) |
 | `tests/test_tls.py` | Cert hat SAN (localhost/127.0.0.1/cn), idempotent |
