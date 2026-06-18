@@ -245,6 +245,10 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
 - [ ] Lasttest: 5 parallele Schüler-Sessions
 - [x] Rate-Limit `/api/student/join` (pro-IP, 5/10 s, `server/ratelimit.py`) —
       2026-06-15; Logik verifiziert, End-to-End-Drosselung noch im Lasttest zu prüfen.
+- [x] Hardening-Pass aus Code-Review (2026-06-18): Worker-Context-Leak (Pool-
+      Erschöpfung), WS-Reconnect-Leak, Host-Login-TTL (`HOST_SESSION_TTL_S`),
+      QR-IP-Override (`HOST_IP`), Pairing-TOCTOU, `commit-book`-ok-nur-bei-booked
+      u. a. Write-Pfad-Gating unangetastet. Details: `docs/hardening_2026-06-18.md`.
 - [ ] O6 fachlich mit Hr. Pühn finalisieren
 - [ ] Generalprobe vor Schuljahresbeginn
 - [ ] **Meilenstein: Pilot mit Testklasse/-jahrgang**
