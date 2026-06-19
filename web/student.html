@@ -26,9 +26,11 @@
       }
     }
     body {
+      box-sizing: border-box;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       background: var(--bg); color: var(--fg); height: 100dvh; overflow: hidden;
-      display: flex; flex-direction: column; align-items: center; padding: 12px;
+      max-width: 742.5px; margin: 0 auto;
+      display: flex; flex-direction: column; align-items: center; padding: 7px;
     }
     h1 { font-size: 1.2rem; font-weight: 600; margin-bottom: 16px; opacity: .85; }
     .view { display: none; width: 100%; flex-direction: column; align-items: center; }
@@ -44,19 +46,19 @@
     }
     .spinner { opacity: .5; font-size: .9rem; }
 
-    /* ---- Obere Leiste: Zahnrad | Kamera | Torch/Sound ---- */
-    .top-bar { display: flex; gap: var(--gap); align-items: flex-start; width: 100%; }
-    .gear-wrap { position: relative; display: flex; flex-direction: column; gap: var(--gap); width: var(--btn); }
-    .gear-wrap button { width: var(--btn); height: var(--btn); }
+    /* ---- Obere Leiste: Zahnrad | Kamera | Torch/Sound (52 + 7 + 610.5 + 7 + 52 px) ---- */
+    .top-bar { display: flex; gap: 7px; align-items: flex-start; width: 100%; }
+    .gear-wrap { position: relative; display: flex; flex-direction: column; gap: 7px; width: 52px; }
+    .gear-wrap button { width: 52px; height: 52px; }
     #reader {
-      flex: 1; height: calc(var(--btn) * 2 + var(--gap));
+      flex: 1 1 auto; min-width: 0; max-width: 610.5px; height: 111px;
       border-radius: 12px; overflow: hidden; background: #000;
       box-shadow: 0 0 0 0 #4caf50; transition: box-shadow .6s ease-out;
     }
     #reader video { width: 100%; height: 100%; object-fit: cover; }
     #reader.scan-success { box-shadow: 0 0 0 3px #4caf50; transition: none; }
-    .right-col { display: flex; flex-direction: column; gap: var(--gap); width: var(--btn); }
-    .right-col button { width: var(--btn); height: var(--btn); font-size: 1.4rem; }
+    .right-col { display: flex; flex-direction: column; gap: 7px; width: 52px; }
+    .right-col button { width: 52px; height: 52px; font-size: 1.4rem; }
 
     button, select { border: none; border-radius: 8px; background: var(--surface-2); color: var(--fg); font-size: .95rem; cursor: pointer; }
     button:active { background: var(--surface-4); }
@@ -76,10 +78,11 @@
 
     /* ---- Statuszeile (volle Breite, 2/3 der Buttonhöhe) ---- */
     #status {
-      margin-top: var(--gap); padding: 0 14px; border-radius: 8px; font-size: .9rem;
-      background: var(--surface); width: 100%; height: var(--status-h);
+      box-sizing: border-box;
+      margin-top: 7px; padding: 8px 14px; border-radius: 8px; font-size: .9rem;
+      background: var(--surface); width: 100%; max-width: 728.5px;
       display: flex; align-items: center; justify-content: center;
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      white-space: normal; overflow-wrap: normal; word-break: normal; text-align: center;
     }
     .dot { display: none; }
     .dot.ok { background: #4caf50; } .dot.err { background: #f44336; }

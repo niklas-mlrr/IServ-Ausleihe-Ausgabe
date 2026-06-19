@@ -35,27 +35,29 @@
       overflow: hidden;
       display: flex;
       justify-content: center;
-      padding: 12px;
+      padding: 0;
     }
     .app {
-      width: 100%; height: 100%;
+      box-sizing: border-box;
+      width: 100%; max-width: 742.5px; height: 100%; margin: 0 auto;
+      padding: 7px;
       display: flex; flex-direction: column;
     }
 
-    /* ---- Obere Leiste: Zahnrad | Kamera | Torch/Sound ---- */
-    .top-bar { display: flex; gap: var(--gap); align-items: flex-start; }
-    .gear-wrap { position: relative; display: flex; flex-direction: column; gap: var(--gap); width: var(--btn); }
-    .gear-wrap button { width: var(--btn); height: var(--btn); }
+    /* ---- Obere Leiste: Zahnrad | Kamera | Torch/Sound (52 + 7 + 610.5 + 7 + 52 px) ---- */
+    .top-bar { display: flex; gap: 7px; align-items: flex-start; }
+    .gear-wrap { position: relative; display: flex; flex-direction: column; gap: 7px; width: 52px; }
+    .gear-wrap button { width: 52px; height: 52px; }
     #reader {
-      flex: 1; height: calc(var(--btn) * 2 + var(--gap));
+      flex: 1 1 auto; min-width: 0; max-width: 610.5px; height: 111px;
       border-radius: 12px; overflow: hidden;
       box-shadow: 0 0 0 0 #4caf50; transition: box-shadow .6s ease-out;
       background: #000;
     }
     #reader video { width: 100%; height: 100%; object-fit: cover; }
     #reader.scan-success { box-shadow: 0 0 0 3px #4caf50; transition: none; }
-    .right-col { display: flex; flex-direction: column; gap: var(--gap); width: var(--btn); }
-    .right-col button { width: var(--btn); height: var(--btn); }
+    .right-col { display: flex; flex-direction: column; gap: 7px; width: 52px; }
+    .right-col button { width: 52px; height: 52px; }
 
     button, select {
       border: none; border-radius: 8px; background: var(--surface-2); color: var(--fg);
@@ -80,14 +82,14 @@
     .cam-dropdown select { flex: 1; padding: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .cam-dropdown #reload-btn { padding: 10px 12px; font-size: 1.1rem; }
 
-    /* ---- Statuszeile: 2/3 der Buttonhöhe, flankiert von zwei Buttons ---- */
-    .status-bar { display: flex; gap: var(--gap); align-items: stretch; margin-top: var(--gap); height: var(--status-h); }
-    .status-bar button { width: var(--btn); height: 100%; font-size: 1.2rem; flex-shrink: 0; }
+    /* ---- Statuszeile: Höhe passt sich dem Text an (wie die Buchzeilen) ---- */
+    .status-bar { display: flex; gap: 7px; align-items: stretch; margin-top: 7px; }
+    .status-bar button { width: 52px; height: auto; font-size: 1.2rem; flex-shrink: 0; }
     #status {
-      flex: 1; min-width: 0; height: 100%; padding: 0 14px; border-radius: 8px;
+      flex: 1; min-width: 0; max-width: 610.5px; padding: 8px 14px; border-radius: 8px;
       font-size: .9rem; background: var(--surface);
       display: flex; align-items: center; justify-content: center;
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      white-space: normal; overflow-wrap: normal; word-break: normal; text-align: center;
     }
     .dot { display: none; }
     .dot.ok { background: #4caf50; }
