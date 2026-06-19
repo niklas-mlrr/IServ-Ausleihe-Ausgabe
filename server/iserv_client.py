@@ -24,6 +24,19 @@ def _sy_date(s: object) -> date | None:
         return None
 
 
+def _sort_ts(s: object) -> float:
+    """ISO-Datum → Unix-Timestamp (für Sortierung); fehlend/ungültig → 0.0.
+
+    Toleriert ein angehängtes 'Z' (UTC), das fromisoformat vor 3.11 nicht mag.
+    """
+    if not s:
+        return 0.0
+    try:
+        return datetime.fromisoformat(str(s).replace("Z", "+00:00")).timestamp()
+    except (ValueError, TypeError):
+        return 0.0
+
+
 class IsServClient:
     """Async wrapper around the synchronous AusleiheClient (read-only)."""
 
@@ -219,6 +232,8 @@ class IsServClient:
                     "isbn": isbn,
                     "title": _title(isbn),
                     "subject": _fach(isbn),
+                    "distributed_at": b.get("distributed_at")
+                        or b.get("BookView", {}).get("distributed_at"),
                 })
 
             # Bücher die der Schüler laut Anmeldung erhalten soll
@@ -249,6 +264,8 @@ class IsServClient:
                     "title": b["title"],
                     "subject": b["subject"],
                     "status": "ausgeliehen" if ausgeliehen else "vorgemerkt",
+                    "distributed_at": lent_by_isbn.get(isbn, {}).get("distributed_at")
+                        if ausgeliehen else None,
                 })
                 seen_isbns.add(isbn)
             # Ausgeliehene Bücher ohne passende Vormerkung trotzdem zeigen.
@@ -261,9 +278,14 @@ class IsServClient:
                     "title": b["title"],
                     "subject": b["subject"],
                     "status": "ausgeliehen",
+                    "distributed_at": b.get("distributed_at"),
                 })
+            # 1. nach Status (vorgemerkt vor ausgeliehen, wie gehabt),
+            # 2. nach Ausgabezeit absteigend (jüngste oben; negativer Timestamp),
+            # 3. alphabetisch als stabiler Fallback (z. B. für vorgemerkte ohne Zeit).
             books.sort(key=lambda x: (
                 0 if x["status"] == "vorgemerkt" else 1,
+                -_sort_ts(x.get("distributed_at")),
                 x["subject"],
                 x["title"],
             ))
