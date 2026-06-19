@@ -11,6 +11,7 @@
     :root {
       --bg: #111;
       --text: #eee;
+      --text-muted: #9a9a9e;    /* gedämpfter Text mit ausreichendem Kontrast (statt opacity) */
       --surface: #1c1c1e;       /* Karten, Status-Bar, Modal, Toast, Tabellenkopf */
       --surface-2: #2a2a2c;     /* Inputs, Secondary-Button, Badge-pending, Hover-Flächen */
       --surface-3: #3a3a3c;     /* Borders, Input-Border, Secondary-Hover */
@@ -18,12 +19,27 @@
       --border-faint: #1e1e1e;
       --input-bg: #2a2a2c;
       --alert-bg: #2a1a1a;
+      /* Rollen-Akzente (themen-unabhängig fix, aber zentral hier) */
+      --accent: #0a84ff;        /* Primär-Buttons, Fokus-Ring */
+      --accent-hover: #0070e0;
+      --info: #5ac8fa;          /* Codes, aktiver Schüler, Pairing */
+      --info-bg: #0a3d6b;
+      --info-tint: rgba(10, 61, 107, .25);
+      --ok: #30d158;
+      --ok-hover: #28b84e;
+      --ok-tint: #1a3a1a;
+      --warn: #ffd60a;
+      --danger: #ff3b30;
+      --danger-hover: #d43028;
+      --danger-text: #ff6b6b;
+      --danger-tint: #3a1a1a;
       color-scheme: dark;
     }
     @media (prefers-color-scheme: light) {
       :root {
         --bg: #f2f2f7;
         --text: #1c1c1e;
+        --text-muted: #6c6c70;
         --surface: #ffffff;
         --surface-2: #e9e9ee;
         --surface-3: #d2d2d8;
@@ -31,6 +47,11 @@
         --border-faint: #ececf0;
         --input-bg: #ffffff;
         --alert-bg: #ffe5e3;
+        --info-bg: #d6ecff;
+        --info-tint: rgba(10, 132, 255, .12);
+        --ok-tint: #e3f7e8;
+        --danger-text: #d70015;
+        --danger-tint: #ffe5e3;
         color-scheme: light;
       }
     }
@@ -65,24 +86,29 @@
       padding: 10px 18px;
       border: none;
       border-radius: 8px;
-      background: #0a84ff;
+      background: var(--accent);
       color: #fff;
       font-size: 0.95rem;
       cursor: pointer;
       transition: background .15s;
     }
-    button:hover { background: #0070e0; }
+    button:hover { background: var(--accent-hover); }
     button:disabled { background: #444; cursor: not-allowed; }
-    button.danger { background: #ff3b30; }
-    button.danger:hover { background: #d43028; }
+    button.danger { background: var(--danger); }
+    button.danger:hover { background: var(--danger-hover); }
     button.secondary { background: var(--surface-3); color: var(--text); }
     button.secondary:hover { background: var(--surface-2); }
-    button.success { background: #30d158; color: #000; }
-    button.success:hover { background: #28b84e; }
+    button.success { background: var(--ok); color: #000; }
+    button.success:hover { background: var(--ok-hover); }
+    /* Tastatur-Fokus klar sichtbar (A11y) */
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    /* Text-Hilfsklassen statt inline style.color (Worker-Status etc.) */
+    .txt-warn { color: var(--warn); }
+    .txt-danger { color: var(--danger-text); }
     /* Dezente Outline-Buttons für selten genutzte Wartungs-/„gefährliche" Aktionen */
     button.ghost {
       background: transparent; border: 1px solid var(--surface-3);
-      color: var(--text); opacity: .72; padding: 6px 12px;
+      color: var(--text); opacity: .72; padding: 8px 14px;
       border-radius: 8px; font-size: 0.8rem;
       display: inline-flex; align-items: center; gap: 6px;
       transition: opacity .15s, background .15s, border-color .15s, color .15s;
@@ -90,20 +116,22 @@
     button.ghost:hover { background: var(--surface-2); opacity: 1; }
     /* Destruktive Variante: erst beim Hover rot — signalisiert „Vorsicht" */
     button.ghost.warn:hover {
-      border-color: #ff3b30; color: #ff6b6b;
-      background: color-mix(in srgb, #ff3b30 10%, transparent);
+      border-color: var(--danger); color: var(--danger-text);
+      background: color-mix(in srgb, var(--danger) 10%, transparent);
     }
     button.ghost .ghost-ico { font-size: .95em; opacity: .8; }
+    /* härteste Aktion (alle trennen) rechts absetzen — kein Fehlklick neben Reset */
+    button.ghost.apart { margin-left: auto; }
     .tabs { display: flex; gap: 4px; margin-bottom: 14px; border-bottom: 1px solid var(--border); }
-    .tab { background: transparent; color: #888; padding: 8px 14px; border-radius: 8px 8px 0 0; font-size: 0.9rem; }
+    .tab { background: transparent; color: var(--text-muted); padding: 8px 14px; border-radius: 8px 8px 0 0; font-size: 0.9rem; }
     .tab:hover { background: var(--surface-2); }
     .tab.active { background: var(--surface-2); color: var(--text); }
-    .hint { font-size: 0.78rem; opacity: 0.45; margin-top: 8px; }
+    .hint { font-size: 0.78rem; color: var(--text-muted); margin-top: 8px; }
     .row { display: flex; gap: 8px; align-items: center; }
     .row > * { flex: 1 }
     .row > button { flex: 0 0 auto; }
     table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-    th { text-align: left; padding: 6px 8px; opacity: 0.5; font-weight: 500; border-bottom: 1px solid var(--border); }
+    th { text-align: left; padding: 6px 8px; color: var(--text-muted); font-weight: 500; border-bottom: 1px solid var(--border); }
     td { padding: 7px 8px; border-bottom: 1px solid var(--border-faint); }
     tr:last-child td { border-bottom: none; }
     .badge {
@@ -113,22 +141,22 @@
       font-size: 0.75rem;
       font-weight: 600;
     }
-    .badge-pending  { background: var(--surface-2); color: #888; }
-    .badge-active   { background: #0a3d6b; color: #5ac8fa; }
-    .badge-done     { background: #1a3a1a; color: #30d158; }
-    .badge-skipped  { background: #3a1a1a; color: #ff6b6b; }
+    .badge-pending  { background: var(--surface-2); color: var(--text-muted); }
+    .badge-active   { background: var(--info-bg); color: var(--info); }
+    .badge-done     { background: var(--ok-tint); color: var(--ok); }
+    .badge-skipped  { background: var(--danger-tint); color: var(--danger-text); }
     .code-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border-faint); flex-wrap: wrap; }
     .code-row:last-child { border-bottom: none; }
-    .code-val { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1.25rem; font-weight: 700; letter-spacing: .12em; color: #5ac8fa; }
-    .code-meta { opacity: .55; font-size: .78rem; }
+    .code-val { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1.25rem; font-weight: 700; letter-spacing: .12em; color: var(--info); }
+    .code-meta { color: var(--text-muted); font-size: .78rem; }
     .code-chip { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1.1rem; font-weight: 700; letter-spacing: .1em; padding: 6px 12px; }
-    .ws-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; background: #888; }
-    .ws-dot.ok { background: #30d158; }
-    .ws-dot.err { background: #ff3b30; }
+    .ws-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; background: var(--text-muted); }
+    .ws-dot.ok { background: var(--ok); }
+    .ws-dot.err { background: var(--danger); }
     #msg { margin-top: 8px; font-size: 0.85rem; opacity: 0.7; min-height: 1.2em; }
     #login-view { max-width: 420px; margin: 0 auto; }
     #main-view { max-width: 1125px; margin: 0 auto; }
-    .helper-url { font-size: 0.8rem; color: #5ac8fa; word-break: break-all; }
+    .helper-url { font-size: 0.8rem; color: var(--info); word-break: break-all; }
     .qr-modal {
       display: none; position: fixed; inset: 0;
       background: rgba(0,0,0,.8); align-items: center; justify-content: center;
@@ -146,12 +174,16 @@
     /* --- Status-Bar + Layout --- */
     #status-bar {
       position: sticky; top: 0; z-index: 50;
-      display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+      display: flex; align-items: center; gap: 6px 0; flex-wrap: wrap;
       max-width: 1125px; margin: 0 auto 18px;
       background: var(--surface); border: 1px solid var(--border);
       border-radius: 10px; padding: 10px 16px;
     }
-    #status-bar .sb-item { font-size: .85rem; opacity: .8; white-space: nowrap; }
+    #status-bar .sb-item { font-size: .85rem; color: var(--text-muted); white-space: nowrap; }
+    /* dezente Trenner zwischen den Items (statt nur gap) */
+    #status-bar .sb-item + .sb-item { padding-left: 18px; border-left: 1px solid var(--border); }
+    #status-bar .sb-item b { color: var(--text); font-weight: 600; }
+    #status-bar .sb-item.txt-warn b, #status-bar .sb-item.txt-danger b { color: inherit; }
     #status-bar .sb-spacer { flex: 1; }
     .layout {
       max-width: 1125px; margin: 0 auto;
@@ -160,6 +192,10 @@
     }
     .layout.setup-collapsed { grid-template-columns: 1fr; }
     @media (max-width: 820px) { .layout { grid-template-columns: 1fr; } }
+    /* Setup-Spalte bewusst zurücknehmen — Vorbereitung ist sekundär gegenüber Betrieb. */
+    #setup-col .card { background: transparent; border: 1px solid var(--border); padding: 14px; }
+    /* Betrieb-Cards leicht anheben (feiner Rand + etwas mehr Luft). */
+    #betrieb-col .card { border: 1px solid var(--border); }
     .col-label {
       font-size: .8rem; text-transform: uppercase; letter-spacing: .06em;
       opacity: .45; margin: 0 4px 8px;
@@ -184,8 +220,32 @@
        damit der Tabellenkopf darin sticky bleiben kann. */
     .table-scroll { overflow: auto; max-height: calc(100vh - 180px); }
     /* Aktiver Schüler hervorheben (Zeile, an der der Host gerade arbeitet) */
-    #queue-table tr.row-active td { background: rgba(10, 61, 107, .25); }
-    #queue-table tr.row-active td:first-child { box-shadow: inset 3px 0 0 #5ac8fa; }
+    #queue-table tr.row-active td { background: var(--info-tint); }
+    #queue-table tr.row-active td:first-child { box-shadow: inset 3px 0 0 var(--info); }
+    /* --- Now-Serving-Panel: optische Bühne der Live-Ausgabe --- */
+    .now-serving {
+      border-left: 4px solid var(--info);
+      padding: 18px 18px 16px;
+    }
+    .ns-head {
+      font-size: .8rem; text-transform: uppercase; letter-spacing: .06em;
+      color: var(--text-muted); margin-bottom: 12px;
+    }
+    .ns-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 12px;
+    }
+    .ns-tile {
+      background: var(--info-tint); border-radius: 10px; padding: 14px;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .ns-name { font-size: 1.35rem; font-weight: 700; line-height: 1.15; }
+    .ns-meta { font-size: .85rem; color: var(--text-muted); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .ns-helper { color: var(--info); }
+    .ns-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+    .ns-empty { color: var(--text-muted); font-size: .95rem; padding: 6px 0; }
+    .ns-next { margin-top: 12px; font-size: .9rem; color: var(--text-muted); }
+    .ns-next strong { color: var(--text); font-weight: 600; }
     /* Toast: Feedback erscheint dort, wo der Host hinschaut — nicht im Setup-Panel */
     #toast {
       position: fixed; bottom: 20px; right: 20px; z-index: 200;
@@ -202,7 +262,7 @@
     /* opacity:1 (statt der globalen th-Regel mit .5) — sonst scheinen Zeilen durch den Kopf */
     #queue-table thead th { position: sticky; top: 0; background: var(--surface); z-index: 2; opacity: 1; color: #777; }
     /* Status-Bar Alarm-Zustand: keine Worker -> ganze Leiste rot tönen */
-    #status-bar.alert { border-color: #ff3b30; background: var(--alert-bg); }
+    #status-bar.alert { border-color: var(--danger); background: var(--alert-bg); }
     /* Bestätigungs-Dialog (ersetzt native confirm-Ketten) */
     .modal {
       display: none; position: fixed; inset: 0; z-index: 150;
@@ -300,6 +360,9 @@
   <div class="col" id="betrieb-col">
   <div class="col-label">Betrieb</div>
 
+  <!-- Now Serving: aktuell bediente Schüler auf einen Blick (Bühne der Live-Ausgabe) -->
+  <div class="card now-serving" id="now-serving"></div>
+
   <!-- Live-Ausgabe (Modus B) -->
   <div class="card">
     <h2>Live-Ausgabe (Modus B)</h2>
@@ -344,7 +407,7 @@
     <div class="row" style="align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px">
       <button class="ghost" onclick="resetQueue()"><span class="ghost-ico">↺</span> Status zurücksetzen</button>
       <button class="ghost warn" onclick="clearQueue()"><span class="ghost-ico">✕</span> Queue leeren</button>
-      <button class="ghost warn" onclick="disconnectAll()"><span class="ghost-ico">⏏</span> Alle Verbindungen trennen</button>
+      <button class="ghost warn apart" onclick="disconnectAll()"><span class="ghost-ico">⏏</span> Alle Verbindungen trennen</button>
     </div>
     <div class="table-scroll">
       <table id="queue-table">
@@ -778,11 +841,50 @@
     const syEl = document.getElementById('schoolyear-select');
     if (syEl && syEl.options.length) syEl.value = state.selected_schoolyear || '';
     maybeCloseQrOnScan();
+    renderNowServing();
     renderHelpers();
     renderQueue();
     renderModusB();
     renderWorkerStatus();
     renderStatusBar();
+  }
+
+  // Now-Serving: zeigt die gerade bedienten (aktiven) Schüler groß und prominent
+  // an — die eine Information, die der Host während der Ausgabe ständig braucht.
+  // Wiederverwendete Aktions-Handler aus renderQueue (finish/commit/print).
+  function renderNowServing() {
+    const el = document.getElementById('now-serving');
+    const queue = state.queue || [];
+    const active = queue.filter(s => s.status === 'active');
+    const next = queue.find(s => s.status === 'pending');
+    const helpers = Object.values(state.helpers || {});
+
+    let body;
+    if (!active.length) {
+      body = '<div class="ns-empty">Niemand aktiv — Schüler per „Pairing" oder „Nächster" zuweisen.</div>';
+    } else {
+      body = '<div class="ns-grid">' + active.map(s => {
+        const helper = helpers.find(h => h.student_id === s.student_id);
+        const helperLbl = helper ? `<span class="ns-helper">⛛ ${escapeHtml(helper.name)}</span>` : '';
+        const bookBtn = state.allow_booking
+          ? `<button class="danger" onclick="commitBook(${s.student_id}, this)">Buchen</button>` : '';
+        return `<div class="ns-tile">
+          <div class="ns-name">${escapeHtml(s.lastname)}, ${escapeHtml(s.firstname)}</div>
+          <div class="ns-meta"><span>${escapeHtml(s.form)}</span>${helperLbl}</div>
+          <div class="ns-actions">
+            ${bookBtn}
+            <button class="success" onclick="finishStudent(${s.student_id})">Abschließen</button>
+            <button class="secondary" onclick="printLoanSlip(${s.student_id}, this)">Leihschein</button>
+          </div>
+        </div>`;
+      }).join('') + '</div>';
+    }
+
+    const nextLbl = next
+      ? `<div class="ns-next">Als Nächstes: <strong>${escapeHtml(next.lastname)}, ${escapeHtml(next.firstname)}</strong> (${escapeHtml(next.form)})</div>`
+      : '';
+
+    el.innerHTML = `<div class="ns-head">Aktuell in Ausgabe</div>${body}${nextLbl}`;
   }
 
   // QR-Popup automatisch schließen, sobald der gezeigte Code gescannt wurde
@@ -803,13 +905,13 @@
     const q = state.queue || [];
     const open = q.filter(s => s.status === 'pending').length;
     const codes = mb.pending_count || 0;
-    document.getElementById('sb-modusb').textContent = mb.open
-      ? `Modus B: offen · ${codes} Code${codes === 1 ? '' : 's'} offen`
-      : 'Modus B: geschlossen';
-    document.getElementById('sb-queue').textContent = `Queue: ${open} offen / ${q.length}`;
+    document.getElementById('sb-modusb').innerHTML = mb.open
+      ? `Modus B <b>offen</b> · <b>${codes}</b> Code${codes === 1 ? '' : 's'} offen`
+      : 'Modus B <b>geschlossen</b>';
+    document.getElementById('sb-queue').innerHTML = `Queue <b>${open} offen</b> / ${q.length}`;
     const auth = (mb.displays || []).filter(d => d.authorized && d.connected).length;
     const total = (mb.displays || []).length;
-    document.getElementById('sb-ipads').textContent = `iPads: ${auth}/${total}`;
+    document.getElementById('sb-ipads').innerHTML = `iPads <b>${auth}/${total}</b>`;
   }
 
   function renderWorkerStatus() {
@@ -817,12 +919,13 @@
     const el = document.getElementById('worker-status');
     // Ganze Status-Bar rot tönen, wenn gar keine Worker da sind (Buchung/Scan unmöglich).
     document.getElementById('status-bar').classList.toggle('alert', !wp.total);
+    el.classList.remove('txt-warn', 'txt-danger');
     if (!wp.total) {
-      el.textContent = '⚠ keine Worker (Buchung/Scan nicht möglich)';
-      el.style.color = '#ff6b6b';
+      el.innerHTML = '⚠ <b>keine Worker</b> (Buchung/Scan nicht möglich)';
+      el.classList.add('txt-danger');
     } else {
-      el.textContent = `Worker: ${wp.available}/${wp.total} frei`;
-      el.style.color = wp.available === 0 ? '#ffd60a' : '';
+      el.innerHTML = `Worker <b>${wp.available}/${wp.total}</b> frei`;
+      if (wp.available === 0) el.classList.add('txt-warn');
     }
   }
 
