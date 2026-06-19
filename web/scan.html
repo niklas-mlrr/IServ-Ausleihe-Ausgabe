@@ -39,7 +39,8 @@
 
     /* ---- Obere Leiste: Zahnrad | Kamera | Torch/Sound ---- */
     .top-bar { display: flex; gap: 8px; align-items: stretch; }
-    .gear-wrap { position: relative; display: flex; }
+    .gear-wrap { position: relative; display: flex; flex-direction: column; gap: 8px; width: 52px; }
+    .gear-wrap button { flex: 1; width: 52px; }
     #reader {
       flex: 1; height: 120px; border-radius: 12px; overflow: hidden;
       box-shadow: 0 0 0 0 #4caf50; transition: box-shadow .6s ease-out;
@@ -57,7 +58,7 @@
     button:hover, select:hover { background: var(--surface-3); }
     button:active { background: var(--surface-4); }
     button:disabled { opacity: .5; cursor: not-allowed; }
-    #gear-btn { width: 52px; font-size: 1.5rem; }
+    #gear-btn, #menu-btn { width: 52px; font-size: 1.5rem; }
     .right-col button { font-size: 1.4rem; }
     .torch-on { background: #4caf50 !important; }
     .sound-on { background: #4caf50 !important; }
@@ -116,6 +117,7 @@
   <div class="app">
     <div class="top-bar">
       <div class="gear-wrap">
+        <button id="menu-btn" title="Menü">&#x2630;</button>
         <button id="gear-btn" title="Einstellungen / Kamera">&#x2699;</button>
         <div class="cam-dropdown" id="cam-dropdown">
           <select id="camera-select"><option>Kameras laden…</option></select>
