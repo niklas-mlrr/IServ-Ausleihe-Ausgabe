@@ -120,6 +120,8 @@
     /* Done / Error */
     .big-msg { text-align: center; margin-top: 60px; }
     .big-msg .icon { font-size: 3rem; margin-bottom: 12px; }
+    /* minimalistische Inline-Icons (Lucide-Stil) — skalieren mit der Schriftgröße */
+    .ico { width: 1em; height: 1em; vertical-align: -0.125em; flex: none; }
     .big-msg .title { font-size: 1.4rem; font-weight: 600; margin-bottom: 8px; }
     .big-msg .text { opacity: .6; }
   </style>
@@ -138,16 +140,16 @@
     <div class="top-bar">
       <div class="gear-wrap">
         <button id="help-btn" title="Hilfe">?</button>
-        <button id="gear-btn" title="Einstellungen / Kamera">&#x2699;</button>
+        <button id="gear-btn" title="Einstellungen / Kamera"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
         <div class="cam-dropdown" id="cam-dropdown">
           <select id="camera-select"><option>Kameras laden…</option></select>
-          <button id="reload-btn" title="Kamera neu laden">&#x21BA;</button>
+          <button id="reload-btn" title="Kamera neu laden"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
         </div>
       </div>
       <div id="reader"></div>
       <div class="right-col">
-        <button id="torch-btn" title="Taschenlampe">&#x1F526;</button>
-        <button id="sound-btn" title="Scan-Ton">&#x1F507;</button>
+        <button id="torch-btn" title="Taschenlampe"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6c0 2-2 2-2 4v10a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2V10c0-2-2-2-2-4V2h14z"/><path d="M6 6h12"/><path d="M12 12h.01"/></svg></button>
+        <button id="sound-btn" title="Scan-Ton"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg></button>
       </div>
     </div>
     <div id="status"><span class="dot" id="dot"></span><span id="status-text">Verbinde…</span></div>
@@ -167,7 +169,7 @@
   <!-- Abgeschlossen (neutral, keine Daten) -->
   <div class="view" id="view-done">
     <div class="big-msg">
-      <div class="icon">✓</div>
+      <div class="icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.801 10A10 10 0 1 1 17 3.335"/><path d="m9 11 3 3L22 4"/></svg></div>
       <div class="title">Vorgang abgeschlossen</div>
       <div class="text">Du kannst dieses Fenster schließen.</div>
     </div>
@@ -176,7 +178,7 @@
   <!-- Fehler -->
   <div class="view" id="view-error">
     <div class="big-msg">
-      <div class="icon">⚠</div>
+      <div class="icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg></div>
       <div class="title" id="error-title">Kein gültiger Zugang</div>
       <div class="text" id="error-text">Bitte scanne den QR-Code am Display erneut.</div>
     </div>
@@ -292,7 +294,9 @@
         return;
       }
       rows.innerHTML = books.map(b => {
-        const icon = b.status === 'ausgeliehen' ? '✓' : '⏳';
+        const icon = b.status === 'ausgeliehen'
+          ? '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>'
+          : '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
         const cls = b.status === 'ausgeliehen' ? 'ausgeliehen' : 'vorgemerkt';
         return `<div class="book-row row-${cls}">`
           + `<div class="b-fach">${escapeHtml(b.subject)}</div>`
@@ -311,6 +315,8 @@
         isTorchOn = false, isRestarting = false, soundEnabled = false;
     const statusEl = document.getElementById('status-text');
     const cameraSelect = document.getElementById('camera-select');
+    const ICON_VOLUME_ON = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>';
+    const ICON_VOLUME_OFF = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>';
     const torchBtn = document.getElementById('torch-btn');
     const soundBtn = document.getElementById('sound-btn');
     const reloadBtn = document.getElementById('reload-btn');
@@ -341,7 +347,7 @@
     }
     soundBtn.addEventListener('click', async () => {
       soundEnabled = !soundEnabled;
-      soundBtn.innerHTML = soundEnabled ? '\u{1F50A}' : '\u{1F507}';
+      soundBtn.innerHTML = soundEnabled ? ICON_VOLUME_ON : ICON_VOLUME_OFF;
       soundBtn.classList.toggle('sound-on', soundEnabled);
       if (soundEnabled) { await initAudio(); playBeep(); }
     });
@@ -386,8 +392,8 @@
           const caps = video.srcObject.getVideoTracks()[0].getCapabilities?.();
           torchBtn.disabled = !(caps && caps.torch);
         }
-      } catch (err) { statusEl.textContent = 'Kamerafehler — ↺ tippen'; document.getElementById('dot').className = 'dot err'; }
-      reloadBtn.textContent = '↺'; reloadBtn.disabled = false; isRestarting = false;
+      } catch (err) { statusEl.textContent = 'Kamerafehler — neu laden'; document.getElementById('dot').className = 'dot err'; }
+      reloadBtn.innerHTML = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>'; reloadBtn.disabled = false; isRestarting = false;
     }
 
     cameraSelect.addEventListener('change', () => { initScanner(cameraSelect.value); camDropdown.classList.remove('open'); });

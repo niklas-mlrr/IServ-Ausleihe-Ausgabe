@@ -115,6 +115,8 @@
     .book-row .b-fach { font-weight: 600; }
     .book-row .b-title { overflow: hidden; text-overflow: ellipsis; }
     .book-row .b-icon { text-align: center; font-size: 1.1rem; }
+    /* minimalistische Inline-Icons (Lucide-Stil) — skalieren mit der Schriftgröße */
+    .ico { width: 1em; height: 1em; vertical-align: -0.125em; flex: none; }
     /* Transparenter Hintergrund, Farbe nur dezent (faint tint + Rand) — in beiden Themes lesbar. */
     .row-vorgemerkt  { background: rgba(230,126,34,.14); border-color: rgba(230,126,34,.55); }
     .row-ausgeliehen { background: rgba(46,125,50,.16);  border-color: rgba(46,125,50,.55); }
@@ -125,24 +127,24 @@
   <div class="app">
     <div class="top-bar">
       <div class="gear-wrap">
-        <button id="menu-btn" title="Menü">&#x2630;</button>
-        <button id="gear-btn" title="Einstellungen / Kamera">&#x2699;</button>
+        <button id="menu-btn" title="Menü"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></svg></button>
+        <button id="gear-btn" title="Einstellungen / Kamera"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
         <div class="cam-dropdown" id="cam-dropdown">
           <select id="camera-select"><option>Kameras laden…</option></select>
-          <button id="reload-btn" title="Kamera neu laden">&#x21BA;</button>
+          <button id="reload-btn" title="Kamera neu laden"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
         </div>
       </div>
       <div id="reader"></div>
       <div class="right-col">
-        <button id="torch-btn" title="Taschenlampe">&#x1F526;</button>
-        <button id="sound-btn" title="Scan-Ton">&#x1F507;</button>
+        <button id="torch-btn" title="Taschenlampe"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6c0 2-2 2-2 4v10a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2V10c0-2-2-2-2-4V2h14z"/><path d="M6 6h12"/><path d="M12 12h.01"/></svg></button>
+        <button id="sound-btn" title="Scan-Ton"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg></button>
       </div>
     </div>
 
     <div class="status-bar">
-      <button id="print-btn" title="Leihschein drucken">&#x1F5A8;</button>
+      <button id="print-btn" title="Leihschein drucken"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg></button>
       <div id="status"><span class="dot" id="dot"></span><span id="status-text">Verbinde…</span></div>
-      <button id="next-btn" title="Nächster Schüler">&#x23ED;</button>
+      <button id="next-btn" title="Nächster Schüler"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg></button>
     </div>
 
     <div class="name-row">
@@ -197,7 +199,9 @@
         return;
       }
       bookRowsEl.innerHTML = books.map(b => {
-        const icon = b.status === 'ausgeliehen' ? '✓' : '⏳';
+        const icon = b.status === 'ausgeliehen'
+          ? '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>'
+          : '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
         return `<div class="book-row row-${b.status === 'ausgeliehen' ? 'ausgeliehen' : 'vorgemerkt'}">`
           + `<div class="b-fach">${escapeHtml(b.subject)}</div>`
           + `<div class="b-title">${escapeHtml(b.title)}</div>`
@@ -260,6 +264,8 @@
     connect();
 
     let lastValue = '', cooldown = false, html5QrCode = null, currentCameraId = null, isTorchOn = false, isCameraRunning = false, isRestarting = false, soundEnabled = false;
+    const ICON_VOLUME_ON = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>';
+    const ICON_VOLUME_OFF = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>';
     const cameraSelect = document.getElementById('camera-select');
     const torchBtn = document.getElementById('torch-btn');
     const soundBtn = document.getElementById('sound-btn');
@@ -321,12 +327,12 @@
     soundBtn.addEventListener('click', async () => {
       soundEnabled = !soundEnabled;
       if (soundEnabled) {
-        soundBtn.innerHTML = '\u{1F50A}';
+        soundBtn.innerHTML = ICON_VOLUME_ON;
         soundBtn.classList.add('sound-on');
         await initAudio();
         playBeep();
       } else {
-        soundBtn.innerHTML = '\u{1F507}';
+        soundBtn.innerHTML = ICON_VOLUME_OFF;
         soundBtn.classList.remove('sound-on');
       }
     });
@@ -402,11 +408,11 @@
         }
       } catch (err) {
         console.error('Camera error:', err);
-        statusEl.textContent = 'Kamerafehler — ↺ zum Neuladen';
+        statusEl.textContent = 'Kamerafehler — neu laden';
         dotEl.className = 'dot err';
       }
 
-      reloadBtn.textContent = '↺';
+      reloadBtn.innerHTML = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>';
       reloadBtn.disabled = false;
       isRestarting = false;
     }

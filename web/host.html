@@ -122,7 +122,9 @@
       border-color: var(--danger); color: var(--danger-text);
       background: color-mix(in srgb, var(--danger) 10%, transparent);
     }
-    button.ghost .ghost-ico { font-size: .95em; opacity: .8; }
+    button.ghost .ghost-ico { opacity: .8; }
+    /* minimalistische Inline-Icons (Lucide-Stil) — skalieren mit der Schriftgröße */
+    .ico { width: 1em; height: 1em; vertical-align: -0.125em; flex: none; }
     /* härteste Aktion (alle trennen) rechts absetzen — kein Fehlklick neben Reset */
     button.ghost.apart { margin-left: auto; }
     .tabs { display: flex; gap: 4px; margin-bottom: 14px; border-bottom: 1px solid var(--border); }
@@ -455,9 +457,9 @@
   <div class="card">
     <h2 style="margin:0 0 8px">Schüler-Queue <span id="queue-count" class="queue-count"></span></h2>
     <div class="row" style="align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px">
-      <button class="ghost" onclick="resetQueue()"><span class="ghost-ico">↺</span> Status zurücksetzen</button>
-      <button class="ghost warn" onclick="clearQueue()"><span class="ghost-ico">✕</span> Queue leeren</button>
-      <button class="ghost warn apart" onclick="disconnectAll()"><span class="ghost-ico">⏏</span> Alle Verbindungen trennen</button>
+      <button class="ghost" onclick="resetQueue()"><span class="ghost-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></span> Status zurücksetzen</button>
+      <button class="ghost warn" onclick="clearQueue()"><span class="ghost-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span> Queue leeren</button>
+      <button class="ghost warn apart" onclick="disconnectAll()"><span class="ghost-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/></svg></span> Alle Verbindungen trennen</button>
     </div>
     <div class="table-scroll">
       <table id="queue-table">
@@ -537,12 +539,14 @@
 
   // ---- Theme: System / Hell / Dunkel (manuelle Wahl überschreibt prefers-color-scheme) ----
   const THEME_CYCLE = { '': 'light', 'light': 'dark', 'dark': '' };
-  const THEME_LABEL = { '': 'Auto', 'light': '☼ Hell', 'dark': '☾ Dunkel' };
+  const ICON_SUN = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>';
+  const ICON_MOON = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>';
+  const THEME_LABEL = { '': 'Auto', 'light': ICON_SUN + ' Hell', 'dark': ICON_MOON + ' Dunkel' };
   function applyTheme(t) {
     if (t) document.documentElement.setAttribute('data-theme', t);
     else document.documentElement.removeAttribute('data-theme');
     const btn = document.getElementById('theme-btn');
-    if (btn) btn.textContent = THEME_LABEL[t] ?? 'Auto';
+    if (btn) btn.innerHTML = THEME_LABEL[t] ?? 'Auto';
   }
   function cycleTheme() {
     const cur = localStorage.getItem('theme') || '';
@@ -974,7 +978,7 @@
     } else {
       body = '<div class="ns-grid">' + active.map(s => {
         const helper = helpers.find(h => h.student_id === s.student_id);
-        const helperLbl = helper ? `<span class="ns-helper">⛛ ${escapeHtml(helper.name)}</span>` : '';
+        const helperLbl = helper ? `<span class="ns-helper"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> ${escapeHtml(helper.name)}</span>` : '';
         const bookBtn = state.allow_booking
           ? `<button class="danger" onclick="commitBook(${s.student_id}, this)">Buchen</button>` : '';
         return `<div class="ns-tile">
@@ -1030,7 +1034,7 @@
     document.getElementById('status-bar').classList.toggle('alert', !wp.total);
     el.classList.remove('txt-warn', 'txt-danger');
     if (!wp.total) {
-      el.innerHTML = '⚠ <b>keine Worker</b> (Buchung/Scan nicht möglich)';
+      el.innerHTML = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg> <b>keine Worker</b> (Buchung/Scan nicht möglich)';
       el.classList.add('txt-danger');
     } else {
       el.innerHTML = `Worker <b>${wp.available}/${wp.total}</b> frei`;
@@ -1055,7 +1059,7 @@
         <td>${connDot} ${h.connected ? 'verbunden' : 'getrennt'}</td>
         <td>${studentName}</td>
         <td>${hasStudent ? '' : `<button class="success" onclick="nextStudent('${h.token}')">Nächster</button>`}</td>
-        <td><button class="danger" aria-label="Helfer ${escapeHtml(h.name)} entfernen" onclick="removeHelper('${h.token}')">✕</button></td>
+        <td><button class="danger" aria-label="Helfer ${escapeHtml(h.name)} entfernen" onclick="removeHelper('${h.token}')"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></td>
       </tr>`;
     }).join('');
   }
