@@ -24,27 +24,52 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 log = logging.getLogger(__name__)
 
 
-def _local_ipv4s() -> list[str]:
-    """Lokale IPv4-Adressen des Hosts ermitteln (für SAN)."""
-    ips: set[str] = set()
-    # Primäre ausgehende IP (kein echter Verbindungsaufbau durch UDP-Socket).
+def _is_usable_lan_ip(ip: str) -> bool:
+    """True, wenn `ip` eine für andere Geräte erreichbare IPv4 ist.
+
+    Filtert Loopback (das ganze `127.0.0.0/8` — Ubuntu/Debian mappen den
+    Hostnamen in `/etc/hosts` oft auf `127.0.1.1`!) und Link-Local
+    (`169.254.0.0/16`, APIPA ohne DHCP) heraus.
+    """
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return not (addr.is_loopback or addr.is_link_local or addr.is_unspecified)
+
+
+def primary_lan_ip() -> str | None:
+    """Primäre ausgehende IPv4 des Hosts (kein echter Verbindungsaufbau).
+
+    Liefert genau die IP, über die der Host ins LAN routet — das ist die
+    richtige Adresse für den QR-Code, anders als das alphabetisch erste
+    Element aus mehreren Interfaces.
+    """
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
             s.connect(("10.255.255.255", 1))
-            ips.add(s.getsockname()[0])
+            ip = s.getsockname()[0]
         finally:
             s.close()
     except Exception:
-        pass
+        return None
+    return ip if _is_usable_lan_ip(ip) else None
+
+
+def _local_ipv4s() -> list[str]:
+    """Alle nutzbaren lokalen IPv4-Adressen des Hosts ermitteln (für SAN)."""
+    ips: set[str] = set()
+    primary = primary_lan_ip()
+    if primary:
+        ips.add(primary)
     # Zusätzlich alle über den Hostnamen auflösbaren IPv4.
     try:
         for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
             ips.add(info[4][0])
     except Exception:
         pass
-    ips.discard("127.0.0.1")
-    return sorted(ips)
+    return sorted(ip for ip in ips if _is_usable_lan_ip(ip))
 
 
 def generate_selfsigned_cert(cert_path: Path, key_path: Path, cn: str = "localhost") -> None:

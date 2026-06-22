@@ -23,7 +23,7 @@ from ..sessions import (
     send_display_update,
 )
 from ..state import HelperSession, get_state
-from ..tls import _local_ipv4s
+from ..tls import primary_lan_ip
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -40,17 +40,17 @@ def _require_host(session_id: str | None = Cookie(default=None)) -> str:
     return session_id
 
 
-# Auto-erkannte LAN-IP einmalig cachen — ändert sich im Betrieb nicht und
-# spart pro QR-Request einen UDP-Socket + DNS-Lookup (_local_ipv4s).
+# Erfolgreich erkannte LAN-IP cachen — ändert sich im Betrieb praktisch nicht
+# und spart pro QR-Request einen UDP-Socket. WICHTIG: Nur Treffer cachen, kein
+# None — sonst friert ein einmaliger Netzwerk-Hänger beim ersten Request (WLAN
+# noch nicht oben) die Erkennung dauerhaft ein und der QR zeigt 127.0.0.1.
 _auto_lan_ip: str | None = None
-_auto_lan_ip_resolved = False
 
 
 def _detect_lan_ip() -> str | None:
-    global _auto_lan_ip, _auto_lan_ip_resolved
-    if not _auto_lan_ip_resolved:
-        _auto_lan_ip = next(iter(_local_ipv4s()), None)
-        _auto_lan_ip_resolved = True
+    global _auto_lan_ip
+    if _auto_lan_ip is None:
+        _auto_lan_ip = primary_lan_ip()
     return _auto_lan_ip
 
 
