@@ -218,6 +218,11 @@
         statusEl.textContent = 'Scanner bereit — Buch scannen';
       } else if (msg.type === 'scan_result') {
         statusEl.textContent = `${escapeHtml(msg.barcode)} — ${escapeHtml(msg.msg || msg.status)}`;
+      } else if (msg.type === 'print_result') {
+        printBtn.disabled = false;
+        statusEl.textContent = msg.ok
+          ? `Leihschein: ${escapeHtml(msg.detail || 'gedruckt')}`
+          : `Druck fehlgeschlagen: ${escapeHtml(msg.msg || '')}`;
       } else if (msg.type === 'waiting') {
         studentActive = false;
         sNameEl.textContent = '';
@@ -266,8 +271,16 @@
     const readerEl = document.getElementById('reader');
     let scanFlashTimeout = null;
 
-    // Leihschein drucken — Funktion folgt später.
-    printBtn.addEventListener('click', () => { /* TODO: Druck anstoßen */ });
+    // Leihschein des aktuell zugewiesenen Schülers drucken. Der Server holt das
+    // PDF read-only und druckt lokal (kein IServ-Submit); Ergebnis kommt als
+    // 'print_result' zurück.
+    printBtn.addEventListener('click', () => {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      if (!studentActive) { statusEl.textContent = 'Kein Schüler zugewiesen'; return; }
+      printBtn.disabled = true;
+      statusEl.textContent = 'Leihschein wird gedruckt …';
+      ws.send(JSON.stringify({ type: 'print' }));
+    });
 
     // Nächster Schüler: aktuellen abschließen + nächsten aus der Queue laden.
     // Alten Schüler sofort entfernen und "Wird geladen…" zeigen, auch während

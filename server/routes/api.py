@@ -520,30 +520,14 @@ async def print_loan_slip(body: dict, session_id: str | None = Cookie(default=No
         raise HTTPException(400, "student_id fehlt")
     variant = str(body.get("variant", "student")).strip() or "student"
 
+    from ..sessions import print_loan_slip_for
+
     state = get_state()
-    cfg = get_config()
     try:
-        pdf = await state.iserv.get_loan_slip_pdf(int(student_id), variant=variant)
+        return await print_loan_slip_for(state, int(student_id), variant=variant)
     except Exception as e:
-        log.exception("Leihschein-PDF für %s konnte nicht geladen werden", student_id)
-        raise HTTPException(502, f"IServ-Fehler beim Leihschein: {e}")
-
-    from ..printing import print_pdf
-    try:
-        result = await print_pdf(
-            pdf,
-            backend=cfg.print_backend,
-            printer_name=cfg.printer_name,
-            sumatra_path=cfg.sumatra_path,
-            output_dir=cfg.print_output_dir,
-            label=f"leihschein_{int(student_id)}",
-        )
-    except Exception as e:
-        log.exception("Druck des Leihscheins fehlgeschlagen (Backend %s)", cfg.print_backend)
-        raise HTTPException(500, f"Druck fehlgeschlagen: {e}")
-
-    log.info("Leihschein gedruckt: student_id=%s backend=%s", student_id, result.get("backend"))
-    return result
+        log.exception("Leihschein-Druck für %s fehlgeschlagen", student_id)
+        raise HTTPException(502, f"Leihschein-Druck fehlgeschlagen: {e}")
 
 
 # ---------------------------------------------------------------------------

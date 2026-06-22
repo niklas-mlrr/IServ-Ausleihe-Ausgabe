@@ -104,6 +104,35 @@ async def handle_commit(state: AppState, student_id: int, barcode: str) -> dict:
         return {"status": "error", "msg": str(e)}
 
 
+async def print_loan_slip_for(
+    state: AppState, student_id: int, *, variant: str = "student"
+) -> dict:
+    """Leihschein eines Schülers holen (read-only GET) und lokal drucken.
+
+    Gemeinsame Orchestrierung für den Host-Endpoint (`/api/print-loan-slip`)
+    und den Scanner (WS `print`). Kein Schreibzugriff auf IServ — `get_loan_slip_pdf`
+    ist ein reiner GET, das Drucken passiert lokal am Laptop/Macbook
+    (siehe server/printing.py).
+
+    Gibt `{ok, backend, detail, [path]}` zurück oder wirft bei Fehlern eine
+    Exception (vom Aufrufer in eine Client-Antwort zu wandeln).
+    """
+    from .printing import print_pdf
+
+    cfg = get_config()
+    pdf = await state.iserv.get_loan_slip_pdf(student_id, variant=variant)
+    result = await print_pdf(
+        pdf,
+        backend=cfg.print_backend,
+        printer_name=cfg.printer_name,
+        sumatra_path=cfg.sumatra_path,
+        output_dir=cfg.print_output_dir,
+        label=f"leihschein_{student_id}",
+    )
+    log.info("Leihschein gedruckt: student_id=%s backend=%s", student_id, result.get("backend"))
+    return result
+
+
 def release_worker(state: AppState, worker) -> None:
     """Worker-Context nach Abschluss zurück in den Pool (statt ihn zu verlieren).
 

@@ -49,7 +49,8 @@
       **Wichtig:** dabei darf im simulierten Browser nichts gebucht werden
       (Worker-Page wird nur geschlossen, kein Submit).
 - [ ] **Statuszeilen-Layout:** Statuszeile nur so breit wie das Kamerafeld,
-      links Drucker-Button (Funktion folgt), rechts Weiter-Button; Name vertikal
+      links Drucker-Button (Druck-Funktion implementiert 2026-06-22 — WS
+      `print` → `print_loan_slip_for`, am Gerät zu prüfen), rechts Weiter-Button; Name vertikal
       mittig zu Klasse/Bezahlt; farbiger Status-Punkt in beiden Clients entfernt.
 
 ### Neu 2026-06-17 (Scanner: Dark/Light + Klasse + transparente Zeilen)
@@ -85,6 +86,14 @@
 - [x] **Druck `sumatra` (Windows)** — Silent-Print am Ausleihe-Laptop mit
       HP LaserJet Professional P1102 (= Spike C / O4) — 2026-06-22 (→ V12).
 - [ ] **Host-Button „Leihschein"** (UI) löst Druck korrekt aus, Statusmeldung.
+      Code vollständig verdrahtet (2026-06-22): `printLoanSlip` → `POST
+      /api/print-loan-slip` → `print_loan_slip_for`; am Gerät zu prüfen.
+- [ ] **Scanner-Button „Leihschein" (🖨)** (`scan.html`, nur Helfer) löst Druck
+      des aktuell zugewiesenen Schülers aus: WS `{type:'print'}` →
+      `print_loan_slip_for(helper.student_id)` → `print_result`. Button während
+      Druck deaktiviert, Statuszeile zeigt Backend/Detail bzw. Fehler.
+      Unit: `tests/test_printing.py::test_print_loan_slip_for_reads_and_prints`
+      (2026-06-22); am Gerät mit echtem Drucker zu prüfen.
 - [ ] **`setup.bat` / `start.bat`** am echten Windows-Laptop (uv vorhanden,
       `uv sync`, Playwright-Install, Start).
 - [ ] **`start.sh`** auf dem Macbook.

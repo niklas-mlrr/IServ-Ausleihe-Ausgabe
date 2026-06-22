@@ -12,6 +12,7 @@ from ..sessions import (
     end_student,
     gen_registration_code,
     handle_scan,
+    print_loan_slip_for,
     send_display_update,
 )
 from ..state import DisplaySession, get_state
@@ -90,6 +91,20 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                 # Aktuellen Schüler abschließen (kein Browser-Submit) und
                 # nächsten Wartenden auf diesen Helfer setzen.
                 await advance_helper(state, hub, helper)
+                continue
+
+            if mtype == "print":
+                # Leihschein des aktuell zugewiesenen Schülers drucken.
+                # Read-only PDF-Abruf + lokaler Druck (kein IServ-Submit).
+                if helper.student_id is None:
+                    await websocket.send_json({"type": "print_result", "ok": False, "msg": "Kein Schüler zugewiesen"})
+                    continue
+                try:
+                    result = await print_loan_slip_for(state, helper.student_id)
+                    await websocket.send_json({"type": "print_result", **result})
+                except Exception as e:  # noqa: BLE001 — Fehler dem Client melden
+                    log.exception("Leihschein-Druck (Scanner) fehlgeschlagen")
+                    await websocket.send_json({"type": "print_result", "ok": False, "msg": str(e)})
                 continue
 
             if mtype != "scan":
