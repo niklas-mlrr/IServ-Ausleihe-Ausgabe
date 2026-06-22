@@ -84,6 +84,47 @@ async def handle_scan(state: AppState, student_id: int, barcode: str) -> dict:
         return {"status": "error", "msg": str(e)}
 
 
+def expected_isbns_from_info(info: dict) -> set[str]:
+    """ISBN-Menge der Bücher, die zu diesem Schüler gehören (Anmeldung + bereits
+    ausgeliehen). Grundlage für die Vorab-Prüfung „gehört dieses Buch zu dir?"."""
+    return {b["isbn"] for b in info.get("books", []) if b.get("isbn")}
+
+
+async def check_scanned_book(
+    state: AppState, expected_isbns: set[str], barcode: str
+) -> dict:
+    """Vorab-Prüfung (read-only) für den Schüler-Client: Ist das gescannte Buch
+    für diesen Schüler angemeldet?
+
+    Schlägt den Barcode über die API nach (`GET /books/{code}`) und vergleicht
+    die ISBN mit der Anmelde-Buchliste des Schülers. Gibt `{"ok": True, ...}`
+    zurück, wenn das Buch dazugehört, sonst `{"ok": False, "status": ..., "msg": ...}`.
+    Reiner Read-Pfad, kein Worker-/Submit-Kontakt.
+    """
+    if state.iserv is None or not expected_isbns:
+        # Ohne API-Client oder solange die Buchliste noch nicht geladen ist (kurzes
+        # Fenster nach Schülerwechsel) nicht blockieren — sonst würde jeder Scan
+        # fälschlich als „nicht angemeldet" abgewiesen.
+        return {"ok": True}
+    try:
+        book = await state.iserv.get_book_by_code(barcode)
+    except Exception as e:  # noqa: BLE001 — Prüfung darf den Scan nicht hart abbrechen
+        log.warning("Buch-Lookup für %s fehlgeschlagen: %s", barcode, e)
+        return {"ok": True}  # bei API-Fehler nicht blockieren (Worker validiert ohnehin)
+    if book is None:
+        return {"status": "unknown_book", "ok": False, "msg": "Buch unbekannt"}
+    if book["isbn"] not in expected_isbns:
+        title = book.get("title") or book["isbn"]
+        return {
+            "status": "not_enrolled",
+            "ok": False,
+            "msg": f"Nicht für dich angemeldet: {title}",
+            "isbn": book["isbn"],
+            "title": title,
+        }
+    return {"ok": True, "isbn": book["isbn"], "title": book.get("title")}
+
+
 async def handle_commit(state: AppState, student_id: int, barcode: str) -> dict:
     """Barcode tatsächlich BUCHEN (Enter auf der Counter-Seite).
 
@@ -240,6 +281,7 @@ async def end_student(
         student.assigned_helper = None
         if old_helper and old_helper in state.helper_sessions:
             state.helper_sessions[old_helper].student_id = None
+            state.helper_sessions[old_helper].expected_isbns = set()
 
     session = state.find_session_by_student(student_id)
     if session:
@@ -267,6 +309,7 @@ async def load_and_push_helper_student(state: AppState, hub, student, helper) ->
         return
 
     info["form"] = getattr(student, "form", "")
+    helper.expected_isbns = expected_isbns_from_info(info)
     await hub.send_scanner(helper.token, {"type": "student_info", "student": info})
     await hub.broadcast_host(state.state_snapshot())
 
@@ -323,6 +366,7 @@ async def load_and_push_paired_student(
     (der Schüler liest ohnehin erst die Liste → Worker ist rechtzeitig da).
     """
     info["form"] = getattr(student, "form", "")
+    session.expected_isbns = expected_isbns_from_info(info)
     if session.ws is not None:
         try:
             await session.ws.send_json(

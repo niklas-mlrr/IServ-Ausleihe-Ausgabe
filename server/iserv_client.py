@@ -10,6 +10,7 @@ from urllib.parse import quote
 _DEFAULT_SY_TTL_S = 6 * 3600
 
 from ausleihe import AusleiheClient
+from ausleihe.exceptions import NotFoundError
 
 
 def _enc(sy: str) -> str:
@@ -301,6 +302,27 @@ class IsServClient:
                 "books_to_receive": books_to_receive,
                 "books": books,
             }
+        return await asyncio.to_thread(_sync)
+
+    async def get_book_by_code(self, code: str) -> dict | None:
+        """Buch zu einem gescannten Barcode auflösen (read-only GET /books/{code}).
+
+        Liefert `{code, isbn, title, subject}` oder `None`, wenn die API das Buch
+        nicht kennt (404). Andere Fehler (Auth/Netz) werden durchgereicht, damit
+        sie nicht fälschlich als „Buch unbekannt" interpretiert werden.
+        """
+        def _sync() -> dict | None:
+            client = self._get_client()
+            series_map = self._get_series_map()
+            try:
+                book = client.books.get_by_code(code)
+            except NotFoundError:
+                return None
+            isbn = book.isbn or ""
+            s = series_map.get(isbn)
+            subject = ", ".join(s.subjects_flat or s.subjects or []) if s else ""
+            title = (s.title if s else "") or isbn
+            return {"code": book.code, "isbn": isbn, "title": title, "subject": subject}
         return await asyncio.to_thread(_sync)
 
     async def get_loan_slip_pdf(self, student_id: int, variant: str = "student") -> bytes:

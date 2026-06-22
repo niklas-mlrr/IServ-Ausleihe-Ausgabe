@@ -9,7 +9,9 @@ from fastapi import APIRouter, Cookie, WebSocket, WebSocketDisconnect
 from ..hub import get_hub
 from ..sessions import (
     advance_helper,
+    check_scanned_book,
     end_student,
+    expected_isbns_from_info,
     gen_registration_code,
     handle_scan,
     print_loan_slip_for,
@@ -72,6 +74,7 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
             try:
                 info = await state.iserv.get_student_info(helper.student_id, state.selected_schoolyear)
                 info["form"] = student.form
+                helper.expected_isbns = expected_isbns_from_info(info)
                 await websocket.send_json({"type": "student_info", "student": info})
             except Exception as e:
                 await websocket.send_json({"type": "error", "msg": str(e)})
@@ -125,6 +128,18 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                     "status": "error",
                     "msg": "Kein Schüler zugewiesen",
                 })
+                continue
+
+            # Vorab-Prüfung (read-only): gehört das Buch zum zugewiesenen Schüler?
+            check = await check_scanned_book(state, helper.expected_isbns, barcode)
+            if not check.get("ok"):
+                await websocket.send_json({
+                    "type": "scan_result",
+                    "barcode": barcode,
+                    "status": check["status"],
+                    "msg": check["msg"],
+                })
+                await hub.broadcast_host(state.state_snapshot())
                 continue
 
             result = await handle_scan(state, student_id, barcode)
@@ -212,6 +227,7 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
             info = await state.iserv.get_student_info(session.student_id, state.selected_schoolyear)
             qs = state.find_student(session.student_id)
             info["form"] = qs.form if qs else ""
+            session.expected_isbns = expected_isbns_from_info(info)
             await websocket.send_json({
                 "type": "student_info",
                 "student": info,
@@ -241,6 +257,18 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
                     })
                     continue
                 session.last_scan = barcode
+                # Vorab-Prüfung (read-only): gehört das gescannte Buch zu diesem
+                # Schüler? Wenn nicht, gar nicht erst an den Worker stagen.
+                check = await check_scanned_book(state, session.expected_isbns, barcode)
+                if not check.get("ok"):
+                    await websocket.send_json({
+                        "type": "scan_result",
+                        "barcode": barcode,
+                        "status": check["status"],
+                        "msg": check["msg"],
+                    })
+                    await hub.broadcast_host(state.state_snapshot())
+                    continue
                 result = await handle_scan(state, session.student_id, barcode)
                 await websocket.send_json({"type": "scan_result", "barcode": barcode, **result})
                 await hub.broadcast_host(state.state_snapshot())

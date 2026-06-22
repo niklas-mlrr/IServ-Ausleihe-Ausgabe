@@ -245,6 +245,18 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
       doppelter Bestätigung, dezenter Link-Stil. Alle bauen auf `end_student`.
 - [x] Schüler-UI: reduziert und selbsterklärend (`web/student.html`:
       Bestellliste, Scan, Abschluss) — 2026-06-15
+- [x] Scan-Vorabprüfung (2026-06-22): Bevor ein gescannter Barcode an den
+      Worker gestaged wird, prüft der Server read-only (`GET /books/{code}` →
+      ISBN), ob das Buch zur Anmelde-Buchliste des Schülers gehört
+      (`check_scanned_book` in `server/sessions.py`). ISBN-Set `expected_isbns`
+      wird je Session gehalten — **Modus B** auf `StudentSessionB` (befüllt beim
+      Pairing/Reconnect), **Modus A** auf `HelperSession` (befüllt beim Laden des
+      Schülers/Reconnect, geleert beim Schülerwechsel). Treffer → wie bisher;
+      „not_enrolled"/„unknown_book" → sofortiges `scan_result`, **kein**
+      Worker-Kontakt. Leeres Set (Buchliste noch nicht geladen) oder API-Fehler
+      blockieren nicht (der offizielle Frontend-Submit validiert ohnehin).
+      Reiner Read-Pfad, in Scanner- (`/ws/scanner`) und Schüler-WS
+      (`/ws/student`) verdrahtet.
 - [x] Harter Zugriffsentzug (Token-Invalidierung + WS-Close + Worker zu) —
       2026-06-15; Skip-Funktion deckt Modus B mit ab
 - [x] Sicherheits-Review Token-Lebenszyklus (initial, E2E-verifiziert) —
