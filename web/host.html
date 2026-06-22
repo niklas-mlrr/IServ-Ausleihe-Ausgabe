@@ -1016,7 +1016,7 @@
 
   function renderHelpers() {
     const tbody = document.getElementById('helper-tbody');
-    const helpers = Object.values(state.helpers);
+    const helpers = Object.values(state.helpers).filter(h => h.connected);
     if (!helpers.length) {
       tbody.innerHTML = '<tr><td colspan="5" style="opacity:.4;text-align:center">Noch keine Helfer</td></tr>';
       return;
