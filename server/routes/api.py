@@ -44,28 +44,36 @@ def _require_host(session_id: str | None = Cookie(default=None)) -> str:
 # und spart pro QR-Request einen UDP-Socket. WICHTIG: Nur Treffer cachen, kein
 # None — sonst friert ein einmaliger Netzwerk-Hänger beim ersten Request (WLAN
 # noch nicht oben) die Erkennung dauerhaft ein und der QR zeigt 127.0.0.1.
-# Pro Modus (Auto / Lokal) getrennt cachen — die Erkennung kostet je einen
+# Pro Modus (Auto / Tailscale) getrennt cachen — die Erkennung kostet je einen
 # UDP-Socket und ändert sich im Betrieb praktisch nicht. Nur Treffer cachen.
 _auto_lan_ip: dict[bool, str | None] = {}
 
 
-def _detect_lan_ip(prefer_local: bool = False) -> str | None:
-    if not _auto_lan_ip.get(prefer_local):
-        _auto_lan_ip[prefer_local] = primary_lan_ip(prefer_local=prefer_local)
-    return _auto_lan_ip[prefer_local]
+def _detect_lan_ip(force_tailscale: bool = False) -> str | None:
+    if not _auto_lan_ip.get(force_tailscale):
+        _auto_lan_ip[force_tailscale] = primary_lan_ip(force_tailscale=force_tailscale)
+    return _auto_lan_ip[force_tailscale]
 
 
 def _base_url(request: Request) -> str:
     host = request.headers.get("host", "localhost")
+    hostname, _, port = host.partition(":")
+    cfg = get_config()
+    # Toggle „Tailscale-IP": erzwingt die Tailscale-IP in JEDER QR-URL, auch wenn
+    # der Host die Seite bereits über eine echte IP (statt localhost) geöffnet hat
+    # — der Host-Header würde sonst gewinnen und der Toggle bliebe wirkungslos.
+    if get_state().force_tailscale_ip:
+        ts = _detect_lan_ip(force_tailscale=True)
+        if ts:
+            port = port or str(cfg.port)
+            return f"https://{ts}:{port}" if port else f"https://{ts}"
     # Host-Rechner ruft die Seite oft über localhost auf (Server läuft lokal).
     # Ein QR mit localhost/127.0.0.1 ist für Schüler-/Helfer-Geräte nutzlos —
     # stattdessen die LAN-IP des Host-Rechners einsetzen.
-    hostname, _, port = host.partition(":")
     if hostname in ("localhost", "127.0.0.1", "::1", ""):
-        cfg = get_config()
         # Expliziter Override (HOST_IP) vor der heuristischen Auto-Erkennung —
         # bei mehreren Interfaces wählt local_ips[0] sonst evtl. das falsche Netz.
-        new_host = cfg.host_ip or _detect_lan_ip(get_state().prefer_local_ip)
+        new_host = cfg.host_ip or _detect_lan_ip()
         if new_host:
             if not port:
                 port = str(cfg.port)
@@ -318,11 +326,11 @@ async def get_state_endpoint(session_id: str | None = Cookie(default=None)) -> d
     return get_state().state_snapshot()
 
 
-@router.post("/api/prefer-local-ip")
-async def set_prefer_local_ip(
+@router.post("/api/force-tailscale-ip")
+async def set_force_tailscale_ip(
     body: dict, request: Request, session_id: str | None = Cookie(default=None)
 ) -> dict:
-    """Header-Toggle „Lokale IP-Adressen": Auto-Auswahl ↔ erzwungene LAN-IP.
+    """Header-Toggle „Tailscale-IP": Auto-Auswahl (LAN-first) ↔ erzwungene Tailscale-IP.
 
     Beeinflusst alle QR-/Join-URLs (Helfer-, Schüler-Join-, iPad-Display-QR).
     Die On-Demand-QRs übernehmen den Modus beim nächsten Abruf automatisch; den
@@ -331,7 +339,7 @@ async def set_prefer_local_ip(
     """
     _require_host(session_id)
     state = get_state()
-    state.prefer_local_ip = bool(body.get("enabled"))
+    state.force_tailscale_ip = bool(body.get("enabled"))
 
     if state.modus_b_open and state.modus_b_join_secret:
         state.modus_b_join_url = (
@@ -341,7 +349,7 @@ async def set_prefer_local_ip(
         await broadcast_displays(state)
 
     await get_hub().broadcast_host(state.state_snapshot())
-    return {"ok": True, "prefer_local_ip": state.prefer_local_ip}
+    return {"ok": True, "force_tailscale_ip": state.force_tailscale_ip}
 
 
 # ---------------------------------------------------------------------------

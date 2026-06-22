@@ -131,7 +131,49 @@ aus `server/tls.py` — dieselbe Quelle wie die Cert-SANs); der Port aus dem
 Header bleibt, sonst Fallback `cfg.port`. Ruft der Host bereits über die IP
 auf, bleibt alles unverändert.
 
-Rest-Gotcha: `_local_ipv4s()[0]` ist die ausgehende Primär-IP (UDP-Trick).
-Bei mehreren Interfaces (z. B. WLAN **und** iPhone-Hotspot gleichzeitig) kann
-das die „falsche" Schnittstelle treffen → dann gezielter wählen oder am
-Gerät nur das gewünschte Netz aktiv lassen.
+Rest-Gotcha (überholt durch §9): Bei mehreren Interfaces konnte die ausgehende
+Primär-IP die „falsche" Schnittstelle treffen → siehe IP-Ranking + Toggle unten.
+
+## 9. QR-IP-Auswahl: Ranking, Tailscale-Erkennung, Header-Toggle (2026-06-22)
+
+Problem: Auf dem VPS (Remote-Test) zeigten die QR-Codes die **öffentliche** IP
+statt der über Tailscale erreichbaren `100.x` — die alte Logik schloss CGNAT
+(`100.64.0.0/10`) ganz aus und fiel auf `candidates[0]` (öffentliche
+Default-Route-IP) zurück. Die Tailscale-IP wurde zudem gar nicht erst gefunden:
+Default-Route-Probe + `gethostname()` liefern sie nicht.
+
+Lösung (`server/tls.py`):
+- **Tailscale-Erkennung:** UDP-Connect auf die MagicDNS-IP `100.100.100.100`
+  liefert die Tailscale-Quell-IP — portabel (auch Windows), ohne Zusatz-Dep.
+  (Reiner Routen-Probe, kein echter Traffic; analog zum LAN-Default-Probe auf
+  `10.255.255.255`.)
+- **3-Stufen-Ranking** (`_ip_rank`): RFC1918-LAN (0) > CGNAT/Tailscale (1) >
+  public/sonstige (2). Auto wählt damit auf dem Schullaptop die LAN-IP, auf dem
+  VPS die Tailscale-IP. Stabil innerhalb einer Stufe (Erkennungsreihenfolge).
+- `primary_lan_ip(force_tailscale=False)`: `force_tailscale=True` erzwingt die
+  Tailscale/CGNAT-IP (Fallback auf Auto-Ranking, wenn keine vorhanden).
+
+**Header-Toggle „Tailscale-IP"** (Host-UI, `web/host.html`):
+- Auto (aus) ⇄ Tailscale erzwingen (an). Zweck: am Schullaptop bewusst über
+  Tailscale testen, obwohl Auto dort die LAN-IP wählen würde.
+- Server-State (`AppState.force_tailscale_ip`), nicht localStorage → über
+  `state_snapshot()` synchron bei Reconnect / zweitem Host.
+- `POST /api/force-tailscale-ip {enabled}` setzt das Flag, baut den bei
+  `/modus-b/open` **eingefrorenen** Schüler-Join-QR bei offener Ausgabe neu
+  (Helfer- + iPad-Display-QR sind On-Demand und ziehen den Modus eh nach).
+- `_detect_lan_ip` cacht **pro Modus** (Auto/Tailscale getrennt).
+- **Wiring-Fix:** `_base_url` honorierte den Toggle bisher nur, wenn der Host
+  über `localhost` zugriff — bei Zugriff über eine echte IP gewann der
+  `Host`-Header und der Toggle blieb wirkungslos. Jetzt überschreibt der
+  erzwungene Tailscale-Pfad den Header in **jeder** QR-URL.
+
+Sichtbarkeit: Auf dem VPS gibt es nur public + Tailscale; Auto wählt dort eh
+schon Tailscale → der Toggle zeigt dort **keinen** Unterschied (erwartbar). Auf
+dem Schullaptop wechselt er sichtbar LAN (`10.254.x`) ⇄ Tailscale (`100.x`).
+
+`HOST_IP` (`.env`) gilt nur im Auto-Pfad; der erzwungene Tailscale-Toggle hat
+Vorrang vor dem `Host`-Header (aber nicht über `HOST_IP` im Auto-Zweig).
+
+Cert-Gotcha: SAN wird einmalig erzeugt und gecacht. Auf dem VPS kann ein altes
+Cert die Tailscale-IP noch nicht im SAN haben → bei Cert-Warnung auf der
+`100.x` `certs/` löschen, damit neu generiert wird (SAN enthält dann `100.x`).

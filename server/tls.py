@@ -115,7 +115,7 @@ def _hostname_ipv4s() -> list[str]:
         return []
 
 
-def primary_lan_ip(prefer_local: bool = False) -> str | None:
+def primary_lan_ip(force_tailscale: bool = False) -> str | None:
     """Beste IPv4 für den QR-Code.
 
     Standard (Auto): bevorzugt RFC1918-LAN (echtes Schul-WLAN, z. B.
@@ -123,16 +123,17 @@ def primary_lan_ip(prefer_local: bool = False) -> str | None:
     zuletzt öffentliche IPs. So zeigt der QR auf dem Schullaptop die LAN-IP, auf
     dem VPS aber die erreichbare Tailscale-IP.
 
-    `prefer_local=True` erzwingt eine RFC1918-LAN-Adresse (Header-Toggle „Lokale
-    IP-Adressen"); gibt es keine, fällt es auf die Auto-Reihenfolge zurück.
+    `force_tailscale=True` erzwingt die Tailscale/CGNAT-Adresse (Header-Toggle
+    „Tailscale-IP", z. B. um am Schullaptop bewusst über Tailscale zu testen);
+    gibt es keine, fällt es auf die Auto-Reihenfolge zurück.
     """
     candidates = _candidate_ipv4s()
     if not candidates:
         return None
-    if prefer_local:
-        private = [ip for ip in candidates if _is_private_lan_ip(ip)]
-        if private:
-            return private[0]
+    if force_tailscale:
+        tailscale = [ip for ip in candidates if _ip_rank(ip) == 1]
+        if tailscale:
+            return tailscale[0]
     # Stabile Sortierung nach Rang; bei Gleichstand bleibt die Erkennungs-
     # Reihenfolge (Default-Route vor Tailscale) erhalten.
     return min(candidates, key=lambda ip: (_ip_rank(ip), candidates.index(ip)))

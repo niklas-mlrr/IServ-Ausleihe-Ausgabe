@@ -133,9 +133,9 @@ class AppState:
         self.modus_b_join_qr: str | None = None  # PNG-Data-URL für iPad/Host
         self.student_sessions: dict[str, StudentSessionB] = {}  # session_token -> Session
         self.displays: dict[str, DisplaySession] = {}           # display_id -> Display
-        # Header-Toggle „Lokale IP-Adressen": erzwingt die RFC1918-LAN-IP in
-        # QR-/Join-URLs statt der Auto-Auswahl (z. B. Tailscale). False = Auto.
-        self.prefer_local_ip: bool = False
+        # Header-Toggle „Tailscale-IP": erzwingt die Tailscale/CGNAT-IP in
+        # QR-/Join-URLs statt der Auto-Auswahl (LAN-first). False = Auto.
+        self.force_tailscale_ip: bool = False
 
     # --- Host-Login-Sessions (gleitendes TTL) ---
     def add_host_session(self, sid: str) -> None:
@@ -186,7 +186,7 @@ class AppState:
             "modus_b": self.modus_b_snapshot(),
             "allow_booking": get_config().allow_booking,
             "worker_pool": worker_stats,
-            "prefer_local_ip": self.prefer_local_ip,
+            "force_tailscale_ip": self.force_tailscale_ip,
         }
 
     def modus_b_snapshot(self) -> dict:

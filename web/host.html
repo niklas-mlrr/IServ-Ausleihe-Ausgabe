@@ -346,10 +346,10 @@
     <span class="sb-item" id="sb-queue"></span>
     <span class="sb-item" id="sb-ipads"></span>
     <span class="sb-spacer"></span>
-    <label class="sb-item switch" id="local-ip-toggle" title="QR-Codes auf die lokale LAN-IP (RFC1918) erzwingen statt der Auto-Auswahl (z. B. Tailscale). Aus = Auto." style="border-left:none; padding-left:0; margin-right:18px">
-      <input type="checkbox" id="prefer-local-ip" onchange="setPreferLocalIp(this.checked)">
+    <label class="sb-item switch" id="tailscale-ip-toggle" title="QR-Codes auf die Tailscale-IP (100.x) erzwingen statt der Auto-Auswahl (LAN-first). Aus = Auto." style="border-left:none; padding-left:0; margin-right:18px">
+      <input type="checkbox" id="force-tailscale-ip" onchange="setForceTailscaleIp(this.checked)">
       <span class="track"></span>
-      Lokale IP-Adressen
+      Tailscale-IP
     </label>
     <label class="sb-item switch" id="slip-variant-toggle" title="Zusätzlich die 2. Seite (Schüler-Leihschein) drucken — Seite 1 wird immer gedruckt" style="margin-right:14px; border-left:none; padding-left:0">
       <input type="checkbox" id="slip-second-page">
@@ -1030,20 +1030,20 @@
     const auth = (mb.displays || []).filter(d => d.authorized && d.connected).length;
     const total = (mb.displays || []).length;
     document.getElementById('sb-ipads').innerHTML = `iPads <b>${auth}/${total}</b>`;
-    // Server-Toggle „Lokale IP-Adressen" synchron halten (auch bei Reconnect /
+    // Server-Toggle „Tailscale-IP" synchron halten (auch bei Reconnect /
     // zweitem Host). Der Zustand lebt im Server, nicht in localStorage.
-    const lipCb = document.getElementById('prefer-local-ip');
-    if (lipCb) lipCb.checked = !!state.prefer_local_ip;
+    const tsCb = document.getElementById('force-tailscale-ip');
+    if (tsCb) tsCb.checked = !!state.force_tailscale_ip;
   }
 
-  // Toggle „Lokale IP-Adressen": erzwingt die LAN-IP in allen QR-Codes (Server-
+  // Toggle „Tailscale-IP": erzwingt die Tailscale-IP in allen QR-Codes (Server-
   // State). Die offenen QR-Modals werden neu geladen, falls gerade sichtbar.
-  async function setPreferLocalIp(enabled) {
-    const r = await fetch('/api/prefer-local-ip', {
+  async function setForceTailscaleIp(enabled) {
+    const r = await fetch('/api/force-tailscale-ip', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ enabled }),
     });
-    if (r.ok) showMsg(enabled ? 'QR-Codes nutzen jetzt die lokale LAN-IP' : 'QR-Codes nutzen wieder die Auto-IP');
+    if (r.ok) showMsg(enabled ? 'QR-Codes nutzen jetzt die Tailscale-IP' : 'QR-Codes nutzen wieder die Auto-IP');
   }
 
   function renderWorkerStatus() {
