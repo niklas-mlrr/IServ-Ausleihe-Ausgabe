@@ -133,6 +133,7 @@
     .row { display: flex; gap: 8px; align-items: center; }
     .row > * { flex: 1 }
     .row > button { flex: 0 0 auto; }
+    .row select, .row input { margin-bottom: 0; }
     table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
     th { text-align: left; padding: 6px 8px; color: var(--text-muted); font-weight: 500; border-bottom: 1px solid var(--border); }
     td { padding: 7px 8px; border-bottom: 1px solid var(--border-faint); }
@@ -356,7 +357,7 @@
     <div id="panel-class">
       <div class="row">
         <select id="class-select"><option value="">-- Klassen werden geladen… --</option></select>
-        <button onclick="selectClass()">Queue aufbauen</button>
+        <button onclick="selectClass()" style="padding-top:12px;padding-bottom:12px">Queue aufbauen</button>
       </div>
       <p class="hint">Ersetzt die komplette Queue durch alle Schüler der gewählten Klasse.</p>
     </div>
