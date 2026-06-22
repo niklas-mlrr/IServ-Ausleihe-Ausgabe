@@ -189,6 +189,22 @@
     #status-bar .sb-item b { color: var(--text); font-weight: 600; }
     #status-bar .sb-item.txt-warn b, #status-bar .sb-item.txt-danger b { color: inherit; }
     #status-bar .sb-spacer { flex: 1; }
+    /* iOS-artiger Umschalter (Leihschein-Variante), passend zur Status-Leiste */
+    .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
+    .switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+    .switch .track {
+      flex: none; width: 38px; height: 22px; border-radius: 11px;
+      background: var(--surface-3); border: 1px solid var(--border);
+      position: relative; transition: background .15s ease, border-color .15s ease;
+    }
+    .switch .track::after {
+      content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+      border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.3);
+      transition: transform .15s ease;
+    }
+    .switch input:checked + .track { background: var(--accent); border-color: var(--accent); }
+    .switch input:checked + .track::after { transform: translateX(16px); }
+    .switch input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
     .layout {
       max-width: 1125px; margin: 0 auto;
       display: grid; grid-template-columns: minmax(320px, 360px) 1fr;
@@ -328,8 +344,10 @@
     <span class="sb-item" id="sb-queue"></span>
     <span class="sb-item" id="sb-ipads"></span>
     <span class="sb-spacer"></span>
-    <label class="sb-item" id="slip-variant-toggle" title="Leihschein zusätzlich mit Schul-Beleg (2. Seite) drucken" style="margin-right:12px; cursor:pointer">
-      <input type="checkbox" id="slip-school-copy"> Schul-Beleg
+    <label class="sb-item switch" id="slip-variant-toggle" title="Zusätzlich die 2. Seite (Schüler-Leihschein) drucken — Seite 1 wird immer gedruckt" style="margin-right:14px; border-left:none; padding-left:0">
+      <input type="checkbox" id="slip-second-page">
+      <span class="track"></span>
+      Schüler-Leihschein
     </label>
     <button class="secondary" id="theme-btn" onclick="cycleTheme()" title="Farbschema: System / Hell / Dunkel" aria-label="Farbschema wechseln" style="margin-right:12px">Auto</button>
     <button class="secondary" onclick="doLogout()">Abmelden</button>
@@ -779,13 +797,12 @@
   }
 
   async function printLoanSlip(studentId, btn) {
-    // Toggle „Schul-Beleg": an → 2-Seiten-Beleg (Schüler + Schule), aus → nur
-    // Schüler-Beleg (1 Seite).
-    const schoolCopy = document.getElementById('slip-school-copy')?.checked;
-    const variant = schoolCopy ? 'student-always_school-auto' : 'student';
+    // Seite 1 wird immer gedruckt; Toggle „Schüler-Leihschein" druckt zusätzlich
+    // Seite 2.
+    const secondPage = !!document.getElementById('slip-second-page')?.checked;
     await busy(btn, async () => {
       showMsg('Leihschein wird geholt …');
-      const r = await fetch('/api/print-loan-slip', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ student_id: studentId, variant }) });
+      const r = await fetch('/api/print-loan-slip', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ student_id: studentId, second_page: secondPage }) });
       const d = await r.json().catch(() => ({}));
       if (r.ok) showMsg(`Leihschein: ${d.detail || 'gedruckt'} (${d.backend})`);
       else showMsg(d.detail || 'Druck fehlgeschlagen');
@@ -1172,12 +1189,12 @@
     });
   }
 
-  // Leihschein-Variante (Schul-Beleg an/aus) persistent halten.
-  const _slipCb = document.getElementById('slip-school-copy');
+  // Leihschein-Toggle (2. Seite / Schüler-Leihschein an/aus) persistent halten.
+  const _slipCb = document.getElementById('slip-second-page');
   if (_slipCb) {
-    _slipCb.checked = localStorage.getItem('slipSchoolCopy') === '1';
+    _slipCb.checked = localStorage.getItem('slipSecondPage') === '1';
     _slipCb.addEventListener('change', () => {
-      localStorage.setItem('slipSchoolCopy', _slipCb.checked ? '1' : '0');
+      localStorage.setItem('slipSecondPage', _slipCb.checked ? '1' : '0');
     });
   }
 

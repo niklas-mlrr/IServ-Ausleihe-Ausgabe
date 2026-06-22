@@ -86,12 +86,16 @@ async def _run(cmd: list[str]) -> tuple[int, str]:
     return proc.returncode or 0, (out or b"").decode(errors="replace").strip()
 
 
-async def _print_lp(tmp_pdf: Path, printer_name: str | None) -> dict:
+async def _print_lp(
+    tmp_pdf: Path, printer_name: str | None, pages: str | None = None
+) -> dict:
     if not shutil.which("lp"):
         raise RuntimeError("lp (CUPS) nicht gefunden — Backend 'lp' nicht verfügbar")
     cmd = ["lp"]
     if printer_name:
         cmd += ["-d", printer_name]
+    if pages:
+        cmd += ["-o", f"page-ranges={pages}"]
     cmd.append(str(tmp_pdf))
     rc, out = await _run(cmd)
     if rc != 0:
@@ -100,15 +104,20 @@ async def _print_lp(tmp_pdf: Path, printer_name: str | None) -> dict:
 
 
 async def _print_sumatra(
-    tmp_pdf: Path, printer_name: str | None, sumatra_path: str | None
+    tmp_pdf: Path, printer_name: str | None, sumatra_path: str | None,
+    pages: str | None = None,
 ) -> dict:
     exe = _find_sumatra(sumatra_path)
     if not exe:
         raise FileNotFoundError("SumatraPDF nicht gefunden")
     if printer_name:
-        cmd = [exe, "-print-to", printer_name, "-silent", str(tmp_pdf)]
+        cmd = [exe, "-print-to", printer_name, "-silent"]
     else:
-        cmd = [exe, "-print-to-default", "-silent", str(tmp_pdf)]
+        cmd = [exe, "-print-to-default", "-silent"]
+    if pages:
+        # SumatraPDF: Seitenbereich via -print-settings (z. B. "1" oder "1-2").
+        cmd += ["-print-settings", pages]
+    cmd.append(str(tmp_pdf))
     rc, out = await _run(cmd)
     if rc != 0:
         raise RuntimeError(f"SumatraPDF fehlgeschlagen (rc={rc}): {out}")
@@ -153,8 +162,14 @@ async def print_pdf(
     sumatra_path: str | None = None,
     output_dir: Path | str = "automation/out/loan_slips",
     label: str = "leihschein",
+    pages: str | None = None,
 ) -> dict:
     """PDF-Bytes drucken (oder im `file`-Backend speichern).
+
+    `pages` schränkt den Druck auf einen Seitenbereich ein (z. B. ``"1"`` nur
+    erste Seite, ``"1-2"`` beide). ``None`` druckt alle Seiten. Unterstützt von
+    den Backends ``lp`` und ``sumatra``; ``file`` speichert immer das ganze PDF
+    und ``win-default`` kann nicht einschränken (druckt alle Seiten).
 
     Gibt ein dict `{ok, backend, detail, [path]}` zurück. Wirft bei harten
     Fehlern eine Exception (vom Aufrufer in eine HTTP-Antwort zu wandeln).
@@ -176,14 +191,19 @@ async def print_pdf(
             fh.write(data)
 
         if resolved == "lp":
-            return await _print_lp(tmp_pdf, printer_name)
+            return await _print_lp(tmp_pdf, printer_name, pages)
 
         if resolved in ("sumatra", "win-default"):
             if resolved == "sumatra":
                 try:
-                    return await _print_sumatra(tmp_pdf, printer_name, sumatra_path)
+                    return await _print_sumatra(tmp_pdf, printer_name, sumatra_path, pages)
                 except FileNotFoundError:
                     log.warning("SumatraPDF nicht gefunden — Fallback auf win-default")
+            if pages:
+                log.warning(
+                    "Backend 'win-default' kann keinen Seitenbereich (%s) wählen — "
+                    "es werden alle Seiten gedruckt", pages,
+                )
             return _print_win_default(tmp_pdf)
 
         raise ValueError(f"Unbekanntes Druck-Backend: {resolved!r}")

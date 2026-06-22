@@ -518,13 +518,16 @@ async def print_loan_slip(body: dict, session_id: str | None = Cookie(default=No
     student_id = body.get("student_id")
     if student_id is None:
         raise HTTPException(400, "student_id fehlt")
-    variant = str(body.get("variant", "student")).strip() or "student"
+    # Seite 1 wird immer gedruckt; Seite 2 (Schüler-Leihschein) nur, wenn der
+    # Host-Toggle gesetzt ist.
+    second_page = bool(body.get("second_page"))
+    pages = None if second_page else "1"
 
     from ..sessions import print_loan_slip_for
 
     state = get_state()
     try:
-        return await print_loan_slip_for(state, int(student_id), variant=variant)
+        return await print_loan_slip_for(state, int(student_id), pages=pages)
     except Exception as e:
         log.exception("Leihschein-Druck für %s fehlgeschlagen", student_id)
         raise HTTPException(502, f"Leihschein-Druck fehlgeschlagen: {e}")

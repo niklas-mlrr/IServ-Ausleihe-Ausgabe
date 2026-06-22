@@ -63,6 +63,38 @@ def test_print_loan_slip_for_reads_and_prints(tmp_path, monkeypatch):
     monkeypatch.setattr(sessions, "get_config", lambda: cfg)
     res = asyncio.run(sessions.print_loan_slip_for(FakeState(), 2159))
 
-    assert calls["fetch"] == (2159, "student")  # read-only GET mit Default-Variante
+    # Read-only GET holt stets den 2-seitigen Beleg (Default-Variante).
+    assert calls["fetch"] == (2159, "student-always_school-auto")
     assert res["ok"] is True and res["backend"] == "file"
     assert Path(res["path"]).read_bytes().startswith(b"%PDF")
+
+
+def test_print_pdf_lp_passes_page_range(monkeypatch):
+    """`pages` wird als CUPS-Seitenbereich an `lp` durchgereicht (Seite 1 only)."""
+    captured = {}
+
+    async def fake_run(cmd):
+        captured["cmd"] = cmd
+        return 0, "ok"
+
+    monkeypatch.setattr(printing, "_run", fake_run)
+    monkeypatch.setattr(printing.shutil, "which", lambda name: "/usr/bin/lp")
+
+    res = asyncio.run(printing.print_pdf(b"%PDF-1.4\n", backend="lp", pages="1"))
+    assert res["ok"] is True and res["backend"] == "lp"
+    assert "page-ranges=1" in captured["cmd"]
+
+
+def test_print_pdf_lp_without_pages_prints_all(monkeypatch):
+    """Ohne `pages` wird kein Seitenbereich gesetzt (alle Seiten)."""
+    captured = {}
+
+    async def fake_run(cmd):
+        captured["cmd"] = cmd
+        return 0, "ok"
+
+    monkeypatch.setattr(printing, "_run", fake_run)
+    monkeypatch.setattr(printing.shutil, "which", lambda name: "/usr/bin/lp")
+
+    asyncio.run(printing.print_pdf(b"%PDF-1.4\n", backend="lp"))
+    assert not any("page-ranges" in str(a) for a in captured["cmd"])

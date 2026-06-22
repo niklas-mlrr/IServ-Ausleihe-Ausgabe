@@ -88,6 +88,13 @@
 - [ ] **Host-Button „Leihschein"** (UI) löst Druck korrekt aus, Statusmeldung.
       Code vollständig verdrahtet (2026-06-22): `printLoanSlip` → `POST
       /api/print-loan-slip` → `print_loan_slip_for`; am Gerät zu prüfen.
+- [ ] **Seitenwahl-Toggle „Schüler-Leihschein"** (host.html, 2026-06-22): es
+      wird stets der 2-seitige Beleg geholt; Seite 1 immer gedruckt, Seite 2 nur
+      bei aktivem Toggle (`second_page` → `pages=None`, sonst `pages="1"`).
+      Seitenbereich via `lp -o page-ranges=` bzw. SumatraPDF `-print-settings`;
+      `win-default` kann **nicht** einschränken (druckt alle Seiten — WARN-Log).
+      **Am echten Drucker prüfen**, dass `-print-settings "1"` wirklich nur
+      Seite 1 druckt (Sumatra-Pfad ist der Produktivweg).
 - [ ] **Scanner-Button „Leihschein" (🖨)** (`scan.html`, nur Helfer) löst Druck
       des aktuell zugewiesenen Schülers aus: WS `{type:'print'}` →
       `print_loan_slip_for(helper.student_id)` → `print_result`. Button während

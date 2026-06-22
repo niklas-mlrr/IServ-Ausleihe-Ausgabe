@@ -105,9 +105,17 @@ async def handle_commit(state: AppState, student_id: int, barcode: str) -> dict:
 
 
 async def print_loan_slip_for(
-    state: AppState, student_id: int, *, variant: str = "student"
+    state: AppState,
+    student_id: int,
+    *,
+    variant: str = "student-always_school-auto",
+    pages: str | None = "1",
 ) -> dict:
     """Leihschein eines Schülers holen (read-only GET) und lokal drucken.
+
+    Geholt wird stets der 2-seitige Beleg (Seite 1 = immer gedruckt, Seite 2 =
+    Schüler-Leihschein). `pages` wählt den zu druckenden Bereich: ``"1"`` nur die
+    erste Seite (Default), ``None`` beide Seiten.
 
     Gemeinsame Orchestrierung für den Host-Endpoint (`/api/print-loan-slip`)
     und den Scanner (WS `print`). Kein Schreibzugriff auf IServ — `get_loan_slip_pdf`
@@ -128,8 +136,12 @@ async def print_loan_slip_for(
         sumatra_path=cfg.sumatra_path,
         output_dir=cfg.print_output_dir,
         label=f"leihschein_{student_id}",
+        pages=pages,
     )
-    log.info("Leihschein gedruckt: student_id=%s backend=%s", student_id, result.get("backend"))
+    log.info(
+        "Leihschein gedruckt: student_id=%s backend=%s pages=%s",
+        student_id, result.get("backend"), pages or "alle",
+    )
     return result
 
 
