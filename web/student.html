@@ -37,6 +37,8 @@
     .view.show { display: flex; }
     /* Active-View füllt die Höhe, damit nur die Tabelle scrollt */
     #view-active.show { flex: 1 1 auto; min-height: 0; align-items: stretch; }
+    /* Pending-View: volle verbleibende Höhe, Inhalt mittig */
+    #view-pending.show { flex: 1 1 auto; justify-content: center; }
     /* Pairing */
     .pair-hint { opacity: .7; text-align: center; margin-bottom: 12px; }
     .pair-code {
@@ -123,10 +125,9 @@
   </style>
 </head>
 <body>
-  <h1>Bücherausgabe</h1>
-
   <!-- Pairing: 4-stelligen Code dem Betreuer zeigen -->
   <div class="view" id="view-pending">
+    <h1>Bücherausgabe</h1>
     <p class="pair-hint">Zeige diesen Code dem Betreuer am Host:</p>
     <div class="pair-code" id="pair-code">····</div>
     <p class="spinner" id="pending-status">Warte auf Freigabe…</p>
@@ -190,8 +191,6 @@
     };
     function show(name) {
       for (const k in views) views[k].classList.toggle('show', k === name);
-      const h1 = document.querySelector('h1');
-      if (h1) h1.style.display = name === 'active' ? 'none' : '';
     }
     // IServ-Strings (Buchtitel etc.) nie ungefiltert per innerHTML einsetzen.
     function escapeHtml(v) {
