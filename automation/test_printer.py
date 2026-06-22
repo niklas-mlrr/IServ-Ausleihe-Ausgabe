@@ -68,15 +68,18 @@ def list_printers() -> None:
 
 def _find_sumatra() -> str | None:
     import shutil
+    local = os.environ.get("LOCALAPPDATA", "")
     candidates = (
         r"C:\Program Files\SumatraPDF\SumatraPDF.exe",
         r"C:\Program Files (x86)\SumatraPDF\SumatraPDF.exe",
+        os.path.join(local, "SumatraPDF", "SumatraPDF.exe"),
+        os.path.join(local, "Programs", "SumatraPDF", "SumatraPDF.exe"),
     )
     found = shutil.which("SumatraPDF") or shutil.which("SumatraPDF.exe")
     if found:
         return found
     for c in candidates:
-        if Path(c).is_file():
+        if c and Path(c).is_file():
             return c
     return None
 

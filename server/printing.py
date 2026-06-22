@@ -56,8 +56,13 @@ def _find_sumatra(sumatra_path: str | None) -> str | None:
     on_path = shutil.which("SumatraPDF") or shutil.which("SumatraPDF.exe")
     if on_path:
         return on_path
-    for cand in _SUMATRA_CANDIDATES:
-        if Path(cand).is_file():
+    local = os.environ.get("LOCALAPPDATA", "")
+    candidates = _SUMATRA_CANDIDATES + (
+        os.path.join(local, "SumatraPDF", "SumatraPDF.exe"),
+        os.path.join(local, "Programs", "SumatraPDF", "SumatraPDF.exe"),
+    )
+    for cand in candidates:
+        if cand and Path(cand).is_file():
             return cand
     return None
 
