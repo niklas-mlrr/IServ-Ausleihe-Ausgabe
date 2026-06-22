@@ -23,6 +23,7 @@
 | V9 | Rate-Limit-Logik (sliding window 5/10 s, pro-IP) | `server/ratelimit.py` Smoke | 2026-06-15 | erste 5 erlaubt, 6. gedrosselt; andere IP unbetroffen |
 | V10 | **Buchungs-Gate** — bei `ALLOW_BOOKING=false` wird der Worker (Enter) nie berührt | `handle_commit` Smoke (uv) | 2026-06-15 | Default→`blocked` ohne Worker-Zugriff; echter Config-Default `False`; Snapshot `False`. Beweist: kein Enter gegen Produktion |
 | V11 | Härtung: `WorkerPool.stats()`, `worker_pool` im Snapshot, Limiter-`sweep()` | uv-Smoke | 2026-06-15 | stats total/available/in_use korrekt; sweep leert alte/leere Buckets; Snapshot enthält `worker_pool` |
+| V12 | **Spike C / O4 — Silent-Print Windows** (echter Druck am Zielgerät) | `automation/test_printer.py "HP LaserJet Professional P1102"` | 2026-06-22 | rc=0, Seite ausgedruckt; SumatraPDF via winget nach `%LOCALAPPDATA%\SumatraPDF\`; `PRINTER_NAME=HP LaserJet Professional P1102` in `.env` setzen |
 
 ## Offen / zu testen
 
@@ -81,8 +82,8 @@
       `POST /api/print-loan-slip` (Server laufend, read-only PDF-Abruf gegen
       IServ → PDF in `automation/out/loan_slips/`). Mit Niklas' Test-Schüler.
 - [ ] **Druck `lp` (macOS, USB-Drucker)** — echter Ausdruck auf dem Macbook.
-- [ ] **Druck `sumatra` / `win-default` (Windows)** — Silent-Print am
-      Ausleihe-Laptop mit altem USB-Drucker (= Spike C / O4).
+- [x] **Druck `sumatra` (Windows)** — Silent-Print am Ausleihe-Laptop mit
+      HP LaserJet Professional P1102 (= Spike C / O4) — 2026-06-22 (→ V12).
 - [ ] **Host-Button „Leihschein"** (UI) löst Druck korrekt aus, Statusmeldung.
 - [ ] **`setup.bat` / `start.bat`** am echten Windows-Laptop (uv vorhanden,
       `uv sync`, Playwright-Install, Start).
