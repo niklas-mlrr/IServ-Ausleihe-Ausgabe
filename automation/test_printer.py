@@ -85,6 +85,8 @@ async def _test_sumatra(pdf_path: Path, printer_name: str | None) -> bool:
     exe = _find_sumatra()
     if not exe:
         print("  SumatraPDF nicht gefunden.")
+        print("  -> Installieren: https://www.sumatrapdfreader.org/")
+        print("     (klein, kostenlos, ermöglicht echten Silent-Print)")
         return False
     print(f"  SumatraPDF: {exe}")
     if printer_name:
@@ -108,6 +110,31 @@ async def _test_sumatra(pdf_path: Path, printer_name: str | None) -> bool:
         return False
 
 
+async def _test_powershell(pdf_path: Path, printer_name: str | None) -> bool:
+    """PowerShell-Fallback: Start-Process -Verb PrintTo (benötigt PDF-Standardprogramm)."""
+    print("  Fallback: PowerShell Start-Process -Verb PrintTo")
+    if printer_name:
+        ps = (
+            f'Start-Process -FilePath "{pdf_path}" '
+            f'-Verb PrintTo -ArgumentList "{printer_name}" -Wait'
+        )
+    else:
+        ps = f'Start-Process -FilePath "{pdf_path}" -Verb Print -Wait'
+    proc = await asyncio.create_subprocess_exec(
+        "powershell", "-NoProfile", "-Command", ps,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+    out, _ = await proc.communicate()
+    rc = proc.returncode or 0
+    output = (out or b"").decode(errors="replace").strip()
+    if rc == 0:
+        print("  OK — Druckjob via PowerShell übergeben.")
+        return True
+    print(f"  FEHLER rc={rc}: {output}")
+    return False
+
+
 def _test_win_default(pdf_path: Path) -> bool:
     print("  Fallback: os.startfile(..., 'print')")
     try:
@@ -116,6 +143,8 @@ def _test_win_default(pdf_path: Path) -> bool:
         return True
     except Exception as e:
         print(f"  FEHLER: {e}")
+        print("  -> Kein Standard-PDF-Viewer gesetzt oder kein 'print'-Verb registriert.")
+        print("     Lösung: SumatraPDF installieren (https://www.sumatrapdfreader.org/)")
         return False
 
 
@@ -129,6 +158,11 @@ async def main() -> None:
         print("Tipp: uv run python automation/test_printer.py \"HP LaserJet Pro P1102\"")
 
     list_printers()
+
+    if printer_name:
+        print(f"\nHinweis: Exakter Name muss mit der Tabelle oben übereinstimmen.")
+        print(f"  Übergeben: {printer_name!r}")
+        print(f"  (Groß-/Kleinschreibung und Leerzeichen beachten)")
 
     print("\n--- Test-PDF erzeugen ---")
     pdf_bytes = _make_test_pdf()
@@ -144,6 +178,10 @@ async def main() -> None:
 
         print("\n--- Drucktest via SumatraPDF ---")
         ok = await _test_sumatra(tmp_path, printer_name)
+
+        if not ok:
+            print("\n--- Drucktest via PowerShell ---")
+            ok = await _test_powershell(tmp_path, printer_name)
 
         if not ok:
             print("\n--- Drucktest via win-default ---")
