@@ -81,12 +81,31 @@ def _find_sumatra() -> str | None:
     return None
 
 
+async def _install_sumatra_winget() -> str | None:
+    """SumatraPDF via winget installieren; gibt Pfad zurück wenn erfolgreich."""
+    print("  -> Installiere SumatraPDF via winget ...")
+    proc = await asyncio.create_subprocess_exec(
+        "winget", "install", "SumatraPDF.SumatraPDF",
+        "--silent", "--accept-package-agreements", "--accept-source-agreements",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+    out, _ = await proc.communicate()
+    output = (out or b"").decode(errors="replace").strip()
+    if proc.returncode == 0:
+        print("  SumatraPDF installiert.")
+        return _find_sumatra()
+    print(f"  winget fehlgeschlagen (rc={proc.returncode}): {output}")
+    print("  Manuell installieren: https://www.sumatrapdfreader.org/")
+    return None
+
+
 async def _test_sumatra(pdf_path: Path, printer_name: str | None) -> bool:
     exe = _find_sumatra()
     if not exe:
-        print("  SumatraPDF nicht gefunden.")
-        print("  -> Installieren: https://www.sumatrapdfreader.org/")
-        print("     (klein, kostenlos, ermöglicht echten Silent-Print)")
+        print("  SumatraPDF nicht gefunden — versuche automatische Installation ...")
+        exe = await _install_sumatra_winget()
+    if not exe:
         return False
     print(f"  SumatraPDF: {exe}")
     if printer_name:
