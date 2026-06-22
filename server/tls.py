@@ -38,38 +38,109 @@ def _is_usable_lan_ip(ip: str) -> bool:
     return not (addr.is_loopback or addr.is_link_local or addr.is_unspecified)
 
 
-def primary_lan_ip() -> str | None:
-    """Primäre ausgehende IPv4 des Hosts (kein echter Verbindungsaufbau).
+# Tailscale/CGNAT (RFC 6598) — vom VPN belegt, kein erreichbares Schul-LAN.
+_CGNAT_NET = ipaddress.ip_network("100.64.0.0/10")
 
-    Liefert genau die IP, über die der Host ins LAN routet — das ist die
-    richtige Adresse für den QR-Code, anders als das alphabetisch erste
-    Element aus mehreren Interfaces.
+
+def _is_private_lan_ip(ip: str) -> bool:
+    """True nur für echte LAN-Adressen (RFC1918), nicht für CGNAT/Tailscale."""
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return addr.is_private and not addr.is_link_local and addr not in _CGNAT_NET
+
+
+def _route_src_ip(target: str) -> str | None:
+    """Quell-IPv4, die der Kernel für eine Verbindung zu `target` wählt.
+
+    Es fließt kein echter Traffic (UDP-Connect setzt nur die Route). Mit
+    verschiedenen Zielen lassen sich gezielt unterschiedliche Interfaces
+    abfragen — z. B. das LAN-Default-Gateway vs. das Tailscale-Netz.
     """
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
-            s.connect(("10.255.255.255", 1))
-            ip = s.getsockname()[0]
+            s.connect((target, 1))
+            return s.getsockname()[0]
         finally:
             s.close()
     except Exception:
         return None
-    return ip if _is_usable_lan_ip(ip) else None
+
+
+def _candidate_ipv4s() -> list[str]:
+    """Alle plausiblen lokalen IPv4 — Default-Route, Tailscale, dann Hostname.
+
+    Die Tailscale-Quell-IP taucht sonst nirgends auf: Die Default-Route zeigt
+    auf einem VPS ins öffentliche Netz, und `gethostname()` löst meist nicht auf
+    die `100.x` auf. Ein UDP-Connect auf die Tailscale-MagicDNS-IP
+    (`100.100.100.100`) liefert dagegen genau die Tailscale-Quell-IP — portabel
+    (auch Windows) und ohne Zusatz-Abhängigkeit.
+    """
+    ordered: list[str] = []
+    seen: set[str] = set()
+    probes = (
+        _route_src_ip("10.255.255.255"),   # LAN/Internet-Default-Route
+        _route_src_ip("100.100.100.100"),  # Tailscale (MagicDNS), falls aktiv
+    )
+    for ip in (*probes, *_hostname_ipv4s()):
+        if ip and ip not in seen and _is_usable_lan_ip(ip):
+            seen.add(ip)
+            ordered.append(ip)
+    return ordered
+
+
+def _ip_rank(ip: str) -> int:
+    """Sortier-Priorität (kleiner = besser) für die QR-IP-Auswahl.
+
+    RFC1918-LAN zuerst (echtes Schul-WLAN), dann CGNAT/Tailscale (Remote-Test),
+    zuletzt öffentliche/sonstige Adressen.
+    """
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return 3
+    if _is_private_lan_ip(ip):
+        return 0
+    if addr in _CGNAT_NET:
+        return 1
+    return 2
+
+
+def _hostname_ipv4s() -> list[str]:
+    try:
+        return [info[4][0] for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET)]
+    except Exception:
+        return []
+
+
+def primary_lan_ip(prefer_local: bool = False) -> str | None:
+    """Beste IPv4 für den QR-Code.
+
+    Standard (Auto): bevorzugt RFC1918-LAN (echtes Schul-WLAN, z. B.
+    `192.168.x.x`/`10.x`), dann Tailscale/CGNAT (Remote-Test über VPN), erst
+    zuletzt öffentliche IPs. So zeigt der QR auf dem Schullaptop die LAN-IP, auf
+    dem VPS aber die erreichbare Tailscale-IP.
+
+    `prefer_local=True` erzwingt eine RFC1918-LAN-Adresse (Header-Toggle „Lokale
+    IP-Adressen"); gibt es keine, fällt es auf die Auto-Reihenfolge zurück.
+    """
+    candidates = _candidate_ipv4s()
+    if not candidates:
+        return None
+    if prefer_local:
+        private = [ip for ip in candidates if _is_private_lan_ip(ip)]
+        if private:
+            return private[0]
+    # Stabile Sortierung nach Rang; bei Gleichstand bleibt die Erkennungs-
+    # Reihenfolge (Default-Route vor Tailscale) erhalten.
+    return min(candidates, key=lambda ip: (_ip_rank(ip), candidates.index(ip)))
 
 
 def _local_ipv4s() -> list[str]:
     """Alle nutzbaren lokalen IPv4-Adressen des Hosts ermitteln (für SAN)."""
-    ips: set[str] = set()
-    primary = primary_lan_ip()
-    if primary:
-        ips.add(primary)
-    # Zusätzlich alle über den Hostnamen auflösbaren IPv4.
-    try:
-        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
-            ips.add(info[4][0])
-    except Exception:
-        pass
-    return sorted(ip for ip in ips if _is_usable_lan_ip(ip))
+    return sorted(set(_candidate_ipv4s()))
 
 
 def generate_selfsigned_cert(cert_path: Path, key_path: Path, cn: str = "localhost") -> None:

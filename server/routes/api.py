@@ -44,14 +44,15 @@ def _require_host(session_id: str | None = Cookie(default=None)) -> str:
 # und spart pro QR-Request einen UDP-Socket. WICHTIG: Nur Treffer cachen, kein
 # None — sonst friert ein einmaliger Netzwerk-Hänger beim ersten Request (WLAN
 # noch nicht oben) die Erkennung dauerhaft ein und der QR zeigt 127.0.0.1.
-_auto_lan_ip: str | None = None
+# Pro Modus (Auto / Lokal) getrennt cachen — die Erkennung kostet je einen
+# UDP-Socket und ändert sich im Betrieb praktisch nicht. Nur Treffer cachen.
+_auto_lan_ip: dict[bool, str | None] = {}
 
 
-def _detect_lan_ip() -> str | None:
-    global _auto_lan_ip
-    if _auto_lan_ip is None:
-        _auto_lan_ip = primary_lan_ip()
-    return _auto_lan_ip
+def _detect_lan_ip(prefer_local: bool = False) -> str | None:
+    if not _auto_lan_ip.get(prefer_local):
+        _auto_lan_ip[prefer_local] = primary_lan_ip(prefer_local=prefer_local)
+    return _auto_lan_ip[prefer_local]
 
 
 def _base_url(request: Request) -> str:
@@ -64,7 +65,7 @@ def _base_url(request: Request) -> str:
         cfg = get_config()
         # Expliziter Override (HOST_IP) vor der heuristischen Auto-Erkennung —
         # bei mehreren Interfaces wählt local_ips[0] sonst evtl. das falsche Netz.
-        new_host = cfg.host_ip or _detect_lan_ip()
+        new_host = cfg.host_ip or _detect_lan_ip(get_state().prefer_local_ip)
         if new_host:
             if not port:
                 port = str(cfg.port)
@@ -315,6 +316,32 @@ async def add_test_students(session_id: str | None = Cookie(default=None)) -> di
 async def get_state_endpoint(session_id: str | None = Cookie(default=None)) -> dict:
     _require_host(session_id)
     return get_state().state_snapshot()
+
+
+@router.post("/api/prefer-local-ip")
+async def set_prefer_local_ip(
+    body: dict, request: Request, session_id: str | None = Cookie(default=None)
+) -> dict:
+    """Header-Toggle „Lokale IP-Adressen": Auto-Auswahl ↔ erzwungene LAN-IP.
+
+    Beeinflusst alle QR-/Join-URLs (Helfer-, Schüler-Join-, iPad-Display-QR).
+    Die On-Demand-QRs übernehmen den Modus beim nächsten Abruf automatisch; den
+    bei `/modus-b/open` eingefrorenen Schüler-Join-QR bauen wir hier neu, wenn
+    die Ausgabe gerade offen ist.
+    """
+    _require_host(session_id)
+    state = get_state()
+    state.prefer_local_ip = bool(body.get("enabled"))
+
+    if state.modus_b_open and state.modus_b_join_secret:
+        state.modus_b_join_url = (
+            f"{_base_url(request)}/student?j={state.modus_b_join_secret}"
+        )
+        state.modus_b_join_qr = make_qr_data_url(state.modus_b_join_url)
+        await broadcast_displays(state)
+
+    await get_hub().broadcast_host(state.state_snapshot())
+    return {"ok": True, "prefer_local_ip": state.prefer_local_ip}
 
 
 # ---------------------------------------------------------------------------
