@@ -44,8 +44,10 @@ def _make_test_pdf() -> bytes:
     return buf.getvalue()
 
 
-def list_printers() -> None:
+def list_printers() -> list[str]:
+    """Drucker auflisten und Namen als Liste zurückgeben."""
     print("\n--- Windows-Drucker ---")
+    names: list[str] = []
     try:
         out = subprocess.check_output(
             ["powershell", "-NoProfile", "-Command",
@@ -53,6 +55,11 @@ def list_printers() -> None:
             text=True, timeout=10,
         )
         print(out.strip())
+        # Namen aus der Tabelle extrahieren (Zeile 3+, erste Spalte)
+        for line in out.splitlines()[2:]:
+            name = line.strip()
+            if name:
+                names.append(name.split("  ")[0].strip())
     except Exception as e:
         print(f"  PowerShell fehlgeschlagen: {e}")
         try:
@@ -64,6 +71,7 @@ def list_printers() -> None:
         except Exception as e2:
             print(f"  wmic fehlgeschlagen: {e2}")
             print("  (Drucker-Auflistung nicht möglich)")
+    return names
 
 
 def _find_sumatra() -> str | None:
@@ -179,12 +187,21 @@ async def main() -> None:
         print("Kein Druckername angegeben → Standarddrucker wird verwendet.")
         print("Tipp: uv run python automation/test_printer.py \"HP LaserJet Pro P1102\"")
 
-    list_printers()
+    known_printers = list_printers()
 
     if printer_name:
-        print(f"\nHinweis: Exakter Name muss mit der Tabelle oben übereinstimmen.")
-        print(f"  Übergeben: {printer_name!r}")
-        print(f"  (Groß-/Kleinschreibung und Leerzeichen beachten)")
+        if known_printers and printer_name not in known_printers:
+            # Partielle Übereinstimmung suchen (case-insensitive)
+            needle = printer_name.lower()
+            suggestions = [n for n in known_printers if needle in n.lower() or n.lower() in needle]
+            print(f"\n[WARNUNG] Druckername {printer_name!r} nicht in der Liste gefunden!")
+            if suggestions:
+                print(f"  Meintest du: {suggestions[0]!r}  ?")
+                print(f"  -> Skript mit diesem Namen erneut aufrufen:")
+                print(f'     uv run python automation/test_printer.py "{suggestions[0]}"')
+            else:
+                print(f"  Bitte exakten Namen aus der Tabelle oben verwenden.")
+            print()
 
     print("\n--- Test-PDF erzeugen ---")
     pdf_bytes = _make_test_pdf()
