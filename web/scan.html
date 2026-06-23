@@ -156,7 +156,8 @@
     .modal-actions button { padding: 12px; font-size: .95rem; width: 100%; }
     .modal-actions .primary { background: #2e7d32; color: #fff; }
     .modal-actions .primary:hover { background: #357a38; }
-    .modal-actions .ghost { background: transparent; border: 1px solid var(--border); }
+    .modal-actions .ghost { background: transparent; border: 1px solid #c0392b; color: #c0392b; }
+    .modal-actions .ghost:hover { background: rgba(192,57,43,.1); }
   </style>
 </head>
 <body>
@@ -209,6 +210,18 @@
         <button class="primary" id="modal-print">Drucken</button>
         <button class="primary" id="modal-print-next">Drucken &amp; nächster Schüler</button>
         <button class="ghost" id="modal-cancel">Abbrechen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Weiter-Dialog: Hinweis auf offene vorgemerkte Bücher vor dem Wechsel -->
+  <div class="modal-overlay" id="next-modal">
+    <div class="modal-box">
+      <h3>Nächster Schüler</h3>
+      <div class="modal-warn" id="next-warn"></div>
+      <div class="modal-actions">
+        <button class="primary" id="modal-next-confirm">Nächster Schüler</button>
+        <button class="ghost" id="modal-next-cancel">Abbrechen</button>
       </div>
     </div>
   </div>
@@ -384,6 +397,10 @@
     const modalPrintBtn = document.getElementById('modal-print');
     const modalPrintNextBtn = document.getElementById('modal-print-next');
     const modalCancelBtn = document.getElementById('modal-cancel');
+    const nextModal = document.getElementById('next-modal');
+    const nextWarnEl = document.getElementById('next-warn');
+    const modalNextConfirmBtn = document.getElementById('modal-next-confirm');
+    const modalNextCancelBtn = document.getElementById('modal-next-cancel');
     let scanFlashTimeout = null;
 
     // Nächster Schüler: aktuellen abschließen + nächsten aus der Queue laden.
@@ -400,7 +417,26 @@
       statusEl.textContent = 'Wird geladen…';
       ws.send(JSON.stringify({ type: 'next' }));
     }
-    nextBtn.addEventListener('click', advanceToNext);
+
+    function closeNextModal() { nextModal.classList.remove('show'); }
+
+    // Nächster-Schüler-Klick: bei noch offenen vorgemerkten Büchern erst einen
+    // Hinweis zeigen (Abbrechen / Nächster Schüler), sonst direkt weiterschalten.
+    async function requestNext() {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      if (!studentActive) { advanceToNext(); return; }
+      statusEl.textContent = 'Prüfe Scans …';
+      await waitForScans();
+      setReadyStatus();
+      const { vorgemerkt, offen } = computeOpenBooks();
+      if (offen.length === 0) { advanceToNext(); return; }
+      renderOpenWarning(nextWarnEl, vorgemerkt, offen);
+      nextModal.classList.add('show');
+    }
+    nextBtn.addEventListener('click', requestNext);
+    modalNextConfirmBtn.addEventListener('click', () => { closeNextModal(); advanceToNext(); });
+    modalNextCancelBtn.addEventListener('click', closeNextModal);
+    nextModal.addEventListener('click', (e) => { if (e.target === nextModal) closeNextModal(); });
 
     // ---- Druck-Dialog ----
     function closePrintModal() { printModal.classList.remove('show'); }
@@ -413,20 +449,32 @@
       statusEl.textContent = 'Prüfe Scans …';
       await waitForScans();
       setReadyStatus();
+      const { vorgemerkt, offen } = computeOpenBooks();
+      renderOpenWarning(printWarnEl, vorgemerkt, offen);
+      slipCheck.checked = slipSecondPageDefault;
+      printModal.classList.add('show');
+    }
+
+    // Vorgemerkte (status !== 'ausgeliehen'), in dieser Session noch nicht
+    // gescannte Bücher ermitteln. Rein lokal — kein IServ-/DB-Zugriff.
+    function computeOpenBooks() {
       const vorgemerkt = currentBooks.filter(b => b.status !== 'ausgeliehen');
       const offen = vorgemerkt.filter(b => !(b.isbn && scannedIsbns.has(b.isbn)));
+      return { vorgemerkt, offen };
+    }
+
+    // Hinweis auf offene Bücher in das Ziel-Element rendern oder ausblenden.
+    function renderOpenWarning(el, vorgemerkt, offen) {
       if (offen.length > 0) {
         const items = offen.map(b =>
           `<li>${escapeHtml(b.subject ? b.subject + ' – ' : '')}${escapeHtml(b.title)}</li>`).join('');
-        printWarnEl.innerHTML =
+        el.innerHTML =
           `Achtung: Erst ${vorgemerkt.length - offen.length} von ${vorgemerkt.length} `
           + `vorgemerkten Büchern gescannt.<ul>${items}</ul>`;
-        printWarnEl.style.display = '';
+        el.style.display = '';
       } else {
-        printWarnEl.style.display = 'none';
+        el.style.display = 'none';
       }
-      slipCheck.checked = slipSecondPageDefault;
-      printModal.classList.add('show');
     }
 
     // Leihschein drucken. Der Server holt das PDF read-only und druckt lokal
@@ -446,7 +494,9 @@
     modalCancelBtn.addEventListener('click', closePrintModal);
     printModal.addEventListener('click', (e) => { if (e.target === printModal) closePrintModal(); });
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && printModal.classList.contains('show')) closePrintModal();
+      if (e.key !== 'Escape') return;
+      if (printModal.classList.contains('show')) closePrintModal();
+      if (nextModal.classList.contains('show')) closeNextModal();
     });
 
     let audioCtx = null, audioBuffer = null;
