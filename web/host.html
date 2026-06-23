@@ -321,6 +321,25 @@
         transition-duration: .01ms !important; scroll-behavior: auto !important;
       }
     }
+    /* Druck-Dialog — exakt wie scan.html (modal-box als flex-column + gleiche Button-Styles) */
+    #print-dialog { background: rgba(0,0,0,.55); padding: 20px; }
+    #print-dialog .modal-box { width: 100%; display: flex; flex-direction: column; gap: 14px; border: 1px solid var(--border); border-radius: 14px; padding: 20px; box-shadow: 0 12px 40px rgba(0,0,0,.5); }
+    @media (prefers-color-scheme: light) { :root:not([data-theme]) #print-dialog .modal-box { box-shadow: 0 12px 40px rgba(0,0,0,.18); } }
+    :root[data-theme="light"] #print-dialog .modal-box { box-shadow: 0 12px 40px rgba(0,0,0,.18); }
+    #print-dialog .modal-box h3 { font-size: 1.2rem; font-weight: 700; }
+    #print-dialog .modal-actions { flex-direction: column; justify-content: stretch; gap: 8px; margin-top: 4px; }
+    #print-dialog .modal-actions button { width: 100%; padding: 12px; font-size: .95rem; }
+    #print-dialog .modal-actions .primary { background: #2e7d32; color: #fff; border: none; }
+    #print-dialog .modal-actions .primary:hover { background: #357a38; }
+    #print-dialog .modal-actions .ghost { background: transparent; border: 1px solid #c0392b; color: #c0392b; display: block; text-align: center; opacity: 1; }
+    #print-dialog .modal-actions .ghost:hover { background: rgba(192,57,43,.1); opacity: 1; }
+    .modal-check { display: flex; align-items: center; gap: 10px; font-size: .95rem; cursor: pointer; user-select: none; }
+    /* native Checkbox erzwingen — globale input{}-Regel (background/border/padding) zurücksetzen */
+    .modal-check input { width: 18px; height: 18px; flex: none; cursor: pointer; margin: 0; padding: 0; background: none; border: none; appearance: auto; -webkit-appearance: auto; }
+    /* globale label{opacity:.6}-Regel zurücksetzen; color explizit statt Vererbung von --text (#eee vs #fff) */
+    #print-dialog .modal-check { color: #fff; opacity: 1; font-size: .95rem; }
+    :root[data-theme="light"] #print-dialog .modal-check { color: var(--text); }
+    @media (prefers-color-scheme: light) { :root:not([data-theme]) #print-dialog .modal-check { color: var(--text); } }
   </style>
 </head>
 <body>
@@ -488,6 +507,21 @@
     <div class="modal-actions">
       <button class="secondary" id="confirm-cancel">Abbrechen</button>
       <button class="danger" id="confirm-ok">Bestätigen</button>
+    </div>
+  </div>
+</div>
+
+<!-- Druck-Dialog -->
+<div class="modal" id="print-dialog">
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="print-dialog-title">
+    <h3 id="print-dialog-title">Leihschein drucken</h3>
+    <label class="modal-check">
+      <input type="checkbox" id="print-dialog-slip">
+      Schüler-Leihschein (2. Seite)
+    </label>
+    <div class="modal-actions">
+      <button class="primary" id="print-dialog-ok">Drucken</button>
+      <button class="ghost" id="print-dialog-cancel">Abbrechen</button>
     </div>
   </div>
 </div>
@@ -805,10 +839,39 @@
     });
   }
 
+  // Öffnet den Druck-Dialog und gibt die gewählte „second_page"-Option zurück,
+  // oder null wenn Abbrechen gedrückt wurde.
+  function openPrintDialog() {
+    return new Promise(resolve => {
+      const modal = document.getElementById('print-dialog');
+      const box = modal.querySelector('.modal-box');
+      const slipCb = document.getElementById('print-dialog-slip');
+      const okBtn = document.getElementById('print-dialog-ok');
+      const cancelBtn = document.getElementById('print-dialog-cancel');
+      const prevFocus = document.activeElement;
+      slipCb.checked = !!document.getElementById('slip-second-page')?.checked;
+      const onKey = (e) => {
+        if (e.key === 'Escape') { e.preventDefault(); finish(null); }
+        else trapFocus(box, e);
+      };
+      const finish = (val) => {
+        modal.classList.remove('show');
+        okBtn.onclick = cancelBtn.onclick = null;
+        modal.removeEventListener('keydown', onKey);
+        if (prevFocus) prevFocus.focus();
+        resolve(val);
+      };
+      okBtn.onclick = () => finish(slipCb.checked);
+      cancelBtn.onclick = () => finish(null);
+      modal.addEventListener('keydown', onKey);
+      modal.classList.add('show');
+      okBtn.focus();
+    });
+  }
+
   async function printLoanSlip(studentId, btn) {
-    // Seite 1 wird immer gedruckt; Toggle „Schüler-Leihschein" druckt zusätzlich
-    // Seite 2.
-    const secondPage = !!document.getElementById('slip-second-page')?.checked;
+    const secondPage = await openPrintDialog();
+    if (secondPage === null) return;
     await busy(btn, async () => {
       showMsg('Leihschein wird geholt …');
       const r = await fetch('/api/print-loan-slip', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ student_id: studentId, second_page: secondPage }) });
