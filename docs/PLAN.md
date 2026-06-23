@@ -191,6 +191,20 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
 - [x] Leihschein-Druck — Code fertig: read-only PDF-Abruf + Druck-Abstraktion
       (`server/printing.py`, Endpoint `POST /api/print-loan-slip`, Host-Button) —
       2026-06-15. Echter Druck am Zielgerät noch zu verifizieren (`docs/test_status.md`).
+- [x] Helfer-Druck-Dialog (`web/scan.html`) statt Sofortdruck — 2026-06-23:
+      Klick auf den Drucker-Button öffnet ein Modal mit (a) Warnung „Erst X von Y
+      vorgemerkten Büchern gescannt" inkl. Liste der offenen Titel, (b) Checkbox
+      „Schüler-Leihschein (2. Seite)", (c) Buttons **Abbrechen / Drucken / Drucken
+      & nächster Schüler** (letzterer schaltet nur bei `print_result.ok` weiter).
+      - Checkbox-Default = Host-Toggle, server-gesynct: Host pusht seinen
+        `slip-second-page`-Stand via `POST /api/slip-default` → `state.slip_second_page_default`
+        → `Hub.broadcast_settings` → Helfer (`{type:"settings"}`); Helfer bekommt
+        den Wert auch beim WS-Connect. Reines UI-Setting, **kein IServ-/DB-Zugriff**.
+      - WS `print` nimmt jetzt `second_page` entgegen → `pages = None|"1"`.
+      - Buchliste aktualisiert sich live nach jedem Scan: `scan_result` trägt die
+        `isbn`, der Client markiert das Buch „erledigt" (rein visuell; Scans
+        bleiben `staged`, kein Submit). Dialog wartet vor dem Vergleich via
+        `pendingScans`-Zähler auf den Abschluss laufender Scans.
 - [ ] End-to-End-Test mit ausgemusterten Büchern **inkl. Buchung** (wartet auf Buchungstest-Freigabe Niklas + Lukas)
 
 ### Phase 3 — Generalprobe Teil 1 (vor Ferienbeginn, Anfang Juli)

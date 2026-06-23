@@ -40,6 +40,21 @@ class Hub:
                 except Exception:
                     helper.ws = None
 
+    async def broadcast_settings(self, state: AppState | None = None) -> None:
+        """Helfer-relevante Settings an alle verbundenen Scanner schicken.
+
+        Aktuell nur der Host-Default „Schüler-Leihschein" (2. Seite), den der
+        Druck-Dialog im Helferclient als Vorauswahl nutzt.
+        """
+        s = state or get_state()
+        msg = {"type": "settings", "slip_second_page": s.slip_second_page_default}
+        for helper in list(s.helper_sessions.values()):
+            if helper.ws is not None:
+                try:
+                    await helper.ws.send_json(msg)
+                except Exception:
+                    helper.ws = None
+
     async def send_scanner(self, token: str, msg: dict, state: AppState | None = None) -> None:
         s = state or get_state()
         helper = s.helper_sessions.get(token)

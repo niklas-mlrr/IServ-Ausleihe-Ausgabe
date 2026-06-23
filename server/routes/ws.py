@@ -83,6 +83,9 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
     else:
         await websocket.send_json({"type": "waiting", "msg": "Warte auf Schüler-Zuweisung", "queue_size": state.pending_count()})
 
+    # Host-Default „Schüler-Leihschein" mitteilen (Vorauswahl im Druck-Dialog).
+    await websocket.send_json({"type": "settings", "slip_second_page": state.slip_second_page_default})
+
     await hub.broadcast_host(state.state_snapshot())
 
     try:
@@ -102,8 +105,12 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                 if helper.student_id is None:
                     await websocket.send_json({"type": "print_result", "ok": False, "msg": "Kein Schüler zugewiesen"})
                     continue
+                # Seite 1 wird immer gedruckt; Seite 2 (Schüler-Leihschein) nur,
+                # wenn der Helfer sie im Druck-Dialog aktiviert hat.
+                second_page = bool(raw.get("second_page"))
+                pages = None if second_page else "1"
                 try:
-                    result = await print_loan_slip_for(state, helper.student_id)
+                    result = await print_loan_slip_for(state, helper.student_id, pages=pages)
                     await websocket.send_json({"type": "print_result", **result})
                 except Exception as e:  # noqa: BLE001 — Fehler dem Client melden
                     log.exception("Leihschein-Druck (Scanner) fehlgeschlagen")
@@ -143,7 +150,9 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                 continue
 
             result = await handle_scan(state, student_id, barcode)
-            await websocket.send_json({"type": "scan_result", "barcode": barcode, **result})
+            # ISBN mitgeben, damit der Helferclient das gescannte Buch in seiner
+            # Liste als „erledigt" markieren kann (rein visuell, kein Submit).
+            await websocket.send_json({"type": "scan_result", "barcode": barcode, "isbn": check.get("isbn"), **result})
             await hub.broadcast_host(state.state_snapshot())
 
     except WebSocketDisconnect:

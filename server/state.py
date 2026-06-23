@@ -136,6 +136,9 @@ class AppState:
         # Header-Toggle „Tailscale-IP": erzwingt die Tailscale/CGNAT-IP in
         # QR-/Join-URLs statt der Auto-Auswahl (LAN-first). False = Auto.
         self.force_tailscale_ip: bool = False
+        # Host-Toggle „Schüler-Leihschein" (2. Seite): Default für den Druck-
+        # Dialog im Helferclient. Wird vom Host gesetzt und an Helfer gesynct.
+        self.slip_second_page_default: bool = False
 
     # --- Host-Login-Sessions (gleitendes TTL) ---
     def add_host_session(self, sid: str) -> None:
@@ -187,6 +190,7 @@ class AppState:
             "allow_booking": get_config().allow_booking,
             "worker_pool": worker_stats,
             "force_tailscale_ip": self.force_tailscale_ip,
+            "slip_second_page_default": self.slip_second_page_default,
         }
 
     def modus_b_snapshot(self) -> dict:

@@ -1212,12 +1212,23 @@
     });
   }
 
-  // Leihschein-Toggle (2. Seite / Schüler-Leihschein an/aus) persistent halten.
+  // Leihschein-Toggle (2. Seite / Schüler-Leihschein an/aus) persistent halten
+  // und als Default an den Server/Helfer pushen (Vorauswahl im Helfer-Druck-Dialog).
   const _slipCb = document.getElementById('slip-second-page');
+  async function pushSlipDefault(checked) {
+    try {
+      await fetch('/api/slip-default', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ second_page: checked }),
+      });
+    } catch (_) {}
+  }
   if (_slipCb) {
     _slipCb.checked = localStorage.getItem('slipSecondPage') === '1';
+    pushSlipDefault(_slipCb.checked);  // Server beim Laden auf Host-Stand bringen
     _slipCb.addEventListener('change', () => {
       localStorage.setItem('slipSecondPage', _slipCb.checked ? '1' : '0');
+      pushSlipDefault(_slipCb.checked);
     });
   }
 

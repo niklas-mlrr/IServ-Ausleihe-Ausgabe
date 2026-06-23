@@ -352,6 +352,20 @@ async def set_force_tailscale_ip(
     return {"ok": True, "force_tailscale_ip": state.force_tailscale_ip}
 
 
+@router.post("/api/slip-default")
+async def set_slip_default(body: dict, session_id: str | None = Cookie(default=None)) -> dict:
+    """Host-Toggle „Schüler-Leihschein" (2. Seite) als Default für die Helfer.
+
+    Rein clientseitig-organisatorisch: setzt nur die Vorauswahl im Druck-Dialog
+    des Helferclients. Kein IServ-/DB-Zugriff.
+    """
+    _require_host(session_id)
+    state = get_state()
+    state.slip_second_page_default = bool(body.get("second_page"))
+    await get_hub().broadcast_settings(state)
+    return {"ok": True, "slip_second_page_default": state.slip_second_page_default}
+
+
 # ---------------------------------------------------------------------------
 # Helfer verwalten
 # ---------------------------------------------------------------------------

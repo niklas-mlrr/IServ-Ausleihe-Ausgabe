@@ -121,6 +121,34 @@
     .row-vorgemerkt  { background: rgba(230,126,34,.14); border-color: rgba(230,126,34,.55); }
     .row-ausgeliehen { background: rgba(46,125,50,.16);  border-color: rgba(46,125,50,.55); }
     .book-empty { opacity: .4; padding: 14px 4px; font-size: .9rem; }
+
+    /* ---- Druck-Dialog (Modal) ---- */
+    .modal-overlay {
+      position: fixed; inset: 0; z-index: 100; padding: 20px;
+      display: none; align-items: center; justify-content: center;
+      background: rgba(0,0,0,.55);
+    }
+    .modal-overlay.show { display: flex; }
+    .modal-box {
+      width: 100%; max-width: 420px; background: var(--surface);
+      border: 1px solid var(--border); border-radius: 14px; padding: 20px;
+      box-shadow: 0 12px 40px var(--shadow);
+      display: flex; flex-direction: column; gap: 14px;
+    }
+    .modal-box h3 { font-size: 1.2rem; font-weight: 700; }
+    .modal-warn {
+      background: rgba(230,126,34,.14); border: 1px solid rgba(230,126,34,.55);
+      border-radius: 8px; padding: 10px 12px; font-size: .9rem; color: var(--fg);
+    }
+    .modal-warn ul { margin: 6px 0 0; padding-left: 18px; }
+    .modal-warn li { margin: 2px 0; }
+    .modal-check { display: flex; align-items: center; gap: 10px; font-size: .95rem; cursor: pointer; user-select: none; }
+    .modal-check input { width: 18px; height: 18px; flex: none; cursor: pointer; }
+    .modal-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+    .modal-actions button { padding: 12px; font-size: .95rem; width: 100%; }
+    .modal-actions .primary { background: #2e7d32; color: #fff; }
+    .modal-actions .primary:hover { background: #357a38; }
+    .modal-actions .ghost { background: transparent; border: 1px solid var(--border); }
   </style>
 </head>
 <body>
@@ -160,6 +188,23 @@
     </div>
   </div>
 
+  <!-- Druck-Dialog: Kontrolle + Wahl der 2. Seite vor dem Drucken -->
+  <div class="modal-overlay" id="print-modal">
+    <div class="modal-box">
+      <h3>Leihschein drucken</h3>
+      <div class="modal-warn" id="print-warn" style="display:none"></div>
+      <label class="modal-check">
+        <input type="checkbox" id="slip-second-page">
+        Schüler-Leihschein (2. Seite)
+      </label>
+      <div class="modal-actions">
+        <button class="primary" id="modal-print">Drucken</button>
+        <button class="primary" id="modal-print-next">Drucken &amp; nächster Schüler</button>
+        <button class="ghost" id="modal-cancel">Abbrechen</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     const statusEl = document.getElementById('status-text');
     const dotEl = document.getElementById('dot');
@@ -171,6 +216,33 @@
     let studentActive = false;          // ist gerade ein Schüler zugewiesen?
     let queueSize = null;               // zuletzt gemeldete Warteschlangengröße
     let waitingMsg = 'Warte auf Schüler-Zuweisung';
+
+    // ---- Druck-Dialog / Buch-Status ----
+    let currentBooks = [];              // Buchliste des aktuellen Schülers
+    const scannedIsbns = new Set();     // ISBNs erfolgreich gescannter (gestageter) Bücher
+    let slipSecondPageDefault = false;  // Host-Default für „Schüler-Leihschein" (2. Seite)
+    let pendingScans = 0;               // noch nicht quittierte Scans (Sequenzierung)
+    const scanWaiters = [];             // Resolver, die auf pendingScans===0 warten
+    let printThenNext = false;          // „Drucken & nächster Schüler" angeklickt?
+
+    function drainScanWaiters() {
+      if (pendingScans <= 0) {
+        pendingScans = 0;
+        while (scanWaiters.length) scanWaiters.shift()();
+      }
+    }
+
+    // Auf den Abschluss aller laufenden Scans warten, bevor die Liste verglichen
+    // wird (mit Sicherheits-Timeout, falls eine Quittung ausbleibt).
+    function waitForScans(timeoutMs = 3000) {
+      if (pendingScans <= 0) return Promise.resolve();
+      return new Promise(resolve => {
+        let done = false;
+        const fin = () => { if (!done) { done = true; resolve(); } };
+        scanWaiters.push(fin);
+        setTimeout(fin, timeoutMs);
+      });
+    }
 
     function renderWaitingStatus() {
       statusEl.textContent = (typeof queueSize === 'number')
@@ -199,10 +271,12 @@
         return;
       }
       bookRowsEl.innerHTML = books.map(b => {
-        const icon = b.status === 'ausgeliehen'
+        // „Erledigt" = bereits ausgeliehen (IServ) ODER in dieser Session gescannt.
+        const done = b.status === 'ausgeliehen' || (b.isbn && scannedIsbns.has(b.isbn));
+        const icon = done
           ? '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>'
           : '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
-        return `<div class="book-row row-${b.status === 'ausgeliehen' ? 'ausgeliehen' : 'vorgemerkt'}">`
+        return `<div class="book-row row-${done ? 'ausgeliehen' : 'vorgemerkt'}">`
           + `<div class="b-fach">${escapeHtml(b.subject)}</div>`
           + `<div class="b-title">${escapeHtml(b.title)}</div>`
           + `<div class="b-icon">${icon}</div></div>`;
@@ -218,21 +292,42 @@
         const paidClass = !s.enrolled ? 'wait' : s.paid ? 'paid' : 'unpaid';
         const paidText = !s.enrolled ? 'Nicht angemeldet' : s.paid ? 'Bezahlt' : `Offen: ${escapeHtml(s.amount_open)} €`;
         sPayEl.innerHTML = `<span class="${paidClass}">${paidText}</span>`;
-        renderBooks(s.books);
+        currentBooks = s.books || [];
+        scannedIsbns.clear();
+        renderBooks(currentBooks);
         statusEl.textContent = 'Scanner bereit — Buch scannen';
       } else if (msg.type === 'scan_result') {
+        if (pendingScans > 0) pendingScans--;
+        // Erfolgreich gestagter Scan → Buch in der Liste als „erledigt" markieren.
+        if (msg.status === 'staged' && msg.isbn) {
+          scannedIsbns.add(msg.isbn);
+          renderBooks(currentBooks);
+        }
+        drainScanWaiters();
         statusEl.textContent = `${escapeHtml(msg.barcode)} — ${escapeHtml(msg.msg || msg.status)}`;
+      } else if (msg.type === 'settings') {
+        slipSecondPageDefault = !!msg.slip_second_page;
       } else if (msg.type === 'print_result') {
         printBtn.disabled = false;
-        statusEl.textContent = msg.ok
+        const detail = msg.ok
           ? `Leihschein: ${escapeHtml(msg.detail || 'gedruckt')}`
           : `Druck fehlgeschlagen: ${escapeHtml(msg.msg || '')}`;
+        statusEl.textContent = detail;
+        // „Drucken & nächster Schüler": nur bei erfolgreichem Druck weiterschalten.
+        if (printThenNext) {
+          printThenNext = false;
+          if (msg.ok) advanceToNext();
+        }
       } else if (msg.type === 'waiting') {
         studentActive = false;
         sNameEl.textContent = '';
         sFormEl.textContent = '';
         sPayEl.innerHTML = '';
         bookRowsEl.innerHTML = '';
+        currentBooks = [];
+        scannedIsbns.clear();
+        pendingScans = 0;
+        drainScanWaiters();
         if (typeof msg.queue_size === 'number') queueSize = msg.queue_size;
         if (msg.msg) waitingMsg = msg.msg;
         renderWaitingStatus();
@@ -275,30 +370,75 @@
     const nextBtn = document.getElementById('next-btn');
     const camDropdown = document.getElementById('cam-dropdown');
     const readerEl = document.getElementById('reader');
+    const printModal = document.getElementById('print-modal');
+    const printWarnEl = document.getElementById('print-warn');
+    const slipCheck = document.getElementById('slip-second-page');
+    const modalPrintBtn = document.getElementById('modal-print');
+    const modalPrintNextBtn = document.getElementById('modal-print-next');
+    const modalCancelBtn = document.getElementById('modal-cancel');
     let scanFlashTimeout = null;
-
-    // Leihschein des aktuell zugewiesenen Schülers drucken. Der Server holt das
-    // PDF read-only und druckt lokal (kein IServ-Submit); Ergebnis kommt als
-    // 'print_result' zurück.
-    printBtn.addEventListener('click', () => {
-      if (!ws || ws.readyState !== WebSocket.OPEN) return;
-      if (!studentActive) { statusEl.textContent = 'Kein Schüler zugewiesen'; return; }
-      printBtn.disabled = true;
-      statusEl.textContent = 'Leihschein wird gedruckt …';
-      ws.send(JSON.stringify({ type: 'print' }));
-    });
 
     // Nächster Schüler: aktuellen abschließen + nächsten aus der Queue laden.
     // Alten Schüler sofort entfernen und "Wird geladen…" zeigen, auch während
     // der neue Schüler serverseitig noch geladen wird.
-    nextBtn.addEventListener('click', () => {
+    function advanceToNext() {
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
       sNameEl.textContent = '';
       sFormEl.textContent = '';
       sPayEl.innerHTML = '';
       bookRowsEl.innerHTML = '';
+      currentBooks = [];
+      scannedIsbns.clear();
       statusEl.textContent = 'Wird geladen…';
       ws.send(JSON.stringify({ type: 'next' }));
+    }
+    nextBtn.addEventListener('click', advanceToNext);
+
+    // ---- Druck-Dialog ----
+    function closePrintModal() { printModal.classList.remove('show'); }
+
+    // Dialog öffnen: erst auf Abschluss laufender Scans warten, dann Warnung
+    // (vorgemerkte, noch nicht gescannte Bücher) berechnen und Default setzen.
+    async function openPrintDialog() {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      if (!studentActive) { statusEl.textContent = 'Kein Schüler zugewiesen'; return; }
+      statusEl.textContent = 'Prüfe Scans …';
+      await waitForScans();
+      setReadyStatus();
+      const vorgemerkt = currentBooks.filter(b => b.status !== 'ausgeliehen');
+      const offen = vorgemerkt.filter(b => !(b.isbn && scannedIsbns.has(b.isbn)));
+      if (offen.length > 0) {
+        const items = offen.map(b =>
+          `<li>${escapeHtml(b.subject ? b.subject + ' – ' : '')}${escapeHtml(b.title)}</li>`).join('');
+        printWarnEl.innerHTML =
+          `Achtung: Erst ${vorgemerkt.length - offen.length} von ${vorgemerkt.length} `
+          + `vorgemerkten Büchern gescannt.<ul>${items}</ul>`;
+        printWarnEl.style.display = '';
+      } else {
+        printWarnEl.style.display = 'none';
+      }
+      slipCheck.checked = slipSecondPageDefault;
+      printModal.classList.add('show');
+    }
+
+    // Leihschein drucken. Der Server holt das PDF read-only und druckt lokal
+    // (kein IServ-Submit); Ergebnis kommt als 'print_result' zurück.
+    function sendPrint(thenNext) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      printThenNext = thenNext;
+      printBtn.disabled = true;
+      statusEl.textContent = 'Leihschein wird gedruckt …';
+      ws.send(JSON.stringify({ type: 'print', second_page: slipCheck.checked }));
+      closePrintModal();
+    }
+
+    printBtn.addEventListener('click', openPrintDialog);
+    modalPrintBtn.addEventListener('click', () => sendPrint(false));
+    modalPrintNextBtn.addEventListener('click', () => sendPrint(true));
+    modalCancelBtn.addEventListener('click', closePrintModal);
+    printModal.addEventListener('click', (e) => { if (e.target === printModal) closePrintModal(); });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && printModal.classList.contains('show')) closePrintModal();
     });
 
     let audioCtx = null, audioBuffer = null;
@@ -351,7 +491,10 @@
       lastValue = value; cooldown = true;
       setTimeout(() => { cooldown = false; lastValue = ''; }, 2000);
       statusEl.textContent = 'Gesendet: ' + value;
-      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'scan', value }));
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        pendingScans++;
+        ws.send(JSON.stringify({ type: 'scan', value }));
+      }
       if (navigator.vibrate) navigator.vibrate(80);
       readerEl.classList.add('scan-success');
       clearTimeout(scanFlashTimeout);
