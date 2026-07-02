@@ -241,6 +241,9 @@
     // ---- Druck-Dialog / Buch-Status ----
     let currentBooks = [];              // Buchliste des aktuellen Schülers
     const scannedIsbns = new Set();     // ISBNs erfolgreich gescannter (gestageter) Bücher
+    const scanOrder = new Map();        // ISBN -> Scan-Sequenz (für „zuletzt ausgegeben oben")
+    let scanSeq = 0;
+    function resetScannedState() { scannedIsbns.clear(); scanOrder.clear(); scanSeq = 0; }
     let bookOrder = [];                 // klassenweite ISBN-Reihenfolge (vom Host konfiguriert)
     let slipSecondPageDefault = false;  // Host-Default für „Schüler-Leihschein" (2. Seite)
     let pendingScans = 0;               // noch nicht quittierte Scans (Sequenzierung)
@@ -305,17 +308,22 @@
         const i = bookOrder.indexOf(isbn);
         return i === -1 ? Number.MAX_SAFE_INTEGER : i;
       };
-      const distTs = b => {
+      // „Erledigt"-Rang, höher = weiter oben: gerade in dieser Session gescannte
+      // Bücher zuerst (nach Scan-Reihenfolge, zuletzt gescanntes oben), darunter die
+      // schon vorher ausgeliehenen nach Ausgabedatum (jüngstes oben).
+      const SCAN_BASE = 1e15;   // > jeder Epoch-ms-Wert
+      const doneRank = b => {
+        if (b.isbn && scanOrder.has(b.isbn)) return SCAN_BASE + scanOrder.get(b.isbn);
         const t = b.distributed_at ? Date.parse(b.distributed_at) : NaN;
-        return Number.isNaN(t) ? Infinity : t;
+        return Number.isNaN(t) ? -1 : t;
       };
       const ordered = books
         .map((b, i) => [b, i])
         .sort((a, b) => {
           const da = isBookDone(a[0]) ? 1 : 0, db = isBookDone(b[0]) ? 1 : 0;
           if (da !== db) return da - db;                       // erledigte nach unten
-          if (da === 1) {                                      // beide erledigt → nach Datum
-            const diff = distTs(b[0]) - distTs(a[0]);          // absteigend (jüngstes oben)
+          if (da === 1) {                                      // beide erledigt → nach Rang
+            const diff = doneRank(b[0]) - doneRank(a[0]);      // absteigend (jüngstes oben)
             if (diff) return diff;
           } else {                                             // beide offen → Klassen-Reihenfolge
             const diff = orderIndex(a[0].isbn) - orderIndex(b[0].isbn);
@@ -347,7 +355,7 @@
         sPayEl.innerHTML = `<span class="${paidClass}">${paidText}</span>`;
         if (Array.isArray(s.book_order)) bookOrder = s.book_order;
         currentBooks = s.books || [];
-        scannedIsbns.clear();
+        resetScannedState();
         renderBooks(currentBooks);
         statusEl.textContent = 'Scanner bereit — Buch scannen';
       } else if (msg.type === 'scan_result') {
@@ -357,6 +365,7 @@
         // Feld gefüllt (Gate aus / read-only Betrieb).
         if ((msg.status === 'staged' || msg.status === 'booked') && msg.isbn) {
           scannedIsbns.add(msg.isbn);
+          scanOrder.set(msg.isbn, ++scanSeq);   // zuletzt gescanntes zuoberst in „erledigt"
           renderBooks(currentBooks);
         }
         drainScanWaiters();
@@ -385,7 +394,7 @@
         sPayEl.innerHTML = '';
         bookRowsEl.innerHTML = '';
         currentBooks = [];
-        scannedIsbns.clear();
+        resetScannedState();
         pendingScans = 0;
         drainScanWaiters();
         if (typeof msg.queue_size === 'number') queueSize = msg.queue_size;
@@ -452,7 +461,7 @@
       sPayEl.innerHTML = '';
       bookRowsEl.innerHTML = '';
       currentBooks = [];
-      scannedIsbns.clear();
+      resetScannedState();
       statusEl.textContent = 'Wird geladen…';
       ws.send(JSON.stringify({ type: 'next' }));
     }

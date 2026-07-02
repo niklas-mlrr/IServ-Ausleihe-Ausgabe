@@ -213,6 +213,8 @@
     let ws = null, finished = false, scannerStarted = false, reconnectDelay = 2000;
     let currentBooks = [];              // Buchliste des Schülers
     const scannedIsbns = new Set();     // in dieser Session gescannte ISBNs
+    const scanOrder = new Map();        // ISBN -> Scan-Sequenz (für „zuletzt ausgegeben oben")
+    let scanSeq = 0;
     let bookOrder = [];                 // klassenweite ISBN-Reihenfolge (vom Host konfiguriert)
 
     function showError(title, text) {
@@ -278,6 +280,7 @@
         // Erfolgreicher Scan → Buch als „erledigt" markieren (sinkt nach unten).
         if ((msg.status === 'staged' || msg.status === 'booked') && msg.isbn) {
           scannedIsbns.add(msg.isbn);
+          scanOrder.set(msg.isbn, ++scanSeq);
           renderBooks(currentBooks);
         }
       } else if (msg.type === 'closed') {
@@ -302,7 +305,7 @@
       }
       if (Array.isArray(s.book_order)) bookOrder = s.book_order;
       currentBooks = s.books || [];
-      scannedIsbns.clear();
+      scannedIsbns.clear(); scanOrder.clear(); scanSeq = 0;
       renderBooks(currentBooks);
     }
 
@@ -323,9 +326,13 @@
         const i = bookOrder.indexOf(isbn);
         return i === -1 ? Number.MAX_SAFE_INTEGER : i;
       };
-      const distTs = b => {
+      // „Erledigt"-Rang: gerade gescannte zuerst (Scan-Reihenfolge, zuletzt oben),
+      // darunter schon ausgeliehene nach Ausgabedatum (jüngstes oben).
+      const SCAN_BASE = 1e15;
+      const doneRank = b => {
+        if (b.isbn && scanOrder.has(b.isbn)) return SCAN_BASE + scanOrder.get(b.isbn);
         const t = b.distributed_at ? Date.parse(b.distributed_at) : NaN;
-        return Number.isNaN(t) ? Infinity : t;
+        return Number.isNaN(t) ? -1 : t;
       };
       const ordered = books
         .map((b, i) => [b, i])
@@ -333,7 +340,7 @@
           const da = isBookDone(a[0]) ? 1 : 0, db = isBookDone(b[0]) ? 1 : 0;
           if (da !== db) return da - db;
           if (da === 1) {
-            const diff = distTs(b[0]) - distTs(a[0]);
+            const diff = doneRank(b[0]) - doneRank(a[0]);
             if (diff) return diff;
           } else {
             const diff = orderIndex(a[0].isbn) - orderIndex(b[0].isbn);
