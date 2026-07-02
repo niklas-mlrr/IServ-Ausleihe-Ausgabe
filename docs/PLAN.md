@@ -207,6 +207,9 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
         `pendingScans`-Zähler auf den Abschluss laufender Scans.
 - [x] Scanner-Buchliste: erledigte (gescannt/ausgeliehen) sinken nach unten —
       2026-07-02 (`web/scan.html`, `isBookDone()` + stabile Sortierung).
+- [x] Erledigt-Gruppe nach **Ausgabedatum** sortiert (jüngstes oben) — 2026-07-02d:
+      In der Erledigt-Gruppe ersetzt `distributed_at` (desc) die Klassen-Reihenfolge;
+      gerade gescannte Bücher ohne Datum stehen oben. `web/scan.html` + `web/student.html`.
 - [x] Konfigurierbare **klassenweite Bücher-Reihenfolge** für den Scanner —
       2026-07-02: Host legt per Drag & Drop die Anzeige-Reihenfolge fest, gilt für
       die ganze Klasse und bleibt über Schülerwechsel (Reset nur bei Klassen-/

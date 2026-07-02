@@ -316,19 +316,31 @@
         rows.innerHTML = '<div class="book-empty">Keine Bücher hinterlegt</div>';
         return;
       }
-      // Erledigte (gescannt/ausgeliehen) nach unten; innerhalb der Gruppen nach der
-      // klassenweit konfigurierten Reihenfolge (bookOrder); Rest ans Ende; Original-
-      // Index als stabiler Tiebreak.
+      // Erledigte (gescannt/ausgeliehen) nach unten. Offene nach der klassenweit
+      // konfigurierten Reihenfolge (bookOrder; Rest ans Ende). Erledigte nach
+      // Ausgabedatum (jüngstes oben); ohne Datum oben. Original-Index als Tiebreak.
       const orderIndex = isbn => {
         const i = bookOrder.indexOf(isbn);
         return i === -1 ? Number.MAX_SAFE_INTEGER : i;
       };
+      const distTs = b => {
+        const t = b.distributed_at ? Date.parse(b.distributed_at) : NaN;
+        return Number.isNaN(t) ? Infinity : t;
+      };
       const ordered = books
         .map((b, i) => [b, i])
-        .sort((a, b) =>
-          (isBookDone(a[0]) - isBookDone(b[0]))
-          || (orderIndex(a[0].isbn) - orderIndex(b[0].isbn))
-          || (a[1] - b[1]))
+        .sort((a, b) => {
+          const da = isBookDone(a[0]) ? 1 : 0, db = isBookDone(b[0]) ? 1 : 0;
+          if (da !== db) return da - db;
+          if (da === 1) {
+            const diff = distTs(b[0]) - distTs(a[0]);
+            if (diff) return diff;
+          } else {
+            const diff = orderIndex(a[0].isbn) - orderIndex(b[0].isbn);
+            if (diff) return diff;
+          }
+          return a[1] - b[1];
+        })
         .map(pair => pair[0]);
       rows.innerHTML = ordered.map(b => {
         const done = isBookDone(b);
