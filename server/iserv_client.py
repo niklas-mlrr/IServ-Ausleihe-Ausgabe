@@ -307,9 +307,14 @@ class IsServClient:
     async def get_book_by_code(self, code: str) -> dict | None:
         """Buch zu einem gescannten Barcode auflösen (read-only GET /books/{code}).
 
-        Liefert `{code, isbn, title, subject}` oder `None`, wenn die API das Buch
-        nicht kennt (404). Andere Fehler (Auth/Netz) werden durchgereicht, damit
-        sie nicht fälschlich als „Buch unbekannt" interpretiert werden.
+        Liefert `{code, isbn, title, subject, available, distributed, deleted,
+        student_id}` oder `None`, wenn die API das Buch nicht kennt (404). Andere
+        Fehler (Auth/Netz) werden durchgereicht, damit sie nicht fälschlich als
+        „Buch unbekannt" interpretiert werden.
+
+        `available`/`distributed`/`deleted` bilden den Lager-Status ab: „im Lager"
+        = `available and not distributed and not deleted` (Grundlage für die
+        Buchungs-Vorabprüfung, PLAN §6 / Freigabe 2026-07-02).
         """
         def _sync() -> dict | None:
             client = self._get_client()
@@ -322,7 +327,16 @@ class IsServClient:
             s = series_map.get(isbn)
             subject = ", ".join(s.subjects_flat or s.subjects or []) if s else ""
             title = (s.title if s else "") or isbn
-            return {"code": book.code, "isbn": isbn, "title": title, "subject": subject}
+            return {
+                "code": book.code,
+                "isbn": isbn,
+                "title": title,
+                "subject": subject,
+                "available": bool(book.available),
+                "distributed": bool(book.distributed),
+                "deleted": bool(book.deleted),
+                "student_id": book.student_id,
+            }
         return await asyncio.to_thread(_sync)
 
     async def get_loan_slip_pdf(self, student_id: int, variant: str = "student") -> bytes:

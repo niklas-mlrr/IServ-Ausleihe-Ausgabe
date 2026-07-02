@@ -45,6 +45,21 @@ produktive Schul-/Schülerdaten zu.
 Lesen (GET, Playwright-Browsing ohne Submit) ist okay. Alles andere gegen
 Produktion ist tabu.
 
+### Buchungs-Freigabe (2026-07-02) — Enter ist bedingt erlaubt
+
+Niklas hat das Klicken auf **Enter** (Buchung via Playwright/offizielles Frontend)
+freigegeben. Es gilt weiterhin: **nie API-Writes**, nur der Enter-Pfad. Enter
+darf **ausschließlich** feuern, wenn eine gescannte Buchung **beide** Bedingungen
+erfüllt (read-only vorab geprüft, sonst wird der Barcode gar nicht ins Feld getippt):
+
+1. **Buch im Lager** (`available` & nicht verliehen & nicht ausgesondert),
+2. **Bestellt & Reihe noch nicht ausgeliehen** (ISBN im Status „vorgemerkt").
+
+Absicherung: `evaluate_scan_for_booking()` (streng bei Unsicherheit) + Master-Gate
+`ALLOW_BOOKING` (Default `false` = read-only, Scan bleibt staged). Details: PLAN §6.1.
+Scharfschalten (`ALLOW_BOOKING=true`) nach wie vor nur mit ausgemusterten Büchern +
+Rückbau-Plan; Real-Buchungen nie unbeaufsichtigt.
+
 ## Dokumentations-Workflow (Wiki ↔ docs/)
 
 - **`docs/` im Repo ist die Primärquelle** für alles Projektgebundene:

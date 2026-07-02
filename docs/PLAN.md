@@ -297,8 +297,44 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
 ## 6. Test- und Produktionsschutz
 
 - Die `ausleihe-api` läuft hier **ausnahmslos read-only** (`allow_writes=False`,
-  Default). Es gibt keinen Grund, das in diesem Projekt je zu ändern.
+  Default). Es gibt keinen Grund, das in diesem Projekt je zu ändern. Buchungen
+  laufen **ausschließlich** über den Playwright-Write-Pfad (offizielles Frontend,
+  Enter auf der Counter-Seite), **nie** per API-Write.
 - Playwright-Tests nur mit Niklas' Account und ausgemusterten Büchern;
   Test-Ausleihen werden unmittelbar zurückgenommen.
 - Vor jedem Probelauf: Rückbau-Plan (welche Test-Buchungen müssen rückgängig
   gemacht werden) schriftlich festhalten.
+
+### 6.1 Buchungs-Freigabe (2026-07-02) — Auto-Buchung mit Vorabprüfung
+
+Niklas hat das Klicken auf **Enter** (Buchung gegen die Produktion) freigegeben —
+aber **nur**, wenn eine gescannte Buchung **beide** Bedingungen erfüllt. Sind sie
+nicht erfüllt, wird der Barcode **gar nicht erst ins Eingabefeld getippt**:
+
+1. **Buch im Lager** — `book.available and not book.distributed and not book.deleted`
+   (Lager-Status aus `GET /books/{code}`).
+2. **Bestellt & Reihe noch nicht ausgeliehen** — die ISBN gehört zur Anmelde-
+   Buchliste des Schülers **und** von der Reihe ist noch kein Exemplar auf ihn
+   ausgeliehen (= ISBN im Status „vorgemerkt" der Schülerinfo).
+
+Umsetzung:
+
+- `server/sessions.py::evaluate_scan_for_booking()` — read-only Vorabprüfung.
+  **Streng bei Unsicherheit** (kein Client / Buchliste noch nicht geladen /
+  Lookup-Fehler → nicht buchen), weil bei Erfolg automatisch Enter folgt.
+- `server/sessions.py::process_scan()` — gemeinsame Scan-Verarbeitung für
+  Scanner (Modus A) und Schüler (Modus B): Prüfung → bei Erfolg buchen
+  (`handle_commit`, Enter) **falls `ALLOW_BOOKING=true`**, sonst nur stagen
+  (`handle_scan`, fill ohne Enter). Bedingungen nicht erfüllt → **kein**
+  Feldkontakt.
+- **`ALLOW_BOOKING` bleibt Master-Gate** (Default `false` = kompletter read-only-
+  Betrieb, Scan bleibt staged). Erst auf `true` feuert die Auto-Buchung.
+- Getrennte ISBN-Mengen pro Session: `vormerk_isbns` (buchbar) / `lent_isbns`
+  (für die Meldung „Reihe schon ausgeliehen") in `HelperSession`/`StudentSessionB`.
+- Tests: `tests/test_booking_precheck.py` (Bedingungslogik + Gate-Verhalten),
+  `tests/test_booking_gate.py` (Enter-Gate unverändert).
+
+⚠️ Die Erfolgs-/Fehler-Selektoren in `worker.commit_barcode()` /
+`_read_booking_result()` sind bis zum ersten freigegebenen Realtest **unverifiziert**
+(nur ein „booked" aus dem DOM gilt als Erfolg; „unknown" täuscht keine Buchung vor).
+Vor Scharfschalten: ausgemustertes Buch + Rückbau-Plan.

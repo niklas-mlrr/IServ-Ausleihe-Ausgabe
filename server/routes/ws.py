@@ -9,12 +9,12 @@ from fastapi import APIRouter, Cookie, WebSocket, WebSocketDisconnect
 from ..hub import get_hub
 from ..sessions import (
     advance_helper,
-    check_scanned_book,
+    booking_isbn_sets_from_info,
     end_student,
     expected_isbns_from_info,
     gen_registration_code,
-    handle_scan,
     print_loan_slip_for,
+    process_scan,
     send_display_update,
 )
 from ..state import DisplaySession, get_state
@@ -75,6 +75,7 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                 info = await state.iserv.get_student_info(helper.student_id, state.selected_schoolyear)
                 info["form"] = student.form
                 helper.expected_isbns = expected_isbns_from_info(info)
+                helper.vormerk_isbns, helper.lent_isbns = booking_isbn_sets_from_info(info)
                 await websocket.send_json({"type": "student_info", "student": info})
             except Exception as e:
                 await websocket.send_json({"type": "error", "msg": str(e)})
@@ -137,22 +138,15 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                 })
                 continue
 
-            # Vorab-Prüfung (read-only): gehört das Buch zum zugewiesenen Schüler?
-            check = await check_scanned_book(state, helper.expected_isbns, barcode)
-            if not check.get("ok"):
-                await websocket.send_json({
-                    "type": "scan_result",
-                    "barcode": barcode,
-                    "status": check["status"],
-                    "msg": check["msg"],
-                })
-                await hub.broadcast_host(state.state_snapshot())
-                continue
-
-            result = await handle_scan(state, student_id, barcode)
+            # Scan verarbeiten: Buchungs-Vorabprüfung (im Lager? bestellt? Reihe
+            # noch nicht ausgeliehen?) → buchen (Enter) oder — Gate aus — stagen.
+            # Nicht erfüllt → Feld wird NICHT berührt (Freigabe 2026-07-02).
+            result = await process_scan(
+                state, student_id, helper.vormerk_isbns, helper.lent_isbns, barcode
+            )
             # ISBN mitgeben, damit der Helferclient das gescannte Buch in seiner
-            # Liste als „erledigt" markieren kann (rein visuell, kein Submit).
-            await websocket.send_json({"type": "scan_result", "barcode": barcode, "isbn": check.get("isbn"), **result})
+            # Liste markieren kann.
+            await websocket.send_json({"type": "scan_result", "barcode": barcode, **result})
             await hub.broadcast_host(state.state_snapshot())
 
     except WebSocketDisconnect:
@@ -237,6 +231,7 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
             qs = state.find_student(session.student_id)
             info["form"] = qs.form if qs else ""
             session.expected_isbns = expected_isbns_from_info(info)
+            session.vormerk_isbns, session.lent_isbns = booking_isbn_sets_from_info(info)
             await websocket.send_json({
                 "type": "student_info",
                 "student": info,
@@ -266,19 +261,11 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
                     })
                     continue
                 session.last_scan = barcode
-                # Vorab-Prüfung (read-only): gehört das gescannte Buch zu diesem
-                # Schüler? Wenn nicht, gar nicht erst an den Worker stagen.
-                check = await check_scanned_book(state, session.expected_isbns, barcode)
-                if not check.get("ok"):
-                    await websocket.send_json({
-                        "type": "scan_result",
-                        "barcode": barcode,
-                        "status": check["status"],
-                        "msg": check["msg"],
-                    })
-                    await hub.broadcast_host(state.state_snapshot())
-                    continue
-                result = await handle_scan(state, session.student_id, barcode)
+                # Scan verarbeiten: Buchungs-Vorabprüfung → buchen (Enter) oder
+                # — Gate aus — stagen. Nicht erfüllt → Feld wird NICHT berührt.
+                result = await process_scan(
+                    state, session.student_id, session.vormerk_isbns, session.lent_isbns, barcode
+                )
                 await websocket.send_json({"type": "scan_result", "barcode": barcode, **result})
                 await hub.broadcast_host(state.state_snapshot())
 

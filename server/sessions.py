@@ -90,39 +90,131 @@ def expected_isbns_from_info(info: dict) -> set[str]:
     return {b["isbn"] for b in info.get("books", []) if b.get("isbn")}
 
 
-async def check_scanned_book(
-    state: AppState, expected_isbns: set[str], barcode: str
-) -> dict:
-    """Vorab-Prüfung (read-only) für den Schüler-Client: Ist das gescannte Buch
-    für diesen Schüler angemeldet?
+def booking_isbn_sets_from_info(info: dict) -> tuple[set[str], set[str]]:
+    """Zerlegt die Buchliste in (vorgemerkt, ausgeliehen) — für die Buchungs-
+    Vorabprüfung (Freigabe 2026-07-02).
 
-    Schlägt den Barcode über die API nach (`GET /books/{code}`) und vergleicht
-    die ISBN mit der Anmelde-Buchliste des Schülers. Gibt `{"ok": True, ...}`
-    zurück, wenn das Buch dazugehört, sonst `{"ok": False, "status": ..., "msg": ...}`.
-    Reiner Read-Pfad, kein Worker-/Submit-Kontakt.
+    `vorgemerkt` = bestellt UND von der Reihe ist noch KEIN Buch auf den Schüler
+    ausgeliehen (genau die buchbaren ISBNs — `get_student_info` setzt den Status
+    einer Reihe auf „ausgeliehen", sobald ein Exemplar verliehen ist).
+    `ausgeliehen` = Reihe bereits auf den Schüler ausgeliehen (nur für die
+    Fehlermeldung „Reihe schon ausgeliehen").
     """
-    if state.iserv is None or not expected_isbns:
-        # Ohne API-Client oder solange die Buchliste noch nicht geladen ist (kurzes
-        # Fenster nach Schülerwechsel) nicht blockieren — sonst würde jeder Scan
-        # fälschlich als „nicht angemeldet" abgewiesen.
-        return {"ok": True}
+    vormerk: set[str] = set()
+    lent: set[str] = set()
+    for b in info.get("books", []):
+        isbn = b.get("isbn")
+        if not isbn:
+            continue
+        if b.get("status") == "vorgemerkt":
+            vormerk.add(isbn)
+        elif b.get("status") == "ausgeliehen":
+            lent.add(isbn)
+    return vormerk, lent
+
+
+async def evaluate_scan_for_booking(
+    state: AppState, vormerk_isbns: set[str], lent_isbns: set[str], barcode: str
+) -> dict:
+    """Buchungs-Vorabprüfung (read-only) VOR jedem Eintippen ins Feld.
+
+    Freigabe 2026-07-02: Gebucht (Enter) wird nur, wenn ALLE Bedingungen erfüllt
+    sind — sonst wird der Barcode gar nicht erst ins Feld gefüllt.
+
+      1. Buch im Lager: `available and not distributed and not deleted`.
+      2. Schüler hat das Buch bestellt UND von der Reihe ist noch keins auf ihn
+         ausgeliehen (= ISBN ∈ vormerk_isbns).
+
+    Streng bei Unsicherheit: fehlender API-Client, noch nicht geladene Buchliste
+    oder ein Lookup-Fehler → `ok=False` (NICHT buchen). Bewusst strenger als eine
+    reine „gehört das Buch zu dir?"-Prüfung: da wir bei Erfolg automatisch Enter
+    drücken (Buchung gegen Produktion), muss die Vorabprüfung sicher sein.
+
+    Gibt `{"ok": True, "isbn", "title", "code"}` bei Buchbarkeit, sonst
+    `{"ok": False, "status", "msg", ...}`. Reiner Read-Pfad.
+    """
+    if state.iserv is None:
+        return {"ok": False, "status": "error", "msg": "Kein IServ-Client"}
+    if not vormerk_isbns and not lent_isbns:
+        # Buchliste noch nicht geladen → keine sichere Aussage möglich, nicht buchen.
+        return {
+            "ok": False,
+            "status": "not_ready",
+            "msg": "Buchliste noch nicht geladen — bitte erneut scannen",
+        }
     try:
         book = await state.iserv.get_book_by_code(barcode)
-    except Exception as e:  # noqa: BLE001 — Prüfung darf den Scan nicht hart abbrechen
+    except Exception as e:  # noqa: BLE001 — bei Lookup-Fehler NICHT buchen
         log.warning("Buch-Lookup für %s fehlgeschlagen: %s", barcode, e)
-        return {"ok": True}  # bei API-Fehler nicht blockieren (Worker validiert ohnehin)
+        return {"ok": False, "status": "error", "msg": f"Buch-Lookup fehlgeschlagen: {e}"}
+
     if book is None:
-        return {"status": "unknown_book", "ok": False, "msg": "Buch unbekannt"}
-    if book["isbn"] not in expected_isbns:
-        title = book.get("title") or book["isbn"]
+        return {"ok": False, "status": "unknown_book", "msg": "Buch unbekannt"}
+
+    isbn = book["isbn"]
+    title = book.get("title") or isbn
+
+    # Bedingung 2: bestellt UND Reihe noch nicht ausgeliehen.
+    if isbn not in vormerk_isbns:
+        if isbn in lent_isbns:
+            return {
+                "ok": False,
+                "status": "series_already_lent",
+                "msg": f"Reihe bereits ausgeliehen: {title}",
+                "isbn": isbn,
+                "title": title,
+            }
         return {
-            "status": "not_enrolled",
             "ok": False,
-            "msg": f"Nicht für dich angemeldet: {title}",
-            "isbn": book["isbn"],
+            "status": "not_enrolled",
+            "msg": f"Nicht bestellt: {title}",
+            "isbn": isbn,
             "title": title,
         }
-    return {"ok": True, "isbn": book["isbn"], "title": book.get("title")}
+
+    # Bedingung 1: Buch im Lager.
+    if book["deleted"] or book["distributed"] or not book["available"]:
+        return {
+            "ok": False,
+            "status": "not_in_stock",
+            "msg": f"Nicht im Lager (verliehen/ausgesondert): {title}",
+            "isbn": isbn,
+            "title": title,
+        }
+
+    return {"ok": True, "isbn": isbn, "title": title, "code": book["code"]}
+
+
+async def process_scan(
+    state: AppState,
+    student_id: int,
+    vormerk_isbns: set[str],
+    lent_isbns: set[str],
+    barcode: str,
+) -> dict:
+    """Vollständige Scan-Verarbeitung, gemeinsam für Scanner (Modus A) und
+    Schüler (Modus B). Returnt das scan_result-Payload (ohne `type`/`barcode`).
+
+    Ablauf (Freigabe 2026-07-02):
+      1. Buchungs-Vorabprüfung (read-only). Nicht erfüllt → Feld wird NICHT
+         berührt, Grund zurückmelden.
+      2. Erfüllt UND `ALLOW_BOOKING=true` → tatsächlich buchen (Enter).
+      3. Erfüllt, aber Gate aus (Default) → nur stagen (fill, kein Enter) —
+         Standardbetrieb bleibt read-only, bis explizit scharfgeschaltet.
+    """
+    decision = await evaluate_scan_for_booking(state, vormerk_isbns, lent_isbns, barcode)
+    if not decision["ok"]:
+        return {
+            "status": decision["status"],
+            "msg": decision["msg"],
+            "isbn": decision.get("isbn"),
+        }
+    if get_config().allow_booking:
+        result = await handle_commit(state, student_id, barcode)
+    else:
+        result = await handle_scan(state, student_id, barcode)
+    result.setdefault("isbn", decision.get("isbn"))
+    return result
 
 
 async def handle_commit(state: AppState, student_id: int, barcode: str) -> dict:
@@ -280,8 +372,11 @@ async def end_student(
         old_helper = student.assigned_helper
         student.assigned_helper = None
         if old_helper and old_helper in state.helper_sessions:
-            state.helper_sessions[old_helper].student_id = None
-            state.helper_sessions[old_helper].expected_isbns = set()
+            h = state.helper_sessions[old_helper]
+            h.student_id = None
+            h.expected_isbns = set()
+            h.vormerk_isbns = set()
+            h.lent_isbns = set()
 
     session = state.find_session_by_student(student_id)
     if session:
@@ -310,6 +405,7 @@ async def load_and_push_helper_student(state: AppState, hub, student, helper) ->
 
     info["form"] = getattr(student, "form", "")
     helper.expected_isbns = expected_isbns_from_info(info)
+    helper.vormerk_isbns, helper.lent_isbns = booking_isbn_sets_from_info(info)
     await hub.send_scanner(helper.token, {"type": "student_info", "student": info})
     await hub.broadcast_host(state.state_snapshot())
 
@@ -367,6 +463,7 @@ async def load_and_push_paired_student(
     """
     info["form"] = getattr(student, "form", "")
     session.expected_isbns = expected_isbns_from_info(info)
+    session.vormerk_isbns, session.lent_isbns = booking_isbn_sets_from_info(info)
     if session.ws is not None:
         try:
             await session.ws.send_json(

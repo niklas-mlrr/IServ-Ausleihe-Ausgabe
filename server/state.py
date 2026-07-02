@@ -50,6 +50,12 @@ class HelperSession:
     # ISBNs des aktuell zugewiesenen Schülers (Anmeldung + bereits ausgeliehen),
     # für die Scan-Vorabprüfung (analog Modus B).
     expected_isbns: set[str] = field(default_factory=set)
+    # Buchungs-Vorabprüfung (Freigabe 2026-07-02): vorgemerkt = bestellt UND Reihe
+    # noch nicht auf den Schüler ausgeliehen (= buchbar); lent = Reihe bereits
+    # ausgeliehen (für klare Fehlermeldung). Getrennt gehalten, weil `expected_isbns`
+    # beides vereint und die Buchbarkeit nicht unterscheiden kann.
+    vormerk_isbns: set[str] = field(default_factory=set)
+    lent_isbns: set[str] = field(default_factory=set)
 
     def as_dict(self) -> dict:
         return {
@@ -81,6 +87,9 @@ class StudentSessionB:
     # ISBNs, die der Schüler laut Anmeldung erhalten soll bzw. bereits hat.
     # Vor jedem Scan wird das gescannte Buch dagegen geprüft (Modus B).
     expected_isbns: set[str] = field(default_factory=set)
+    # Buchungs-Vorabprüfung (Freigabe 2026-07-02) — s. HelperSession.
+    vormerk_isbns: set[str] = field(default_factory=set)
+    lent_isbns: set[str] = field(default_factory=set)
     created_at: datetime = field(default_factory=datetime.now)
     paired_at: datetime | None = None
     last_activity: datetime = field(default_factory=datetime.now)

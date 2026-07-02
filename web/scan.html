@@ -319,8 +319,10 @@
         statusEl.textContent = 'Scanner bereit — Buch scannen';
       } else if (msg.type === 'scan_result') {
         if (pendingScans > 0) pendingScans--;
-        // Erfolgreich gestagter Scan → Buch in der Liste als „erledigt" markieren.
-        if (msg.status === 'staged' && msg.isbn) {
+        // Erfolgreicher Scan → Buch in der Liste als „erledigt" markieren:
+        // 'booked' = tatsächlich gebucht (ALLOW_BOOKING an), 'staged' = nur ins
+        // Feld gefüllt (Gate aus / read-only Betrieb).
+        if ((msg.status === 'staged' || msg.status === 'booked') && msg.isbn) {
           scannedIsbns.add(msg.isbn);
           renderBooks(currentBooks);
         }
