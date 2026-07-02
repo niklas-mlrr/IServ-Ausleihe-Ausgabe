@@ -74,6 +74,7 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
             try:
                 info = await state.iserv.get_student_info(helper.student_id, state.selected_schoolyear)
                 info["form"] = student.form
+                info["book_order"] = state.book_order
                 helper.expected_isbns = expected_isbns_from_info(info)
                 helper.vormerk_isbns, helper.lent_isbns = booking_isbn_sets_from_info(info)
                 await websocket.send_json({"type": "student_info", "student": info})
@@ -84,8 +85,12 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
     else:
         await websocket.send_json({"type": "waiting", "msg": "Warte auf Schüler-Zuweisung", "queue_size": state.pending_count()})
 
-    # Host-Default „Schüler-Leihschein" mitteilen (Vorauswahl im Druck-Dialog).
-    await websocket.send_json({"type": "settings", "slip_second_page": state.slip_second_page_default})
+    # Host-Default „Schüler-Leihschein" (Druck-Dialog) + klassenweite Bücher-Reihenfolge.
+    await websocket.send_json({
+        "type": "settings",
+        "slip_second_page": state.slip_second_page_default,
+        "book_order": state.book_order,
+    })
 
     await hub.broadcast_host(state.state_snapshot())
 
@@ -230,6 +235,7 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
             info = await state.iserv.get_student_info(session.student_id, state.selected_schoolyear)
             qs = state.find_student(session.student_id)
             info["form"] = qs.form if qs else ""
+            info["book_order"] = state.book_order
             session.expected_isbns = expected_isbns_from_info(info)
             session.vormerk_isbns, session.lent_isbns = booking_isbn_sets_from_info(info)
             await websocket.send_json({

@@ -205,6 +205,21 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
         `isbn`, der Client markiert das Buch „erledigt" (rein visuell; Scans
         bleiben `staged`, kein Submit). Dialog wartet vor dem Vergleich via
         `pendingScans`-Zähler auf den Abschluss laufender Scans.
+- [x] Scanner-Buchliste: erledigte (gescannt/ausgeliehen) sinken nach unten —
+      2026-07-02 (`web/scan.html`, `isBookDone()` + stabile Sortierung).
+- [x] Konfigurierbare **klassenweite Bücher-Reihenfolge** für den Scanner —
+      2026-07-02: Host legt per Drag & Drop die Anzeige-Reihenfolge fest, gilt für
+      die ganze Klasse und bleibt über Schülerwechsel (Reset nur bei Klassen-/
+      Schuljahreswechsel, Queue-leeren). Karte „Bücher-Reihenfolge (Scanner)" in
+      `web/host.html` zeigt die **Vereinigung aller in der Klasse bestellten Bücher**
+      (`GET /api/class-book-order`, on-demand gebaut über
+      `iserv_client.get_class_book_catalog`, read-only); Speichern via
+      `POST /api/class-book-order` (`normalize_book_order` beschränkt auf Katalog +
+      hängt fehlende an). `state.book_order` reist in `student_info`/`settings`
+      mit; Scanner (`web/scan.html`, Modus A) **und** Schülerseite
+      (`web/student.html`, Modus B) sortieren nach `[erledigt, Klassen-Reihenfolge,
+      Original]`. Jeder Schüler sieht weiterhin nur seine eigenen Bücher.
+      Tests: `tests/test_class_book_order.py`.
 - [ ] End-to-End-Test mit ausgemusterten Büchern **inkl. Buchung** (wartet auf Buchungstest-Freigabe Niklas + Lukas)
 
 ### Phase 3 — Generalprobe Teil 1 (vor Ferienbeginn, Anfang Juli)

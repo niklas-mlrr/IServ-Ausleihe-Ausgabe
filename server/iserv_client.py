@@ -304,6 +304,65 @@ class IsServClient:
             }
         return await asyncio.to_thread(_sync)
 
+    async def get_class_book_catalog(
+        self, form_name: str, schoolyear: str | None = None
+    ) -> list[dict]:
+        """Vereinigung aller in einer Klasse bestellten Bücher (read-only).
+
+        Grundlage für die klassenweite Bücher-Reihenfolge im Scanner: Über alle
+        Schüler der Klasse werden die angemeldeten Serien-ISBNs
+        (`enrollments[].booklistItems[].series`) eingesammelt, dedupliziert und —
+        als Default-Reihenfolge — nach `(subject, title)` sortiert.
+
+        Liefert `[{isbn, title, subject}]`. Rein GET (kein `books=True` nötig).
+        Sequentiell in einem Thread (die synchrone Client-Session ist nicht
+        thread-safe); Schüler ohne Anmeldung im gewählten Jahr werden übersprungen.
+        """
+        def _sync() -> list[dict]:
+            client = self._get_client()
+            series_map = self._get_series_map()
+
+            def _fach(isbn: str) -> str:
+                s = series_map.get(isbn)
+                if not s:
+                    return ""
+                return ", ".join(s.subjects_flat or s.subjects or [])
+
+            def _title(isbn: str) -> str:
+                s = series_map.get(isbn)
+                return (s.title if s else "") or isbn
+
+            sy_id = self._resolve_sy(client, schoolyear)
+            forms = client.get(f"/schoolyears/{_enc(sy_id)}/forms")
+            members: list[dict] = []
+            for f in forms:
+                if f["name"] == form_name:
+                    members = f.get("members", [])
+                    break
+
+            seen: set[str] = set()
+            catalog: list[dict] = []
+            for m in members:
+                detail = client.students.get_detail(m["id"], enrollments=True)
+                enrollment = next(
+                    (e for e in detail.get("enrollments", []) if e.get("schoolyear") == sy_id),
+                    None,
+                )
+                if not enrollment:
+                    continue
+                for item in enrollment.get("booklistItems", []):
+                    isbn = item.get("series", "")
+                    if not isbn or isbn in seen:
+                        continue
+                    seen.add(isbn)
+                    catalog.append(
+                        {"isbn": isbn, "title": _title(isbn), "subject": _fach(isbn)}
+                    )
+
+            catalog.sort(key=lambda b: (b["subject"], b["title"]))
+            return catalog
+        return await asyncio.to_thread(_sync)
+
     async def get_book_by_code(self, code: str) -> dict | None:
         """Buch zu einem gescannten Barcode auflösen (read-only GET /books/{code}).
 

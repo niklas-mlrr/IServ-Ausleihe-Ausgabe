@@ -241,6 +241,7 @@
     // ---- Druck-Dialog / Buch-Status ----
     let currentBooks = [];              // Buchliste des aktuellen Schülers
     const scannedIsbns = new Set();     // ISBNs erfolgreich gescannter (gestageter) Bücher
+    let bookOrder = [];                 // klassenweite ISBN-Reihenfolge (vom Host konfiguriert)
     let slipSecondPageDefault = false;  // Host-Default für „Schüler-Leihschein" (2. Seite)
     let pendingScans = 0;               // noch nicht quittierte Scans (Sequenzierung)
     const scanWaiters = [];             // Resolver, die auf pendingScans===0 warten
@@ -286,14 +287,32 @@
 
     const token = new URLSearchParams(location.search).get('token');
 
+    // „Erledigt" = bereits ausgeliehen (IServ) ODER in dieser Session gescannt.
+    function isBookDone(b) {
+      return b.status === 'ausgeliehen' || !!(b.isbn && scannedIsbns.has(b.isbn));
+    }
+
     function renderBooks(books) {
       if (!books || !books.length) {
         bookRowsEl.innerHTML = '<div class="book-empty">Keine Bücher hinterlegt</div>';
         return;
       }
-      bookRowsEl.innerHTML = books.map(b => {
-        // „Erledigt" = bereits ausgeliehen (IServ) ODER in dieser Session gescannt.
-        const done = b.status === 'ausgeliehen' || (b.isbn && scannedIsbns.has(b.isbn));
+      // Sortierung: erledigte (gescannt/ausgeliehen) nach unten; innerhalb der
+      // Gruppen nach der klassenweit konfigurierten Reihenfolge (bookOrder);
+      // Bücher ohne Eintrag ans Ende; Original-Index als stabiler Tiebreak.
+      const orderIndex = isbn => {
+        const i = bookOrder.indexOf(isbn);
+        return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+      };
+      const ordered = books
+        .map((b, i) => [b, i])
+        .sort((a, b) =>
+          (isBookDone(a[0]) - isBookDone(b[0]))
+          || (orderIndex(a[0].isbn) - orderIndex(b[0].isbn))
+          || (a[1] - b[1]))
+        .map(pair => pair[0]);
+      bookRowsEl.innerHTML = ordered.map(b => {
+        const done = isBookDone(b);
         const icon = done
           ? '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>'
           : '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
@@ -313,6 +332,7 @@
         const paidClass = !s.enrolled ? 'wait' : s.paid ? 'paid' : 'unpaid';
         const paidText = !s.enrolled ? 'Nicht angemeldet' : s.paid ? 'Bezahlt' : `Offen: ${escapeHtml(s.amount_open)} €`;
         sPayEl.innerHTML = `<span class="${paidClass}">${paidText}</span>`;
+        if (Array.isArray(s.book_order)) bookOrder = s.book_order;
         currentBooks = s.books || [];
         scannedIsbns.clear();
         renderBooks(currentBooks);
@@ -330,6 +350,10 @@
         statusEl.textContent = `${escapeHtml(msg.barcode)} — ${escapeHtml(msg.msg || msg.status)}`;
       } else if (msg.type === 'settings') {
         slipSecondPageDefault = !!msg.slip_second_page;
+        if (Array.isArray(msg.book_order)) {
+          bookOrder = msg.book_order;
+          if (studentActive) renderBooks(currentBooks);  // aktuelle Liste live umsortieren
+        }
       } else if (msg.type === 'print_result') {
         printBtn.disabled = false;
         const detail = msg.ok

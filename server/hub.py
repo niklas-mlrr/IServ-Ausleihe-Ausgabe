@@ -43,11 +43,15 @@ class Hub:
     async def broadcast_settings(self, state: AppState | None = None) -> None:
         """Helfer-relevante Settings an alle verbundenen Scanner schicken.
 
-        Aktuell nur der Host-Default „Schüler-Leihschein" (2. Seite), den der
-        Druck-Dialog im Helferclient als Vorauswahl nutzt.
+        Der Host-Default „Schüler-Leihschein" (2. Seite) für den Druck-Dialog und
+        die klassenweite Bücher-Reihenfolge (`book_order`) für die Scanner-Liste.
         """
         s = state or get_state()
-        msg = {"type": "settings", "slip_second_page": s.slip_second_page_default}
+        msg = {
+            "type": "settings",
+            "slip_second_page": s.slip_second_page_default,
+            "book_order": s.book_order,
+        }
         for helper in list(s.helper_sessions.values()):
             if helper.ws is not None:
                 try:

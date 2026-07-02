@@ -218,6 +218,19 @@
     #setup-col .card { background: transparent; border: 1px solid var(--border); padding: 14px; }
     /* Betrieb-Cards leicht anheben (feiner Rand + etwas mehr Luft). */
     #betrieb-col .card { border: 1px solid var(--border); }
+    /* Drag&Drop-Liste für die Bücher-Reihenfolge */
+    .book-order-list { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+    .bo-row {
+      display: flex; align-items: center; gap: 10px; padding: 9px 11px;
+      background: var(--panel, rgba(255,255,255,.03)); border: 1px solid var(--border);
+      border-radius: 8px; cursor: grab; user-select: none;
+    }
+    .bo-row.dragging { opacity: .45; }
+    .bo-row.drag-over { border-color: var(--accent, #4a90d9); }
+    .bo-grip { opacity: .4; font-size: 1.1rem; line-height: 1; }
+    .bo-num { opacity: .5; min-width: 1.4em; text-align: right; font-variant-numeric: tabular-nums; }
+    .bo-fach { min-width: 7em; opacity: .7; font-size: .85rem; }
+    .bo-title { flex: 1; }
     .col-label {
       font-size: .8rem; text-transform: uppercase; letter-spacing: .06em;
       opacity: .45; margin: 0 4px 8px;
@@ -429,6 +442,25 @@
       <p class="hint">Hängt die Testschüler <strong>Niklas Müller</strong>, <strong>Lukas Podleschny</strong> und <strong>Lucas Stolpe</strong> an die Queue an.</p>
     </div>
 
+  </div>
+
+  <!-- Bücher-Reihenfolge (Scanner-Anzeige) -->
+  <div class="card" id="book-order-card" style="display:none">
+    <h2>Bücher-Reihenfolge (Scanner)</h2>
+    <p class="hint">Legt die Reihenfolge fest, in der die Bücher im Scanner angezeigt
+      werden — gilt für die ganze Klasse und bleibt beim Schülerwechsel erhalten.
+      Alle in der Klasse bestellten Bücher erscheinen hier; im Scanner sieht jeder
+      Schüler nur seine eigenen. Per Drag &amp; Drop sortieren.</p>
+    <div class="row">
+      <button id="book-order-load-btn" onclick="loadBookOrder()">Bücher laden &amp; anordnen</button>
+    </div>
+    <div id="book-order-body" style="display:none">
+      <div id="book-order-list" class="book-order-list"></div>
+      <div class="row" style="margin-top:8px">
+        <button class="success" onclick="saveBookOrder()">Reihenfolge speichern</button>
+        <button onclick="loadBookOrder()">Neu laden</button>
+      </div>
+    </div>
   </div>
 
   </details><!-- /setup-col -->
@@ -1007,6 +1039,101 @@
   }
 
   // ---- State rendering ----
+  // ---- Bücher-Reihenfolge (Drag & Drop) ----
+  let boOrder = [];          // aktuelle ISBN-Reihenfolge
+  let boCatalog = {};        // isbn -> {title, subject}
+  let boLoadedForm = null;   // Klasse, für die die Liste zuletzt geladen wurde
+  let boDragIndex = null;
+
+  async function loadBookOrder() {
+    if (!state.active_form) { showMsg('Erst eine Klasse laden'); return; }
+    showMsg('Lade Bücherliste der Klasse…');
+    const r = await fetch('/api/class-book-order');
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { showMsg(d.detail || 'Konnte Bücherliste nicht laden'); return; }
+    boCatalog = {};
+    (d.catalog || []).forEach(b => { boCatalog[b.isbn] = b; });
+    boOrder = (d.order || []).filter(isbn => boCatalog[isbn]);
+    boLoadedForm = state.active_form;
+    document.getElementById('book-order-body').style.display = '';
+    renderBookOrderList();
+    showMsg(`${boOrder.length} Bücher geladen`);
+  }
+
+  function renderBookOrderList() {
+    const list = document.getElementById('book-order-list');
+    if (!boOrder.length) {
+      list.innerHTML = '<div class="hint">Keine bestellten Bücher in dieser Klasse.</div>';
+      return;
+    }
+    list.innerHTML = boOrder.map((isbn, i) => {
+      const b = boCatalog[isbn] || { title: isbn, subject: '' };
+      return `<div class="bo-row" draggable="true" data-idx="${i}">`
+        + `<span class="bo-grip">⠿</span>`
+        + `<span class="bo-num">${i + 1}</span>`
+        + `<span class="bo-fach">${escapeHtml(b.subject || '')}</span>`
+        + `<span class="bo-title">${escapeHtml(b.title || isbn)}</span></div>`;
+    }).join('');
+    list.querySelectorAll('.bo-row').forEach(row => {
+      row.addEventListener('dragstart', onBoDragStart);
+      row.addEventListener('dragover', onBoDragOver);
+      row.addEventListener('drop', onBoDrop);
+      row.addEventListener('dragend', onBoDragEnd);
+    });
+  }
+
+  function onBoDragStart(e) {
+    boDragIndex = Number(e.currentTarget.dataset.idx);
+    e.currentTarget.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+  }
+  function onBoDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const row = e.currentTarget;
+    if (Number(row.dataset.idx) !== boDragIndex) row.classList.add('drag-over');
+  }
+  function onBoDrop(e) {
+    e.preventDefault();
+    const to = Number(e.currentTarget.dataset.idx);
+    if (boDragIndex === null || boDragIndex === to) return;
+    const [moved] = boOrder.splice(boDragIndex, 1);
+    boOrder.splice(to, 0, moved);
+    boDragIndex = null;
+    renderBookOrderList();
+  }
+  function onBoDragEnd() {
+    boDragIndex = null;
+    document.querySelectorAll('.bo-row').forEach(r => r.classList.remove('dragging', 'drag-over'));
+  }
+
+  async function saveBookOrder() {
+    const r = await fetch('/api/class-book-order', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order: boOrder }),
+    });
+    const d = await r.json().catch(() => ({}));
+    showMsg(r.ok ? 'Reihenfolge gespeichert' : (d.detail || 'Speichern fehlgeschlagen'));
+  }
+
+  // Karte anzeigen wenn eine Klasse geladen ist; bei Klassenwechsel Liste zurücksetzen
+  // (Katalog wird erst auf Klick neu geladen — vermeidet unnötige IServ-Abrufe).
+  function syncBookOrderCard() {
+    const card = document.getElementById('book-order-card');
+    if (!state.active_form) {
+      card.style.display = 'none';
+      boLoadedForm = null;
+      return;
+    }
+    card.style.display = '';
+    if (boLoadedForm !== state.active_form) {
+      boLoadedForm = null;
+      boOrder = [];
+      boCatalog = {};
+      document.getElementById('book-order-body').style.display = 'none';
+    }
+  }
+
   function applyState(s) {
     state = s;
     if (!state.modus_b) state.modus_b = { open: false, pending: [], pending_count: 0, displays: [] };
@@ -1028,6 +1155,7 @@
     renderModusB();
     renderWorkerStatus();
     renderStatusBar();
+    syncBookOrderCard();
   }
 
   // Now-Serving: zeigt die gerade bedienten (aktiven) Schüler groß und prominent

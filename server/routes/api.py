@@ -155,6 +155,7 @@ async def select_schoolyear(body: dict, session_id: str | None = Cookie(default=
     state.selected_schoolyear = schoolyear
     state.active_form = None
     state.queue = []
+    state.reset_class_book_order()
     await hub.broadcast_host(state.state_snapshot())
     return {"ok": True, "selected": schoolyear}
 
@@ -213,6 +214,7 @@ async def select_class(body: dict, session_id: str | None = Cookie(default=None)
 
     from ..state import QueueStudent
     state.active_form = form
+    state.reset_class_book_order()  # neue Klasse → Reihenfolge/Katalog neu aufbauen
     state.queue = [
         QueueStudent(
             student_id=s["student_id"],
@@ -240,6 +242,89 @@ async def students_for_class(form: str, session_id: str | None = Cookie(default=
         log.exception("Schüler konnten nicht geladen werden")
         raise HTTPException(502, f"IServ-Fehler: {e}")
     return {"students": students}
+
+
+# ---------------------------------------------------------------------------
+# Klassenweite Bücher-Reihenfolge (Scanner-Anzeige, per Drag & Drop am Host)
+# ---------------------------------------------------------------------------
+
+def normalize_book_order(catalog_isbns: list[str], requested: list) -> list[str]:
+    """Gewünschte Reihenfolge auf die Katalog-ISBNs beschränken (unbekannte/Dubletten
+    raus) und fehlende Katalog-ISBNs in Katalogreihenfolge hinten anhängen, damit
+    kein bestelltes Buch verloren geht."""
+    catalog_set = set(catalog_isbns)
+    seen: set[str] = set()
+    order: list[str] = []
+    for isbn in requested:
+        if isinstance(isbn, str) and isbn in catalog_set and isbn not in seen:
+            seen.add(isbn)
+            order.append(isbn)
+    for isbn in catalog_isbns:
+        if isbn not in seen:
+            order.append(isbn)
+    return order
+
+
+async def _ensure_class_catalog(state) -> None:
+    """Katalog (Union aller in der Klasse bestellten Bücher) für die aktive Klasse
+    bauen und cachen, falls noch nicht für diese Klasse geschehen. Initialisiert
+    `book_order` beim ersten Bauen mit der Default-Reihenfolge (subject/title)."""
+    if state.class_catalog_form == state.active_form and state.class_catalog:
+        return
+    catalog = await state.iserv.get_class_book_catalog(state.active_form, state.selected_schoolyear)
+    state.class_catalog = catalog
+    state.class_catalog_form = state.active_form
+    if not state.book_order:
+        state.book_order = [b["isbn"] for b in catalog]
+
+
+@router.get("/api/class-book-order")
+async def get_class_book_order(session_id: str | None = Cookie(default=None)) -> dict:
+    """Katalog aller in der aktiven Klasse bestellten Bücher + aktuelle Reihenfolge.
+
+    Read-only. Baut den Katalog beim ersten Aufruf pro Klasse (mehrere GETs gegen
+    IServ) und cached ihn; `book_order` wird dabei mit der Default-Reihenfolge
+    initialisiert.
+    """
+    _require_host(session_id)
+    state = get_state()
+    if not state.active_form:
+        raise HTTPException(400, "Keine Klasse geladen")
+    try:
+        await _ensure_class_catalog(state)
+    except Exception as e:
+        log.exception("Klassen-Bücherkatalog konnte nicht geladen werden")
+        raise HTTPException(502, f"IServ-Fehler: {e}")
+    return {"form": state.active_form, "catalog": state.class_catalog, "order": state.book_order}
+
+
+@router.post("/api/class-book-order")
+async def set_class_book_order(body: dict, session_id: str | None = Cookie(default=None)) -> dict:
+    """Neue Bücher-Reihenfolge für die aktive Klasse speichern.
+
+    Beschränkt die übergebene Reihenfolge auf die Katalog-ISBNs (unbekannte werden
+    ignoriert) und hängt fehlende Katalog-ISBNs hinten an (Vollständigkeit). Pusht
+    die neue Reihenfolge live an verbundene Scanner (`broadcast_settings`).
+    """
+    _require_host(session_id)
+    state = get_state()
+    if not state.active_form:
+        raise HTTPException(400, "Keine Klasse geladen")
+    try:
+        await _ensure_class_catalog(state)
+    except Exception as e:
+        log.exception("Klassen-Bücherkatalog konnte nicht geladen werden")
+        raise HTTPException(502, f"IServ-Fehler: {e}")
+
+    requested = body.get("order")
+    if not isinstance(requested, list):
+        raise HTTPException(400, "order (Liste) erforderlich")
+
+    catalog_isbns = [b["isbn"] for b in state.class_catalog]
+    state.book_order = normalize_book_order(catalog_isbns, requested)
+    order = state.book_order
+    await get_hub().broadcast_settings()
+    return {"ok": True, "order": order}
 
 
 @router.post("/api/add-student")
@@ -531,6 +616,7 @@ async def clear_queue(session_id: str | None = Cookie(default=None)) -> dict:
         helper.student_id = None
     state.active_form = None
     state.queue = []
+    state.reset_class_book_order()
     await hub.broadcast_host(state.state_snapshot())
     return {"ok": True, "count": count}
 

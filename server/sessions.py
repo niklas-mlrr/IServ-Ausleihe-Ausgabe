@@ -404,6 +404,7 @@ async def load_and_push_helper_student(state: AppState, hub, student, helper) ->
         return
 
     info["form"] = getattr(student, "form", "")
+    info["book_order"] = state.book_order
     helper.expected_isbns = expected_isbns_from_info(info)
     helper.vormerk_isbns, helper.lent_isbns = booking_isbn_sets_from_info(info)
     await hub.send_scanner(helper.token, {"type": "student_info", "student": info})
@@ -462,6 +463,7 @@ async def load_and_push_paired_student(
     (der Schüler liest ohnehin erst die Liste → Worker ist rechtzeitig da).
     """
     info["form"] = getattr(student, "form", "")
+    info["book_order"] = state.book_order
     session.expected_isbns = expected_isbns_from_info(info)
     session.vormerk_isbns, session.lent_isbns = booking_isbn_sets_from_info(info)
     if session.ws is not None:

@@ -148,6 +148,19 @@ class AppState:
         # Host-Toggle „Schüler-Leihschein" (2. Seite): Default für den Druck-
         # Dialog im Helferclient. Wird vom Host gesetzt und an Helfer gesynct.
         self.slip_second_page_default: bool = False
+        # Klassenweite Bücher-Reihenfolge für den Scanner (per Drag & Drop am Host
+        # konfiguriert). Gilt für die ganze Klasse und bleibt beim Schülerwechsel
+        # bestehen; erst ein Klassen-/Schuljahreswechsel setzt sie zurück.
+        self.book_order: list[str] = []                 # konfigurierte ISBN-Sequenz
+        self.class_catalog: list[dict] = []             # [{isbn,title,subject}] Union der Klasse
+        self.class_catalog_form: str | None = None      # Cache-Key (für welche Klasse)
+
+    def reset_class_book_order(self) -> None:
+        """Klassenweite Bücher-Reihenfolge + Katalog-Cache leeren (Klassen-/
+        Schuljahreswechsel, Queue leeren)."""
+        self.book_order = []
+        self.class_catalog = []
+        self.class_catalog_form = None
 
     # --- Host-Login-Sessions (gleitendes TTL) ---
     def add_host_session(self, sid: str) -> None:
@@ -200,6 +213,7 @@ class AppState:
             "worker_pool": worker_stats,
             "force_tailscale_ip": self.force_tailscale_ip,
             "slip_second_page_default": self.slip_second_page_default,
+            "book_order": self.book_order,
         }
 
     def modus_b_snapshot(self) -> dict:

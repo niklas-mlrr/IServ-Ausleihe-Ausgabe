@@ -211,6 +211,9 @@
     const joinSecret = new URLSearchParams(location.search).get('j');
     let token = sessionStorage.getItem('mb_token');
     let ws = null, finished = false, scannerStarted = false, reconnectDelay = 2000;
+    let currentBooks = [];              // Buchliste des Schülers
+    const scannedIsbns = new Set();     // in dieser Session gescannte ISBNs
+    let bookOrder = [];                 // klassenweite ISBN-Reihenfolge (vom Host konfiguriert)
 
     function showError(title, text) {
       if (title) document.getElementById('error-title').textContent = title;
@@ -272,6 +275,11 @@
       } else if (msg.type === 'scan_result') {
         document.getElementById('status-text').textContent =
           `${escapeHtml(msg.barcode)} — ${escapeHtml(msg.msg || msg.status)}`;
+        // Erfolgreicher Scan → Buch als „erledigt" markieren (sinkt nach unten).
+        if ((msg.status === 'staged' || msg.status === 'booked') && msg.isbn) {
+          scannedIsbns.add(msg.isbn);
+          renderBooks(currentBooks);
+        }
       } else if (msg.type === 'closed') {
         finished = true; clearToken(); show('done');
       } else if (msg.type === 'error') {
@@ -292,7 +300,14 @@
       } else {
         pay.innerHTML = `<span class="pay-badge unpaid">Nicht bezahlt — offen: ${escapeHtml(s.amount_open)} €</span>`;
       }
-      renderBooks(s.books);
+      if (Array.isArray(s.book_order)) bookOrder = s.book_order;
+      currentBooks = s.books || [];
+      scannedIsbns.clear();
+      renderBooks(currentBooks);
+    }
+
+    function isBookDone(b) {
+      return b.status === 'ausgeliehen' || !!(b.isbn && scannedIsbns.has(b.isbn));
     }
 
     function renderBooks(books) {
@@ -301,11 +316,26 @@
         rows.innerHTML = '<div class="book-empty">Keine Bücher hinterlegt</div>';
         return;
       }
-      rows.innerHTML = books.map(b => {
-        const icon = b.status === 'ausgeliehen'
+      // Erledigte (gescannt/ausgeliehen) nach unten; innerhalb der Gruppen nach der
+      // klassenweit konfigurierten Reihenfolge (bookOrder); Rest ans Ende; Original-
+      // Index als stabiler Tiebreak.
+      const orderIndex = isbn => {
+        const i = bookOrder.indexOf(isbn);
+        return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+      };
+      const ordered = books
+        .map((b, i) => [b, i])
+        .sort((a, b) =>
+          (isBookDone(a[0]) - isBookDone(b[0]))
+          || (orderIndex(a[0].isbn) - orderIndex(b[0].isbn))
+          || (a[1] - b[1]))
+        .map(pair => pair[0]);
+      rows.innerHTML = ordered.map(b => {
+        const done = isBookDone(b);
+        const icon = done
           ? '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>'
           : '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
-        const cls = b.status === 'ausgeliehen' ? 'ausgeliehen' : 'vorgemerkt';
+        const cls = done ? 'ausgeliehen' : 'vorgemerkt';
         return `<div class="book-row row-${cls}">`
           + `<div class="b-fach">${escapeHtml(b.subject)}</div>`
           + `<div class="b-title">${escapeHtml(b.title)}</div>`
