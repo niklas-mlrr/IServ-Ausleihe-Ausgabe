@@ -1,8 +1,8 @@
 """Klassenweite Bücher-Reihenfolge für den Scanner.
 
-Deckt ab: Katalog-Aggregation (Union über die Klasse, Dedupe, Default-Sortierung),
-die Reihenfolge-Normalisierung des POST-Endpoints und den State-Reset.
-Rein logisch — kein echter IServ/HTTP.
+Deckt ab: Katalog-Aufbau aus der Jahrgangs-Bücherliste (borrowable-Filter, Dedupe,
+Mehrjahresband-Filter, Default-Sortierung), die Reihenfolge-Normalisierung des
+POST-Endpoints und den State-Reset. Rein logisch — kein echter IServ/HTTP.
 """
 
 from __future__ import annotations
@@ -15,90 +15,92 @@ from server.state import AppState
 
 
 # ---------------------------------------------------------------------------
-# get_class_book_catalog — mit gefälschten Client-Internals
+# get_class_book_catalog — mit gefälschter Jahrgangs-Bücherliste
 # ---------------------------------------------------------------------------
 
-class _Series:
-    def __init__(self, title, subjects, is_multi_year=False, grades=None):
-        self.title = title
-        self.subjects_flat = subjects
-        self.subjects = subjects
-        self.is_multi_year = is_multi_year
-        self.grades = grades or []
-        self.grades_flat = grades or []
+def _item(isbn, title, subject, borrowable=True, multi=False, grades=None):
+    """Ein Booklist-Item mit `series_data` (wie der /booklists/:id-Endpunkt liefert)."""
+    return {
+        "borrowable": borrowable,
+        "series": isbn,
+        "series_data": {
+            "isbn": isbn, "title": title, "subjectsFlat": [subject],
+            "isMultiYear": multi, "gradesFlat": grades or [],
+        },
+    }
 
 
-class _FakeStudents:
-    def __init__(self, details):
-        self._details = details
+def _booklist(items):
+    return {"sections": [{"options": [{"items": items}]}]}
 
-    def get_detail(self, sid, **kw):
-        return self._details[sid]
+
+class _FakeSchoolyears:
+    def __init__(self, booklists, full):
+        self._booklists = booklists
+        self._full = full   # booklist_id -> full booklist
+
+    def get_booklists(self, sy):
+        return self._booklists
+
+    def get_booklist(self, sy, bid):
+        return self._full[bid]
 
 
 class _FakeClient:
-    def __init__(self, forms, details):
+    def __init__(self, forms, booklists, full):
         self._forms = forms
-        self.students = _FakeStudents(details)
+        self.schoolyears = _FakeSchoolyears(booklists, full)
 
     def get(self, path, **kw):
-        return self._forms  # nur der /forms-Endpunkt wird genutzt
+        return self._forms  # nur der /forms-Endpunkt wird direkt genutzt
 
 
-_DEFAULT_SERIES = {
-    "A": _Series("Mathe", ["Mathematik"]),
-    "B": _Series("Deutsch", ["Deutsch"]),
-    "C": _Series("Bio", ["Biologie"]),
-}
-
-
-def _catalog(client, form="9a", sy="2025/2026", series_map=None):
+def _catalog(forms, booklists, full, form="9a", sy="2025/2026"):
     c = IsServClient("d", "u", "p")
-    c._client = client                 # _get_client() gibt diesen zurück
-    c._series_map = series_map or _DEFAULT_SERIES  # _get_series_map() überspringt den Fetch
+    c._client = _FakeClient(forms, booklists, full)  # _get_client()
+    c._series_map = {}                               # series_data reicht → kein Fetch
     return asyncio.run(c.get_class_book_catalog(form, sy))
 
 
-def test_catalog_unions_dedupes_and_sorts():
-    forms = [{"name": "9a", "members": [{"id": 1}, {"id": 2}]}]
-    details = {
-        1: {"enrollments": [{"schoolyear": "2025/2026", "booklistItems": [
-            {"series": "A"}, {"series": "B"}]}]},
-        2: {"enrollments": [{"schoolyear": "2025/2026", "booklistItems": [
-            {"series": "B"}, {"series": "C"}]}]},   # B ist Dublette
-    }
-    cat = _catalog(_FakeClient(forms, details))
-    # Sortiert nach (subject, title): Biologie(C), Deutsch(B), Mathematik(A)
-    assert [b["isbn"] for b in cat] == ["C", "B", "A"]
+def test_catalog_from_booklist_filters_borrowable_dedupes_sorts():
+    forms = [{"name": "9a", "grade": 9}]
+    items = [
+        _item("A", "Mathe", "Mathematik"),
+        _item("B", "Deutsch Arbeitsheft", "Deutsch", borrowable=False),  # raus
+        _item("C", "Bio", "Biologie"),
+        _item("A", "Mathe", "Mathematik"),                               # Dublette
+    ]
+    cat = _catalog(forms, [{"grade": 9, "id": 100}], {100: _booklist(items)})
+    # borrowable + dedupe, sortiert nach (subject, title): Biologie(C), Mathematik(A)
+    assert [b["isbn"] for b in cat] == ["C", "A"]
     assert cat[0] == {"isbn": "C", "title": "Bio", "subject": "Biologie"}
 
 
-def test_catalog_includes_multiyear_only_in_lowest_grade():
-    # Mehrjahresband M (Klassen 7-8): nur in Jg. 7 in den Katalog, nicht in Jg. 8.
-    smap = {
-        "N": _Series("Normal", ["Deutsch"]),
-        "M": _Series("Bioskop 7/8", ["Biologie"], is_multi_year=True, grades=[7, 8]),
-    }
-    details = {1: {"enrollments": [{"schoolyear": "2025/2026", "booklistItems": [
-        {"series": "N"}, {"series": "M"}]}]}}
-    forms7 = [{"name": "7a", "grade": 7, "members": [{"id": 1}]}]
-    forms8 = [{"name": "8a", "grade": 8, "members": [{"id": 1}]}]
+def test_catalog_multiyear_only_in_lowest_grade():
+    # Mehrjahresband M (Jg. 7-8, gradesFlat unsortiert): nur in Jg. 7, nicht Jg. 8.
+    m = _item("M", "Bioskop 7/8", "Biologie", multi=True, grades=[8, 7])
+    forms7 = [{"name": "7a", "grade": 7}]
+    forms8 = [{"name": "8a", "grade": 8}]
 
-    cat7 = _catalog(_FakeClient(forms7, details), form="7a", series_map=smap)
-    assert {b["isbn"] for b in cat7} == {"N", "M"}  # Jg. 7 = unterster → dabei
+    cat7 = _catalog(forms7, [{"grade": 7, "id": 7}],
+                    {7: _booklist([_item("N", "Normal", "Deutsch"), m])}, form="7a")
+    assert {b["isbn"] for b in cat7} == {"N", "M"}   # unterster Jg. → dabei
 
-    cat8 = _catalog(_FakeClient(forms8, details), form="8a", series_map=smap)
-    assert {b["isbn"] for b in cat8} == {"N"}       # Jg. 8 → Mehrjahresband raus
+    cat8 = _catalog(forms8, [{"grade": 8, "id": 8}],
+                    {8: _booklist([_item("P", "Physik", "Physik"), m])}, form="8a")
+    assert {b["isbn"] for b in cat8} == {"P"}        # oberer Jg. → Band raus
 
 
-def test_catalog_skips_students_without_enrollment_this_year():
-    forms = [{"name": "9a", "members": [{"id": 1}, {"id": 2}]}]
-    details = {
-        1: {"enrollments": [{"schoolyear": "2024/2025", "booklistItems": [{"series": "A"}]}]},
-        2: {"enrollments": [{"schoolyear": "2025/2026", "booklistItems": [{"series": "B"}]}]},
-    }
-    cat = _catalog(_FakeClient(forms, details))
-    assert [b["isbn"] for b in cat] == ["B"]  # Schüler 1 (falsches Jahr) ignoriert
+def test_catalog_empty_when_no_booklist_for_grade():
+    forms = [{"name": "9a", "grade": 9}]
+    cat = _catalog(forms, [{"grade": 5, "id": 5}], {5: _booklist([_item("A", "X", "Y")])})
+    assert cat == []
+
+
+def test_catalog_empty_when_form_unknown():
+    cat = _catalog([{"name": "8a", "grade": 8}], [{"grade": 8, "id": 8}],
+                   {8: _booklist([_item("A", "X", "Y")])}, form="9z")
+    assert cat == []
 
 
 # ---------------------------------------------------------------------------

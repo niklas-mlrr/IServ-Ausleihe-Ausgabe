@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import date, datetime
 from urllib.parse import quote
+
+log = logging.getLogger(__name__)
 
 # Default-Schuljahr neu bestimmen, wenn der Cache älter als das ist. Fängt den
 # upcoming→running-Übergang ab, falls der Server über einen Schuljahresbeginn
@@ -307,76 +310,71 @@ class IsServClient:
     async def get_class_book_catalog(
         self, form_name: str, schoolyear: str | None = None
     ) -> list[dict]:
-        """Vereinigung aller in einer Klasse bestellten Bücher (read-only).
+        """Ausleihbare Bücher des Jahrgangs einer Klasse (read-only).
 
-        Grundlage für die klassenweite Bücher-Reihenfolge im Scanner: Über alle
-        Schüler der Klasse werden die angemeldeten Serien-ISBNs
-        (`enrollments[].booklistItems[].series`) eingesammelt, dedupliziert und —
-        als Default-Reihenfolge — nach `(subject, title)` sortiert.
+        Grundlage für die klassenweite Bücher-Reihenfolge im Scanner. Quelle ist die
+        **Jahrgangs-Bücherliste** (`GET /schoolyears/:sy/booklists/:id`), NICHT die
+        Vereinigung der Einzelanmeldungen — so erscheinen alle für den Jahrgang
+        ausleihbaren Titel, unabhängig davon, welche Schüler gerade angemeldet sind.
 
-        Liefert `[{isbn, title, subject}]`. Rein GET (kein `books=True` nötig).
-        Sequentiell in einem Thread (die synchrone Client-Session ist nicht
-        thread-safe); Schüler ohne Anmeldung im gewählten Jahr werden übersprungen.
+        Klassenstufe → Booklist über `form["grade"]` == `booklist["grade"]`. Aus der
+        Liste werden nur **ausleihbare** Items (`borrowable=True`) genommen (keine
+        Kauf-/Arbeitshefte), nach ISBN dedupliziert (Items wiederholen sich über
+        Sections/Options) und nach `(subject, title)` sortiert. `series_data` der
+        Booklist ist verlässlich (Titel/Fach/ISBN/Mehrjahr direkt).
 
-        **Mehrjahresbände** (Serie mit `is_multi_year=True`, z. B. „Bioskop 5/6",
-        Atlas 5–13) werden nur im **untersten** Jahrgang der Serie in den Katalog
-        aufgenommen — dort werden sie ausgegeben, in den höheren Jahrgängen hat der
-        Schüler sie bereits (kein erneutes Ordnen). Klassenstufe kommt aus der Form
-        (`grade`), die Serien-Jahrgänge aus dem Serien-Katalog.
+        **Mehrjahresbände** (`isMultiYear`) stehen in der Booklist auch im oberen
+        Jahrgang als `borrowable=True`; sie werden nur im **untersten** Jahrgang der
+        Serie aufgenommen (`grade == min(gradesFlat)`) — oben hat der Schüler den
+        Band bereits.
+
+        Liefert `[{isbn, title, subject}]`; leer, wenn die Klasse/Jahrgang keine
+        Booklist hat. Nur GETs.
         """
         def _sync() -> list[dict]:
             client = self._get_client()
             series_map = self._get_series_map()
 
-            def _fach(isbn: str) -> str:
-                s = series_map.get(isbn)
-                if not s:
-                    return ""
-                return ", ".join(s.subjects_flat or s.subjects or [])
-
-            def _title(isbn: str) -> str:
-                s = series_map.get(isbn)
-                return (s.title if s else "") or isbn
-
-            def _multi_year_wrong_grade(isbn: str) -> bool:
-                """True, wenn ISBN ein Mehrjahresband ist, dessen unterster Jahrgang
-                NICHT die aktuelle Klassenstufe ist (→ nicht in den Katalog)."""
-                s = series_map.get(isbn)
-                if not s or not getattr(s, "is_multi_year", False) or form_grade is None:
-                    return False
-                grades = s.grades or s.grades_flat
-                return bool(grades) and form_grade != min(grades)
-
             sy_id = self._resolve_sy(client, schoolyear)
             forms = client.get(f"/schoolyears/{_enc(sy_id)}/forms")
-            members: list[dict] = []
-            form_grade: int | None = None
-            for f in forms:
-                if f["name"] == form_name:
-                    members = f.get("members", [])
-                    form_grade = f.get("grade")
-                    break
+            form_grade = next(
+                (f.get("grade") for f in forms if f["name"] == form_name), None
+            )
+            if form_grade is None:
+                return []
+
+            booklists = client.schoolyears.get_booklists(sy_id)
+            bl = next((b for b in booklists if b.get("grade") == form_grade), None)
+            if not bl:
+                log.warning("Keine Booklist für Jahrgang %s (Klasse %s)", form_grade, form_name)
+                return []
+            full = client.schoolyears.get_booklist(sy_id, bl["id"])
 
             seen: set[str] = set()
             catalog: list[dict] = []
-            for m in members:
-                detail = client.students.get_detail(m["id"], enrollments=True)
-                enrollment = next(
-                    (e for e in detail.get("enrollments", []) if e.get("schoolyear") == sy_id),
-                    None,
-                )
-                if not enrollment:
-                    continue
-                for item in enrollment.get("booklistItems", []):
-                    isbn = item.get("series", "")
-                    if not isbn or isbn in seen:
-                        continue
-                    seen.add(isbn)  # pro ISBN einmal entscheiden (Klassenstufe ist konstant)
-                    if _multi_year_wrong_grade(isbn):
-                        continue
-                    catalog.append(
-                        {"isbn": isbn, "title": _title(isbn), "subject": _fach(isbn)}
-                    )
+            for sec in full.get("sections", []):
+                for opt in sec.get("options", []):
+                    for item in opt.get("items", []):
+                        if not item.get("borrowable"):
+                            continue  # Kauf-/Arbeitshefte raus
+                        sd = item.get("series_data") or {}
+                        isbn = sd.get("isbn") or item.get("series") or ""
+                        if not isbn or isbn in seen:
+                            continue
+                        seen.add(isbn)
+                        # Mehrjahresband nur im untersten Jahrgang der Serie.
+                        if sd.get("isMultiYear"):
+                            grades = sd.get("gradesFlat") or []
+                            if grades and form_grade != min(grades):
+                                continue
+                        s = series_map.get(isbn)
+                        title = sd.get("title") or (s.title if s else "") or isbn
+                        subject = ", ".join(
+                            sd.get("subjectsFlat")
+                            or (s.subjects_flat or s.subjects if s else [])
+                            or []
+                        )
+                        catalog.append({"isbn": isbn, "title": title, "subject": subject})
 
             catalog.sort(key=lambda b: (b["subject"], b["title"]))
             return catalog
