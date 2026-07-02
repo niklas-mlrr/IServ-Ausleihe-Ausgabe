@@ -19,10 +19,13 @@ from server.state import AppState
 # ---------------------------------------------------------------------------
 
 class _Series:
-    def __init__(self, title, subjects):
+    def __init__(self, title, subjects, is_multi_year=False, grades=None):
         self.title = title
         self.subjects_flat = subjects
         self.subjects = subjects
+        self.is_multi_year = is_multi_year
+        self.grades = grades or []
+        self.grades_flat = grades or []
 
 
 class _FakeStudents:
@@ -42,14 +45,17 @@ class _FakeClient:
         return self._forms  # nur der /forms-Endpunkt wird genutzt
 
 
-def _catalog(client, form="9a", sy="2025/2026"):
+_DEFAULT_SERIES = {
+    "A": _Series("Mathe", ["Mathematik"]),
+    "B": _Series("Deutsch", ["Deutsch"]),
+    "C": _Series("Bio", ["Biologie"]),
+}
+
+
+def _catalog(client, form="9a", sy="2025/2026", series_map=None):
     c = IsServClient("d", "u", "p")
     c._client = client                 # _get_client() gibt diesen zurück
-    c._series_map = {                  # _get_series_map() überspringt den Fetch
-        "A": _Series("Mathe", ["Mathematik"]),
-        "B": _Series("Deutsch", ["Deutsch"]),
-        "C": _Series("Bio", ["Biologie"]),
-    }
+    c._series_map = series_map or _DEFAULT_SERIES  # _get_series_map() überspringt den Fetch
     return asyncio.run(c.get_class_book_catalog(form, sy))
 
 
@@ -65,6 +71,24 @@ def test_catalog_unions_dedupes_and_sorts():
     # Sortiert nach (subject, title): Biologie(C), Deutsch(B), Mathematik(A)
     assert [b["isbn"] for b in cat] == ["C", "B", "A"]
     assert cat[0] == {"isbn": "C", "title": "Bio", "subject": "Biologie"}
+
+
+def test_catalog_includes_multiyear_only_in_lowest_grade():
+    # Mehrjahresband M (Klassen 7-8): nur in Jg. 7 in den Katalog, nicht in Jg. 8.
+    smap = {
+        "N": _Series("Normal", ["Deutsch"]),
+        "M": _Series("Bioskop 7/8", ["Biologie"], is_multi_year=True, grades=[7, 8]),
+    }
+    details = {1: {"enrollments": [{"schoolyear": "2025/2026", "booklistItems": [
+        {"series": "N"}, {"series": "M"}]}]}}
+    forms7 = [{"name": "7a", "grade": 7, "members": [{"id": 1}]}]
+    forms8 = [{"name": "8a", "grade": 8, "members": [{"id": 1}]}]
+
+    cat7 = _catalog(_FakeClient(forms7, details), form="7a", series_map=smap)
+    assert {b["isbn"] for b in cat7} == {"N", "M"}  # Jg. 7 = unterster → dabei
+
+    cat8 = _catalog(_FakeClient(forms8, details), form="8a", series_map=smap)
+    assert {b["isbn"] for b in cat8} == {"N"}       # Jg. 8 → Mehrjahresband raus
 
 
 def test_catalog_skips_students_without_enrollment_this_year():

@@ -317,6 +317,12 @@ class IsServClient:
         Liefert `[{isbn, title, subject}]`. Rein GET (kein `books=True` nötig).
         Sequentiell in einem Thread (die synchrone Client-Session ist nicht
         thread-safe); Schüler ohne Anmeldung im gewählten Jahr werden übersprungen.
+
+        **Mehrjahresbände** (Serie mit `is_multi_year=True`, z. B. „Bioskop 5/6",
+        Atlas 5–13) werden nur im **untersten** Jahrgang der Serie in den Katalog
+        aufgenommen — dort werden sie ausgegeben, in den höheren Jahrgängen hat der
+        Schüler sie bereits (kein erneutes Ordnen). Klassenstufe kommt aus der Form
+        (`grade`), die Serien-Jahrgänge aus dem Serien-Katalog.
         """
         def _sync() -> list[dict]:
             client = self._get_client()
@@ -332,12 +338,23 @@ class IsServClient:
                 s = series_map.get(isbn)
                 return (s.title if s else "") or isbn
 
+            def _multi_year_wrong_grade(isbn: str) -> bool:
+                """True, wenn ISBN ein Mehrjahresband ist, dessen unterster Jahrgang
+                NICHT die aktuelle Klassenstufe ist (→ nicht in den Katalog)."""
+                s = series_map.get(isbn)
+                if not s or not getattr(s, "is_multi_year", False) or form_grade is None:
+                    return False
+                grades = s.grades or s.grades_flat
+                return bool(grades) and form_grade != min(grades)
+
             sy_id = self._resolve_sy(client, schoolyear)
             forms = client.get(f"/schoolyears/{_enc(sy_id)}/forms")
             members: list[dict] = []
+            form_grade: int | None = None
             for f in forms:
                 if f["name"] == form_name:
                     members = f.get("members", [])
+                    form_grade = f.get("grade")
                     break
 
             seen: set[str] = set()
@@ -354,7 +371,9 @@ class IsServClient:
                     isbn = item.get("series", "")
                     if not isbn or isbn in seen:
                         continue
-                    seen.add(isbn)
+                    seen.add(isbn)  # pro ISBN einmal entscheiden (Klassenstufe ist konstant)
+                    if _multi_year_wrong_grade(isbn):
+                        continue
                     catalog.append(
                         {"isbn": isbn, "title": _title(isbn), "subject": _fach(isbn)}
                     )

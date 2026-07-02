@@ -221,12 +221,20 @@
     /* Drag&Drop-Liste für die Bücher-Reihenfolge */
     .book-order-list { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
     .bo-row {
+      position: relative;
       display: flex; align-items: center; gap: 10px; padding: 9px 11px;
       background: var(--panel, rgba(255,255,255,.03)); border: 1px solid var(--border);
       border-radius: 8px; cursor: grab; user-select: none;
     }
     .bo-row.dragging { opacity: .45; }
-    .bo-row.drag-over { border-color: var(--accent, #4a90d9); }
+    /* Einfügemarke: horizontaler Balken dort, wo das Buch landen würde. */
+    .bo-row.drop-before::before,
+    .bo-row.drop-after::after {
+      content: ""; position: absolute; left: 0; right: 0; height: 3px;
+      background: var(--accent, #4a90d9); border-radius: 2px; pointer-events: none;
+    }
+    .bo-row.drop-before::before { top: -5px; }
+    .bo-row.drop-after::after { bottom: -5px; }
     .bo-grip { opacity: .4; font-size: 1.1rem; line-height: 1; }
     .bo-num { opacity: .5; min-width: 1.4em; text-align: right; font-variant-numeric: tabular-nums; }
     .bo-fach { min-width: 7em; opacity: .7; font-size: .85rem; }
@@ -1043,7 +1051,9 @@
   let boOrder = [];          // aktuelle ISBN-Reihenfolge
   let boCatalog = {};        // isbn -> {title, subject}
   let boLoadedForm = null;   // Klasse, für die die Liste zuletzt geladen wurde
-  let boDragIndex = null;
+  let boDragIndex = null;    // Index des gezogenen Buchs
+  let boDropIndex = null;    // Index der Zeile, über der die Marke steht
+  let boDropPos = null;      // 'before' | 'after' — Seite der Einfügemarke
 
   async function loadBookOrder() {
     if (!state.active_form) { showMsg('Erst eine Klasse laden'); return; }
@@ -1082,6 +1092,9 @@
     });
   }
 
+  function clearBoDropMarks() {
+    document.querySelectorAll('.bo-row').forEach(r => r.classList.remove('drop-before', 'drop-after'));
+  }
   function onBoDragStart(e) {
     boDragIndex = Number(e.currentTarget.dataset.idx);
     e.currentTarget.classList.add('dragging');
@@ -1091,20 +1104,31 @@
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
     const row = e.currentTarget;
-    if (Number(row.dataset.idx) !== boDragIndex) row.classList.add('drag-over');
+    const rect = row.getBoundingClientRect();
+    const pos = (e.clientY < rect.top + rect.height / 2) ? 'before' : 'after';
+    boDropIndex = Number(row.dataset.idx);
+    boDropPos = pos;
+    // Marke immer an genau einer Stelle zeigen.
+    clearBoDropMarks();
+    row.classList.add(pos === 'before' ? 'drop-before' : 'drop-after');
   }
   function onBoDrop(e) {
     e.preventDefault();
-    const to = Number(e.currentTarget.dataset.idx);
-    if (boDragIndex === null || boDragIndex === to) return;
-    const [moved] = boOrder.splice(boDragIndex, 1);
-    boOrder.splice(to, 0, moved);
-    boDragIndex = null;
+    if (boDragIndex === null || boDropIndex === null) return;
+    let target = boDropIndex + (boDropPos === 'after' ? 1 : 0);
+    const from = boDragIndex;
+    if (from < target) target--;   // Verschiebung durch das Entnehmen ausgleichen
+    if (target !== from) {
+      const [moved] = boOrder.splice(from, 1);
+      boOrder.splice(target, 0, moved);
+    }
+    boDragIndex = boDropIndex = boDropPos = null;
     renderBookOrderList();
   }
   function onBoDragEnd() {
-    boDragIndex = null;
-    document.querySelectorAll('.bo-row').forEach(r => r.classList.remove('dragging', 'drag-over'));
+    boDragIndex = boDropIndex = boDropPos = null;
+    clearBoDropMarks();
+    document.querySelectorAll('.bo-row').forEach(r => r.classList.remove('dragging'));
   }
 
   async function saveBookOrder() {

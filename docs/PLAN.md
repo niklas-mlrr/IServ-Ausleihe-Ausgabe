@@ -213,7 +213,11 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
       Schuljahreswechsel, Queue-leeren). Karte „Bücher-Reihenfolge (Scanner)" in
       `web/host.html` zeigt die **Vereinigung aller in der Klasse bestellten Bücher**
       (`GET /api/class-book-order`, on-demand gebaut über
-      `iserv_client.get_class_book_catalog`, read-only); Speichern via
+      `iserv_client.get_class_book_catalog`, read-only). **Mehrjahresbände**
+      (`Series.is_multi_year`) erscheinen nur im **untersten** Jahrgang der Serie
+      (Klassenstufe = `min(series.grades)`) — in höheren Jahrgängen hat der Schüler
+      den Band schon. Drag & Drop mit **horizontaler Einfügemarke** (kein
+      Zeilen-Highlight). Speichern via
       `POST /api/class-book-order` (`normalize_book_order` beschränkt auf Katalog +
       hängt fehlende an). `state.book_order` reist in `student_info`/`settings`
       mit; Scanner (`web/scan.html`, Modus A) **und** Schülerseite
