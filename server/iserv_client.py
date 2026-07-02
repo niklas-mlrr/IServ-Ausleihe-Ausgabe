@@ -318,15 +318,14 @@ class IsServClient:
         ausleihbaren Titel, unabhängig davon, welche Schüler gerade angemeldet sind.
 
         Klassenstufe → Booklist über `form["grade"]` == `booklist["grade"]`. Aus der
-        Liste werden nur **ausleihbare** Items (`borrowable=True`) genommen (keine
+        Liste werden **alle ausleihbaren** Items (`borrowable=True`) genommen (keine
         Kauf-/Arbeitshefte), nach ISBN dedupliziert (Items wiederholen sich über
         Sections/Options) und nach `(subject, title)` sortiert. `series_data` der
-        Booklist ist verlässlich (Titel/Fach/ISBN/Mehrjahr direkt).
+        Booklist ist verlässlich (Titel/Fach/ISBN direkt).
 
-        **Mehrjahresbände** (`isMultiYear`) stehen in der Booklist auch im oberen
-        Jahrgang als `borrowable=True`; sie werden nur im **untersten** Jahrgang der
-        Serie aufgenommen (`grade == min(gradesFlat)`) — oben hat der Schüler den
-        Band bereits.
+        **Mehrjahresbände sind bewusst enthalten** (2026-07-02d): die komplette
+        ausleihbare Jahrgangsliste wird gezeigt, auch wenn ein Band die Klassenstufe
+        nur als oberen Jahrgang führt.
 
         Liefert `[{isbn, title, subject}]`; leer, wenn die Klasse/Jahrgang keine
         Booklist hat. Nur GETs.
@@ -362,11 +361,6 @@ class IsServClient:
                         if not isbn or isbn in seen:
                             continue
                         seen.add(isbn)
-                        # Mehrjahresband nur im untersten Jahrgang der Serie.
-                        if sd.get("isMultiYear"):
-                            grades = sd.get("gradesFlat") or []
-                            if grades and form_grade != min(grades):
-                                continue
                         s = series_map.get(isbn)
                         title = sd.get("title") or (s.title if s else "") or isbn
                         subject = ", ".join(

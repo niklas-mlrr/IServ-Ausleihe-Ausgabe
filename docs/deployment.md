@@ -78,7 +78,10 @@ Weitere `.env`-Variablen: `PRINTER_NAME` (leer = Standarddrucker),
 2. **[SumatraPDF](https://www.sumatrapdfreader.org/)** installieren (klein, kostenlos)
    — ermöglicht echten Silent-Print ohne Dialog. Ohne Sumatra fällt der Service
    automatisch auf `win-default` zurück (öffnet kurz das PDF-Programm).
-3. Testdruck über den Host-Button **„Leihschein"** an einem Schüler.
+3. Soll ein **bestimmter** Drucker (nicht der Standarddrucker) verwendet werden:
+   exakten Namen per PowerShell ermitteln — `Get-Printer | Select-Object Name` —
+   und den Wert als `PRINTER_NAME` in die `.env` eintragen (leer = Standarddrucker).
+4. Testdruck über den Host-Button **„Leihschein"** an einem Schüler.
 
 ### macOS-Drucker (Macbook)
 

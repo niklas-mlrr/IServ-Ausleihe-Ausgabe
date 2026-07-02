@@ -219,10 +219,10 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
       (keine Kauf-/Arbeitshefte), dedupliziert, `series_data` liefert Titel/Fach
       direkt. Zugriff über `GET /api/class-book-order` (on-demand,
       `iserv_client.get_class_book_catalog`, read-only, 2 GETs statt N).
-      **Mehrjahresbände** (`isMultiYear`) erscheinen nur im **untersten** Jahrgang
-      der Serie (`grade == min(gradesFlat)`) — in höheren Jahrgängen hat der Schüler
-      den Band schon. Drag & Drop mit **horizontaler Einfügemarke** (kein
-      Zeilen-Highlight). Speichern via
+      **Mehrjahresbände sind enthalten** (2026-07-02d): die komplette ausleihbare
+      Jahrgangsliste wird gezeigt — der frühere `min(gradesFlat)`-Filter (nur
+      unterster Jahrgang) wurde auf Wunsch entfernt. Drag & Drop mit
+      **horizontaler Einfügemarke** (kein Zeilen-Highlight). Speichern via
       `POST /api/class-book-order` (`normalize_book_order` beschränkt auf Katalog +
       hängt fehlende an). `state.book_order` reist in `student_info`/`settings`
       mit; Scanner (`web/scan.html`, Modus A) **und** Schülerseite
@@ -353,6 +353,12 @@ Umsetzung:
   Feldkontakt.
 - **`ALLOW_BOOKING` bleibt Master-Gate** (Default `false` = kompletter read-only-
   Betrieb, Scan bleibt staged). Erst auf `true` feuert die Auto-Buchung.
+- **Manueller „Buchen"-Button entfernt (2026-07-02):** Der Host-UI-Button
+  (`web/host.html`, Kachel- + Queue-Ansicht) plus die `commitBook`-JS-Funktion
+  sind raus — er wurde nur bei `allow_booking=true` gerendert, also genau dann,
+  wenn die Auto-Buchung ohnehin läuft (redundant). Der Endpoint
+  `POST /api/commit-book` (+ `handle_commit`) **bleibt** als dreifach gegateter
+  Fallback bestehen, nur ohne UI-Fläche.
 - Getrennte ISBN-Mengen pro Session: `vormerk_isbns` (buchbar) / `lent_isbns`
   (für die Meldung „Reihe schon ausgeliehen") in `HelperSession`/`StudentSessionB`.
 - Tests: `tests/test_booking_precheck.py` (Bedingungslogik + Gate-Verhalten),

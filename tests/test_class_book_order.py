@@ -76,19 +76,18 @@ def test_catalog_from_booklist_filters_borrowable_dedupes_sorts():
     assert cat[0] == {"isbn": "C", "title": "Bio", "subject": "Biologie"}
 
 
-def test_catalog_multiyear_only_in_lowest_grade():
-    # Mehrjahresband M (Jg. 7-8, gradesFlat unsortiert): nur in Jg. 7, nicht Jg. 8.
+def test_catalog_includes_multiyear_in_every_grade():
+    # Mehrjahresband M (Jg. 7-8): die komplette ausleihbare Jahrgangsliste wird
+    # gezeigt — der Band erscheint in BEIDEN Jahrgängen (kein min-grade-Filter).
     m = _item("M", "Bioskop 7/8", "Biologie", multi=True, grades=[8, 7])
-    forms7 = [{"name": "7a", "grade": 7}]
-    forms8 = [{"name": "8a", "grade": 8}]
 
-    cat7 = _catalog(forms7, [{"grade": 7, "id": 7}],
+    cat7 = _catalog([{"name": "7a", "grade": 7}], [{"grade": 7, "id": 7}],
                     {7: _booklist([_item("N", "Normal", "Deutsch"), m])}, form="7a")
-    assert {b["isbn"] for b in cat7} == {"N", "M"}   # unterster Jg. → dabei
+    assert {b["isbn"] for b in cat7} == {"N", "M"}
 
-    cat8 = _catalog(forms8, [{"grade": 8, "id": 8}],
+    cat8 = _catalog([{"name": "8a", "grade": 8}], [{"grade": 8, "id": 8}],
                     {8: _booklist([_item("P", "Physik", "Physik"), m])}, form="8a")
-    assert {b["isbn"] for b in cat8} == {"P"}        # oberer Jg. → Band raus
+    assert {b["isbn"] for b in cat8} == {"P", "M"}   # oberer Jg. → Band bleibt drin
 
 
 def test_catalog_empty_when_no_booklist_for_grade():
