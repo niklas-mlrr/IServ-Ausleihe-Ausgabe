@@ -868,17 +868,6 @@
     await fetch('/api/finish', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ student_id: studentId }) });
   }
 
-  async function commitBook(studentId, btn) {
-    if (!await confirmDialog('Buchung gegen die IServ-PRODUKTION auslösen (letzter Scan)?\n\nNur im freigegebenen Buchungstest bestätigen!', 'Buchen')) return;
-    await busy(btn, async () => {
-      showMsg('Buchung wird ausgelöst …');
-      const r = await fetch('/api/commit-book', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ student_id: studentId, confirm: true }) });
-      const d = await r.json().catch(() => ({}));
-      if (r.ok) showMsg(`Buchung (${d.barcode}): ${d.status} — ${d.msg || ''}`);
-      else showMsg(d.detail || 'Buchung fehlgeschlagen');
-    });
-  }
-
   // Öffnet den Druck-Dialog und gibt die gewählte „second_page"-Option zurück,
   // oder null wenn Abbrechen gedrückt wurde.
   function openPrintDialog() {
@@ -1199,13 +1188,10 @@
       body = '<div class="ns-grid">' + active.map(s => {
         const helper = helpers.find(h => h.student_id === s.student_id);
         const helperLbl = helper ? `<span class="ns-helper"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> ${escapeHtml(helper.name)}</span>` : '';
-        const bookBtn = state.allow_booking
-          ? `<button class="danger" onclick="commitBook(${s.student_id}, this)">Buchen</button>` : '';
         return `<div class="ns-tile">
           <div class="ns-name">${escapeHtml(s.lastname)}, ${escapeHtml(s.firstname)}</div>
           <div class="ns-meta"><span>${escapeHtml(s.form)}</span>${helperLbl}</div>
           <div class="ns-actions">
-            ${bookBtn}
             <button class="success" onclick="finishStudent(${s.student_id})">Abschließen</button>
             <button class="secondary" onclick="printLoanSlip(${s.student_id}, this)">Leihschein</button>
           </div>
@@ -1314,15 +1300,12 @@
       const pairBtn = (state.modus_b && state.modus_b.open)
         ? `<button class="success" onclick="pairStudent(${s.student_id})">Pairing</button> ` : '';
       const printBtn = `<button class="secondary" onclick="printLoanSlip(${s.student_id}, this)">Leihschein</button>`;
-      // Buchen-Button NUR wenn der Server ALLOW_BOOKING=true meldet (Default: aus).
-      const bookBtn = state.allow_booking
-        ? `<button class="danger" onclick="commitBook(${s.student_id}, this)">Buchen</button> ` : '';
       // Trennen: löst Helfer-/Schüler-Verbindung und setzt den Schüler zurück auf "Wartend".
       const disconnectBtn = `<button class="secondary" onclick="disconnectStudent(${s.student_id})">Trennen</button>`;
       const actions = s.status === 'pending'
         ? `${pairBtn}<button class="secondary" onclick="skipStudent(${s.student_id})">Überspringen</button> ${disconnectBtn}`
         : s.status === 'active'
-          ? `${bookBtn}<button class="success" onclick="finishStudent(${s.student_id})">Abschließen</button> <button class="secondary" onclick="skipStudent(${s.student_id})">Abbrechen</button> ${disconnectBtn} ${printBtn}`
+          ? `<button class="success" onclick="finishStudent(${s.student_id})">Abschließen</button> <button class="secondary" onclick="skipStudent(${s.student_id})">Abbrechen</button> ${disconnectBtn} ${printBtn}`
           : s.status === 'done'
             ? printBtn
             : '';
