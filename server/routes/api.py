@@ -451,6 +451,38 @@ async def set_slip_default(body: dict, session_id: str | None = Cookie(default=N
     return {"ok": True, "slip_second_page_default": state.slip_second_page_default}
 
 
+@router.get("/api/printers")
+async def get_printers(session_id: str | None = Cookie(default=None)) -> dict:
+    """Dem Host-Gerät bekannte Drucker für die Auswahl im Einstellungen-Dialog.
+
+    Rein lesend (lpstat/Get-Printer, lokales System — kein IServ-/DB-Zugriff).
+    """
+    _require_host(session_id)
+    from ..printing import list_printers
+
+    cfg = get_config()
+    state = get_state()
+    info = await list_printers(cfg.print_backend)
+    info["current"] = state.printer_name_override or cfg.printer_name
+    info["env_default"] = cfg.printer_name
+    return info
+
+
+@router.post("/api/printer")
+async def set_printer(body: dict, session_id: str | None = Cookie(default=None)) -> dict:
+    """Einstellungen-Dialog: Leihschein-Drucker wählen.
+
+    Setzt nur den In-Memory-Override im Serverstate (leer = zurück auf
+    .env/Systemstandard) — kein IServ-/DB-Zugriff, nichts wird persistiert.
+    """
+    _require_host(session_id)
+    state = get_state()
+    name = str(body.get("printer") or "").strip()
+    state.printer_name_override = name or None
+    await get_hub().broadcast_host(state.state_snapshot())
+    return {"ok": True, "printer": state.printer_name_override}
+
+
 # ---------------------------------------------------------------------------
 # Helfer verwalten
 # ---------------------------------------------------------------------------

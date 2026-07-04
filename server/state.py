@@ -148,6 +148,9 @@ class AppState:
         # Host-Toggle „Schüler-Leihschein" (2. Seite): Default für den Druck-
         # Dialog im Helferclient. Wird vom Host gesetzt und an Helfer gesynct.
         self.slip_second_page_default: bool = False
+        # Einstellungen-Dialog: am Host gewählter Leihschein-Drucker. None =
+        # PRINTER_NAME aus der .env bzw. Systemstandard. Reiner In-Memory-State.
+        self.printer_name_override: str | None = None
         # Klassenweite Bücher-Reihenfolge für den Scanner (per Drag & Drop am Host
         # konfiguriert). Gilt für die ganze Klasse und bleibt beim Schülerwechsel
         # bestehen; erst ein Klassen-/Schuljahreswechsel setzt sie zurück.
@@ -213,6 +216,7 @@ class AppState:
             "worker_pool": worker_stats,
             "force_tailscale_ip": self.force_tailscale_ip,
             "slip_second_page_default": self.slip_second_page_default,
+            "printer_name": self.printer_name_override,
             "book_order": self.book_order,
         }
 

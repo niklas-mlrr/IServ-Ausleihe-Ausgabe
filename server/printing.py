@@ -124,6 +124,44 @@ async def _print_sumatra(
     return {"ok": True, "backend": "sumatra", "detail": "an Drucker gesendet"}
 
 
+async def list_printers(backend: str = "auto") -> dict:
+    """Dem Gerät bekannte Drucker auflisten (für die Druckerauswahl am Host).
+
+    Rein lesend: Windows via `Get-Printer` (PowerShell), lp/CUPS via `lpstat`.
+    Im `file`-Backend (headless) gibt es keinen Druckdienst — leere Liste.
+    Gibt `{printers, default, backend}` zurück; Fehler werden geschluckt
+    (dann eben keine Auswahl, der Druck läuft weiter über den Default).
+    """
+    resolved = resolve_backend(backend)
+    printers: list[str] = []
+    default: str | None = None
+    try:
+        if resolved in ("sumatra", "win-default"):
+            rc, out = await _run([
+                "powershell", "-NoProfile", "-NonInteractive", "-Command",
+                "Get-Printer | Select-Object -ExpandProperty Name",
+            ])
+            if rc == 0:
+                printers = [ln.strip() for ln in out.splitlines() if ln.strip()]
+            rc, out = await _run([
+                "powershell", "-NoProfile", "-NonInteractive", "-Command",
+                "(Get-CimInstance Win32_Printer -Filter 'Default=TRUE').Name",
+            ])
+            if rc == 0 and out.strip():
+                default = out.strip().splitlines()[0].strip()
+        elif resolved == "lp" and shutil.which("lpstat"):
+            rc, out = await _run(["lpstat", "-e"])
+            if rc == 0:
+                printers = [ln.strip() for ln in out.splitlines() if ln.strip()]
+            rc, out = await _run(["lpstat", "-d"])
+            # Format: "system default destination: <name>" (oder "no system default …")
+            if rc == 0 and ":" in out:
+                default = out.split(":", 1)[1].strip() or None
+    except Exception:
+        log.warning("Druckerliste konnte nicht ermittelt werden", exc_info=True)
+    return {"printers": printers, "default": default, "backend": resolved}
+
+
 def _print_win_default(tmp_pdf: Path) -> dict:
     # os.startfile gibt es nur unter Windows; druckt über das verknüpfte
     # PDF-Programm (öffnet ggf. kurz dessen Fenster).

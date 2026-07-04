@@ -265,7 +265,7 @@ async def print_loan_slip_for(
     result = await print_pdf(
         pdf,
         backend=cfg.print_backend,
-        printer_name=cfg.printer_name,
+        printer_name=state.printer_name_override or cfg.printer_name,
         sumatra_path=cfg.sumatra_path,
         output_dir=cfg.print_output_dir,
         label=f"leihschein_{student_id}",
