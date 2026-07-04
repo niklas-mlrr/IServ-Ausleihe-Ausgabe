@@ -156,6 +156,7 @@ async def select_schoolyear(body: dict, session_id: str | None = Cookie(default=
     state.active_form = None
     state.queue = []
     state.reset_class_book_order()
+    state.reset_booklist_orders()  # andere Booklists -> vorkonfigurierte Reihenfolgen weg
     await hub.broadcast_host(state.state_snapshot())
     return {"ok": True, "selected": schoolyear}
 
@@ -266,16 +267,25 @@ def normalize_book_order(catalog_isbns: list[str], requested: list) -> list[str]
 
 
 async def _ensure_class_catalog(state) -> None:
-    """Katalog (Union aller in der Klasse bestellten Bücher) für die aktive Klasse
-    bauen und cachen, falls noch nicht für diese Klasse geschehen. Initialisiert
-    `book_order` beim ersten Bauen mit der Default-Reihenfolge (subject/title)."""
+    """Katalog (ausleihbare Jahrgangs-Bücher) für die aktive Klasse bauen und
+    cachen, falls noch nicht für diese Klasse geschehen. `book_order` wird beim
+    ersten Bauen aus der jahrgangsweit gesetzten Reihenfolge übernommen (falls im
+    Einstellungen-Dialog vorkonfiguriert), sonst mit der Default-Reihenfolge
+    (subject/title) initialisiert."""
     if state.class_catalog_form == state.active_form and state.class_catalog:
         return
-    catalog = await state.iserv.get_class_book_catalog(state.active_form, state.selected_schoolyear)
+    grade, catalog = await state.iserv.get_class_book_catalog(
+        state.active_form, state.selected_schoolyear
+    )
     state.class_catalog = catalog
     state.class_catalog_form = state.active_form
-    if not state.book_order:
-        state.book_order = [b["isbn"] for b in catalog]
+    state.class_catalog_grade = grade
+    catalog_isbns = [b["isbn"] for b in catalog]
+    stored = state.book_orders_by_grade.get(grade) if grade is not None else None
+    if stored:
+        state.book_order = normalize_book_order(catalog_isbns, stored)
+    elif not state.book_order:
+        state.book_order = catalog_isbns
 
 
 @router.get("/api/class-book-order")
@@ -323,8 +333,79 @@ async def set_class_book_order(body: dict, session_id: str | None = Cookie(defau
     catalog_isbns = [b["isbn"] for b in state.class_catalog]
     state.book_order = normalize_book_order(catalog_isbns, requested)
     order = state.book_order
+    # Jahrgangsweite Reihenfolge konsistent halten, damit die Vorkonfiguration im
+    # Einstellungen-Dialog dieselbe Datenbasis nutzt.
+    if state.class_catalog_grade is not None:
+        state.book_orders_by_grade[state.class_catalog_grade] = list(order)
     await get_hub().broadcast_settings()
     return {"ok": True, "order": order}
+
+
+@router.get("/api/booklists")
+async def list_booklists(session_id: str | None = Cookie(default=None)) -> dict:
+    """Alle Bücherlisten (Jahrgänge) des gewählten Schuljahrs — für die Reiter im
+    Einstellungen-Dialog. Read-only (ein GET gegen IServ), kein DB-Write."""
+    _require_host(session_id)
+    state = get_state()
+    try:
+        booklists = await state.iserv.get_booklists_overview(state.selected_schoolyear)
+    except Exception as e:
+        log.exception("Bücherlisten konnten nicht geladen werden")
+        raise HTTPException(502, f"IServ-Fehler: {e}")
+    return {"schoolyear": state.selected_schoolyear, "booklists": booklists}
+
+
+@router.get("/api/booklist-order")
+async def get_booklist_order(
+    grade: int, session_id: str | None = Cookie(default=None)
+) -> dict:
+    """Ausleihbare Bücher eines Jahrgangs + aktuelle (ggf. vorkonfigurierte)
+    Reihenfolge. Read-only, kein DB-Write."""
+    _require_host(session_id)
+    state = get_state()
+    try:
+        catalog = await state.iserv.get_booklist_catalog_by_grade(
+            grade, state.selected_schoolyear
+        )
+    except Exception as e:
+        log.exception("Jahrgangs-Bücherliste konnte nicht geladen werden")
+        raise HTTPException(502, f"IServ-Fehler: {e}")
+    catalog_isbns = [b["isbn"] for b in catalog]
+    stored = state.book_orders_by_grade.get(grade)
+    order = normalize_book_order(catalog_isbns, stored) if stored else catalog_isbns
+    return {"grade": grade, "catalog": catalog, "order": order}
+
+
+@router.post("/api/booklist-order")
+async def set_booklist_order(
+    body: dict, session_id: str | None = Cookie(default=None)
+) -> dict:
+    """Jahrgangsweite Bücher-Reihenfolge (aus dem Einstellungen-Dialog) speichern.
+
+    Reiner In-Memory-State (kein DB-/IServ-Write). Gehört die aktuell geladene
+    Klasse zu diesem Jahrgang, wird die aktive Scanner-Reihenfolge live nachgezogen.
+    """
+    _require_host(session_id)
+    state = get_state()
+    grade = body.get("grade")
+    requested = body.get("order")
+    if not isinstance(grade, int) or not isinstance(requested, list):
+        raise HTTPException(400, "grade (int) und order (Liste) erforderlich")
+    try:
+        catalog = await state.iserv.get_booklist_catalog_by_grade(
+            grade, state.selected_schoolyear
+        )
+    except Exception as e:
+        log.exception("Jahrgangs-Bücherliste konnte nicht geladen werden")
+        raise HTTPException(502, f"IServ-Fehler: {e}")
+    catalog_isbns = [b["isbn"] for b in catalog]
+    order = normalize_book_order(catalog_isbns, requested)
+    state.book_orders_by_grade[grade] = order
+    # Aktive Klasse desselben Jahrgangs? -> Scanner-Reihenfolge live nachziehen.
+    if state.class_catalog_grade == grade:
+        state.book_order = list(order)
+        await get_hub().broadcast_settings()
+    return {"ok": True, "grade": grade, "order": order}
 
 
 @router.post("/api/add-student")

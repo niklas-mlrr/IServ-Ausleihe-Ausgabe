@@ -55,11 +55,16 @@ class _FakeClient:
         return self._forms  # nur der /forms-Endpunkt wird direkt genutzt
 
 
-def _catalog(forms, booklists, full, form="9a", sy="2025/2026"):
+def _catalog_with_grade(forms, booklists, full, form="9a", sy="2025/2026"):
     c = IsServClient("d", "u", "p")
     c._client = _FakeClient(forms, booklists, full)  # _get_client()
     c._series_map = {}                               # series_data reicht → kein Fetch
-    return asyncio.run(c.get_class_book_catalog(form, sy))
+    return asyncio.run(c.get_class_book_catalog(form, sy))  # (grade, catalog)
+
+
+def _catalog(forms, booklists, full, form="9a", sy="2025/2026"):
+    # get_class_book_catalog liefert (grade, catalog) — hier nur der Katalog.
+    return _catalog_with_grade(forms, booklists, full, form, sy)[1]
 
 
 def test_catalog_from_booklist_filters_borrowable_dedupes_sorts():
@@ -102,6 +107,24 @@ def test_catalog_empty_when_form_unknown():
     assert cat == []
 
 
+def test_catalog_returns_grade_alongside_books():
+    # (grade, catalog): der Jahrgang der Klasse wird zum Seeden der jahrgangs-
+    # weiten Reihenfolge mitgeliefert.
+    grade, cat = _catalog_with_grade(
+        [{"name": "9a", "grade": 9}], [{"grade": 9, "id": 100}],
+        {100: _booklist([_item("A", "Mathe", "Mathematik")])},
+    )
+    assert grade == 9 and [b["isbn"] for b in cat] == ["A"]
+
+
+def test_catalog_grade_none_when_form_unknown():
+    grade, cat = _catalog_with_grade(
+        [{"name": "8a", "grade": 8}], [{"grade": 8, "id": 8}],
+        {8: _booklist([_item("A", "X", "Y")])}, form="9z",
+    )
+    assert grade is None and cat == []
+
+
 # ---------------------------------------------------------------------------
 # normalize_book_order — Beschränkung auf Katalog + Anhängen fehlender
 # ---------------------------------------------------------------------------
@@ -130,8 +153,26 @@ def test_reset_clears_order_and_catalog():
     st.book_order = ["A", "B"]
     st.class_catalog = [{"isbn": "A"}]
     st.class_catalog_form = "9a"
+    st.class_catalog_grade = 9
     st.reset_class_book_order()
     assert st.book_order == [] and st.class_catalog == [] and st.class_catalog_form is None
+    assert st.class_catalog_grade is None
+
+
+def test_reset_class_order_keeps_booklist_orders():
+    # Klassen-/Schülerwechsel setzt die aktive Reihenfolge zurück, aber die
+    # jahrgangsweiten (schuljahrweit gültigen) Reihenfolgen bleiben bestehen.
+    st = AppState()
+    st.book_orders_by_grade = {9: ["A", "B"]}
+    st.reset_class_book_order()
+    assert st.book_orders_by_grade == {9: ["A", "B"]}
+
+
+def test_reset_booklist_orders_clears_all_grades():
+    st = AppState()
+    st.book_orders_by_grade = {9: ["A"], 10: ["B"]}
+    st.reset_booklist_orders()
+    assert st.book_orders_by_grade == {}
 
 
 def test_snapshot_includes_book_order():

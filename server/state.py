@@ -157,13 +157,26 @@ class AppState:
         self.book_order: list[str] = []                 # konfigurierte ISBN-Sequenz
         self.class_catalog: list[dict] = []             # [{isbn,title,subject}] Union der Klasse
         self.class_catalog_form: str | None = None      # Cache-Key (für welche Klasse)
+        self.class_catalog_grade: int | None = None     # Jahrgang der aktiven Klasse
+        # Jahrgangsweite Bücher-Reihenfolgen (im Einstellungen-Dialog vorab pro
+        # Bücherliste gesetzt). grade -> ISBN-Sequenz. Speist beim Klassenladen
+        # `book_order` (Jahrgang der Klasse). Reiner In-Memory-State, kein DB-/
+        # IServ-Write. Wird erst beim Schuljahreswechsel geleert.
+        self.book_orders_by_grade: dict[int, list[str]] = {}
 
     def reset_class_book_order(self) -> None:
-        """Klassenweite Bücher-Reihenfolge + Katalog-Cache leeren (Klassen-/
-        Schuljahreswechsel, Queue leeren)."""
+        """Aktive Klassen-Reihenfolge + Katalog-Cache leeren (Klassen-/
+        Schuljahreswechsel, Queue leeren). Die jahrgangsweiten Reihenfolgen
+        (`book_orders_by_grade`) bleiben bestehen — sie gelten schuljahrweit."""
         self.book_order = []
         self.class_catalog = []
         self.class_catalog_form = None
+        self.class_catalog_grade = None
+
+    def reset_booklist_orders(self) -> None:
+        """Alle jahrgangsweiten Bücher-Reihenfolgen leeren (Schuljahreswechsel:
+        andere Booklists, ISBNs passen nicht mehr)."""
+        self.book_orders_by_grade = {}
 
     # --- Host-Login-Sessions (gleitendes TTL) ---
     def add_host_session(self, sid: str) -> None:

@@ -367,6 +367,12 @@
     /* Drucker-Auswahl: Label + Select untereinander, volle Breite */
     #settings-dialog .settings-field { display: flex; flex-direction: column; gap: 6px; cursor: default; }
     #settings-dialog .settings-field select { width: 100%; }
+    /* Bücherlisten-Bereich: breiterer Dialog, Liste mit eigenem Scroll */
+    #settings-dialog .modal-box { max-width: 560px; max-height: 90vh; overflow-y: auto; }
+    #settings-dialog .settings-booklists { display: flex; flex-direction: column; gap: 6px; }
+    #settings-dialog .settings-bl-label { font-weight: 600; }
+    #settings-dialog #bl-tabs { flex-wrap: wrap; border-bottom: none; margin-bottom: 6px; }
+    #settings-dialog #bl-list { max-height: 46vh; overflow-y: auto; margin-top: 0; }
   </style>
 </head>
 <body>
@@ -581,6 +587,13 @@
       <span class="track"></span>
       Schüler-Leihschein
     </label>
+    <div class="settings-row settings-booklists" id="settings-booklists">
+      <span class="settings-bl-label">Bücherlisten ordnen</span>
+      <p class="hint">Reihenfolge der ausleihbaren Bücher je Jahrgang für die Scanner-Anzeige.
+        Reiter wählen, per Drag &amp; Drop sortieren — mit „Speichern" übernehmen.</p>
+      <div class="tabs" id="bl-tabs"></div>
+      <div id="bl-list" class="book-order-list"></div>
+    </div>
     <div class="modal-actions">
       <button class="primary" id="settings-dialog-save">Speichern</button>
       <button class="ghost" id="settings-dialog-cancel">Abbrechen</button>
@@ -1507,6 +1520,8 @@
       printerSel.innerHTML = '<option value="">Standard (Liste nicht verfügbar)</option>';
       printerSel.disabled = false;
     });
+    // Bücherlisten des Schuljahrs laden und als Reiter aufbauen (rein lesend).
+    loadBooklistTabs();
     const onKey = (e) => {
       if (e.key === 'Escape') { e.preventDefault(); finish(false); }
       else trapFocus(box, e);
@@ -1519,6 +1534,7 @@
           pushSlipDefault(slipCb.checked);
         }
         if (!printerSel.disabled && printerSel.value !== prev.printer) setPrinter(printerSel.value);
+        saveChangedBooklistOrders();
       } else {
         tsCb.checked = prev.ts;
         slipCb.checked = prev.slip;
@@ -1533,6 +1549,146 @@
     modal.addEventListener('keydown', onKey);
     modal.classList.add('show');
     saveBtn.focus();
+  }
+
+  // ---- Bücherlisten ordnen (Einstellungen-Dialog, Reiter je Jahrgang) ----
+  // Analog zur Klassen-Bücher-Reihenfolge, aber jahrgangsweit und vorab: pro
+  // Booklist ein Reiter, Katalog wird beim Anklicken lazy geladen. Änderungen
+  // leben lokal bis „Speichern" (dann POST je geänderten Jahrgang).
+  let blData = {};        // grade -> { catalog:{isbn:{title,subject}}, order:[isbn], saved:[isbn], loaded:bool }
+  let blActiveGrade = null;
+  let blDragIndex = null, blDropIndex = null, blDropPos = null;
+
+  function settingsOpen() { return document.getElementById('settings-dialog').classList.contains('show'); }
+
+  async function loadBooklistTabs() {
+    const tabs = document.getElementById('bl-tabs');
+    const list = document.getElementById('bl-list');
+    blData = {}; blActiveGrade = null;
+    tabs.innerHTML = '';
+    list.innerHTML = '<div class="hint">Lade Bücherlisten…</div>';
+    let info = null;
+    try { const r = await fetch('/api/booklists'); if (r.ok) info = await r.json(); } catch (_) {}
+    if (!settingsOpen()) return;
+    const lists = (info && info.booklists) || [];
+    if (!lists.length) {
+      list.innerHTML = '<div class="hint">Keine Bücherlisten für das gewählte Schuljahr.</div>';
+      return;
+    }
+    lists.forEach((bl, i) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'tab' + (i === 0 ? ' active' : '');
+      btn.textContent = bl.title || ('Jahrgang ' + bl.grade);
+      btn.dataset.grade = bl.grade;
+      btn.onclick = () => selectBooklistTab(bl.grade);
+      tabs.appendChild(btn);
+    });
+    selectBooklistTab(lists[0].grade);
+  }
+
+  async function selectBooklistTab(grade) {
+    blActiveGrade = grade;
+    document.querySelectorAll('#bl-tabs .tab').forEach(t =>
+      t.classList.toggle('active', Number(t.dataset.grade) === grade));
+    const list = document.getElementById('bl-list');
+    if (!blData[grade] || !blData[grade].loaded) {
+      list.innerHTML = '<div class="hint">Lade…</div>';
+      let d = null;
+      try {
+        const r = await fetch('/api/booklist-order?grade=' + encodeURIComponent(grade));
+        if (r.ok) d = await r.json();
+      } catch (_) {}
+      if (blActiveGrade !== grade || !settingsOpen()) return;  // Nutzer hat weitergeklickt
+      const cat = {};
+      ((d && d.catalog) || []).forEach(b => { cat[b.isbn] = b; });
+      const order = ((d && d.order) || []).filter(isbn => cat[isbn]);
+      blData[grade] = { catalog: cat, order, saved: order.slice(), loaded: true };
+    }
+    renderBooklistList();
+  }
+
+  function renderBooklistList() {
+    const list = document.getElementById('bl-list');
+    const data = blData[blActiveGrade];
+    if (!data) { list.innerHTML = ''; return; }
+    if (!data.order.length) {
+      list.innerHTML = '<div class="hint">Keine ausleihbaren Bücher in dieser Liste.</div>';
+      return;
+    }
+    list.innerHTML = data.order.map((isbn, i) => {
+      const b = data.catalog[isbn] || { title: isbn, subject: '' };
+      return `<div class="bo-row" draggable="true" data-idx="${i}">`
+        + `<span class="bo-grip">⠿</span>`
+        + `<span class="bo-num">${i + 1}</span>`
+        + `<span class="bo-fach">${escapeHtml(b.subject || '')}</span>`
+        + `<span class="bo-title">${escapeHtml(b.title || isbn)}</span></div>`;
+    }).join('');
+    list.querySelectorAll('.bo-row').forEach(row => {
+      row.addEventListener('dragstart', onBlDragStart);
+      row.addEventListener('dragover', onBlDragOver);
+      row.addEventListener('drop', onBlDrop);
+      row.addEventListener('dragend', onBlDragEnd);
+    });
+  }
+
+  function clearBlDropMarks() {
+    document.querySelectorAll('#bl-list .bo-row').forEach(r => r.classList.remove('drop-before', 'drop-after'));
+  }
+  function onBlDragStart(e) {
+    blDragIndex = Number(e.currentTarget.dataset.idx);
+    e.currentTarget.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+  }
+  function onBlDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const row = e.currentTarget;
+    const rect = row.getBoundingClientRect();
+    const pos = (e.clientY < rect.top + rect.height / 2) ? 'before' : 'after';
+    blDropIndex = Number(row.dataset.idx);
+    blDropPos = pos;
+    clearBlDropMarks();
+    row.classList.add(pos === 'before' ? 'drop-before' : 'drop-after');
+  }
+  function onBlDrop(e) {
+    e.preventDefault();
+    const data = blData[blActiveGrade];
+    if (!data || blDragIndex === null || blDropIndex === null) return;
+    let target = blDropIndex + (blDropPos === 'after' ? 1 : 0);
+    const from = blDragIndex;
+    if (from < target) target--;
+    if (target !== from) {
+      const [moved] = data.order.splice(from, 1);
+      data.order.splice(target, 0, moved);
+    }
+    blDragIndex = blDropIndex = blDropPos = null;
+    renderBooklistList();
+  }
+  function onBlDragEnd() {
+    blDragIndex = blDropIndex = blDropPos = null;
+    clearBlDropMarks();
+    document.querySelectorAll('#bl-list .bo-row').forEach(r => r.classList.remove('dragging'));
+  }
+
+  // Beim „Speichern" nur tatsächlich geänderte Jahrgänge an den Server schicken.
+  function saveChangedBooklistOrders() {
+    for (const g of Object.keys(blData)) {
+      const d = blData[g];
+      if (!d.loaded) continue;
+      if (JSON.stringify(d.order) !== JSON.stringify(d.saved)) {
+        d.saved = d.order.slice();
+        saveBooklistOrder(Number(g), d.order);
+      }
+    }
+  }
+  async function saveBooklistOrder(grade, order) {
+    try {
+      await fetch('/api/booklist-order', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ grade, order }),
+      });
+    } catch (_) {}
   }
 
   // ---- Tastatur-Shortcuts für den Operator (nur wenn eingeloggt) ----

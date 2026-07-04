@@ -307,30 +307,58 @@ class IsServClient:
             }
         return await asyncio.to_thread(_sync)
 
+    def _extract_borrowable_catalog(self, full: dict, series_map: dict) -> list[dict]:
+        """Ausleihbare Titel aus einer voll aufgelösten Booklist ziehen.
+
+        Aus `sections[]->options[]->items[]` werden **alle ausleihbaren** Items
+        (`borrowable=True`) genommen (keine Kauf-/Arbeitshefte), nach ISBN
+        dedupliziert (Items wiederholen sich über Sections/Options) und nach
+        `(subject, title)` sortiert. `series_data` der Booklist ist verlässlich
+        (Titel/Fach/ISBN direkt). Liefert `[{isbn, title, subject}]`.
+        """
+        seen: set[str] = set()
+        catalog: list[dict] = []
+        for sec in full.get("sections", []):
+            for opt in sec.get("options", []):
+                for item in opt.get("items", []):
+                    if not item.get("borrowable"):
+                        continue  # Kauf-/Arbeitshefte raus
+                    sd = item.get("series_data") or {}
+                    isbn = sd.get("isbn") or item.get("series") or ""
+                    if not isbn or isbn in seen:
+                        continue
+                    seen.add(isbn)
+                    s = series_map.get(isbn)
+                    title = sd.get("title") or (s.title if s else "") or isbn
+                    subject = ", ".join(
+                        sd.get("subjectsFlat")
+                        or (s.subjects_flat or s.subjects if s else [])
+                        or []
+                    )
+                    catalog.append({"isbn": isbn, "title": title, "subject": subject})
+        catalog.sort(key=lambda b: (b["subject"], b["title"]))
+        return catalog
+
     async def get_class_book_catalog(
         self, form_name: str, schoolyear: str | None = None
-    ) -> list[dict]:
-        """Ausleihbare Bücher des Jahrgangs einer Klasse (read-only).
+    ) -> tuple[int | None, list[dict]]:
+        """Jahrgang + ausleihbare Bücher der Klasse (read-only).
 
         Grundlage für die klassenweite Bücher-Reihenfolge im Scanner. Quelle ist die
         **Jahrgangs-Bücherliste** (`GET /schoolyears/:sy/booklists/:id`), NICHT die
         Vereinigung der Einzelanmeldungen — so erscheinen alle für den Jahrgang
         ausleihbaren Titel, unabhängig davon, welche Schüler gerade angemeldet sind.
 
-        Klassenstufe → Booklist über `form["grade"]` == `booklist["grade"]`. Aus der
-        Liste werden **alle ausleihbaren** Items (`borrowable=True`) genommen (keine
-        Kauf-/Arbeitshefte), nach ISBN dedupliziert (Items wiederholen sich über
-        Sections/Options) und nach `(subject, title)` sortiert. `series_data` der
-        Booklist ist verlässlich (Titel/Fach/ISBN direkt).
-
+        Klassenstufe → Booklist über `form["grade"]` == `booklist["grade"]`.
         **Mehrjahresbände sind bewusst enthalten** (2026-07-02d): die komplette
         ausleihbare Jahrgangsliste wird gezeigt, auch wenn ein Band die Klassenstufe
         nur als oberen Jahrgang führt.
 
-        Liefert `[{isbn, title, subject}]`; leer, wenn die Klasse/Jahrgang keine
+        Liefert `(grade, [{isbn, title, subject}])`. `grade` ist `None`, wenn die
+        Klasse nicht gefunden wird; der Katalog ist leer, wenn der Jahrgang keine
         Booklist hat. Nur GETs.
         """
-        def _sync() -> list[dict]:
+        def _sync() -> tuple[int | None, list[dict]]:
             client = self._get_client()
             series_map = self._get_series_map()
 
@@ -340,38 +368,63 @@ class IsServClient:
                 (f.get("grade") for f in forms if f["name"] == form_name), None
             )
             if form_grade is None:
-                return []
+                return None, []
 
             booklists = client.schoolyears.get_booklists(sy_id)
             bl = next((b for b in booklists if b.get("grade") == form_grade), None)
             if not bl:
                 log.warning("Keine Booklist für Jahrgang %s (Klasse %s)", form_grade, form_name)
+                return form_grade, []
+            full = client.schoolyears.get_booklist(sy_id, bl["id"])
+            return form_grade, self._extract_borrowable_catalog(full, series_map)
+        return await asyncio.to_thread(_sync)
+
+    async def get_booklists_overview(
+        self, schoolyear: str | None = None
+    ) -> list[dict]:
+        """Alle Bücherlisten (Jahrgänge) des Schuljahrs — read-only.
+
+        Liefert `[{id, grade, title}]` nach Jahrgang sortiert. Grundlage für die
+        Jahrgangs-Auswahl (Reiter) im Einstellungen-Dialog. Nur ein GET.
+        """
+        def _sync() -> list[dict]:
+            client = self._get_client()
+            sy_id = self._resolve_sy(client, schoolyear)
+            booklists = client.schoolyears.get_booklists(sy_id)
+            out: list[dict] = []
+            for b in booklists:
+                grade = b.get("grade")
+                if not isinstance(grade, int):
+                    continue
+                out.append({
+                    "id": b.get("id"),
+                    "grade": grade,
+                    "title": b.get("title") or f"Jahrgang {grade}",
+                })
+            out.sort(key=lambda b: b["grade"])
+            return out
+        return await asyncio.to_thread(_sync)
+
+    async def get_booklist_catalog_by_grade(
+        self, grade: int, schoolyear: str | None = None
+    ) -> list[dict]:
+        """Ausleihbare Bücher der Jahrgangs-Bücherliste — read-only.
+
+        Wie `get_class_book_catalog`, aber direkt über den Jahrgang (ohne geladene
+        Klasse). Liefert `[{isbn, title, subject}]`; leer, wenn der Jahrgang keine
+        Booklist hat. Nur GETs.
+        """
+        def _sync() -> list[dict]:
+            client = self._get_client()
+            series_map = self._get_series_map()
+            sy_id = self._resolve_sy(client, schoolyear)
+            booklists = client.schoolyears.get_booklists(sy_id)
+            bl = next((b for b in booklists if b.get("grade") == grade), None)
+            if not bl:
+                log.warning("Keine Booklist für Jahrgang %s", grade)
                 return []
             full = client.schoolyears.get_booklist(sy_id, bl["id"])
-
-            seen: set[str] = set()
-            catalog: list[dict] = []
-            for sec in full.get("sections", []):
-                for opt in sec.get("options", []):
-                    for item in opt.get("items", []):
-                        if not item.get("borrowable"):
-                            continue  # Kauf-/Arbeitshefte raus
-                        sd = item.get("series_data") or {}
-                        isbn = sd.get("isbn") or item.get("series") or ""
-                        if not isbn or isbn in seen:
-                            continue
-                        seen.add(isbn)
-                        s = series_map.get(isbn)
-                        title = sd.get("title") or (s.title if s else "") or isbn
-                        subject = ", ".join(
-                            sd.get("subjectsFlat")
-                            or (s.subjects_flat or s.subjects if s else [])
-                            or []
-                        )
-                        catalog.append({"isbn": isbn, "title": title, "subject": subject})
-
-            catalog.sort(key=lambda b: (b["subject"], b["title"]))
-            return catalog
+            return self._extract_borrowable_catalog(full, series_map)
         return await asyncio.to_thread(_sync)
 
     async def get_book_by_code(self, code: str) -> dict | None:

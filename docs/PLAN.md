@@ -235,6 +235,31 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
       (`web/student.html`, Modus B) sortieren nach `[erledigt, Klassen-Reihenfolge,
       Original]`. Jeder Schüler sieht weiterhin nur seine eigenen Bücher.
       Tests: `tests/test_class_book_order.py`.
+- [x] **Host-Einstellungen-Dialog** (2026-07-04) — die zwei Inline-Umschalter der
+      Status-Bar (Tailscale-IP, Schüler-Leihschein) in einen Modal-Dialog
+      („Einstellungen"-Button, Stil wie Druck-Dialog) ausgelagert. Speichern
+      übernimmt nur Änderungen, Abbrechen/Esc verwirft. Enthält zusätzlich:
+      - **Drucker-Auswahl:** Dropdown der dem Gerät bekannten Drucker.
+        `list_printers()` in `server/printing.py` (rein lesend: Windows
+        `Get-Printer`/`Win32_Printer Default=TRUE`, macOS/Linux `lpstat -e/-d`).
+        `GET /api/printers`, `POST /api/printer` → In-Memory
+        `state.printer_name_override` (None = `PRINTER_NAME` aus `.env` bzw.
+        Systemstandard). `print_loan_slip_for` nutzt Override vor `cfg.printer_name`
+        (Host + Helfer). „Kein Drucker gefunden", wenn nichts verfügbar.
+      - **Bücherlisten ordnen (jahrgangsweit):** verallgemeinert die
+        klassenweite Reihenfolge auf **alle Jahrgänge** des Schuljahrs, vorab
+        konfigurierbar — ein **Reiter je Booklist** (Jahrgang), Katalog lazy
+        geladen, per Drag & Drop sortierbar. `state.book_orders_by_grade`
+        (dict grade→ISBN-Liste, In-Memory; Reset nur bei Schuljahreswechsel via
+        `reset_booklist_orders`). `GET /api/booklists` (`get_booklists_overview`
+        → `[{id,grade,title}]`), `GET|POST /api/booklist-order?grade=`
+        (`get_booklist_catalog_by_grade`). `get_class_book_catalog` liefert jetzt
+        `(grade, catalog)`; `_ensure_class_catalog` seedet `book_order` aus der
+        jahrgangsweiten Reihenfolge, `POST /api/class-book-order` schreibt in
+        dieselbe Map — Klassen- und Jahrgangs-Ordnung teilen sich `grade` als
+        Key. Speichern für den Jahrgang der geladenen Klasse zieht `book_order`
+        live nach (`broadcast_settings`). Alles nur GET/In-Memory, kein DB-Write.
+        Tests: `tests/test_class_book_order.py` erweitert (Suite 79 grün).
 - [ ] End-to-End-Test mit ausgemusterten Büchern **inkl. Buchung** (wartet auf Buchungstest-Freigabe Niklas + Lukas)
 
 ### Phase 3 — Generalprobe Teil 1 (vor Ferienbeginn, Anfang Juli)

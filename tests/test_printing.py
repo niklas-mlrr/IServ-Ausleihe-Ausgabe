@@ -51,6 +51,7 @@ def test_print_loan_slip_for_reads_and_prints(tmp_path, monkeypatch):
 
     class FakeState:
         iserv = FakeIServ()
+        printer_name_override = None
 
     cfg = Config(
         iserv_domain="example.org",
