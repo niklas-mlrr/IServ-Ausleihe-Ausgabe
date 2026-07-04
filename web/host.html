@@ -1484,9 +1484,17 @@
       if (!modal.classList.contains('show')) return;  // Dialog inzwischen zu
       const names = (info && info.printers) || [];
       const current = (info && info.current) || prev.printer;
+      const envDefault = (info && info.env_default) || null;
+      const sysDefault = (info && info.default) || null;
+      // Gar nichts gefunden (keine Geräteliste, kein System-/.env-Standard,
+      // kein gesetzter Drucker): Auswahl deaktiviert lassen.
+      if (!names.length && !envDefault && !sysDefault && !current) {
+        printerSel.innerHTML = '<option value="">Kein Drucker gefunden</option>';
+        return;
+      }
       let defLabel = 'Standard';
-      if (info && info.env_default) defLabel += ` (${info.env_default})`;
-      else if (info && info.default) defLabel += ` (${info.default})`;
+      if (envDefault) defLabel += ` (${envDefault})`;
+      else if (sysDefault) defLabel += ` (${sysDefault})`;
       printerSel.innerHTML = '';
       printerSel.add(new Option(defLabel, ''));
       for (const n of names) printerSel.add(new Option(n, n));
