@@ -144,12 +144,16 @@ async def _test_powershell(pdf_path: Path, printer_name: str | None) -> bool:
     """PowerShell-Fallback: Start-Process -Verb PrintTo (benötigt PDF-Standardprogramm)."""
     print("  Fallback: PowerShell Start-Process -Verb PrintTo")
     if printer_name:
+        # PowerShell single-quoted string: einfache Anführungszeichen werden
+        # durch Verdopplung escaped — schließt Command-Injection über den
+        # Druckernamen (aus sys.argv[1]) aus.
+        safe_printer = printer_name.replace("'", "''")
         ps = (
-            f'Start-Process -FilePath "{pdf_path}" '
-            f'-Verb PrintTo -ArgumentList "{printer_name}" -Wait'
+            f"Start-Process -FilePath '{pdf_path}' "
+            f"-Verb PrintTo -ArgumentList '{safe_printer}' -Wait"
         )
     else:
-        ps = f'Start-Process -FilePath "{pdf_path}" -Verb Print -Wait'
+        ps = f"Start-Process -FilePath '{pdf_path}' -Verb Print -Wait"
     proc = await asyncio.create_subprocess_exec(
         "powershell", "-NoProfile", "-Command", ps,
         stdout=asyncio.subprocess.PIPE,

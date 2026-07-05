@@ -626,7 +626,7 @@
         cameras.find(c => /back dual wide/i.test(c.label)) ||
         cameras.find(c => /back/i.test(c.label)) ||
         cameras[0];
-      cameraSelect.innerHTML = cameras.map(c => `<option value="${c.id}" ${c === preferred ? 'selected' : ''}>${c.label}</option>`).join('');
+      cameraSelect.innerHTML = cameras.map(c => `<option value="${escapeHtml(c.id)}" ${c === preferred ? 'selected' : ''}>${escapeHtml(c.label)}</option>`).join('');
       currentCameraId = preferred?.id;
       initScanner(currentCameraId);
     }).catch(err => {

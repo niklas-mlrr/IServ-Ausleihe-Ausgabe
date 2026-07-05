@@ -5,6 +5,7 @@ import logging
 
 from fastapi import WebSocket
 
+from .book_order import get_book_order_for_form
 from .state import AppState, HelperSession, get_state
 
 log = logging.getLogger(__name__)
@@ -44,20 +45,28 @@ class Hub:
         """Helfer-relevante Settings an alle verbundenen Scanner schicken.
 
         Der Host-Default „Schüler-Leihschein" (2. Seite) für den Druck-Dialog und
-        die klassenweite Bücher-Reihenfolge (`book_order`) für die Scanner-Liste.
-        """
+        die Bücher-Reihenfolge für die Scanner-Liste. Die Reihenfolge wird **pro
+        Helfer** anhand des Jahrgangs seines aktuell zugewiesenen Schülers
+        ermittelt (`get_book_order_for_form`) — nicht die eine globale
+        `state.book_order` für alle. Nötig für klassenübergreifende
+        Warteschlangen (einzeln hinzugefügte Schüler, „Test Config") mit
+        Schülern aus verschiedenen Jahrgängen; Helfer ohne zugewiesenen Schüler
+        bekommen den Fallback `state.book_order`."""
         s = state or get_state()
-        msg = {
-            "type": "settings",
-            "slip_second_page": s.slip_second_page_default,
-            "book_order": s.book_order,
-        }
         for helper in list(s.helper_sessions.values()):
-            if helper.ws is not None:
-                try:
-                    await helper.ws.send_json(msg)
-                except Exception:
-                    helper.ws = None
+            if helper.ws is None:
+                continue
+            student = s.find_student(helper.student_id) if helper.student_id is not None else None
+            book_order = await get_book_order_for_form(s, student.form) if student else s.book_order
+            msg = {
+                "type": "settings",
+                "slip_second_page": s.slip_second_page_default,
+                "book_order": book_order,
+            }
+            try:
+                await helper.ws.send_json(msg)
+            except Exception:
+                helper.ws = None
 
     async def send_scanner(self, token: str, msg: dict, state: AppState | None = None) -> None:
         s = state or get_state()

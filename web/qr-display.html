@@ -99,7 +99,9 @@
           document.getElementById('reg-code').textContent = msg.code;
           show('register');
         } else if (msg.type === 'qr') {
-          document.getElementById('qr-img').src = msg.qr;
+          const _qrImg = document.getElementById('qr-img');
+          if (typeof msg.qr === 'string' && msg.qr.startsWith('data:image/')) _qrImg.src = msg.qr;
+          else _qrImg.src = '';
           document.getElementById('qr-url').textContent = msg.url || '';
           show('qr');
         } else if (msg.type === 'closed') {

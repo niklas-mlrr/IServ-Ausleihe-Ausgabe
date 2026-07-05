@@ -4,15 +4,17 @@ import asyncio
 import contextlib
 import json
 import logging
+import secrets
 import uuid
 from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Cookie, HTTPException, Request, Response
 
+from ..book_order import get_book_order_for_form, normalize_book_order
 from ..config import get_config
 from ..hub import get_hub
-from ..ratelimit import join_limiter
+from ..ratelimit import join_limiter, login_limiter
 from ..sessions import (
     broadcast_displays,
     create_student_session,
@@ -59,8 +61,13 @@ def _detect_lan_ip(force_tailscale: bool = False) -> str | None:
 
 
 def _base_url(request: Request) -> str:
-    host = request.headers.get("host", "localhost")
-    hostname, _, port = host.partition(":")
+    # Hostname wird bewusst NICHT aus dem Host-Header übernommen — ein beliebiger
+    # Host-Header (z. B. `evil.com`) würde sonst in die QR-URL wandern und dort
+    # das join_secret transportieren (Host-Header-Injection). Der Host-Header
+    # liefert nur noch den Port (der Host-Rechner hat sich ja selbst verbunden,
+    # sein Port ist korrekt). Der Hostname kommt aus cfg.host_ip / Auto-Erkennung.
+    host_header = request.headers.get("host", "")
+    _, _, port = host_header.partition(":")
     cfg = get_config()
     # Toggle „Tailscale-IP": erzwingt die Tailscale-IP in JEDER QR-URL, auch wenn
     # der Host die Seite bereits über eine echte IP (statt localhost) geöffnet hat
@@ -70,17 +77,18 @@ def _base_url(request: Request) -> str:
         if ts:
             port = port or str(cfg.port)
             return f"https://{ts}:{port}" if port else f"https://{ts}"
-    # Host-Rechner ruft die Seite oft über localhost auf (Server läuft lokal).
-    # Ein QR mit localhost/127.0.0.1 ist für Schüler-/Helfer-Geräte nutzlos —
-    # stattdessen die LAN-IP des Host-Rechners einsetzen.
-    if hostname in ("localhost", "127.0.0.1", "::1", ""):
-        # Expliziter Override (HOST_IP) vor der heuristischen Auto-Erkennung —
-        # bei mehreren Interfaces wählt local_ips[0] sonst evtl. das falsche Netz.
-        new_host = cfg.host_ip or _detect_lan_ip()
-        if new_host:
-            if not port:
-                port = str(cfg.port)
-            host = f"{new_host}:{port}" if port else new_host
+    # Hostname aus Config-Override oder Auto-Erkennung (LAN-Default-Route).
+    # Expliziter HOST_IP vor der Heuristik — bei mehreren Interfaces wählt die
+    # Auto-Erkennung sonst evtl. das falsche Netz.
+    hostname = cfg.host_ip or _detect_lan_ip()
+    if hostname:
+        port = port or str(cfg.port)
+        return f"https://{hostname}:{port}" if port else f"https://{hostname}"
+    # Fallback: Auto-Erkennung lieferte nichts (z. B. Netzwerk noch nicht oben).
+    # Dann den Host-Header als Ganzen nehmen — besser eine evtl. falsche URL als
+    # keine. Betrifft nur Übergangszustände; _detect_lan_ip cacht nur Treffer,
+    # so dass ein einmaliger Hänger die Erkennung nicht dauerhaft einfriert.
+    host = host_header or "localhost"
     return f"https://{host}"
 
 
@@ -89,9 +97,23 @@ def _base_url(request: Request) -> str:
 # ---------------------------------------------------------------------------
 
 @router.post("/api/login")
-async def login(body: dict, response: Response) -> dict:
+async def login(body: dict, response: Response, request: Request = None) -> dict:
     cfg = get_config()
-    if body.get("password") != cfg.host_password:
+    # Login-Rate-Limit (pro-IP) — Brute-Force-Anläufe auf das Host-Passwort
+    # drosseln. `request` hat bewusst KEINE Union-Annotation (Request | None):
+    # FastAPI erkennt `Request` nur als Special-Parameter (Injektion ohne
+    # Pydantic-Feld), wenn die Annotation genau `Request` ist — bei einer Union
+    # versucht FastAPI ein Pydantic-Feld draus zu bauen und stirbt. Der Default
+    # None greift nur beim Direktaufruf im Unit-Test (Tests übergeben kein
+    # request-Objekt); in Produktion injiziert FastAPI das echte Request.
+    if request is not None:
+        if request.client is None:
+            raise HTTPException(400, "Client-Info nicht verfügbar")
+        if not login_limiter.hit(request.client.host):
+            raise HTTPException(429, "Zu viele Login-Versuche — bitte kurz warten")
+    # Konstantzeit-Vergleich — kein Short-Circuit-Timing-Leak wie bei `!=`.
+    # compare_digest verlangt gleichartige Typen; None/non-str über str() abgesichert.
+    if not secrets.compare_digest(str(body.get("password") or ""), str(cfg.host_password or "")):
         raise HTTPException(403, "Falsches Passwort")
     sid = str(uuid.uuid4())
     get_state().add_host_session(sid)
@@ -261,23 +283,6 @@ async def students_for_class(form: str, session_id: str | None = Cookie(default=
 # noch der Katalog-Aufbau für die aktive Klasse (`select_class` ruft ihn auf).
 # ---------------------------------------------------------------------------
 
-def normalize_book_order(catalog_isbns: list[str], requested: list) -> list[str]:
-    """Gewünschte Reihenfolge auf die Katalog-ISBNs beschränken (unbekannte/Dubletten
-    raus) und fehlende Katalog-ISBNs in Katalogreihenfolge hinten anhängen, damit
-    kein bestelltes Buch verloren geht."""
-    catalog_set = set(catalog_isbns)
-    seen: set[str] = set()
-    order: list[str] = []
-    for isbn in requested:
-        if isinstance(isbn, str) and isbn in catalog_set and isbn not in seen:
-            seen.add(isbn)
-            order.append(isbn)
-    for isbn in catalog_isbns:
-        if isbn not in seen:
-            order.append(isbn)
-    return order
-
-
 async def _ensure_class_catalog(state) -> None:
     """Katalog (ausleihbare Jahrgangs-Bücher) für die aktive Klasse bauen und
     cachen, falls noch nicht für diese Klasse geschehen. `book_order` wird beim
@@ -293,6 +298,8 @@ async def _ensure_class_catalog(state) -> None:
     state.class_catalog_form = state.active_form
     state.class_catalog_grade = grade
     catalog_isbns = [b["isbn"] for b in catalog]
+    if grade is not None:
+        state.form_catalog_cache[state.active_form] = (grade, catalog_isbns)
     stored = state.book_orders_by_grade.get(grade) if grade is not None else None
     if stored:
         state.book_order = normalize_book_order(catalog_isbns, stored)
@@ -341,10 +348,15 @@ async def set_booklist_order(
 ) -> dict:
     """Jahrgangsweite Bücher-Reihenfolge (aus dem Einstellungen-Dialog) speichern.
 
-    Reiner In-Memory-State (kein DB-/IServ-Write). Gehört die aktuell geladene
-    Klasse zu diesem Jahrgang, wird die aktive Scanner-Reihenfolge live nachgezogen
-    — auch am Host selbst (`broadcast_host`), damit die Klassen-Karte in der
-    Vorbereitung nicht die alte Reihenfolge zeigt, bis man "Neu laden" klickt.
+    Reiner In-Memory-State (kein DB-/IServ-Write). `broadcast_settings()` schickt
+    jedem verbundenen Helfer die für **seinen eigenen** zugewiesenen Schüler
+    passende Reihenfolge (per Jahrgang ermittelt über `get_book_order_for_form`)
+    — funktioniert daher auch bei klassenübergreifenden Warteschlangen mit
+    Schülern aus verschiedenen Jahrgängen (z. B. „Test Config"), nicht nur bei
+    einer komplett geladenen Klasse. Gehört die aktuell geladene Klasse zu diesem
+    Jahrgang, wird zusätzlich `state.book_order` + der Host selbst
+    (`broadcast_host`) live nachgezogen, damit ein Reload des Hosts konsistent
+    bleibt.
     """
     _require_host(session_id)
     state = get_state()
@@ -362,11 +374,13 @@ async def set_booklist_order(
     catalog_isbns = [b["isbn"] for b in catalog]
     order = normalize_book_order(catalog_isbns, requested)
     state.book_orders_by_grade[grade] = order
-    # Aktive Klasse desselben Jahrgangs? -> Scanner-Reihenfolge live nachziehen.
+    hub = get_hub()
+    # Jeder Helfer bekommt (unabhängig von der aktiven Klasse) seine eigene,
+    # zum Jahrgang seines zugewiesenen Schülers passende Reihenfolge.
+    await hub.broadcast_settings()
+    # Aktive Klasse desselben Jahrgangs? -> Host-eigene Anzeige live nachziehen.
     if state.class_catalog_grade == grade:
         state.book_order = list(order)
-        hub = get_hub()
-        await hub.broadcast_settings()
         await hub.broadcast_host(state.state_snapshot())
     return {"ok": True, "grade": grade, "order": order}
 
@@ -645,17 +659,21 @@ async def skip_student(body: dict, session_id: str | None = Cookie(default=None)
     student_id = body.get("student_id")
     if student_id is None:
         raise HTTPException(400, "student_id fehlt")
+    try:
+        student_id = int(student_id)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "student_id ungültig")
     state = get_state()
     hub = get_hub()
 
-    student = state.find_student(int(student_id))
+    student = state.find_student(student_id)
     if not student:
         raise HTTPException(404, "Schüler nicht in der Queue")
     if student.status in ("done", "skipped"):
         raise HTTPException(409, f"Schüler bereits als {student.status} markiert")
 
     # Setzt Queue-Status, löst Helfer und entwertet eine Modus-B-Session hart.
-    await end_student(state, hub, int(student_id), queue_status="skipped", session_state="revoked")
+    await end_student(state, hub, student_id, queue_status="skipped", session_state="revoked")
     return {"ok": True}
 
 
@@ -671,14 +689,18 @@ async def disconnect_student(body: dict, session_id: str | None = Cookie(default
     student_id = body.get("student_id")
     if student_id is None:
         raise HTTPException(400, "student_id fehlt")
+    try:
+        student_id = int(student_id)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "student_id ungültig")
     state = get_state()
     hub = get_hub()
-    student = state.find_student(int(student_id))
+    student = state.find_student(student_id)
     if not student:
         raise HTTPException(404, "Schüler nicht in der Queue")
     if student.status in ("done", "skipped"):
         raise HTTPException(409, f"Schüler ist {student.status}")
-    await end_student(state, hub, int(student_id), queue_status="pending", session_state="revoked")
+    await end_student(state, hub, student_id, queue_status="pending", session_state="revoked")
     return {"ok": True}
 
 
@@ -749,14 +771,18 @@ async def finish_student(body: dict, session_id: str | None = Cookie(default=Non
     student_id = body.get("student_id")
     if student_id is None:
         raise HTTPException(400, "student_id fehlt")
+    try:
+        student_id = int(student_id)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "student_id ungültig")
     state = get_state()
     hub = get_hub()
 
-    student = state.find_student(int(student_id))
+    student = state.find_student(student_id)
     if not student:
         raise HTTPException(404, "Schüler nicht in der Queue")
 
-    await end_student(state, hub, int(student_id), queue_status="done", session_state="completed")
+    await end_student(state, hub, student_id, queue_status="done", session_state="completed")
     return {"ok": True}
 
 
@@ -775,6 +801,10 @@ async def print_loan_slip(body: dict, session_id: str | None = Cookie(default=No
     student_id = body.get("student_id")
     if student_id is None:
         raise HTTPException(400, "student_id fehlt")
+    try:
+        student_id = int(student_id)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "student_id ungültig")
     # Seite 1 wird immer gedruckt; Seite 2 (Schüler-Leihschein) nur, wenn der
     # Host-Toggle gesetzt ist.
     second_page = bool(body.get("second_page"))
@@ -784,7 +814,7 @@ async def print_loan_slip(body: dict, session_id: str | None = Cookie(default=No
 
     state = get_state()
     try:
-        return await print_loan_slip_for(state, int(student_id), pages=pages)
+        return await print_loan_slip_for(state, student_id, pages=pages)
     except Exception as e:
         log.exception("Leihschein-Druck für %s fehlgeschlagen", student_id)
         raise HTTPException(502, f"Leihschein-Druck fehlgeschlagen: {e}")
@@ -824,7 +854,10 @@ async def commit_book(body: dict, session_id: str | None = Cookie(default=None))
     student_id = body.get("student_id")
     if student_id is None:
         raise HTTPException(400, "student_id fehlt")
-    student_id = int(student_id)
+    try:
+        student_id = int(student_id)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "student_id ungültig")
 
     state = get_state()
     hub = get_hub()
@@ -938,15 +971,20 @@ async def student_join(body: dict, request: Request) -> dict:
     session_token (Zugang) + den 4-stelligen Pairing-Code (Zuordnung am Host).
     """
     # DoS-Schutz: pro-IP gedrosselt, noch vor jeder Prüfung (auch Falsch-Secret-Floods).
-    ip = request.client.host if request.client else "?"
-    if not join_limiter.hit(ip):
+    # request.client None (z. B. bei Test-Clients ohne Peer-Info) würde sonst alle
+    # Anfragen in einen "?"-Bucket werfen und einen gemeinsamen Limit-Kontingent
+    # teilen — lieber hart abweisen, bevor der Limiter gerufen wird.
+    if request.client is None:
+        raise HTTPException(400, "Client-Info nicht verfügbar")
+    if not join_limiter.hit(request.client.host):
         raise HTTPException(429, "Zu viele Anfragen — bitte kurz warten")
 
     state = get_state()
     secret = str(body.get("join_secret", "")).strip()
     if not state.modus_b_open or not state.modus_b_join_secret:
         raise HTTPException(403, "Live-Ausgabe ist geschlossen")
-    if secret != state.modus_b_join_secret:
+    # Konstantzeit-Vergleich — kein Short-Circuit-Timing-Leak wie bei `!=`.
+    if not secrets.compare_digest(secret, str(state.modus_b_join_secret or "")):
         raise HTTPException(403, "Ungültiger oder abgelaufener QR")
 
     try:
@@ -970,7 +1008,10 @@ async def student_pair(body: dict, session_id: str | None = Cookie(default=None)
     override = bool(body.get("override_payment", False))
     if not code or student_id is None:
         raise HTTPException(400, "pairing_code und student_id erforderlich")
-    student_id = int(student_id)
+    try:
+        student_id = int(student_id)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "student_id ungültig")
 
     session = state.find_session_by_code(code)
     if not session:

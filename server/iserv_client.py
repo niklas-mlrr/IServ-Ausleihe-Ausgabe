@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from datetime import date, datetime
 from urllib.parse import quote
 
@@ -10,6 +11,11 @@ log = logging.getLogger(__name__)
 # Default-Schuljahr neu bestimmen, wenn der Cache älter als das ist. Fängt den
 # upcoming→running-Übergang ab, falls der Server über einen Schuljahresbeginn
 # hinweg läuft, ohne pro Anfrage neu aufzulösen.
+# Trade-off: die 6h TTL verzögert auch den running→ended-Übergang (ein abgelaufen
+# laufendes Jahr wird bis zu 6h lang noch als Default gemeldet). Wird bewusst in
+# Kauf genommen, weil der Sommerferien-Puffer typischerweise länger ist als 6h
+# und der upcoming-Fall häufiger auftritt als ein exakt zum TTL-Stichtag laufendes
+# Jahr, das gerade endet.
 _DEFAULT_SY_TTL_S = 6 * 3600
 
 from ausleihe import AusleiheClient
@@ -55,15 +61,27 @@ class IsServClient:
         # der upcoming→running-Übergang nicht erst nach einem Neustart greift.
         self._default_sy_id: str | None = None
         self._default_sy_at: datetime | None = None
+        # Lock schützt die Lazy-Init der drei Singletons (_client, _series_map,
+        # _default_sy_id) gegen Concurrent-Instantiate: mehrere asyncio.to_thread-
+        # Worker können sonst gleichzeitig _client is None sehen, jeweils einen
+        # AusleiheClient instanziieren und sich gegenseitig überschreiben →
+        # orphaned requests.Session + geteilte Session über Threads hinweg
+        # (Cookie/Connection-State-Korruption). Lock wird nur für die Init-Phase
+        # gehalten; danach läuft die eigentliche API-Call-Arbeit außerhalb.
+        self._init_lock = threading.Lock()
 
     def _get_client(self) -> AusleiheClient:
         if self._client is None:
-            self._client = AusleiheClient(
-                domain=self._domain,
-                username=self._username,
-                password=self._password,
-                allow_writes=False,
-            )
+            with self._init_lock:
+                # Double-checked locking: nach dem Lock-Erwerb nochmal prüfen,
+                # ein anderer Worker könnte uns zuvor gekommen sein.
+                if self._client is None:
+                    self._client = AusleiheClient(
+                        domain=self._domain,
+                        username=self._username,
+                        password=self._password,
+                        allow_writes=False,
+                    )
         return self._client
 
     def _active_years(self, client: AusleiheClient) -> list[dict]:
@@ -106,8 +124,16 @@ class IsServClient:
             or (now - self._default_sy_at).total_seconds() > _DEFAULT_SY_TTL_S
         )
         if self._default_sy_id is None or stale:
-            self._default_sy_id = self._pick_default(self._active_years(client), client)
-            self._default_sy_at = now
+            with self._init_lock:
+                if self._default_sy_id is None or (
+                    self._default_sy_at is None
+                    or (datetime.now() - self._default_sy_at).total_seconds()
+                    > _DEFAULT_SY_TTL_S
+                ):
+                    self._default_sy_id = self._pick_default(
+                        self._active_years(client), client
+                    )
+                    self._default_sy_at = datetime.now()
         return self._default_sy_id
 
     async def get_schoolyears(self) -> list[dict]:
@@ -142,8 +168,10 @@ class IsServClient:
         um Titel und Fach (subjects_flat) für alle Bücher aufzulösen.
         """
         if self._series_map is None:
-            client = self._get_client()
-            self._series_map = {s.isbn: s for s in client.series.get_all()}
+            with self._init_lock:
+                if self._series_map is None:
+                    client = self._get_client()
+                    self._series_map = {s.isbn: s for s in client.series.get_all()}
         return self._series_map
 
     async def get_forms(self, schoolyear: str | None = None) -> list[dict]:
@@ -227,17 +255,52 @@ class IsServClient:
                 exemption = current_enrollment.get("exemption_accepted")
                 paid = exemption is True or (amount_open is not None and float(amount_open) <= 0)
 
+            # Schuljahr-Fenster für die konservative Bücher-Filterung bestimmen.
+            # Annahme (konservativ, zur Review): die API doku sagt zu
+            # `?books=true` nur "aktuell ausgeliehen" — nicht, ob Bücher aus
+            # Vorjahren (noch nicht zurückgegeben) enthalten sind. Da das
+            # Book-Schema kein `schoolyear`/`enrollment`-Feld trägt, filtern wir
+            # heuristisch über `distributed_at`: nur Bücher, die innerhalb des
+            # gewählten Schuljahrs (begin ≤ distributed_at ≤ end) ausgegeben
+            # wurden, gelten als current-year. Bücher ohne distributed_at
+            # behalten wir (verlässlicher Zeitstempel fehlt → nicht aussortieren).
+            # Vorjahr-Bücher ohne Vormerkung würden sonst als "ausgeliehen" in der
+            # Scanner-Tabelle auftauchen und ein schon zurückgegebenes Buch
+            # (falls die API es wider Erwarten doch liefert) als ausgeliehen
+            # anzeigen. Siehe PLAN §6.1 / Review-Hinweis.
+            sy_begin = None
+            sy_end = None
+            for y in self._active_years(client):
+                if y.get("id") == sy_id:
+                    sy_begin = _sy_date(y.get("begin"))
+                    sy_end = _sy_date(y.get("end"))
+                    break
+
+            def _in_current_sy(dist_at: object) -> bool:
+                if dist_at is None:
+                    return True  # kein Zeitstempel → nicht aussortieren
+                d = _sy_date(dist_at)
+                if d is None:
+                    return True  # ungültiger Zeitstempel → nicht aussortieren
+                if sy_begin is None or sy_end is None:
+                    return True  # Schuljahrs-Fenster unbekannt → nicht aussortieren
+                return sy_begin <= d <= sy_end
+
             # Bereits ausgeliehene Bücher (compact format for UI)
             current_books = []
             for b in detail.get("books", []):
-                isbn = b.get("isbn") or b.get("BookView", {}).get("isbn", "")
+                bv = b.get("BookView") or {}
+                isbn = b.get("isbn") or bv.get("isbn", "")
+                dist_at = b.get("distributed_at") or bv.get("distributed_at")
+                # Konservative Vorjahres-Filterung (siehe Annahme oben).
+                if not _in_current_sy(dist_at):
+                    continue
                 current_books.append({
-                    "code": b.get("code") or b.get("BookView", {}).get("code"),
+                    "code": b.get("code") or bv.get("code"),
                     "isbn": isbn,
                     "title": _title(isbn),
                     "subject": _fach(isbn),
-                    "distributed_at": b.get("distributed_at")
-                        or b.get("BookView", {}).get("distributed_at"),
+                    "distributed_at": dist_at,
                 })
 
             # Bücher die der Schüler laut Anmeldung erhalten soll

@@ -49,7 +49,9 @@ async def async_login(page: Page, domain: str, username: str, password: str, lab
     await page.click('button[type="submit"]')
     await page.wait_for_load_state("domcontentloaded")
     await page.wait_for_timeout(2500)
-    if "login" in page.url and "auth" in page.url:
+    # OR statt AND: ein Fehl-Login landet u. U. nur auf iserv/login ODER
+    # iserv/auth, nicht zwingend auf beidem (konsistent zu worker.py:_login).
+    if "iserv/login" in page.url or "iserv/auth" in page.url:
         await snap(page, f"{label}_login_fehlgeschlagen")
         raise RuntimeError(f"[{label}] Login fehlgeschlagen — noch auf {page.url}")
     elapsed_ms = (time.monotonic() - t0) * 1000

@@ -60,7 +60,9 @@ def login(page: Page, domain: str, username: str, password: str) -> None:
     page.click('button[type="submit"]')
     page.wait_for_load_state("domcontentloaded")
     page.wait_for_timeout(3000)
-    if "login" in page.url and "auth" in page.url:
+    # OR statt AND: ein Fehl-Login landet u. U. nur auf iserv/login ODER
+    # iserv/auth, nicht zwingend auf beidem (konsistent zu worker.py:_login).
+    if "iserv/login" in page.url or "iserv/auth" in page.url:
         snap(page, "01b_login_fehlgeschlagen")
         sys.exit(f"Login offenbar fehlgeschlagen — noch auf {page.url}")
     snap(page, "02_nach_login")

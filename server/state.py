@@ -171,6 +171,12 @@ class AppState:
         # `book_order` (Jahrgang der Klasse). Reiner In-Memory-State, kein DB-/
         # IServ-Write. Wird erst beim Schuljahreswechsel geleert.
         self.book_orders_by_grade: dict[int, list[str]] = {}
+        # Katalog-Cache für klassenübergreifende Warteschlangen (einzeln
+        # hinzugefügte Schüler/„Test Config", ggf. aus verschiedenen Jahrgängen):
+        # form-Name -> (grade, catalog_isbns). Erspart einen IServ-Roundtrip pro
+        # Schüler-Zuweisung; wird wie `book_orders_by_grade` erst beim
+        # Schuljahreswechsel geleert.
+        self.form_catalog_cache: dict[str, tuple[int | None, list[str]]] = {}
 
     def reset_class_book_order(self) -> None:
         """Aktive Klassen-Reihenfolge + Katalog-Cache leeren (Klassen-/
@@ -185,6 +191,7 @@ class AppState:
         """Alle jahrgangsweiten Bücher-Reihenfolgen leeren (Schuljahreswechsel:
         andere Booklists, ISBNs passen nicht mehr)."""
         self.book_orders_by_grade = {}
+        self.form_catalog_cache = {}
 
     # --- Host-Login-Sessions (gleitendes TTL) ---
     def add_host_session(self, sid: str) -> None:

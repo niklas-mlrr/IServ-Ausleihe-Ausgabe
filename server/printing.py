@@ -23,6 +23,8 @@ import asyncio
 import logging
 import os
 import platform
+import re
+import secrets
 import shutil
 import subprocess
 import tempfile
@@ -69,21 +71,36 @@ def _find_sumatra(sumatra_path: str | None) -> str | None:
 
 def _write_pdf(data: bytes, output_dir: Path, *, prefix: str) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    path = output_dir / f"{prefix}_{ts}.pdf"
+    # Sekunden-genauer Timestamp kann bei zwei Drucken in derselben Sekunde
+    # kollidieren → Mikrosekunden + 4 Hex-Zeichen Suffix machen den Dateinamen
+    # eindeutig, ohne den Prefix/Dir-Logik zu verändern.
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S%f")
+    suffix = secrets.token_hex(2)
+    path = output_dir / f"{prefix}_{ts}_{suffix}.pdf"
     path.write_bytes(data)
     return path
 
 
+# PowerShell-Vorspann: erzwingt UTF-8 auf stdout, damit Umlaute auf deutschem
+# Windows (Default cp850/cp1252) nicht als Mojibake durchgereicht werden.
+_PS_UTF8_PREFIX = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8;"
+
+
 async def _run(cmd: list[str]) -> tuple[int, str]:
-    """Subprozess async ausführen, (returncode, stderr/stdout) zurückgeben."""
+    """Subprozess async ausführen, (returncode, stderr/stdout) zurückgeben.
+
+    Decode stdout als UTF-8 mit ``errors="replace"`` — Backends geben i. d. R.
+    UTF-8 (lp/lpstat auf macOS/Linux, SumatraPDF); bei PowerShell wird das
+    OutputEncoding zusätzlich vorab auf UTF-8 gesetzt (siehe _PS_UTF8_PREFIX),
+    sodass cp850/cp1252-Umlaute auf deutschem Windows nicht kaputtgehen.
+    """
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
     )
     out, _ = await proc.communicate()
-    return proc.returncode or 0, (out or b"").decode(errors="replace").strip()
+    return proc.returncode or 0, (out or b"").decode("utf-8", errors="replace").strip()
 
 
 async def _print_lp(
@@ -139,13 +156,13 @@ async def list_printers(backend: str = "auto") -> dict:
         if resolved in ("sumatra", "win-default"):
             rc, out = await _run([
                 "powershell", "-NoProfile", "-NonInteractive", "-Command",
-                "Get-Printer | Select-Object -ExpandProperty Name",
+                _PS_UTF8_PREFIX + "Get-Printer | Select-Object -ExpandProperty Name",
             ])
             if rc == 0:
                 printers = [ln.strip() for ln in out.splitlines() if ln.strip()]
             rc, out = await _run([
                 "powershell", "-NoProfile", "-NonInteractive", "-Command",
-                "(Get-CimInstance Win32_Printer -Filter 'Default=TRUE').Name",
+                _PS_UTF8_PREFIX + "(Get-CimInstance Win32_Printer -Filter 'Default=TRUE').Name",
             ])
             if rc == 0 and out.strip():
                 default = out.strip().splitlines()[0].strip()
@@ -215,6 +232,15 @@ async def print_pdf(
     resolved = resolve_backend(backend)
     out_dir = Path(output_dir)
 
+    # `pages` validieren (z. B. "1" oder "1-2"); None bedeutet „alle Seiten".
+    if pages is not None:
+        if not re.fullmatch(r"\d+(?:-\d+)?", pages):
+            return {
+                "ok": False,
+                "backend": resolved,
+                "detail": f"ungültiger Seitenbereich: {pages!r} (erwartet z. B. '1' oder '1-2')",
+            }
+
     # `file`: nur speichern, nichts drucken.
     if resolved == "file":
         path = _write_pdf(data, out_dir, prefix=label)
@@ -242,7 +268,10 @@ async def print_pdf(
                     "Backend 'win-default' kann keinen Seitenbereich (%s) wählen — "
                     "es werden alle Seiten gedruckt", pages,
                 )
-            return _print_win_default(tmp_pdf)
+            # `os.startfile` ist synchron und kann das Event-Loop für hunderte
+            # ms blockieren (Windows-PDF-Handler-Aufruf) → in einen Thread
+            # auslagern.
+            return await asyncio.to_thread(_print_win_default, tmp_pdf)
 
         raise ValueError(f"Unbekanntes Druck-Backend: {resolved!r}")
     finally:

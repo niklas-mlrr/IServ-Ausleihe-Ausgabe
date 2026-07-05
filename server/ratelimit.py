@@ -22,17 +22,23 @@ class SlidingWindowLimiter:
     def hit(self, key: str) -> bool:
         """Treffer registrieren. True = erlaubt, False = drosseln (Limit erreicht)."""
         now = time.monotonic()
-        dq = self._hits[key]
+        # .get() statt defaultdict-Zugriff — sonst legt jeder Lookup einen leeren
+        # Bucket an, der nie wieder verschwindet (das alte `if not dq: pop +
+        # neu-fetch` war ein No-op: pop dann sofort defaultdict-re-add).
+        dq = self._hits.get(key)
+        if dq is None:
+            dq = deque()
         cutoff = now - self._window
         while dq and dq[0] < cutoff:
             dq.popleft()
+        # Leeren Bucket jetzt wirklich entfernen — wird unten nur bei einem
+        # neuen Hit wieder angelegt (via self._hits[key] = dq).
         if not dq:
-            # Leere Deques nicht im Dict halten (kein unbegrenztes Wachstum).
             self._hits.pop(key, None)
-            dq = self._hits[key]
         if len(dq) >= self._max:
             return False
         dq.append(now)
+        self._hits[key] = dq
         return True
 
     def sweep(self) -> None:
@@ -49,3 +55,8 @@ class SlidingWindowLimiter:
 
 # Modul-Level-Instanz für /api/student/join.
 join_limiter = SlidingWindowLimiter(max_hits=5, window_s=10.0)
+
+# Modul-Level-Instanz für /api/login (pro-IP). Engere Fenster als join — ein
+# Brute-Force-Anlauf gegen das Host-Passwort soll schnell gedrosselt werden,
+# ohne legitime Vertipper zu blocken (5 Versuche / 15 s).
+login_limiter = SlidingWindowLimiter(max_hits=5, window_s=15.0)

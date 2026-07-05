@@ -185,11 +185,40 @@ class StudentSession:
                         return {"status": "error", "msg": msg[:200], "raw": sel}
             except Exception:  # noqa: BLE001
                 continue
-        # 2) Buchcode in der Kartei-/Bücherliste aufgetaucht? (Indikator Erfolg)
+        # 2) Buchcode in der Bücherliste aufgetaucht? (Indikator Erfolg)
+        # WICHTIG: get_by_text(barcode) auf der ganzen Page trifft auch das
+        # Typeahead-Eingabefeld (input.tt-input), das den Barcode nach fill()
+        # noch als Wert enthält — das meldet einen fehlgeschlagenen Booking als
+        # Erfolg (False-Positive). Daher: Scope auf Nicht-Input-Container, die
+        # die ausgeliehenen Bücher auflisten, und Typeahead-Dropdown sowie
+        # Eingabefeld explizit ausschließen. Selektoren unverifiziert → bewusst
+        # mehrere Kandidaten prüfen und bei Unklarheit `unknown` bleiben.
         try:
-            if await page.get_by_text(barcode, exact=False).count():
-                return {"status": "booked",
-                        "msg": "Buchung im DOM bestätigt (best-effort)", "raw": barcode}
+            # Eingabefeld + Typeahead-Suggestions, die den Barcode abbilden:
+            input_scope = page.locator('input.tt-input, .tt-dropdown-menu, .tt-hint')
+            # Kandidaten für die Bücherliste der Schülerkartei (Counter-Seite).
+            list_selectors = [
+                'table tbody tr',
+                '.books-list',
+                '.lent-books',
+                '[ng-repeat*="book"]',
+                '.student-books',
+            ]
+            for sel in list_selectors:
+                rows = page.locator(sel).filter(has_not=input_scope)
+                try:
+                    count = await rows.count()
+                except Exception:  # noqa: BLE001
+                    continue
+                for i in range(count):
+                    try:
+                        row_text = (await rows.nth(i).inner_text()).strip()
+                    except Exception:  # noqa: BLE001
+                        continue
+                    if barcode in row_text:
+                        return {"status": "booked",
+                                "msg": "Buchung im DOM bestätigt (best-effort)",
+                                "raw": barcode}
         except Exception:  # noqa: BLE001
             pass
         return {
@@ -254,10 +283,21 @@ class WorkerPool:
             log.info("Playwright headful (sichtbar) — slow_mo=%d ms", self._slow_mo_ms)
 
         t0 = time.monotonic()
-        results = await asyncio.gather(
-            *[self._make_logged_in_context(f"worker_{i}") for i in range(self._n)],
-            return_exceptions=True,
-        )
+        # Wird start() während des Logins gecancel't (z. B. App-Shutdown), würde
+        # asyncio.gather CancelledError werfen und der Append-Loop nie laufen →
+        # die bereits erfolgreich eingeloggten Contexts wären georphan't (leak).
+        # Daher: im finally alle erfolgreich erstellten Contexts entweder in den
+        # Pool übernehmen oder — wenn wir abgebrochen wurden — sauber schließen.
+        cancelled = False
+        try:
+            results = await asyncio.gather(
+                *[self._make_logged_in_context(f"worker_{i}") for i in range(self._n)],
+                return_exceptions=True,
+            )
+        except BaseException:  # noqa: BLE001 — CancelledError oder anderes
+            cancelled = True
+            results = []
+            log.warning("start() während erstem Login abgebrochen — Contexts bereinigen")
         for i, r in enumerate(results):
             if isinstance(r, Exception):
                 log.warning("Worker %d Login fehlgeschlagen: %s", i, r)
@@ -266,17 +306,34 @@ class WorkerPool:
 
         # Einmal nachziehen, was beim ersten Versuch gescheitert ist.
         missing = self._n - len(self._contexts)
-        if missing > 0:
+        if missing > 0 and not cancelled:
             log.info("%d Worker-Context(e) fehlen — Retry", missing)
-            retry = await asyncio.gather(
-                *[self._make_logged_in_context(f"worker_retry_{i}") for i in range(missing)],
-                return_exceptions=True,
-            )
+            try:
+                retry = await asyncio.gather(
+                    *[self._make_logged_in_context(f"worker_retry_{i}") for i in range(missing)],
+                    return_exceptions=True,
+                )
+            except BaseException:  # noqa: BLE001
+                cancelled = True
+                retry = []
+                log.warning("start() während Retry-Login abgebrochen — Contexts bereinigen")
             for r in retry:
                 if isinstance(r, Exception):
                     log.warning("Worker-Retry Login fehlgeschlagen: %s", r)
                 else:
                     self._contexts.append(r)
+
+        if cancelled:
+            # Abbruch: aufgebaute Contexts nicht im Pool behalten (Pool wird
+            # ohnehin nicht genutzt), sondern deterministisch schließen.
+            log.info("start() abgebrochen — schließe %d bereits erstellte Contexts",
+                     len(self._contexts))
+            for ctx in self._contexts:
+                try:
+                    await ctx.close()
+                except Exception:
+                    pass
+            self._contexts.clear()
 
         elapsed = (time.monotonic() - t0) * 1000
         self._total = len(self._contexts)
@@ -285,7 +342,14 @@ class WorkerPool:
             log.error("Kein einziger Worker-Context eingeloggt — Scannen wird scheitern")
 
     def stats(self) -> dict:
-        """Pool-Auslastung für den Host: total / frei / in Benutzung."""
+        """Pool-Auslastung für den Host: total / frei / in Benutzung.
+
+        Hinweis: stats() bleibt synchron, weil alle Aufrufer (state_snapshot,
+        Tests) es synchron aufrufen. Der Zugriff auf len(self._contexts) ist in
+        CPython unter dem GIL atomar; wirkliche Konsistenz mit den Mutationen
+        (open_student/release/check_selectors) ergibt sich daraus, dass alles
+        im selben Event-Loop-Thread läuft — stats() hat keine await-Punkte und
+        wird daher nicht mitten in einer Mutation unterbrochen."""
         available = len(self._contexts)
         return {
             "total": self._total,
@@ -304,7 +368,16 @@ class WorkerPool:
             if not self._contexts:
                 return {"ok": False, "msg": "kein Worker-Context"}
             context = self._contexts.pop(0)
-        page = await context.new_page()
+        # new_page() kann bei transienten Playwright-Transportfehlern werfen.
+        # Stand das außerhalb des protected try/finally, würde der Context leaken
+        # (Pool schrumpft dauerhaft). Daher: bei Fehlern Context zurückgeben.
+        try:
+            page = await context.new_page()
+        except BaseException as e:  # noqa: BLE001 — inkl. CancelledError
+            async with self._cond:
+                self._contexts.append(context)
+                self._cond.notify_all()
+            raise
         sel = 'input.tt-input[name="input"]'
         try:
             await page.goto(f"https://ausleihe.{self._domain}/", wait_until="domcontentloaded")
@@ -370,7 +443,16 @@ class WorkerPool:
                     raise RuntimeError("Kein freier Worker-Context verfügbar")
             context = self._contexts.pop(0)
 
-        page = await context.new_page()
+        # new_page() kann bei transienten Playwright-Transportfehlern werfen.
+        # Stand das außerhalb des protected try/except, würde der Context leaken
+        # (Pool schrumpft dauerhaft). Daher: bei Fehlern Context zurückgeben.
+        try:
+            page = await context.new_page()
+        except BaseException as e:  # noqa: BLE001 — inkl. CancelledError!
+            async with self._cond:
+                self._contexts.append(context)
+                self._cond.notify_all()
+            raise
         session = StudentSession(
             context, page, self._domain, student_id, student_name, relogin=self._login
         )
@@ -393,10 +475,20 @@ class WorkerPool:
         return session
 
     async def release(self, session: StudentSession) -> None:
-        """Context nach Abschluss eines Schülers zurück in den Pool."""
+        """Context nach Abschluss eines Schülers zurück in den Pool.
+
+        Idempotent: ein zweiter Aufruf (z. B. durch Race im Server-Code) würde
+        denselben Context sonst zweimal appenden → zwei open_student poppen ihn
+        „zweimal", beide erzeugen Pages auf demselben Context, stats().available
+        würde über total liegen. Daher: Context atomar aus der Session entfernen
+        und nur dann appenden, wenn er noch da war."""
         await session.close()
+        ctx = session._context
+        session._context = None
+        if ctx is None:
+            return  # bereits released — nichts tun (Double-Release-Schutz)
         async with self._cond:
-            self._contexts.append(session._context)
+            self._contexts.append(ctx)
             self._cond.notify_all()
 
     async def _login(self, page: Page, label: str) -> None:

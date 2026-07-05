@@ -144,10 +144,32 @@ def _local_ipv4s() -> list[str]:
     return sorted(set(_candidate_ipv4s()))
 
 
+def _cert_expired_or_expiring(cert_path: Path, *, within_days: int = 30) -> bool:
+    """True, wenn das Zertifikat abgelaufen ist oder innerhalb `within_days`
+    Tagen ausläuft. Bei Lesefehlern konservativ True (→ neu erzeugen), damit
+    ein kaputtes Cert nicht still stehen bleibt."""
+    try:
+        cert = x509.load_pem_x509_certificate(cert_path.read_bytes())
+    except Exception:
+        return True
+    # `not_valid_after_utc` (neu in cryptography>=42); auf älteren Versionen
+    # fällt der naive `not_valid_after` zurück — wir normalisieren auf UTC.
+    try:
+        expiry = cert.not_valid_after_utc
+    except AttributeError:
+        expiry = cert.not_valid_after.replace(tzinfo=dt.timezone.utc)
+    now = dt.datetime.now(dt.timezone.utc)
+    return expiry <= now + dt.timedelta(days=within_days)
+
+
 def generate_selfsigned_cert(cert_path: Path, key_path: Path, cn: str = "localhost") -> None:
-    """Cert + Key erzeugen (einmalig). Bestehende Dateien werden nicht überschrieben."""
+    """Cert + Key erzeugen. Bestehende Dateien werden nur dann überschrieben,
+    wenn das Zertifikat abgelaufen ist oder innerhalb ~30 Tagen ausläuft
+    (vorher wurde ungeachtet des Ablaufs immer frühzeitig returned)."""
     if cert_path.exists() and key_path.exists():
-        return
+        if not _cert_expired_or_expiring(cert_path):
+            return
+        log.info("TLS-Zertifikat läuft bald ab oder ist abgelaufen — wird neu erzeugt: %s", cert_path)
     cert_path.parent.mkdir(parents=True, exist_ok=True)
 
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -183,19 +205,22 @@ def generate_selfsigned_cert(cert_path: Path, key_path: Path, cn: str = "localho
         .sign(key, hashes.SHA256())
     )
 
-    key_path.write_bytes(
-        key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.TraditionalOpenSSL,
-            encryption_algorithm=serialization.NoEncryption(),
-        )
+    # Privaten Schlüssel direkt mit 0o600 anlegen (statt Default-umask oft
+    # 0o644 + nachträglich chmod 600 — das schließt das world-readable-Fenster).
+    # Windows ignoriert die Mode-Bits i. d. R., schadet dort aber nicht.
+    key_pem = key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.TraditionalOpenSSL,
+        encryption_algorithm=serialization.NoEncryption(),
     )
+    key_fd = os.open(
+        str(key_path),
+        os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+        0o600,
+    )
+    with os.fdopen(key_fd, "wb") as fh:
+        fh.write(key_pem)
     cert_path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
-    # Privaten Schlüssel restriktiv setzen (best effort; Windows ignoriert das ggf.).
-    try:
-        os.chmod(key_path, 0o600)
-    except OSError:
-        pass
 
     sans = ["localhost", "127.0.0.1", *local_ips] + ([cn] if cn != "localhost" else [])
     log.info("TLS-Zertifikat erzeugt (SAN: %s): %s", ", ".join(sans), cert_path)

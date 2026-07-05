@@ -20,7 +20,6 @@ ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
 PORT = os.environ.get("PORT", "3443")
 BASE = f"https://localhost:{PORT}"
-PW = os.environ["HOST_PASSWORD"]
 
 console_errors: list[str] = []
 
@@ -30,6 +29,9 @@ def log(*a):
 
 
 async def main():
+    pw = os.environ.get("HOST_PASSWORD")
+    if not pw:
+        raise SystemExit("HOST_PASSWORD fehlt — .env prüfen (.env.example als Vorlage).")
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         ctx = await browser.new_context(ignore_https_errors=True)
@@ -39,7 +41,7 @@ async def main():
 
         # 1. Login
         await page.goto(f"{BASE}/host.html", wait_until="domcontentloaded")
-        await page.fill("#pw-input", PW)
+        await page.fill("#pw-input", pw)
         await page.click("#login-btn")
         await page.wait_for_selector("#main-view", state="visible", timeout=10_000)
         log("OK  Login -> main-view sichtbar")

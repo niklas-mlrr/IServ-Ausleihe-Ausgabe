@@ -666,6 +666,7 @@
       loadSchoolyears();
       loadClasses();
       connectWs();
+      if (_slipCb) pushSlipDefault(_slipCb.checked);  // Server auf Host-Stand bringen
     } else {
       document.getElementById('login-msg').textContent = 'Falsches Passwort';
     }
@@ -686,7 +687,9 @@
     ws.onclose = () => { setConn(false); setTimeout(connectWs, 3000); };
     ws.onerror = () => setConn(false);
     ws.onmessage = e => {
-      const msg = JSON.parse(e.data);
+      let msg;
+      try { msg = JSON.parse(e.data); }
+      catch (err) { console.warn('Bad WS frame', err); return; }
       if (msg.type === 'state') applyState(msg);
       else if (msg.type === 'book_deleted_alert') showBookDeletedAlert(msg);
     };
@@ -1263,7 +1266,9 @@
   // ---- QR-Modal ----
   function showQr(dataUrl, url) {
     _modalPrevFocus = document.activeElement;
-    document.getElementById('qr-img').src = dataUrl;
+    const _qrImg = document.getElementById('qr-img');
+    if (typeof dataUrl === 'string' && dataUrl.startsWith('data:image/')) _qrImg.src = dataUrl;
+    else _qrImg.src = '';
     document.getElementById('qr-url').textContent = url;
     document.getElementById('qr-modal').classList.add('show');
     document.getElementById('qr-close-btn').focus();
@@ -1358,7 +1363,9 @@
   }
   if (_slipCb) {
     _slipCb.checked = localStorage.getItem('slipSecondPage') === '1';
-    pushSlipDefault(_slipCb.checked);  // Server beim Laden auf Host-Stand bringen
+    // Server-Push passiert erst nach erfolgreichem (Auto-)Login — siehe
+    // doLogin() bzw. den /api/state-Lade-Check weiter unten. Ein Push vor
+    // dem Login läuft ohnehin ins 401 und rauscht nur im Log.
   }
 
   // Einstellungen-Dialog: Tailscale-IP + Schüler-Leihschein. Änderungen werden
@@ -1613,6 +1620,7 @@
       loadSchoolyears();
       loadClasses();
       connectWs();
+      if (_slipCb) pushSlipDefault(_slipCb.checked);  // Server auf Host-Stand bringen
       // Auto-Login hat keine Login-Geste -> AudioContext beim ersten Klick entsperren
       document.addEventListener('pointerdown', () => initAudio(), { once: true });
     }

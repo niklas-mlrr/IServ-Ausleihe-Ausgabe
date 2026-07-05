@@ -21,6 +21,7 @@ from datetime import datetime
 
 import qrcode
 
+from .book_order import get_book_order_for_form
 from .config import get_config
 from .hub import get_hub
 from .ratelimit import join_limiter
@@ -484,7 +485,7 @@ async def load_and_push_helper_student(state: AppState, hub, student, helper) ->
         return
 
     info["form"] = getattr(student, "form", "")
-    info["book_order"] = state.book_order
+    info["book_order"] = await get_book_order_for_form(state, info["form"])
     helper.expected_isbns = expected_isbns_from_info(info)
     helper.vormerk_isbns, helper.lent_isbns = booking_isbn_sets_from_info(info)
     await hub.send_scanner(helper.token, {"type": "student_info", "student": info})
@@ -569,7 +570,7 @@ async def load_and_push_paired_student(
     # student_id, der schon nicht mehr zur Session gehört → Worker-Orphan.
     paired_student_id = student.student_id
     info["form"] = getattr(student, "form", "")
-    info["book_order"] = state.book_order
+    info["book_order"] = await get_book_order_for_form(state, info["form"])
     session.expected_isbns = expected_isbns_from_info(info)
     session.vormerk_isbns, session.lent_isbns = booking_isbn_sets_from_info(info)
     if session.ws is not None:

@@ -53,17 +53,29 @@ def load_config(env_file: Path | None = None) -> Config:
             raise SystemExit(f"Fehler: {name} fehlt in .env — .env.example als Vorlage nutzen.")
         return v
 
+    def req_int(name: str, default: int) -> int:
+        """int()-Parse mit sauberer Fehlermeldung (wie req(), nur für Zahlen).
+
+        Raw int() würde bei z. B. PORT=abc mit kryptischem ValueError sterben;
+        req_int gibt einen klaren SystemExit wie bei den String-Pflichtfeldern.
+        """
+        raw = os.environ.get(name, str(default))
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            raise SystemExit(f"Fehler: {name} muss eine Zahl sein (war '{raw}')")
+
     _config = Config(
         iserv_domain=req("ISERV_DOMAIN"),
         iserv_username=req("ISERV_USERNAME"),
         iserv_password=req("ISERV_PASSWORD"),
         host_password=req("HOST_PASSWORD"),
-        port=int(os.environ.get("PORT", "3443")),
+        port=req_int("PORT", 3443),
         host_ip=(os.environ.get("HOST_IP", "").strip() or None),
-        worker_contexts=int(os.environ.get("WORKER_CONTEXTS", "2")),
+        worker_contexts=req_int("WORKER_CONTEXTS", 2),
         headless=os.environ.get("HEADLESS", "true").strip().lower() not in ("0", "false", "no"),
-        slow_mo_ms=int(os.environ.get("SLOW_MO_MS", "0")),
-        host_session_ttl_s=int(os.environ.get("HOST_SESSION_TTL_S", "43200")),
+        slow_mo_ms=req_int("SLOW_MO_MS", 0),
+        host_session_ttl_s=req_int("HOST_SESSION_TTL_S", 43200),
         print_backend=os.environ.get("PRINT_BACKEND", "auto").strip() or "auto",
         printer_name=(os.environ.get("PRINTER_NAME", "").strip() or None),
         sumatra_path=(os.environ.get("SUMATRA_PATH", "").strip() or None),

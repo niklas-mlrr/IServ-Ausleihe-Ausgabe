@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Cookie, WebSocket, WebSocketDisconnect
 
+from ..book_order import get_book_order_for_form
 from ..hub import get_hub
 from ..sessions import (
     advance_helper,
@@ -69,14 +71,19 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
             pass
     helper.ws = websocket
 
-    # Schüler bereits zugewiesen? Info sofort schicken.
+    # Schüler bereits zugewiesen? Info sofort schicken. Die Reihenfolge wird
+    # anhand des Jahrgangs *dieses* Schülers ermittelt (nicht der einen globalen
+    # `state.book_order`) — sonst würde die direkt danach folgende `settings`-
+    # Nachricht sie bei klassenübergreifenden Warteschlangen wieder überschreiben.
+    book_order = state.book_order
     if helper.student_id is not None:
         student = state.find_student(helper.student_id)
         if student and state.iserv:
             try:
                 info = await state.iserv.get_student_info(helper.student_id, state.selected_schoolyear)
                 info["form"] = student.form
-                info["book_order"] = state.book_order
+                book_order = await get_book_order_for_form(state, student.form)
+                info["book_order"] = book_order
                 helper.expected_isbns = expected_isbns_from_info(info)
                 helper.vormerk_isbns, helper.lent_isbns = booking_isbn_sets_from_info(info)
                 await websocket.send_json({"type": "student_info", "student": info})
@@ -87,18 +94,27 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
     else:
         await websocket.send_json({"type": "waiting", "msg": "Warte auf Schüler-Zuweisung", "queue_size": state.pending_count()})
 
-    # Host-Default „Schüler-Leihschein" (Druck-Dialog) + klassenweite Bücher-Reihenfolge.
+    # Host-Default „Schüler-Leihschein" (Druck-Dialog) + Bücher-Reihenfolge.
     await websocket.send_json({
         "type": "settings",
         "slip_second_page": state.slip_second_page_default,
-        "book_order": state.book_order,
+        "book_order": book_order,
     })
 
     await hub.broadcast_host(state.state_snapshot())
 
     try:
         while True:
-            raw = await websocket.receive_json()
+            try:
+                raw = await websocket.receive_json()
+            except WebSocketDisconnect:
+                break
+            except json.JSONDecodeError:
+                # Malformedes Frame (kein valides JSON) — nicht tödlich, Client
+                # bleibt verbunden. Loggen und ignorieren, statt die Schleife
+                # mit einem rohen Traceback sterben zu lassen.
+                log.warning("Ungültiges JSON-Frame vom Scanner-WS (token=%s) — ignoriert", token)
+                continue
             mtype = raw.get("type")
 
             if mtype == "next":
@@ -265,7 +281,7 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
             info = await state.iserv.get_student_info(session.student_id, state.selected_schoolyear)
             qs = state.find_student(session.student_id)
             info["form"] = qs.form if qs else ""
-            info["book_order"] = state.book_order
+            info["book_order"] = await get_book_order_for_form(state, info["form"])
             session.expected_isbns = expected_isbns_from_info(info)
             session.vormerk_isbns, session.lent_isbns = booking_isbn_sets_from_info(info)
             await websocket.send_json({
@@ -280,7 +296,16 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
 
     try:
         while True:
-            raw = await websocket.receive_json()
+            try:
+                raw = await websocket.receive_json()
+            except WebSocketDisconnect:
+                break
+            except json.JSONDecodeError:
+                # Malformedes Frame — loggen und weiterlauschen, statt die
+                # Schleife mit Traceback sterben zu lassen.
+                log.warning("Ungültiges JSON-Frame vom Schüler-WS (session=%s) — ignoriert",
+                            getattr(session, "session_token", "?"))
+                continue
             session.last_activity = datetime.now()
             mtype = raw.get("type")
 

@@ -82,13 +82,13 @@ def test_require_host_accepts_valid_session(ctx):
 
 def test_login_wrong_password(ctx):
     with pytest.raises(HTTPException) as ei:
-        run(api.login({"password": "nope"}, Response()))
+        run(api.login({"password": "nope"}, Response(), request=None))
     assert ei.value.status_code == 403
 
 
 def test_login_correct_password_sets_session(ctx):
     state, _, _ = ctx
-    res = run(api.login({"password": "secret"}, Response()))
+    res = run(api.login({"password": "secret"}, Response(), request=None))
     assert res == {"ok": True}
     # Genau eine neue Host-Session zusätzlich zur fixture-'sid'.
     assert len(state.host_sessions) == 2
@@ -200,8 +200,14 @@ class _FakeRequest:
         self.headers = {"host": host}
 
 
-def test_base_url_keeps_routable_host(ctx):
-    assert api._base_url(_FakeRequest("192.168.0.5:3443")) == "https://192.168.0.5:3443"
+def test_base_url_ignores_spoofed_host_header_uses_config_ip(ctx):
+    """Der Host-Header-Hostname darf NICHT in die QR-URL wandern (trägt join_secret).
+    Nur der Port aus dem Host-Header übernommen; Hostname aus cfg.host_ip."""
+    _, cfg, _ = ctx
+    cfg.host_ip = "10.0.0.9"   # deterministischer Override
+    url = api._base_url(_FakeRequest("evil.example:3443"))
+    assert url == "https://10.0.0.9:3443"
+    assert "evil.example" not in url
 
 
 def test_base_url_rewrites_localhost(ctx, monkeypatch):
