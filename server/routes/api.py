@@ -424,14 +424,18 @@ async def add_student_to_queue(body: dict, session_id: str | None = Cookie(defau
 # Namenssuche ermittelt, siehe Git-Historie). Klassen-Angabe nur informativ —
 # die Queue arbeitet rein über student_id.
 #
-# Privacy: Die echte Namens-/ID-Liste liegt in der gitignored Lokal-Datei
-# `tests/test_students.local.json` (pro Entwickler:in). Fehlt sie oder ist sie
-# nicht parsebar, fällt TEST_STUDENTS auf einen sicheren Default zurück, der
-# nur den freigegebenen Testschüler Niklas Müller enthält — in server/ source
-# stehen keine weiteren realen Schülerdaten.
+# Die vier Testschüler stehen bewusst im Source (Niklas = freigegebener
+# Testschüler für Buchungstests; Lukas/Lucas/Finn = Mitentwickler/Mitschüler
+# für Queue-/UI-Tests, keine Buchung). Eine optionale pro-Entwickler:in-
+# Override-Datei `tests/test_students.local.json` (gitignored) kann die Liste
+# ersetzen — fehlt sie, gilt dieser Default. Buchungen gegen Produktion werden
+# ohnehin nur mit Niklas + expliziter Freigabe gefahren (CLAUDE.md).
 _TEST_STUDENTS_FILE = Path(__file__).resolve().parent.parent.parent / "tests" / "test_students.local.json"
 _TEST_STUDENTS_DEFAULT = [
     {"student_id": 2159, "firstname": "Niklas", "lastname": "Müller", "form": "Klasse 12Slw"},
+    {"student_id": 2164, "firstname": "Lukas", "lastname": "Podleschny", "form": "Klasse 12Mk"},
+    {"student_id": 2167, "firstname": "Lucas", "lastname": "Stolpe", "form": "Klasse 12Slw"},
+    {"student_id": 2415, "firstname": "Finn", "lastname": "Podleschny", "form": "Klasse 10c"},
 ]
 
 
