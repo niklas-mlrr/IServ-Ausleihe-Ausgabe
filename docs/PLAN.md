@@ -181,14 +181,24 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
 - [x] E2E-Smoke headless (read-only): voller Modus-A-Flow Host→Scanner→Worker→Kartei→staged — 2026-06-15 (`automation/e2e_smoke.py`)
 - [x] 2-Helfer-Paralleltest: zwei Schüler gleichzeitig aktiv, beide Karteien parallel, unabhängiges Staging — 2026-06-15 (`automation/e2e_parallel.py`)
 - [x] Pool-Härtung: fehlgeschlagene Worker-Logins werden in `start()` einmal nachgezogen, geleakte Contexts geschlossen — 2026-06-15
-      - **Release-Race-Fix 2026-07-05:** `release_worker` gibt Contexts asynchron
-        via `create_task(pool.release(…))` zurück; `release()` schließt erst die
-        Page und hängt den Context dann erst wieder in den Pool. Bei schnellem
-        Weiterklicken am Helfer kam `open_student` an, bevor die Release-Task
-        fertig war → Pool leer → „Kein freier Worker-Context verfügbar"
-        (False-Positive). Fix: `WorkerPool._lock` → `asyncio.Condition`;
-        `open_student` wartet bis 12 s via `cond.wait_for(lambda: pool)` statt
-        sofort zu werfen; `release`/`check_selectors` rufen `notify_all()`.
+      - **Leak-Fix bei schnellem „Weiter"-Klicken 2026-07-05:** Wahrer Grund
+        war ein permanenter Context-Leak, nicht nur eine Race.
+        `load_and_push_helper_student` läuft als `create_task`; `open_student`
+        pop'd einen Context und lief in `load_card()` (~5 s), aber erst
+        **nach** Return registrierte `set_worker_session` den Worker in
+        `student_worker_sessions[id]`. „Weiter" vor `load_card`-Ende →
+        `end_student(id)` → `pop(id)` → None → nichts freigegeben → Context
+        geleakt. Bei `WORKER_CONTEXTS=2` und zwei schnellen Klicks Pool
+        dauerhaft leer (jeder weitere Schüler: 12 s Timeout). Fix (gekoppelt):
+        (a) `open_student`: `except Exception` → `except BaseException` —
+        `CancelledError` ist seit Py3.8 `BaseException`, der alte Code ließ
+        den Context beim Cancel durchrutschen; Handler gibt Context +
+        `notify_all()` zurück. (b) `load_task`-Feld an `HelperSession`/
+        `StudentSessionB`; `end_student`/`invalidate_session` canceln den
+        laufenden Lade-Task → Context kommt zurück. Zusätzlich (mildere Race)
+        `WorkerPool._lock` → `asyncio.Condition`, `open_student` wartet bis
+        12 s statt sofort zu werfen. Regressionstests in
+        `tests/test_worker_pool.py` + `tests/test_queue_flow.py`.
         Siehe `_logs/2026-07-05_sba_worker_pool_release_race.md`.
 - [x] Buchender Submit-Pfad als Code vorhanden, **dreifach gated** — 2026-06-15:
       `commit_barcode()` (Enter+Result-Parse) + `handle_commit()` + Endpoint

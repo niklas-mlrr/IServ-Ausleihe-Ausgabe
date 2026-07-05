@@ -376,9 +376,16 @@ class WorkerPool:
         )
         try:
             await session.load_card()
-        except Exception as e:
-            log.warning("load_card für %d fehlgeschlagen: %s", student_id, e)
-            await page.close()
+        except BaseException as e:  # noqa: BLE001 — inkl. CancelledError!
+            # Wird der Task während load_card abgebrochen (z. B. „Weiter" am
+            # Helfer, bevor open_student zurückkam), MUSS der Context zurück in
+            # den Pool — sonst leakt er. `except Exception` fängt CancelledError
+            # (seit Py3.8 BaseException) nicht, daher hier BaseException.
+            log.warning("load_card für %d fehlgeschlagen/abgebrochen: %s", student_id, e)
+            try:
+                await page.close()
+            except Exception:
+                pass
             async with self._cond:
                 self._contexts.append(context)
                 self._cond.notify_all()

@@ -314,7 +314,8 @@ async def set_class_book_order(body: dict, session_id: str | None = Cookie(defau
 
     Beschränkt die übergebene Reihenfolge auf die Katalog-ISBNs (unbekannte werden
     ignoriert) und hängt fehlende Katalog-ISBNs hinten an (Vollständigkeit). Pusht
-    die neue Reihenfolge live an verbundene Scanner (`broadcast_settings`).
+    die neue Reihenfolge live an verbundene Scanner (`broadcast_settings`) und an
+    den Host selbst (`broadcast_host`), damit die eigene Anzeige synchron bleibt.
     """
     _require_host(session_id)
     state = get_state()
@@ -337,7 +338,9 @@ async def set_class_book_order(body: dict, session_id: str | None = Cookie(defau
     # Einstellungen-Dialog dieselbe Datenbasis nutzt.
     if state.class_catalog_grade is not None:
         state.book_orders_by_grade[state.class_catalog_grade] = list(order)
-    await get_hub().broadcast_settings()
+    hub = get_hub()
+    await hub.broadcast_settings()
+    await hub.broadcast_host(state.state_snapshot())
     return {"ok": True, "order": order}
 
 
@@ -383,7 +386,9 @@ async def set_booklist_order(
     """Jahrgangsweite Bücher-Reihenfolge (aus dem Einstellungen-Dialog) speichern.
 
     Reiner In-Memory-State (kein DB-/IServ-Write). Gehört die aktuell geladene
-    Klasse zu diesem Jahrgang, wird die aktive Scanner-Reihenfolge live nachgezogen.
+    Klasse zu diesem Jahrgang, wird die aktive Scanner-Reihenfolge live nachgezogen
+    — auch am Host selbst (`broadcast_host`), damit die Klassen-Karte in der
+    Vorbereitung nicht die alte Reihenfolge zeigt, bis man "Neu laden" klickt.
     """
     _require_host(session_id)
     state = get_state()
@@ -404,7 +409,9 @@ async def set_booklist_order(
     # Aktive Klasse desselben Jahrgangs? -> Scanner-Reihenfolge live nachziehen.
     if state.class_catalog_grade == grade:
         state.book_order = list(order)
-        await get_hub().broadcast_settings()
+        hub = get_hub()
+        await hub.broadcast_settings()
+        await hub.broadcast_host(state.state_snapshot())
     return {"ok": True, "grade": grade, "order": order}
 
 
@@ -624,7 +631,9 @@ async def next_student(body: dict, session_id: str | None = Cookie(default=None)
     helper.student_id = student.student_id
 
     await hub.broadcast_host(state.state_snapshot())
-    asyncio.create_task(load_and_push_helper_student(state, hub, student, helper))
+    helper.load_task = asyncio.create_task(
+        load_and_push_helper_student(state, hub, student, helper)
+    )
 
     return {"ok": True, "student_id": student.student_id,
             "name": f"{student.lastname}, {student.firstname}"}
@@ -1014,7 +1023,9 @@ async def student_pair(body: dict, session_id: str | None = Cookie(default=None)
     # Der QR bleibt unverändert; bereits angezeigte Displays brauchen kein Update.
 
     await hub.broadcast_host(state.state_snapshot())
-    asyncio.create_task(load_and_push_paired_student(state, hub, session, student, info))
+    session.load_task = asyncio.create_task(
+        load_and_push_paired_student(state, hub, session, student, info)
+    )
     return {"ok": True, "student_id": student_id}
 
 

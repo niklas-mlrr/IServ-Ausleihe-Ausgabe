@@ -346,6 +346,11 @@ async def invalidate_session(
         return
     session.state = new_state  # type: ignore[assignment]
 
+    # In-flight Lade-Task abbrechen — sonst leakt der Worker-Context, wenn
+    # open_student noch in load_card steckt (s. end_student / worker.py).
+    if session.load_task is not None and not session.load_task.done():
+        session.load_task.cancel()
+
     # Worker-Context zurück in den Pool (falls vorhanden).
     if session.student_id is not None:
         worker = state.student_worker_sessions.pop(session.student_id, None)
@@ -394,6 +399,14 @@ async def end_student(
         student.assigned_helper = None
         if old_helper and old_helper in state.helper_sessions:
             h = state.helper_sessions[old_helper]
+            # In-flight Lade-Task abbrechen, damit ein noch laufendes
+            # open_student seinen Worker-Context zurückgibt (BaseException-
+            # Handler in worker.py). Sonst leakt der Context, weil er erst
+            # nach open_student in student_worker_sessions registriert wird
+            # und pop() unten Nothing fände — Pool läuft unter schnellem
+            # „Weiter"-Klicken leer.
+            if h.load_task is not None and not h.load_task.done():
+                h.load_task.cancel()
             h.student_id = None
             h.expected_isbns = set()
             h.vormerk_isbns = set()
@@ -475,7 +488,9 @@ async def advance_helper(state: AppState, hub, helper) -> dict:
     student.assigned_helper = helper.token
     helper.student_id = student.student_id
     await hub.broadcast_host(state.state_snapshot())
-    asyncio.create_task(load_and_push_helper_student(state, hub, student, helper))
+    helper.load_task = asyncio.create_task(
+        load_and_push_helper_student(state, hub, student, helper)
+    )
     return {"ok": True, "student_id": student.student_id}
 
 

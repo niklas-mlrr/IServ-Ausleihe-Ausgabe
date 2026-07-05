@@ -146,6 +146,56 @@ def test_end_student_releases_worker_without_session():
 
 
 # ---------------------------------------------------------------------------
+# end_student — In-flight Lade-Task abbrechen (Leak-Fix 2026-07-05)
+# ---------------------------------------------------------------------------
+
+class _FakeTask:
+    """Steht für einen laufenden load_and_push_helper_student-Task."""
+
+    def __init__(self) -> None:
+        self.cancelled = False
+
+    def done(self) -> bool:
+        return False
+
+    def cancel(self) -> None:
+        self.cancelled = True
+
+
+def test_end_student_cancels_inflight_load_task():
+    """end_student muss den laufenden Lade-Task des Helfers canceln — sonst
+    leakt dessen Worker-Context (open_student noch nicht registriert)."""
+    st = _state_with_iserv()
+    hub = _FakeHub()
+    student = _add_student(st, 7, status="active")
+    helper = HelperSession(token="h1", name="Helfer", student_id=7)
+    student.assigned_helper = "h1"
+    st.helper_sessions["h1"] = helper
+
+    task = _FakeTask()
+    helper.load_task = task
+
+    asyncio.run(end_student_call(st, hub, 7, "done", "completed"))
+
+    assert task.cancelled is True
+
+
+def test_invalidate_cancels_inflight_load_task():
+    """invalidate_session (Modus B) muss den Lade-Task canceln — gleicher Leak."""
+    st = AppState()
+    sess = sessions.create_student_session(st)
+    sess.student_id = 3
+    sess.state = "paired"
+
+    task = _FakeTask()
+    sess.load_task = task
+
+    asyncio.run(_invalidate_and_drain(st, sess))
+
+    assert task.cancelled is True
+
+
+# ---------------------------------------------------------------------------
 # advance_helper — Helfer auf nächsten Wartenden setzen
 # ---------------------------------------------------------------------------
 

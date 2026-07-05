@@ -56,6 +56,11 @@ class HelperSession:
     # beides vereint und die Buchbarkeit nicht unterscheiden kann.
     vormerk_isbns: set[str] = field(default_factory=set)
     lent_isbns: set[str] = field(default_factory=set)
+    # In-flight Lade-Task (load_and_push_helper_student). Wird beim Abbruch
+    # des Schülers (end_student) cancel'd, damit ein noch laufendes open_student
+    # seinen Worker-Context zurückgibt — sonst leakt der Context, weil er erst
+    # nach open_student in student_worker_sessions registriert wird.
+    load_task: object | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -90,6 +95,9 @@ class StudentSessionB:
     # Buchungs-Vorabprüfung (Freigabe 2026-07-02) — s. HelperSession.
     vormerk_isbns: set[str] = field(default_factory=set)
     lent_isbns: set[str] = field(default_factory=set)
+    # In-flight Lade-Task (load_and_push_paired_student) — cancel bei
+    # invalidate_session, sonst leakt der Worker-Context (s. HelperSession).
+    load_task: object | None = None
     created_at: datetime = field(default_factory=datetime.now)
     paired_at: datetime | None = None
     last_activity: datetime = field(default_factory=datetime.now)
