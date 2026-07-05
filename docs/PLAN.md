@@ -399,3 +399,27 @@ Umsetzung:
 `_read_booking_result()` sind bis zum ersten freigegebenen Realtest **unverifiziert**
 (nur ein „booked" aus dem DOM gilt als Erfolg; „unknown" täuscht keine Buchung vor).
 Vor Scharfschalten: ausgemustertes Buch + Rückbau-Plan.
+
+**Update (2026-07-05) — Ausgemustert-Prüfung vorgezogen:** `book["deleted"]`
+wird jetzt als **erste** Bedingung geprüft, noch vor „bestellt & Reihe nicht
+ausgeliehen" — eigener Status `"book_deleted"`, unabhängig davon, ob der
+Schüler das Buch überhaupt bestellt hat. Grund: ein ausgemustertes Buch soll
+sofort als solches erkennbar sein, statt hinter „nicht bestellt" versteckt zu
+werden. Die Bedingung „im Lager" (`not_in_stock`) prüft jetzt nur noch
+`distributed`/`available`, `deleted` läuft separat vorher. Sichtbarkeit:
+`process_scan()` broadcastet bei `book_deleted` einen
+`{"type": "book_deleted_alert"}` an alle Host-WS-Verbindungen (roter Toast in
+`web/host.html`); der Scanner (`web/scan.html`) färbt die Statuszeile rot
+(`status-book-deleted`). Tests: `tests/test_booking_precheck.py`
+(`test_reject_deleted_before_not_enrolled`,
+`test_reject_deleted_before_not_in_stock`).
+
+**Bugfix (2026-07-05) — Scanner reagiert nicht auf Host-Trennung:**
+`end_student()` löste die Helfer-Zuordnung serverseitig, informierte aber nie
+den Scanner-WebSocket selbst — `web/scan.html` hat keinen Host-State-Feed und
+reagiert nur auf gezielt gepushte Nachrichten. Betraf „Trennen" **und** „Alle
+Verbindungen trennen". Fix: `end_student()` schickt jetzt zusätzlich
+`hub.send_scanner(old_helper, {"type": "waiting", ...})` an den betroffenen
+Helfer. **Lesson:** jede neue serverseitige Aktion, die einen Helfer-Zustand
+ändert, braucht einen expliziten `send_scanner`-Push — ein
+`broadcast_host`-Aufruf allein erreicht den Scanner nicht.
