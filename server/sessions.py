@@ -154,6 +154,18 @@ async def evaluate_scan_for_booking(
     isbn = book["isbn"]
     title = book.get("title") or isbn
 
+    # Ausgemustert-Prüfung ZUERST — noch vor der Anmeldeprüfung, damit ein
+    # ausgemustertes Buch immer als solches erkannt wird, auch wenn der Schüler
+    # es gar nicht bestellt hat. Muss am Scanner (rot) und am Host sichtbar sein.
+    if book["deleted"]:
+        return {
+            "ok": False,
+            "status": "book_deleted",
+            "msg": f"Buch ausgemustert: {title}",
+            "isbn": isbn,
+            "title": title,
+        }
+
     # Bedingung 2: bestellt UND Reihe noch nicht ausgeliehen.
     if isbn not in vormerk_isbns:
         if isbn in lent_isbns:
@@ -173,11 +185,11 @@ async def evaluate_scan_for_booking(
         }
 
     # Bedingung 1: Buch im Lager.
-    if book["deleted"] or book["distributed"] or not book["available"]:
+    if book["distributed"] or not book["available"]:
         return {
             "ok": False,
             "status": "not_in_stock",
-            "msg": f"Nicht im Lager (verliehen/ausgesondert): {title}",
+            "msg": f"Nicht im Lager (verliehen): {title}",
             "isbn": isbn,
             "title": title,
         }
@@ -204,6 +216,15 @@ async def process_scan(
     """
     decision = await evaluate_scan_for_booking(state, vormerk_isbns, lent_isbns, barcode)
     if not decision["ok"]:
+        if decision["status"] == "book_deleted":
+            student = state.find_student(student_id)
+            await get_hub().broadcast_host({
+                "type": "book_deleted_alert",
+                "barcode": barcode,
+                "isbn": decision.get("isbn"),
+                "title": decision.get("title"),
+                "student": f"{student.lastname}, {student.firstname}" if student else None,
+            })
         return {
             "status": decision["status"],
             "msg": decision["msg"],
@@ -377,6 +398,14 @@ async def end_student(
             h.expected_isbns = set()
             h.vormerk_isbns = set()
             h.lent_isbns = set()
+            # Scanner sonst ohne jede Rückmeldung mit dem alten (getrennten)
+            # Schüler stehen — der Helfer sieht dann weder Trennung noch neuen
+            # Wartezustand ("Alle Verbindungen trennen" wirkte sonst nur am Host).
+            await hub.send_scanner(old_helper, {
+                "type": "waiting",
+                "msg": "Warte auf Schüler-Zuweisung",
+                "queue_size": state.pending_count(),
+            })
 
     session = state.find_session_by_student(student_id)
     if session:

@@ -74,6 +74,18 @@ def test_reject_series_already_lent():
     assert res["status"] == "series_already_lent"
 
 
+def test_reject_deleted_before_not_enrolled():
+    # Ausgemustert (deleted) UND nicht bestellt -> "book_deleted" muss VOR der
+    # Anmeldeprüfung greifen (ToDo: sofort erkennbar, egal ob bestellt).
+    res = _eval(_State(_FakeIserv(_book(isbn="978-9", deleted=True))), {"978-1"}, set())
+    assert res["ok"] is False and res["status"] == "book_deleted"
+
+
+def test_reject_deleted_before_not_in_stock():
+    res = _eval(_State(_FakeIserv(_book(deleted=True, distributed=True))), {"978-1"}, set())
+    assert res["ok"] is False and res["status"] == "book_deleted"
+
+
 def test_reject_not_enrolled():
     # ISBN weder vorgemerkt noch ausgeliehen, aber Liste ist geladen (andere ISBN).
     res = _eval(_State(_FakeIserv(_book(isbn="978-9"))), {"978-1"}, set())

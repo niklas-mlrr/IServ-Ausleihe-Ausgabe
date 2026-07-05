@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <title>Barcode Scanner</title>
+  <link rel="icon" type="image/png" href="/favicon.png">
   <script src="/html5-qrcode.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -102,6 +103,8 @@
     .dot { display: none; }
     .dot.ok { background: #4caf50; }
     .dot.err { background: #f44336; }
+    /* Ausgemustertes Buch gescannt — deutlich in Rot in der Statuszeile. */
+    #status-text.status-book-deleted { color: #f44336; font-weight: 700; }
 
     /* ---- Name (groß, ohne Box) + Klasse/Bezahlstatus rechtsbündig ---- */
     .name-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 12px 2px 8px; }
@@ -357,6 +360,7 @@
         currentBooks = s.books || [];
         resetScannedState();
         renderBooks(currentBooks);
+        statusEl.classList.remove('status-book-deleted');
         statusEl.textContent = 'Scanner bereit — Buch scannen';
       } else if (msg.type === 'scan_result') {
         if (pendingScans > 0) pendingScans--;
@@ -369,6 +373,9 @@
           renderBooks(currentBooks);
         }
         drainScanWaiters();
+        // Ausgemustertes Buch (im System gelöscht) → Statuszeile deutlich rot,
+        // Prüfung greift server-seitig noch vor der Anmeldeprüfung.
+        statusEl.classList.toggle('status-book-deleted', msg.status === 'book_deleted');
         statusEl.textContent = `${escapeHtml(msg.barcode)} — ${escapeHtml(msg.msg || msg.status)}`;
       } else if (msg.type === 'settings') {
         slipSecondPageDefault = !!msg.slip_second_page;
@@ -397,6 +404,7 @@
         resetScannedState();
         pendingScans = 0;
         drainScanWaiters();
+        statusEl.classList.remove('status-book-deleted');
         if (typeof msg.queue_size === 'number') queueSize = msg.queue_size;
         if (msg.msg) waitingMsg = msg.msg;
         renderWaitingStatus();
@@ -462,6 +470,7 @@
       bookRowsEl.innerHTML = '';
       currentBooks = [];
       resetScannedState();
+      statusEl.classList.remove('status-book-deleted');
       statusEl.textContent = 'Wird geladen…';
       ws.send(JSON.stringify({ type: 'next' }));
     }

@@ -104,6 +104,13 @@ def test_end_student_sets_status_and_releases_helper():
     assert student.assigned_helper is None
     assert helper.student_id is None       # Helfer wieder frei
     assert hub.host_broadcasts == 1
+    # Scanner muss aktiv über die Trennung informiert werden ("Alle
+    # Verbindungen trennen" wirkte sonst nur am Host, der Helfer sah nichts).
+    assert hub.scanner_msgs == [("h1", {
+        "type": "waiting",
+        "msg": "Warte auf Schüler-Zuweisung",
+        "queue_size": st.pending_count(),
+    })]
 
 
 def test_end_student_invalidates_modus_b_session_and_releases_worker():

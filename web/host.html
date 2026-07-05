@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Ausleihe-Host</title>
+  <link rel="icon" type="image/png" href="/favicon.png">
   <style>
     /* Farb-Palette als CSS-Variablen — Dark als Default, Light per
        prefers-color-scheme (System-Einstellung) weiter unten überschrieben.
@@ -304,6 +305,7 @@
       transition: opacity .2s, transform .2s;
     }
     .toast.show { opacity: 1; transform: translateY(0); }
+    .toast-warn { background: #c0392b; color: #fff; font-weight: 600; }
     /* Sticky Tabellenkopf — klebt am oberen Rand des .table-scroll-Containers.
        border-collapse:separate, sonst bleibt der th-Hintergrund nicht deckend (Chrome-Bug). */
     #queue-table { border-collapse: separate; border-spacing: 0; }
@@ -705,6 +707,7 @@
     ws.onmessage = e => {
       const msg = JSON.parse(e.data);
       if (msg.type === 'state') applyState(msg);
+      else if (msg.type === 'book_deleted_alert') showBookDeletedAlert(msg);
     };
   }
 
@@ -843,7 +846,10 @@
     const name = document.getElementById('helper-name').value || 'Helfer';
     const r = await fetch('/api/add-helper', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ name }) });
     const d = await r.json();
-    if (r.ok) showQr(d.qr, d.url);
+    if (r.ok) {
+      qrWatch = { kind: 'helper', token: d.token };
+      showQr(d.qr, d.url);
+    }
   }
 
   async function removeHelper(token) {
@@ -1242,9 +1248,14 @@
   }
 
   // QR-Popup automatisch schließen, sobald der gezeigte Code gescannt wurde
-  // (neuer Pairing-Code beim Schüler-QR bzw. neues Display beim iPad-QR).
+  // (neuer Pairing-Code beim Schüler-QR, neues Display beim iPad-QR, bzw. der
+  // Helfer sich erfolgreich verbunden hat).
   function maybeCloseQrOnScan() {
     if (!qrWatch) return;
+    if (qrWatch.kind === 'helper') {
+      if ((state.helpers || {})[qrWatch.token]?.connected) closeQr();
+      return;
+    }
     const mb = state.modus_b || {};
     const grown = qrWatch.kind === 'student'
       ? (mb.pending_count || 0) > qrWatch.baseline
@@ -1394,11 +1405,17 @@
     if (_modalPrevFocus) { _modalPrevFocus.focus(); _modalPrevFocus = null; }
   }
 
+  // Ausgemustertes Buch wurde am Scanner gescannt — deutlich sichtbar melden.
+  function showBookDeletedAlert(msg) {
+    const who = msg.student ? ` (${escapeHtml(msg.student)})` : '';
+    showMsg(`Ausgemustertes Buch gescannt: ${escapeHtml(msg.title || msg.barcode)}${who}`, 'warn');
+  }
+
   // ---- Util: Toast-Stack (mehrere Meldungen gleichzeitig) ----
-  function showMsg(text) {
+  function showMsg(text, variant) {
     const stack = document.getElementById('toast-stack');
     const t = document.createElement('div');
-    t.className = 'toast';
+    t.className = 'toast' + (variant ? ` toast-${variant}` : '');
     t.textContent = text;
     stack.appendChild(t);
     requestAnimationFrame(() => t.classList.add('show'));
