@@ -225,6 +225,13 @@ async def select_class(body: dict, session_id: str | None = Cookie(default=None)
         )
         for s in students
     ]
+    # Katalog + Bücher-Reihenfolge sofort aufbauen (übernimmt eine im
+    # Einstellungen-Dialog vorkonfigurierte Reihenfolge automatisch für den
+    # Scanner) — Fehler hier sind nicht fatal, die Klasse bleibt trotzdem geladen.
+    try:
+        await _ensure_class_catalog(state)
+    except Exception:
+        log.exception("Klassen-Bücherkatalog konnte beim Klassenwechsel nicht vorgebaut werden")
     await hub.broadcast_host(state.state_snapshot())
     return {"ok": True, "count": len(state.queue)}
 
@@ -246,7 +253,9 @@ async def students_for_class(form: str, session_id: str | None = Cookie(default=
 
 
 # ---------------------------------------------------------------------------
-# Klassenweite Bücher-Reihenfolge (Scanner-Anzeige, per Drag & Drop am Host)
+# Klassenweite Bücher-Reihenfolge (Scanner-Anzeige) — konfiguriert wird sie nur
+# noch jahrgangsweit im Einstellungen-Dialog (`/api/booklist-order`); hier nur
+# noch der Katalog-Aufbau für die aktive Klasse (`select_class` ruft ihn auf).
 # ---------------------------------------------------------------------------
 
 def normalize_book_order(catalog_isbns: list[str], requested: list) -> list[str]:
@@ -286,62 +295,6 @@ async def _ensure_class_catalog(state) -> None:
         state.book_order = normalize_book_order(catalog_isbns, stored)
     elif not state.book_order:
         state.book_order = catalog_isbns
-
-
-@router.get("/api/class-book-order")
-async def get_class_book_order(session_id: str | None = Cookie(default=None)) -> dict:
-    """Katalog aller in der aktiven Klasse bestellten Bücher + aktuelle Reihenfolge.
-
-    Read-only. Baut den Katalog beim ersten Aufruf pro Klasse (mehrere GETs gegen
-    IServ) und cached ihn; `book_order` wird dabei mit der Default-Reihenfolge
-    initialisiert.
-    """
-    _require_host(session_id)
-    state = get_state()
-    if not state.active_form:
-        raise HTTPException(400, "Keine Klasse geladen")
-    try:
-        await _ensure_class_catalog(state)
-    except Exception as e:
-        log.exception("Klassen-Bücherkatalog konnte nicht geladen werden")
-        raise HTTPException(502, f"IServ-Fehler: {e}")
-    return {"form": state.active_form, "catalog": state.class_catalog, "order": state.book_order}
-
-
-@router.post("/api/class-book-order")
-async def set_class_book_order(body: dict, session_id: str | None = Cookie(default=None)) -> dict:
-    """Neue Bücher-Reihenfolge für die aktive Klasse speichern.
-
-    Beschränkt die übergebene Reihenfolge auf die Katalog-ISBNs (unbekannte werden
-    ignoriert) und hängt fehlende Katalog-ISBNs hinten an (Vollständigkeit). Pusht
-    die neue Reihenfolge live an verbundene Scanner (`broadcast_settings`) und an
-    den Host selbst (`broadcast_host`), damit die eigene Anzeige synchron bleibt.
-    """
-    _require_host(session_id)
-    state = get_state()
-    if not state.active_form:
-        raise HTTPException(400, "Keine Klasse geladen")
-    try:
-        await _ensure_class_catalog(state)
-    except Exception as e:
-        log.exception("Klassen-Bücherkatalog konnte nicht geladen werden")
-        raise HTTPException(502, f"IServ-Fehler: {e}")
-
-    requested = body.get("order")
-    if not isinstance(requested, list):
-        raise HTTPException(400, "order (Liste) erforderlich")
-
-    catalog_isbns = [b["isbn"] for b in state.class_catalog]
-    state.book_order = normalize_book_order(catalog_isbns, requested)
-    order = state.book_order
-    # Jahrgangsweite Reihenfolge konsistent halten, damit die Vorkonfiguration im
-    # Einstellungen-Dialog dieselbe Datenbasis nutzt.
-    if state.class_catalog_grade is not None:
-        state.book_orders_by_grade[state.class_catalog_grade] = list(order)
-    hub = get_hub()
-    await hub.broadcast_settings()
-    await hub.broadcast_host(state.state_snapshot())
-    return {"ok": True, "order": order}
 
 
 @router.get("/api/booklists")

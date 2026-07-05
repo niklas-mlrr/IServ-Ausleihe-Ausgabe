@@ -5,7 +5,9 @@
 
 ## 1. Voraussetzungen
 
-- **[uv](https://docs.astral.sh/uv/)** (Python-Toolchain; installiert Python ≥3.12 selbst).
+- **[uv](https://docs.astral.sh/uv/)** (Python-Toolchain; installiert Python ≥3.12 selbst,
+  kein separates Python/Node.js nötig). `setup.bat` installiert `uv` unter Windows
+  automatisch, falls es fehlt (macOS/Linux: siehe uv-Doku).
 - Das Schwesterprojekt **`ausleihe-api`** als Checkout unter `../ausleihe-api`
   (editable Dependency, siehe `pyproject.toml`).
 - Netz: Gerät im **Schul-WLAN**; Handys/iPad erreichen es unter `https://<IP>:3443`.

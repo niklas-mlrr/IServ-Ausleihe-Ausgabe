@@ -279,6 +279,29 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
         Key. Speichern für den Jahrgang der geladenen Klasse zieht `book_order`
         live nach (`broadcast_settings`). Alles nur GET/In-Memory, kein DB-Write.
         Tests: `tests/test_class_book_order.py` erweitert (Suite 79 grün).
+- [x] **Karte „Bücher-Reihenfolge (Scanner)" entfernt** (2026-07-05) — mit dem
+      Einstellungen-Dialog (s.o.) war sie funktional komplett redundant (gleicher
+      Katalog, gleiche `book_orders_by_grade`-Ablage), zeigte aber zwei Bugs:
+      (1) `POST /api/booklist-order` pushte nur per `broadcast_settings` an die
+      Scanner-Helfer-Sessions, nie per `broadcast_host` an den Host selbst — eine
+      im Einstellungen-Dialog gespeicherte Reihenfolge aktualisierte weder die
+      (jetzt entfernte) Klassen-Karte noch `state.book_order` am Host live, bevor
+      man neu geladen hat. Fix: beide Bücher-Reihenfolge-POST-Endpunkte rufen
+      jetzt zusätzlich `broadcast_host(state.state_snapshot())`.
+      (2) `_ensure_class_catalog` (seedet `book_order` aus `book_orders_by_grade`)
+      wurde bisher nur durch den Klick auf „Bücher laden & anordnen" ausgelöst —
+      ohne den Klick blieb `book_order` leer, auch wenn im Einstellungen-Dialog
+      längst eine Reihenfolge vorkonfiguriert war. Fix: `select_class` ruft
+      `_ensure_class_catalog` jetzt automatisch auf, Fehler dabei sind nicht
+      fatal (Klasse bleibt geladen, `book_order` bleibt leer wie bisher ohne
+      Klick). Damit greift eine vorab im Einstellungen-Dialog gesetzte
+      Reihenfolge sofort beim Klassenwechsel, ganz ohne Zusatzklick.
+      `GET|POST /api/class-book-order` + zugehöriges Frontend (`web/host.html`:
+      `boOrder`/`loadBookOrder`/`renderBookOrderList`/Drag-Handler/`saveBookOrder`/
+      `syncBookOrderCard`) entfernt; `normalize_book_order`/`_ensure_class_catalog`
+      bleiben (jetzt einzig von `select_class` genutzt). Bestehende Tests
+      (`tests/test_class_book_order.py`) testen nur die Katalog-/Normalisierungs-
+      Logik, nicht die entfernten Endpunkte — unverändert grün (Suite 92).
 - [ ] End-to-End-Test mit ausgemusterten Büchern **inkl. Buchung** (wartet auf Buchungstest-Freigabe Niklas + Lukas)
 
 ### Phase 3 — Generalprobe Teil 1 (vor Ferienbeginn, Anfang Juli)
@@ -286,6 +309,12 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
 - [x] Deployment-Packaging (→ O7): `setup.bat`/`start.bat`/`start.sh` +
       `docs/deployment.md` (Windows + Macbook, USB-Drucker) — 2026-06-15.
       Lauf am echten Ausleihe-Laptop noch offen (`docs/test_status.md`).
+      2026-07-05: `setup.bat` installiert **`uv` jetzt automatisch** (offizieller
+      Installer via `powershell -Command "irm https://astral.sh/uv/install.ps1 | iex"`,
+      PATH für die laufende Sitzung ergänzt), falls es fehlt — vorher brach das
+      Skript mit einer reinen Anleitung ab. `uv sync` lädt bei Bedarf selbst eine
+      passende Python-Version; Node.js wird im Projekt nirgends gebraucht (kein
+      `package.json`) — einzige externe Abhängigkeit war/ist `uv` selbst.
 - [ ] Probelauf im Schul-WLAN mit echtem Drucker
 - [ ] Helfer-Kurzanleitung (1 Seite) + dokumentierter Fallback auf USB-Scanner
 - [ ] **Meilenstein: Einsatz bei der Stapelerstellung**
