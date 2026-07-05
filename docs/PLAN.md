@@ -200,6 +200,33 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
         12 s statt sofort zu werfen. Regressionstests in
         `tests/test_worker_pool.py` + `tests/test_queue_flow.py`.
         Siehe `_logs/2026-07-05_sba_worker_pool_release_race.md`.
+      - **Root-Cause-Fix 2026-07-05b (Commit `d3a75bd`, Review-Tier 1):** Der
+        obige Fix war symptomatisch; vier strukturelle Lücken blieben:
+        (a) `release_worker` feuer-te `asyncio.create_task(pool.release(...))`
+        ohne Strong-Ref → Task konnte mid-Release geGC'd werden (asyncio
+        hält Tasks nur schwach) → Context-leak. Fix: modullevel
+        `_release_tasks`-Set + `add_done_callback(discard)`.
+        (b) `load_task.cancel()` wurde **nicht awaited** — war der Task
+        bereits nach `await open_student` im **synchronen** `set_worker_session`,
+        traf `CancelledError` erst am nächsten `await` (keines mehr) → Task
+        registriert Worker für bereits abgebrochenen Schüler → orphaned.
+        Fix: jedes `cancel()` jetzt
+        `with contextlib.suppress(asyncio.CancelledError): await task`;
+        plus Stale-Guard in `load_and_push_*` (`assigned_student_id` capturen,
+        nach `open_student` re-checken, sonst Worker schließen ohne Registrierung).
+        (c) `remove_helper` (api.py) + `ws_scanner`-finally (ws.py) clear'ten
+        nur die WS — Schüler blieb `active`, Worker orphaned (Modus A hatte
+        keine TTL-Recovery wie Modus B). Fix: beide rufen jetzt
+        `end_student(..., pending, revoked)` + cancel/await `load_task`.
+        (d) `sweep_expired_sessions` ohne try/except → eine Exception tötet
+        den Sweeper dauerhaft. Fix: try/except pro Iteration (CancelledError
+        re-raise, Rest log+continue) + Batch-Broadcast.
+        **Privacy im gleichen Commit:** `TEST_STUDENTS` (echte Schülernamen)
+        aus `server/routes/api.py` in gitignored `tests/test_students.local.json`
+        ausgelagert (Default nur Niklas); `session_token[:6]`-Logging →
+        `sha256[:8]`-Handle. Suite grün (85). Siehe
+        `_logs/2026-07-05_sba_pool_leak_root_causes.md` +
+        `wiki/40_experience_logs/lessons_learned.md` („Await task.cancel()").
 - [x] Buchender Submit-Pfad als Code vorhanden, **dreifach gated** — 2026-06-15:
       `commit_barcode()` (Enter+Result-Parse) + `handle_commit()` + Endpoint
       `POST /api/commit-book`. Gates: `ALLOW_BOOKING=false` (Default) + Host-Auth
