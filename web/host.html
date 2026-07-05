@@ -385,7 +385,7 @@
   <div class="card">
     <label>Passwort</label>
     <input type="password" id="pw-input" placeholder="Host-Passwort" autocomplete="current-password">
-    <button id="login-btn" onclick="doLogin()">Einloggen</button>
+    <button id="login-btn">Einloggen</button>
     <div id="login-msg" class="login-msg txt-danger"></div>
   </div>
 </div>
@@ -400,9 +400,9 @@
     <span class="sb-item" id="sb-queue"></span>
     <span class="sb-item" id="sb-ipads"></span>
     <span class="sb-spacer"></span>
-    <button class="secondary" id="settings-btn" onclick="openSettingsDialog()" title="Einstellungen (Tailscale-IP, Schüler-Leihschein)" style="margin-right:12px">Einstellungen</button>
-    <button class="secondary" id="theme-btn" onclick="cycleTheme()" title="Farbschema: System / Hell / Dunkel" aria-label="Farbschema wechseln" style="margin-right:12px">Auto</button>
-    <button class="secondary" onclick="doLogout()">Abmelden</button>
+    <button class="secondary" id="settings-btn" title="Einstellungen (Tailscale-IP, Schüler-Leihschein)" style="margin-right:12px">Einstellungen</button>
+    <button class="secondary" id="theme-btn" title="Farbschema: System / Hell / Dunkel" aria-label="Farbschema wechseln" style="margin-right:12px">Auto</button>
+    <button class="secondary" id="logout-btn">Abmelden</button>
   </div>
 
   <div class="layout">
@@ -413,7 +413,7 @@
   <div class="card">
     <h2>Schuljahr</h2>
     <div class="row">
-      <select id="schoolyear-select" onchange="selectSchoolyear()"><option value="">-- wird geladen… --</option></select>
+      <select id="schoolyear-select"><option value="">-- wird geladen… --</option></select>
     </div>
     <p class="hint">Bestimmt, aus welchem Schuljahr Klassen, Anmeldungen und Bücherlisten geladen werden. Ein Wechsel setzt die Queue zurück.</p>
   </div>
@@ -421,16 +421,16 @@
   <!-- Queue-Aufbau (Reiter) -->
   <div class="card">
     <div class="tabs">
-      <button class="tab active" id="tab-class" onclick="switchTab('class')">Ganze Klasse</button>
-      <button class="tab" id="tab-student" onclick="switchTab('student')">Einzelne Schüler</button>
-      <button class="tab" id="tab-test" onclick="switchTab('test')">Test Config</button>
+      <button class="tab active" id="tab-class">Ganze Klasse</button>
+      <button class="tab" id="tab-student">Einzelne Schüler</button>
+      <button class="tab" id="tab-test">Test Config</button>
     </div>
 
     <!-- Reiter: Ganze Klasse -->
     <div id="panel-class">
       <div class="row">
         <select id="class-select"><option value="">-- Klassen werden geladen… --</option></select>
-        <button onclick="selectClass()" style="padding-top:12px;padding-bottom:12px">Queue aufbauen</button>
+        <button id="select-class-btn" style="padding-top:12px;padding-bottom:12px">Queue aufbauen</button>
       </div>
       <p class="hint">Ersetzt die komplette Queue durch alle Schüler der gewählten Klasse.</p>
     </div>
@@ -438,11 +438,11 @@
     <!-- Reiter: Einzelne Schüler -->
     <div id="panel-student" style="display:none">
       <div class="row" style="margin-bottom:8px">
-        <select id="single-class-select" onchange="loadStudentsForClass()"><option value="">-- Klasse wählen --</option></select>
+        <select id="single-class-select"><option value="">-- Klasse wählen --</option></select>
       </div>
       <div class="row">
-        <select id="single-student-select" onchange="onSingleStudentChange()" disabled><option value="">-- erst Klasse wählen --</option></select>
-        <button id="add-student-btn" class="success" onclick="addSingleStudent()" disabled>+ Hinzufügen</button>
+        <select id="single-student-select" disabled><option value="">-- erst Klasse wählen --</option></select>
+        <button id="add-student-btn" class="success" disabled>+ Hinzufügen</button>
       </div>
       <p class="hint">Hängt einzelne Schüler an die bestehende Queue an — auch klassenübergreifend.</p>
     </div>
@@ -450,7 +450,7 @@
     <!-- Reiter: Test Config -->
     <div id="panel-test" style="display:none">
       <div class="row">
-        <button class="success" onclick="addTestStudents()">Testschüler hinzufügen</button>
+        <button class="success" id="add-test-students-btn">Testschüler hinzufügen</button>
       </div>
       <p class="hint">Hängt die Testschüler <strong>Niklas Müller</strong>, <strong>Lukas Podleschny</strong> und <strong>Lucas Stolpe</strong> an die Queue an.</p>
     </div>
@@ -469,8 +469,8 @@
   <div class="card">
     <h2>Live-Ausgabe (Modus B)</h2>
     <div class="row" style="margin-bottom:12px">
-      <button id="mb-open-btn" class="success" onclick="openModusB()">Ausgabe öffnen</button>
-      <button id="mb-close-btn" class="danger" onclick="closeModusB()" style="display:none">Ausgabe schließen</button>
+      <button id="mb-open-btn" class="success">Ausgabe öffnen</button>
+      <button id="mb-close-btn" class="danger" style="display:none">Ausgabe schließen</button>
       <span id="mb-status" class="mb-status">geschlossen</span>
     </div>
     <div id="mb-info" style="display:none;font-size:.85rem">
@@ -478,14 +478,13 @@
       <div id="mb-display-auth" class="row" style="margin-top:8px;display:none">
         <span style="opacity:.7">iPad freischalten — Code vom iPad eingeben:</span>
         <input id="mb-display-code" type="text" inputmode="latin" autocapitalize="characters"
-               placeholder="z. B. ABCD" style="width:110px;text-transform:uppercase"
-               onkeydown="if(event.key==='Enter')authorizeDisplay()">
-        <button class="success" onclick="authorizeDisplay()">Freischalten</button>
+               placeholder="z. B. ABCD" style="width:110px;text-transform:uppercase">
+        <button class="success" id="authorize-display-btn">Freischalten</button>
       </div>
       <div id="mb-codes" style="margin-top:8px"></div>
       <div class="row" style="margin-top:8px">
-        <button class="secondary" onclick="showMbQr()">QR für Schüler anzeigen</button>
-        <button class="secondary" onclick="showDisplayQr()">QR für iPad anzeigen</button>
+        <button class="secondary" id="show-mb-qr-btn">QR für Schüler anzeigen</button>
+        <button class="secondary" id="show-display-qr-btn">QR für iPad anzeigen</button>
       </div>
     </div>
   </div>
@@ -495,7 +494,7 @@
     <h2>Helfer</h2>
     <div class="row" style="margin-bottom:12px">
       <input type="text" id="helper-name" placeholder="Name des Helfers (optional)" style="margin-bottom:0">
-      <button onclick="addHelper()">+ Helfer</button>
+      <button id="add-helper-btn">+ Helfer</button>
     </div>
     <table id="helper-table">
       <thead><tr><th>Name</th><th>Status</th><th>Aktueller Schüler</th><th>Nächster</th><th></th></tr></thead>
@@ -507,9 +506,9 @@
   <div class="card">
     <h2 style="margin:0 0 8px">Schüler-Queue <span id="queue-count" class="queue-count"></span></h2>
     <div class="row" style="align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px">
-      <button class="ghost" onclick="resetQueue()"><span class="ghost-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></span> Status zurücksetzen</button>
-      <button class="ghost warn" onclick="clearQueue()"><span class="ghost-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span> Queue leeren</button>
-      <button class="ghost warn apart" onclick="disconnectAll()"><span class="ghost-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/></svg></span> Alle Verbindungen trennen</button>
+      <button class="ghost" id="reset-queue-btn"><span class="ghost-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></span> Status zurücksetzen</button>
+      <button class="ghost warn" id="clear-queue-btn"><span class="ghost-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span> Queue leeren</button>
+      <button class="ghost warn apart" id="disconnect-all-btn"><span class="ghost-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/></svg></span> Alle Verbindungen trennen</button>
     </div>
     <div class="table-scroll">
       <table id="queue-table">
@@ -585,11 +584,11 @@
 </div>
 
 <!-- QR-Modal -->
-<div class="qr-modal" id="qr-modal" onclick="closeQr()">
-  <div class="qr-box" role="dialog" aria-modal="true" aria-label="QR-Code" onclick="event.stopPropagation()">
+<div class="qr-modal" id="qr-modal">
+  <div class="qr-box" id="qr-box" role="dialog" aria-modal="true" aria-label="QR-Code">
     <img id="qr-img" src="" alt="QR-Code">
     <p id="qr-url"></p>
-    <button id="qr-close-btn" onclick="closeQr()">Schließen</button>
+    <button id="qr-close-btn">Schließen</button>
   </div>
 </div>
 
@@ -1026,7 +1025,7 @@
     if (armed) {
       banner.style.display = 'block';
       banner.innerHTML = `Code für <b>${escapeHtml(armed.lastname)}, ${escapeHtml(armed.firstname)}</b> wählen — `
-        + `<a href="#" onclick="cancelArm();return false" style="color:#fff">Abbrechen</a>`;
+        + `<a href="#" data-action="cancel-arm" style="color:#fff">Abbrechen</a>`;
     } else {
       banner.style.display = 'none';
     }
@@ -1045,7 +1044,7 @@
       if (armed) {
         // Schüler-zuerst: Code-Chip direkt anklickbar.
         return `<div class="code-row">
-          <button class="success code-chip" onclick="doPair(${armed.student_id}, '${p.pairing_code}', this)">${p.pairing_code}</button>
+          <button class="success code-chip" data-action="pair" data-student-id="${armed.student_id}" data-code="${p.pairing_code}">${p.pairing_code}</button>
           ${meta}
         </div>`;
       }
@@ -1055,7 +1054,7 @@
         <span class="code-val">${p.pairing_code}</span>
         ${meta}
         <select id="${selId}" style="flex:1;min-width:140px">${studentOpts}</select>
-        <button class="success" onclick="doPair(parseInt(document.getElementById('${selId}').value), '${p.pairing_code}', this)" ${pendingStudents.length ? '' : 'disabled'}>Zuordnen</button>
+        <button class="success" data-action="pair-select" data-sel-id="${selId}" data-code="${p.pairing_code}" ${pendingStudents.length ? '' : 'disabled'}>Zuordnen</button>
       </div>`;
     }).join('');
   }
@@ -1105,8 +1104,8 @@
           <div class="ns-name">${escapeHtml(s.lastname)}, ${escapeHtml(s.firstname)}</div>
           <div class="ns-meta"><span>${escapeHtml(s.form)}</span>${helperLbl}</div>
           <div class="ns-actions">
-            <button class="success" onclick="finishStudent(${s.student_id})">Abschließen</button>
-            <button class="secondary" onclick="printLoanSlip(${s.student_id}, this)">Leihschein</button>
+            <button class="success" data-action="finish" data-student-id="${s.student_id}">Abschließen</button>
+            <button class="secondary" data-action="print" data-student-id="${s.student_id}">Leihschein</button>
           </div>
         </div>`;
       }).join('') + '</div>';
@@ -1154,7 +1153,7 @@
     // Nicht anfassen, solange der Einstellungen-Dialog offen ist — sonst
     // würden ungespeicherte Änderungen des Operators überschrieben.
     const tsCb = document.getElementById('force-tailscale-ip');
-    if (tsCb && !document.getElementById('settings-dialog').classList.contains('show'))
+    if (tsCb && !settingsOpen())
       tsCb.checked = !!state.force_tailscale_ip;
   }
 
@@ -1210,8 +1209,8 @@
         <td>${escapeHtml(h.name)}</td>
         <td>${connDot} ${h.connected ? 'verbunden' : 'getrennt'}</td>
         <td>${studentName}</td>
-        <td>${hasStudent ? '' : `<button class="success" onclick="nextStudent('${h.token}')">Nächster</button>`}</td>
-        <td><button class="danger" aria-label="Helfer ${escapeHtml(h.name)} entfernen" onclick="removeHelper('${h.token}')"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></td>
+        <td>${hasStudent ? '' : `<button class="success" data-action="next-student" data-token="${h.token}">Nächster</button>`}</td>
+        <td><button class="danger" aria-label="Helfer ${escapeHtml(h.name)} entfernen" data-action="remove-helper" data-token="${h.token}"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></td>
       </tr>`;
     }).join('');
   }
@@ -1230,14 +1229,14 @@
       const badgeClass = { pending: 'badge-pending', active: 'badge-active', done: 'badge-done', skipped: 'badge-skipped' }[s.status] || '';
       const statusLabel = { pending: 'Wartend', active: 'Aktiv', done: 'Fertig', skipped: 'Übersprungen' }[s.status] || s.status;
       const pairBtn = (state.modus_b && state.modus_b.open)
-        ? `<button class="success" onclick="pairStudent(${s.student_id})">Pairing</button> ` : '';
-      const printBtn = `<button class="secondary" onclick="printLoanSlip(${s.student_id}, this)">Leihschein</button>`;
+        ? `<button class="success" data-action="pair-student" data-student-id="${s.student_id}">Pairing</button> ` : '';
+      const printBtn = `<button class="secondary" data-action="print" data-student-id="${s.student_id}">Leihschein</button>`;
       // Trennen: löst Helfer-/Schüler-Verbindung und setzt den Schüler zurück auf "Wartend".
-      const disconnectBtn = `<button class="secondary" onclick="disconnectStudent(${s.student_id})">Trennen</button>`;
+      const disconnectBtn = `<button class="secondary" data-action="disconnect" data-student-id="${s.student_id}">Trennen</button>`;
       const actions = s.status === 'pending'
-        ? `${pairBtn}<button class="secondary" onclick="skipStudent(${s.student_id})">Überspringen</button> ${disconnectBtn}`
+        ? `${pairBtn}<button class="secondary" data-action="skip" data-student-id="${s.student_id}">Überspringen</button> ${disconnectBtn}`
         : s.status === 'active'
-          ? `<button class="success" onclick="finishStudent(${s.student_id})">Abschließen</button> <button class="secondary" onclick="skipStudent(${s.student_id})">Abbrechen</button> ${disconnectBtn} ${printBtn}`
+          ? `<button class="success" data-action="finish" data-student-id="${s.student_id}">Abschließen</button> <button class="secondary" data-action="skip" data-student-id="${s.student_id}">Abbrechen</button> ${disconnectBtn} ${printBtn}`
           : s.status === 'done'
             ? printBtn
             : '';
@@ -1610,6 +1609,61 @@
       }
     }
   });
+
+  // ---- Verkabelung ehemaliger inline on*=-Attribute (Tier 3.2 Refactor) ----
+  // Statische Buttons/Selects: direkte addEventListener-Bindung an feste IDs.
+  document.getElementById('login-btn').addEventListener('click', doLogin);
+  document.getElementById('settings-btn').addEventListener('click', openSettingsDialog);
+  document.getElementById('theme-btn').addEventListener('click', cycleTheme);
+  document.getElementById('logout-btn').addEventListener('click', doLogout);
+  document.getElementById('schoolyear-select').addEventListener('change', () => selectSchoolyear());
+  document.getElementById('tab-class').addEventListener('click', () => switchTab('class'));
+  document.getElementById('tab-student').addEventListener('click', () => switchTab('student'));
+  document.getElementById('tab-test').addEventListener('click', () => switchTab('test'));
+  document.getElementById('select-class-btn').addEventListener('click', () => selectClass());
+  document.getElementById('single-class-select').addEventListener('change', loadStudentsForClass);
+  document.getElementById('single-student-select').addEventListener('change', onSingleStudentChange);
+  document.getElementById('add-student-btn').addEventListener('click', addSingleStudent);
+  document.getElementById('add-test-students-btn').addEventListener('click', addTestStudents);
+  document.getElementById('mb-open-btn').addEventListener('click', openModusB);
+  document.getElementById('mb-close-btn').addEventListener('click', closeModusB);
+  document.getElementById('mb-display-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') authorizeDisplay(); });
+  document.getElementById('authorize-display-btn').addEventListener('click', authorizeDisplay);
+  document.getElementById('show-mb-qr-btn').addEventListener('click', showMbQr);
+  document.getElementById('show-display-qr-btn').addEventListener('click', showDisplayQr);
+  document.getElementById('add-helper-btn').addEventListener('click', addHelper);
+  document.getElementById('reset-queue-btn').addEventListener('click', resetQueue);
+  document.getElementById('clear-queue-btn').addEventListener('click', clearQueue);
+  document.getElementById('disconnect-all-btn').addEventListener('click', disconnectAll);
+  document.getElementById('qr-modal').addEventListener('click', closeQr);
+  document.getElementById('qr-box').addEventListener('click', (e) => e.stopPropagation());
+  document.getElementById('qr-close-btn').addEventListener('click', closeQr);
+
+  // Dynamisch per innerHTML gerenderte Buttons (Now-Serving, Helfer-Tabelle,
+  // Queue-Tabelle, Modus-B-Codes): tragen statt onclick nur noch data-action/
+  // data-* Attribute. Ein delegierter Click-Handler pro stabilem Container
+  // ersetzt den ehemaligen Inline-Aufruf 1:1 (gleiche Argumente/Reihenfolge).
+  function handleDelegatedAction(e) {
+    const el = e.target.closest('[data-action]');
+    if (!el) return;
+    switch (el.dataset.action) {
+      case 'cancel-arm': e.preventDefault(); cancelArm(); break;
+      case 'pair': doPair(parseInt(el.dataset.studentId), el.dataset.code, el); break;
+      case 'pair-select': doPair(parseInt(document.getElementById(el.dataset.selId).value), el.dataset.code, el); break;
+      case 'finish': finishStudent(parseInt(el.dataset.studentId)); break;
+      case 'print': printLoanSlip(parseInt(el.dataset.studentId), el); break;
+      case 'next-student': nextStudent(el.dataset.token); break;
+      case 'remove-helper': removeHelper(el.dataset.token); break;
+      case 'pair-student': pairStudent(parseInt(el.dataset.studentId)); break;
+      case 'skip': skipStudent(parseInt(el.dataset.studentId)); break;
+      case 'disconnect': disconnectStudent(parseInt(el.dataset.studentId)); break;
+    }
+  }
+  document.getElementById('mb-arm-banner').addEventListener('click', handleDelegatedAction);
+  document.getElementById('mb-codes').addEventListener('click', handleDelegatedAction);
+  document.getElementById('now-serving').addEventListener('click', handleDelegatedAction);
+  document.getElementById('helper-tbody').addEventListener('click', handleDelegatedAction);
+  document.getElementById('queue-tbody').addEventListener('click', handleDelegatedAction);
 
   // Beim Laden prüfen ob bereits eingeloggt
   fetch('/api/state').then(r => {

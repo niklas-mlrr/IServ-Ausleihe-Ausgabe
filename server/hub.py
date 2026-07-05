@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import weakref
 
 from fastapi import WebSocket
 
@@ -14,13 +16,38 @@ log = logging.getLogger(__name__)
 class Hub:
     """WebSocket-Verteiler für Host- und Scanner-Verbindungen."""
 
+    def __init__(self) -> None:
+        # Pro Verbindung ein Lock: `broadcast_host`, `broadcast_settings`,
+        # `broadcast_queue_size` und `send_scanner` laufen als unabhängige
+        # Tasks (z. B. ein Scan-Ergebnis-Push zeitgleich mit einem
+        # Settings-Broadcast an denselben Helfer) und können denselben
+        # WebSocket gleichzeitig treffen. Ohne Serialisierung können die
+        # zugrunde liegenden ASGI-Sends interleaven oder in falscher
+        # Reihenfolge beim Client ankommen. `WeakKeyDictionary`, damit Locks
+        # toter Verbindungen nicht dauerhaft im Speicher bleiben.
+        self._ws_locks: "weakref.WeakKeyDictionary[object, asyncio.Lock]" = weakref.WeakKeyDictionary()
+
+    def _lock_for(self, ws: object) -> asyncio.Lock:
+        lock = self._ws_locks.get(ws)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._ws_locks[ws] = lock
+        return lock
+
+    async def _safe_send(self, ws: object, msg: dict) -> bool:
+        """Sendet serialisiert pro Verbindung. True bei Erfolg, False wenn tot."""
+        async with self._lock_for(ws):
+            try:
+                await ws.send_json(msg)
+                return True
+            except Exception:
+                return False
+
     async def broadcast_host(self, msg: dict, state: AppState | None = None) -> None:
         s = state or get_state()
         dead = []
         for ws in list(s.host_ws_connections):
-            try:
-                await ws.send_json(msg)
-            except Exception:
+            if not await self._safe_send(ws, msg):
                 dead.append(ws)
         for ws in dead:
             try:
@@ -36,9 +63,7 @@ class Hub:
         qsize = s.pending_count()
         for helper in list(s.helper_sessions.values()):
             if helper.student_id is None and helper.ws is not None:
-                try:
-                    await helper.ws.send_json({"type": "queue_update", "queue_size": qsize})
-                except Exception:
+                if not await self._safe_send(helper.ws, {"type": "queue_update", "queue_size": qsize}):
                     helper.ws = None
 
     async def broadcast_settings(self, state: AppState | None = None) -> None:
@@ -63,9 +88,7 @@ class Hub:
                 "slip_second_page": s.slip_second_page_default,
                 "book_order": book_order,
             }
-            try:
-                await helper.ws.send_json(msg)
-            except Exception:
+            if not await self._safe_send(helper.ws, msg):
                 helper.ws = None
 
     async def send_scanner(self, token: str, msg: dict, state: AppState | None = None) -> None:
@@ -73,9 +96,7 @@ class Hub:
         helper = s.helper_sessions.get(token)
         if not helper or helper.ws is None:
             return
-        try:
-            await helper.ws.send_json(msg)
-        except Exception:
+        if not await self._safe_send(helper.ws, msg):
             helper.ws = None
             log.warning("Scanner WS für Token %s ist tot", token)
 

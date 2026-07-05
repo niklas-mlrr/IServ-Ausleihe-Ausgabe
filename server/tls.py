@@ -24,6 +24,14 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 log = logging.getLogger(__name__)
 
 
+def _parsed_ip(ip: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    """`ip` parsen, `None` bei ungültiger Adresse (statt Exception nach oben)."""
+    try:
+        return ipaddress.ip_address(ip)
+    except ValueError:
+        return None
+
+
 def _is_usable_lan_ip(ip: str) -> bool:
     """True, wenn `ip` eine für andere Geräte erreichbare IPv4 ist.
 
@@ -31,9 +39,8 @@ def _is_usable_lan_ip(ip: str) -> bool:
     Hostnamen in `/etc/hosts` oft auf `127.0.1.1`!) und Link-Local
     (`169.254.0.0/16`, APIPA ohne DHCP) heraus.
     """
-    try:
-        addr = ipaddress.ip_address(ip)
-    except ValueError:
+    addr = _parsed_ip(ip)
+    if addr is None:
         return False
     return not (addr.is_loopback or addr.is_link_local or addr.is_unspecified)
 
@@ -44,9 +51,8 @@ _CGNAT_NET = ipaddress.ip_network("100.64.0.0/10")
 
 def _is_private_lan_ip(ip: str) -> bool:
     """True nur für echte LAN-Adressen (RFC1918), nicht für CGNAT/Tailscale."""
-    try:
-        addr = ipaddress.ip_address(ip)
-    except ValueError:
+    addr = _parsed_ip(ip)
+    if addr is None:
         return False
     return addr.is_private and not addr.is_link_local and addr not in _CGNAT_NET
 
@@ -67,6 +73,13 @@ def _route_src_ip(target: str) -> str | None:
             s.close()
     except Exception:
         return None
+
+
+def _hostname_ipv4s() -> list[str]:
+    try:
+        return [info[4][0] for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET)]
+    except Exception:
+        return []
 
 
 def _candidate_ipv4s() -> list[str]:
@@ -97,22 +110,14 @@ def _ip_rank(ip: str) -> int:
     RFC1918-LAN zuerst (echtes Schul-WLAN), dann CGNAT/Tailscale (Remote-Test),
     zuletzt öffentliche/sonstige Adressen.
     """
-    try:
-        addr = ipaddress.ip_address(ip)
-    except ValueError:
+    addr = _parsed_ip(ip)
+    if addr is None:
         return 3
     if _is_private_lan_ip(ip):
         return 0
     if addr in _CGNAT_NET:
         return 1
     return 2
-
-
-def _hostname_ipv4s() -> list[str]:
-    try:
-        return [info[4][0] for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET)]
-    except Exception:
-        return []
 
 
 def primary_lan_ip(force_tailscale: bool = False) -> str | None:

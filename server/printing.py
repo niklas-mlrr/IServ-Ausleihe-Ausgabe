@@ -26,7 +26,6 @@ import platform
 import re
 import secrets
 import shutil
-import subprocess
 import tempfile
 from datetime import datetime
 from pathlib import Path

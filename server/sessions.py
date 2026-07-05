@@ -284,6 +284,13 @@ async def print_loan_slip_for(
     """
     from .printing import print_pdf
 
+    if state.iserv is None:
+        # Passiert, wenn noch keine Klasse/Ausgabe aktiv war (der IServ-Client
+        # wird erst dabei gesetzt) — ohne diesen Guard würde ein AttributeError
+        # auf `None.get_loan_slip_pdf` geworfen (Aufrufer fängt es zwar generisch
+        # ab, aber mit einer unklaren Meldung statt eines aussagekräftigen Texts).
+        raise RuntimeError("Kein IServ-Client verfügbar — bitte zuerst eine Klasse laden")
+
     cfg = get_config()
     pdf = await state.iserv.get_loan_slip_pdf(student_id, variant=variant)
     result = await print_pdf(
@@ -528,8 +535,12 @@ async def load_and_push_helper_student(state: AppState, hub, student, helper) ->
 async def advance_helper(state: AppState, hub, helper) -> dict:
     """Helfer auf den nächsten Wartenden setzen.
 
-    Schließt den aktuellen Schüler ab (`end_student` → Worker-Context zu, KEIN
-    Browser-Submit/keine Buchung) und lädt den nächsten Pending aus der Queue.
+    Zwei klar getrennte Schritte (analog zur Cleanup-Reihenfolge in
+    `/api/helper/{token}` DELETE — erst abschließen, dann neu zuweisen):
+
+      1. Aktuellen Schüler abschließen (`end_student` → Worker-Context zu,
+         KEIN Browser-Submit/keine Buchung).
+      2. Nächsten Pending aus der Queue diesem Helfer zuweisen.
     """
     if helper.student_id is not None:
         await end_student(
@@ -537,6 +548,18 @@ async def advance_helper(state: AppState, hub, helper) -> dict:
             queue_status="done", session_state="completed",
         )
 
+    return await assign_next_pending_to_helper(state, hub, helper)
+
+
+async def assign_next_pending_to_helper(state: AppState, hub, helper) -> dict:
+    """Nächsten wartenden Schüler (falls vorhanden) diesem Helfer zuweisen.
+
+    Setzt voraus, dass der Helfer aktuell KEINEN aktiven Schüler mehr hat
+    (vom Aufrufer sicherzustellen — z. B. `advance_helper` ruft vorher
+    `end_student` für den bisherigen Schüler). Stößt das (langsamere) Laden
+    von Schülerinfo + Worker-Context als Hintergrund-Task an
+    (`load_and_push_helper_student`), ohne darauf zu warten.
+    """
     student = state.next_pending()
     if not student:
         await hub.send_scanner(helper.token, {"type": "waiting", "msg": "Warteschlange leer", "queue_size": state.pending_count()})

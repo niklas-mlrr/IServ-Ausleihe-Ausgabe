@@ -391,6 +391,49 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
       `_logs/2026-07-05_sba_tier2_hardening.md` +
       `wiki/40_experience_logs/lessons_learned.md` („Host-Header nicht für
       URL-Hostnamen vertrauen").
+- [x] **Review-Tier-3 (UI-Architektur + Server-Robustheit)** (2026-07-05,
+      Commit folgt) — 5 dateibegrenzt parallele Agenten + 1 Polish-Agent
+      danach, Suite grün (85):
+      (a) `web/scan.html`: großer Inline-`<script>`-Block mechanisch nach
+      `web/scan.js` extrahiert (493 Zeilen), `scan.html` auf 234 Zeilen
+      (Markup + `<script src="scan.js">`) reduziert. Ladereihenfolge
+      (`html5-qrcode.min.js` vor `scan.js`) erhalten, `node --check` grün.
+      (b) `web/host.html`: alle 34 inline `onclick=`/`onchange=`/`onkeydown=`
+      entfernt → `addEventListener` (direkt für statische Elemente,
+      delegiert via `data-action`/`data-student-id`/`data-token`/`data-code`
+      für dynamisch gerenderte Zeilen/Buttons). Grep bestätigt: keine
+      `on*=`-Attribute mehr im Markup oder in Template-Literal-`innerHTML`.
+      (c) `server/sessions.py`: `advance_helper` in zwei klare Schritte
+      gesplittet — ruft `end_student` und delegiert dann an neues
+      `assign_next_pending_to_helper` (Zuweisung + Broadcast + Hintergrund-
+      Task für `load_and_push_helper_student`), analog zur Cleanup-Reihenfolge
+      bei `/api/helper/{token}` DELETE. Tier-1-Stale-Task-Guards unangetastet.
+      (d) `server/hub.py`: Broadcast-Race behoben — `broadcast_host`,
+      `broadcast_queue_size`, `broadcast_settings` und `send_scanner` liefen
+      als unabhängige Tasks und konnten dieselbe WebSocket-Verbindung
+      gleichzeitig treffen (Interleaving/Reihenfolge-Risiko bei parallelen
+      Sends). Neuer `Hub._safe_send()` mit Pro-Verbindung-`asyncio.Lock`
+      (in `WeakKeyDictionary`, damit Locks toter Verbindungen nicht leaken).
+      `server/sessions.py`: `print_loan_slip_for` bekommt expliziten
+      `state.iserv is None`-Guard mit klarer `RuntimeError`-Meldung (statt
+      unklarem `AttributeError` auf `None.get_loan_slip_pdf`, wird von den
+      Aufrufern ohnehin generisch abgefangen).
+      (e) `server/tls.py`: dreifach duplizierte `ipaddress.ip_address`/
+      `ValueError`-Blöcke zu `_parsed_ip()`-Helper zusammengeführt;
+      `_hostname_ipv4s` vor Verwendung in `_candidate_ipv4s` einsortiert.
+      `server/printing.py`: toter `import subprocess` entfernt (nur
+      `asyncio.subprocess.PIPE`/`STDOUT` in Gebrauch). `automation/e2e_*.py`
+      bereits konsistent aus Tier 2, unverändert gelassen.
+      (f) Polish-Pass (nach a+b, gleiche Dateien): `host.html`
+      `renderStatusBar()` nutzt jetzt `settingsOpen()` statt eigener
+      DOM-Query-Duplikation; kein Dead-Code/`window.*`-Exposure-Rest aus den
+      onclick→addEventListener- bzw. Inline-Script-Extraktions-Refactors
+      gefunden (bereits sauber). Token-Rotation-Kommentare in `showMbQr()`
+      bereits ausreichend (WHY-only, keine Ergänzung nötig).
+      Verifiziert: `uv run pytest` 85/85, `node --check` auf `scan.js` +
+      extrahiertem `host.html`-Inline-Script grün, Grep bestätigt 0
+      verbleibende `on*=`-Attribute in `web/`. Kein Verhaltensunterschied im
+      Buchungspfad, `ALLOW_BOOKING`-Gate unangetastet.
 - [ ] End-to-End-Test mit ausgemusterten Büchern **inkl. Buchung** (wartet auf Buchungstest-Freigabe Niklas + Lukas)
 
 ### Phase 3 — Generalprobe Teil 1 (vor Ferienbeginn, Anfang Juli)
