@@ -220,7 +220,11 @@ class WorkerPool:
         self._browser = None
         self._contexts: list = []
         self._total = 0       # erfolgreich eingeloggte Contexts (für stats())
-        self._lock = asyncio.Lock()
+        # Condition (wrapt ein Lock) — open_student kann damit kurz auf einen
+        # freigewordenen Context warten, wenn eine release()-Task noch läuft.
+        # Verhindert das „Kein freier Worker-Context"-Rennen, wenn am Helfer
+        # schnell hintereinander Schüler abgeschlossen werden (PLAN-Stabilität).
+        self._cond = asyncio.Condition()
 
     async def _make_logged_in_context(self, label: str):
         """Einen frischen Context anlegen und einloggen. Bei Fehler Context
@@ -296,7 +300,7 @@ class WorkerPool:
 
         Reines Browsing — kein Schüler, kein Submit (CLAUDE.md erlaubt Lesen)."""
         # Context unter Lock leihen (gegen Race mit open_student) und danach zurück.
-        async with self._lock:
+        async with self._cond:
             if not self._contexts:
                 return {"ok": False, "msg": "kein Worker-Context"}
             context = self._contexts.pop(0)
@@ -322,8 +326,9 @@ class WorkerPool:
                 await page.close()
             except Exception:
                 pass
-            async with self._lock:
+            async with self._cond:
                 self._contexts.append(context)
+                self._cond.notify_all()
 
     async def stop(self) -> None:
         # Defensiv: bei Ctrl+C / Treiber-Abbruch ist der Transport evtl. schon
@@ -339,11 +344,30 @@ class WorkerPool:
             except Exception as e:
                 log.warning("Playwright.stop beim Shutdown fehlgeschlagen: %s", e)
 
-    async def open_student(self, student_id: int, student_name: str) -> StudentSession:
-        """Einen freien Context holen und Schülerkartei laden."""
-        async with self._lock:
+    async def open_student(
+        self, student_id: int, student_name: str, *, wait_timeout: float = 12.0
+    ) -> StudentSession:
+        """Einen freien Context holen und Schülerkartei laden.
+
+        Ist der Pool gerade leer (z. B. weil eine release()-Task nach einem
+        schnellen „Weiter/ Abschließen" noch läuft), warten wir bis zu
+        `wait_timeout` Sekunden auf einen freigewordenen Context, statt sofort
+        „Kein freier Worker-Context verfügbar" zu werfen. Erst nach Ablauf der
+        Frist gilt der Mangel als echt und wird als Fehler gemeldet.
+        """
+        async with self._cond:
             if not self._contexts:
-                raise RuntimeError("Kein freier Worker-Context verfügbar")
+                log.info(
+                    "Worker-Pool leer für Schüler %d — warte bis %.1fs auf freien Context",
+                    student_id, wait_timeout,
+                )
+                try:
+                    await asyncio.wait_for(
+                        self._cond.wait_for(lambda: bool(self._contexts)),
+                        timeout=wait_timeout,
+                    )
+                except asyncio.TimeoutError:
+                    raise RuntimeError("Kein freier Worker-Context verfügbar")
             context = self._contexts.pop(0)
 
         page = await context.new_page()
@@ -355,16 +379,18 @@ class WorkerPool:
         except Exception as e:
             log.warning("load_card für %d fehlgeschlagen: %s", student_id, e)
             await page.close()
-            async with self._lock:
+            async with self._cond:
                 self._contexts.append(context)
+                self._cond.notify_all()
             raise
         return session
 
     async def release(self, session: StudentSession) -> None:
         """Context nach Abschluss eines Schülers zurück in den Pool."""
         await session.close()
-        async with self._lock:
+        async with self._cond:
             self._contexts.append(session._context)
+            self._cond.notify_all()
 
     async def _login(self, page: Page, label: str) -> None:
         domain = self._domain

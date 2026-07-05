@@ -618,7 +618,11 @@
 
     // Load available cameras
     Html5Qrcode.getCameras().then(cameras => {
+      // Bevorzugt die hintere Ultra-Weitwinkel-Kamera (iOS: "Back Ultra Wide
+      // Camera") — damit lassen sich auch dicke Bücher/stapelig liegende Codes
+      // gut erfassen. Sonst beliebige Rückkamera, sonst erste Kamera.
       const preferred =
+        cameras.find(c => /back ultra wide/i.test(c.label)) ||
         cameras.find(c => /back dual wide/i.test(c.label)) ||
         cameras.find(c => /back/i.test(c.label)) ||
         cameras[0];

@@ -181,6 +181,15 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
 - [x] E2E-Smoke headless (read-only): voller Modus-A-Flow Host→Scanner→Worker→Kartei→staged — 2026-06-15 (`automation/e2e_smoke.py`)
 - [x] 2-Helfer-Paralleltest: zwei Schüler gleichzeitig aktiv, beide Karteien parallel, unabhängiges Staging — 2026-06-15 (`automation/e2e_parallel.py`)
 - [x] Pool-Härtung: fehlgeschlagene Worker-Logins werden in `start()` einmal nachgezogen, geleakte Contexts geschlossen — 2026-06-15
+      - **Release-Race-Fix 2026-07-05:** `release_worker` gibt Contexts asynchron
+        via `create_task(pool.release(…))` zurück; `release()` schließt erst die
+        Page und hängt den Context dann erst wieder in den Pool. Bei schnellem
+        Weiterklicken am Helfer kam `open_student` an, bevor die Release-Task
+        fertig war → Pool leer → „Kein freier Worker-Context verfügbar"
+        (False-Positive). Fix: `WorkerPool._lock` → `asyncio.Condition`;
+        `open_student` wartet bis 12 s via `cond.wait_for(lambda: pool)` statt
+        sofort zu werfen; `release`/`check_selectors` rufen `notify_all()`.
+        Siehe `_logs/2026-07-05_sba_worker_pool_release_race.md`.
 - [x] Buchender Submit-Pfad als Code vorhanden, **dreifach gated** — 2026-06-15:
       `commit_barcode()` (Enter+Result-Parse) + `handle_commit()` + Endpoint
       `POST /api/commit-book`. Gates: `ALLOW_BOOKING=false` (Default) + Host-Auth
