@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 import uuid
 from datetime import datetime
@@ -162,6 +164,34 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
         # (analog ws_student), sonst würde der alte Disconnect sie wegräumen.
         if helper.ws is websocket:
             helper.ws = None
+        # Trennt der Helfer-WS, muss der Schüler zurück auf 'pending' (Modus A)
+        # bzw. die Modus-B-Session revoked werden — sonst bleibt der Schüler
+        # "active" auf einen toten Helfer-Token zeigend stehen, und der Worker-
+        # Context leakt. Modus B hat TTL-Recovery via Sweeper, Modus A nicht
+        # (active-Queue-Einträge werden nie gesweept) → hier zwingend aufräumen.
+        # end_student ist idempotent: falls ein anderer Pfad (z. B. /api/skip)
+        # im selben Disconnect-Zyklus schon beendet hat, ist student_id None
+        # bzw. der Schüler nicht mehr 'active' → No-op. Guard gegen Doppel-End:
+        # nur aufrufen, wenn helper.student_id noch gesetzt ist (bedeutet, der
+        # Schüler wurde noch nicht via end_student zurückgesetzt).
+        if helper.student_id is not None:
+            try:
+                # In-flight Lade-Task erst canceln+awaiten, sonst leakt sein
+                # Worker-Context während end_student's eigenem pop läuft.
+                if helper.load_task is not None and not helper.load_task.done():
+                    helper.load_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await helper.load_task
+                    helper.load_task = None
+                await end_student(
+                    state, hub, helper.student_id,
+                    queue_status="pending", session_state="revoked",
+                )
+            except Exception:
+                log.exception(
+                    "end_student im ws_scanner-finally für student_id=%s fehlgeschlagen",
+                    helper.student_id,
+                )
         try:
             await hub.broadcast_host(state.state_snapshot())
         except Exception:

@@ -29,3 +29,10 @@ automation/out/
 
 # Laufzeit-Logs (rotierend, server.log*)
 logs/
+
+# Lokale Testschüler-Liste (echte Schülerdaten — nicht committen!)
+tests/test_students.local.json
+
+# macOS Metadata
+.DS_Store
+._*

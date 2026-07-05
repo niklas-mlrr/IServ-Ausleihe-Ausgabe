@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
+import hashlib
 import io
 import logging
 import secrets
@@ -302,13 +304,21 @@ async def print_loan_slip_for(
 def release_worker(state: AppState, worker) -> None:
     """Worker-Context nach Abschluss zurück in den Pool (statt ihn zu verlieren).
 
-    Fällt auf reines Schließen zurück, falls kein Pool verfügbar ist.
+    Fällt auf reines Schließen zurück, falls kein Pool verfügbar ist. Die
+    Release-Coroutine wird als Task mit starkem Reference gehalten — CPython's
+    asyncio führt Tasks nur in einem WeakSet, ein fire-and-forget-Task kann
+    sonst mid-Coroutine GC'd werden und der Context bleibt für immer aus dem
+    Pool draußen (bei WORKER_CONTEXTS=2 reicht das zweimal zum stillen Drain).
     """
     pool = state.worker_pool
-    if pool is not None and hasattr(pool, "release"):
-        asyncio.create_task(pool.release(worker))
-    else:
-        asyncio.create_task(worker.close())
+    coro = pool.release(worker) if (pool is not None and hasattr(pool, "release")) else worker.close()
+    t = asyncio.create_task(coro)
+    _release_tasks.add(t)
+    t.add_done_callback(_release_tasks.discard)
+
+
+# Starke Referenzen auf in-flight Release-Tasks — verhindert GC vor Completion.
+_release_tasks: set[asyncio.Task] = set()
 
 
 def set_worker_session(state: AppState, student_id: int, worker_session) -> None:
@@ -348,8 +358,17 @@ async def invalidate_session(
 
     # In-flight Lade-Task abbrechen — sonst leakt der Worker-Context, wenn
     # open_student noch in load_card steckt (s. end_student / worker.py).
+    # Der Await erzwingt, dass die CancelledError den Task tatsächlich trifft
+    # (bzw. der Task über den Stale-Guard in load_and_push_paired_student
+    # sauber zurückkehrt), BEVOR wir unten den Worker poppen — sonst raced das
+    # pop() gegen das nachträgliche set_worker_session und der Context wird
+    # trotzdem als orphan für den toten student_id registriert. Kein Lock
+    # wird hier gehalten → kein Deadlock-Risiko.
     if session.load_task is not None and not session.load_task.done():
         session.load_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await session.load_task
+    session.load_task = None
 
     # Worker-Context zurück in den Pool (falls vorhanden).
     if session.student_id is not None:
@@ -372,7 +391,10 @@ async def invalidate_session(
 
     # Token endgültig entwerten.
     state.student_sessions.pop(session.session_token, None)
-    log.info("Modus-B-Session %s… → %s (%s)", session.session_token[:6], new_state, reason)
+    # Token niemals loggen — auch nicht als Präfix (PLAN §3.7). Stattdessen
+    # ein nicht-reversibler 8-Zeichen-Hash als Korrelationshandle.
+    token_handle = hashlib.sha256(session.session_token.encode()).hexdigest()[:8]
+    log.info("Modus-B-Session %s → %s (%s)", token_handle, new_state, reason)
 
 
 async def end_student(
@@ -405,12 +427,25 @@ async def end_student(
             # nach open_student in student_worker_sessions registriert wird
             # und pop() unten Nothing fände — Pool läuft unter schnellem
             # „Weiter"-Klicken leer.
+            #
+            # WICHTIG: student_id wird VOR dem Await auf None gesetzt, damit
+            # der Stale-Guard in load_and_push_helper_student (der
+            # helper.student_id gegen den ursprünglich zugewiesenen student_id
+            # prüft) den nach open_student noch synchronen set_worker_session-
+            # Aufruf überspringt und den Context selbst schließt. Der Await
+            # selbst ist sicher (kein Lock gehalten) — der Task wartet nur auf
+            # open_student (BaseException-Handler fängt Cancel) oder ist schon
+            # darüber hinaus und läuft via Stale-Guard leer.
             if h.load_task is not None and not h.load_task.done():
                 h.load_task.cancel()
             h.student_id = None
             h.expected_isbns = set()
             h.vormerk_isbns = set()
             h.lent_isbns = set()
+            if h.load_task is not None and not h.load_task.done():
+                with contextlib.suppress(asyncio.CancelledError):
+                    await h.load_task
+            h.load_task = None
             # Scanner sonst ohne jede Rückmeldung mit dem alten (getrennten)
             # Schüler stehen — der Helfer sieht dann weder Trennung noch neuen
             # Wartezustand ("Alle Verbindungen trennen" wirkte sonst nur am Host).
@@ -438,6 +473,9 @@ async def load_and_push_helper_student(state: AppState, hub, student, helper) ->
     Reihenfolge bewusst: erst `student_info` an den Scanner (sofort sichtbar),
     dann der (langsamere) Worker-Aufbau.
     """
+    # Identität festhalten, bevor wir awaiten — end_student/skip kann während
+    # open_student helper.student_id auf None (oder einen neuen Schüler) setzen.
+    assigned_student_id = student.student_id
     try:
         info = await state.iserv.get_student_info(student.student_id, state.selected_schoolyear)
     except Exception as e:  # noqa: BLE001
@@ -458,13 +496,32 @@ async def load_and_push_helper_student(state: AppState, hub, student, helper) ->
                 student.student_id,
                 f"{student.lastname}, {student.firstname}",
             )
-            set_worker_session(state, student.student_id, worker_session)
         except Exception as e:  # noqa: BLE001
             log.exception("Worker-Session für Schüler %d fehlgeschlagen", student.student_id)
             await hub.send_scanner(
                 helper.token,
                 {"type": "error", "msg": f"Playwright-Fehler: {e}. Buchung manuell."},
             )
+            return
+        # Stale-Guard: end_student/skip kann während open_student gelaufen sein
+        # und helper.student_id auf None gesetzt haben. CancelledError trifft
+        # erst am nächsten await — aber zwischen open_student-Return und
+        # set_worker_session gibt es KEIN await (synchroner Aufruf). Ohne
+        # diesen Guard würde der Task den Context für einen student_id
+        # registrieren, dessen end_student schon gelaufen ist → Worker-Orphan
+        # unter totalem student_id (Pool-Slot belegt, niemand poppt ihn jemals).
+        if helper.student_id != assigned_student_id:
+            log.info(
+                "Stale load_and_push_helper_student für %d — Helfer nicht mehr "
+                "zugewiesen (helper.student_id=%r), Context zurück.",
+                assigned_student_id, helper.student_id,
+            )
+            try:
+                await worker_session.close()
+            except Exception:
+                log.exception("Schließen des stale Worker-Contexts fehlgeschlagen")
+            return
+        set_worker_session(state, student.student_id, worker_session)
 
 
 async def advance_helper(state: AppState, hub, helper) -> dict:
@@ -506,6 +563,11 @@ async def load_and_push_paired_student(
     der Worker bereit ist, meldet `handle_scan` sauber „Worker nicht bereit"
     (der Schüler liest ohnehin erst die Liste → Worker ist rechtzeitig da).
     """
+    # Identität + Session-State festhalten — invalidate_session kann während
+    # open_student die Session auf "revoked" setzen und aus student_sessions
+    # poppen. Ohne Stale-Gard registriert der Task danach den Context für einen
+    # student_id, der schon nicht mehr zur Session gehört → Worker-Orphan.
+    paired_student_id = student.student_id
     info["form"] = getattr(student, "form", "")
     info["book_order"] = state.book_order
     session.expected_isbns = expected_isbns_from_info(info)
@@ -528,7 +590,6 @@ async def load_and_push_paired_student(
                 student.student_id,
                 f"{student.lastname}, {student.firstname}",
             )
-            set_worker_session(state, student.student_id, worker_session)
         except Exception as e:  # noqa: BLE001
             log.exception("Worker-Session (Modus B) für %d fehlgeschlagen", student.student_id)
             if session.ws is not None:
@@ -538,6 +599,25 @@ async def load_and_push_paired_student(
                     )
                 except Exception:
                     pass
+            await hub.broadcast_host(state.state_snapshot())
+            return
+        # Stale-Gard: invalidate_session/Modus-B-Close kann während open_student
+        # gelaufen sein (session.state != "paired" oder student_id gezogen).
+        # Dann Context selbst schließen — set_worker_session würde sonst einen
+        # Orphan unter totalem student_id registrieren.
+        if session.student_id != paired_student_id or session.state != "paired":
+            log.info(
+                "Stale load_and_push_paired_student für %d — Session nicht mehr "
+                "paired (state=%r, student_id=%r), Context zurück.",
+                paired_student_id, session.state, session.student_id,
+            )
+            try:
+                await worker_session.close()
+            except Exception:
+                log.exception("Schließen des stale Worker-Contexts (Modus B) fehlgeschlagen")
+            await hub.broadcast_host(state.state_snapshot())
+            return
+        set_worker_session(state, student.student_id, worker_session)
 
     await hub.broadcast_host(state.state_snapshot())
 
@@ -581,25 +661,40 @@ async def sweep_expired_sessions() -> None:
     hub = get_hub()
     while True:
         await asyncio.sleep(30)
-        join_limiter.sweep()  # Rate-Limit-Buckets aufräumen (kein unbegrenztes Wachstum)
-        state = get_state()
-        state.sweep_host_sessions(cfg.host_session_ttl_s)  # abgelaufene Host-Logins entfernen
-        now = datetime.now()
-        expired: list[StudentSessionB] = []
-        for session in list(state.student_sessions.values()):
-            if session.state == "pending_pairing":
-                age = (now - session.created_at).total_seconds()
-                if age > cfg.pending_pairing_ttl_s:
-                    expired.append(session)
-            elif session.state == "paired":
-                idle = (now - session.last_activity).total_seconds()
-                if idle > cfg.paired_idle_ttl_s:
-                    expired.append(session)
-        for session in expired:
-            sid = session.student_id
-            if sid is not None:
-                await end_student(state, hub, sid, queue_status="pending", session_state="expired")
-            else:
-                await invalidate_session(state, session, "expired", reason="timeout")
+        # Einzelne Iteration darf den Loop nie töten — eine flüchtige Exception
+        # (z. B. transienter IServ-Fehler in end_student) würde sonst den
+        # Sweeper dauerhaft killen → unbegrenztes Session-Wachstum.
+        try:
+            join_limiter.sweep()  # Rate-Limit-Buckets aufräumen (kein unbegrenztes Wachstum)
+            state = get_state()
+            state.sweep_host_sessions(cfg.host_session_ttl_s)  # abgelaufene Host-Logins entfernen
+            now = datetime.now()
+            expired: list[StudentSessionB] = []
+            for session in list(state.student_sessions.values()):
+                if session.state == "pending_pairing":
+                    age = (now - session.created_at).total_seconds()
+                    if age > cfg.pending_pairing_ttl_s:
+                        expired.append(session)
+                elif session.state == "paired":
+                    idle = (now - session.last_activity).total_seconds()
+                    if idle > cfg.paired_idle_ttl_s:
+                        expired.append(session)
+            # broadcast=False — einmal am Ende bündeln (wie /api/disconnect-all),
+            # sonst N Snapshots pro Sweep.
+            for session in expired:
+                sid = session.student_id
+                if sid is not None:
+                    await end_student(
+                        state, hub, sid,
+                        queue_status="pending", session_state="expired",
+                        broadcast=False,
+                    )
+                else:
+                    await invalidate_session(state, session, "expired", reason="timeout")
+        except asyncio.CancelledError:
+            raise  # Shutdown — Loop sauber beenden.
+        except Exception:
+            log.exception("Sweeper iteration fehlgeschlagen (non-fatal)")
+            continue
         if expired:
             await hub.broadcast_host(state.state_snapshot())

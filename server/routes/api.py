@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import json
 import logging
 import uuid
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import APIRouter, Cookie, HTTPException, Request, Response
 
@@ -403,15 +406,38 @@ async def add_student_to_queue(body: dict, session_id: str | None = Cookie(defau
     return {"ok": True, "count": len(state.queue)}
 
 
-# Fest verdrahtete Testschüler für den "Test Config"-Reiter (IDs einmalig per
-# read-only Namenssuche ermittelt, siehe Git-Historie). Klassen-Angabe nur
-# informativ — die Queue arbeitet rein über student_id.
-TEST_STUDENTS = [
+# Testschüler für den "Test Config"-Reiter (IDs einmalig per read-only
+# Namenssuche ermittelt, siehe Git-Historie). Klassen-Angabe nur informativ —
+# die Queue arbeitet rein über student_id.
+#
+# Privacy: Die echte Namens-/ID-Liste liegt in der gitignored Lokal-Datei
+# `tests/test_students.local.json` (pro Entwickler:in). Fehlt sie oder ist sie
+# nicht parsebar, fällt TEST_STUDENTS auf einen sicheren Default zurück, der
+# nur den freigegebenen Testschüler Niklas Müller enthält — in server/ source
+# stehen keine weiteren realen Schülerdaten.
+_TEST_STUDENTS_FILE = Path(__file__).resolve().parent.parent.parent / "tests" / "test_students.local.json"
+_TEST_STUDENTS_DEFAULT = [
     {"student_id": 2159, "firstname": "Niklas", "lastname": "Müller", "form": "Klasse 12Slw"},
-    {"student_id": 2164, "firstname": "Lukas", "lastname": "Podleschny", "form": "Klasse 12Mk"},
-    {"student_id": 2167, "firstname": "Lucas", "lastname": "Stolpe", "form": "Klasse 12Slw"},
-    {"student_id": 2415, "firstname": "Finn", "lastname": "Podleschny", "form": "Klasse 10c"},
 ]
+
+
+def _load_test_students() -> list[dict]:
+    try:
+        with _TEST_STUDENTS_FILE.open("r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except FileNotFoundError:
+        log.warning("Testschüler-Datei nicht gefunden (%s) — nutze Default.", _TEST_STUDENTS_FILE)
+        return list(_TEST_STUDENTS_DEFAULT)
+    except (OSError, ValueError) as exc:
+        log.warning("Testschüler-Datei nicht lesbar (%s: %s) — nutze Default.", _TEST_STUDENTS_FILE, exc)
+        return list(_TEST_STUDENTS_DEFAULT)
+    if not isinstance(data, list) or not all(isinstance(item, dict) for item in data):
+        log.warning("Testschüler-Datei hat falsches Format — nutze Default.")
+        return list(_TEST_STUDENTS_DEFAULT)
+    return data
+
+
+TEST_STUDENTS = _load_test_students()
 
 
 @router.post("/api/add-test-students")
@@ -546,15 +572,36 @@ async def add_helper(body: dict, request: Request, session_id: str | None = Cook
 async def remove_helper(token: str, session_id: str | None = Cookie(default=None)) -> dict:
     _require_host(session_id)
     state = get_state()
-    helper = state.helper_sessions.pop(token, None)
+    hub = get_hub()
+    helper = state.helper_sessions.get(token)
     if not helper:
         raise HTTPException(404, "Unbekannter Token")
+    # Vollständige Cleanup-Reihenfolge analog invalidate_session / disconnect:
+    # 1. laufenden Lade-Task canceln (sonst leakt der Worker-Context, falls er
+    #    noch in open_student steckt),
+    # 2. aktiven Schüler des Helfers beenden → Worker zu + Queue zurück auf
+    #    pending (Modus A) bzw. Session revoked (Modus B via end_student),
+    # 3. WS schließen,
+    # 4. Helper aus der Map nehmen.
+    # Reihenfolge 1 vor 2 stellt sicher, dass end_student's eigener cancel+
+    # await denselben Task nicht doppelt canceln muss (idempotent, aber klarer).
+    if helper.load_task is not None and not helper.load_task.done():
+        helper.load_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await helper.load_task
+        helper.load_task = None
+    if helper.student_id is not None:
+        await end_student(
+            state, hub, helper.student_id,
+            queue_status="pending", session_state="revoked",
+        )
     if helper.ws:
         try:
             await helper.ws.close()
         except Exception:
             pass
-    await get_hub().broadcast_host(state.state_snapshot())
+    state.helper_sessions.pop(token, None)
+    await hub.broadcast_host(state.state_snapshot())
     return {"ok": True}
 
 

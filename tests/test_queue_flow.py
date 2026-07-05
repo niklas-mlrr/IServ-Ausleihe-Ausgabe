@@ -150,16 +150,32 @@ def test_end_student_releases_worker_without_session():
 # ---------------------------------------------------------------------------
 
 class _FakeTask:
-    """Steht für einen laufenden load_and_push_helper_student-Task."""
+    """Steht für einen laufenden load_and_push_helper_student-Task.
+
+    Awaitbar ( wie ein echter asyncio.Task ), denn end_student/invalidate_session
+    canceln nicht nur, sondern awaiten den Task jetzt auch (Stale-Guard +
+    CancelledError-Observance). Ein cancel'ter Fake-Task raising CancelledError
+    beim Await spiegelt das echte Verhalten — der production-Code fängt das via
+    contextlib.suppress(asyncio.CancelledError) ab.
+    """
 
     def __init__(self) -> None:
         self.cancelled = False
+        self.awaited = False
 
     def done(self) -> bool:
         return False
 
     def cancel(self) -> None:
         self.cancelled = True
+
+    def __await__(self):
+        self.awaited = True
+        if self.cancelled:
+            raise asyncio.CancelledError()
+        # Yield nothing — completes immediately without suspension.
+        return
+        yield  # pragma: no cover — unreachable, keeps it an async-gen-style awaitable
 
 
 def test_end_student_cancels_inflight_load_task():
