@@ -9,10 +9,11 @@ from datetime import datetime
 
 from fastapi import APIRouter, Cookie, WebSocket, WebSocketDisconnect
 
-from ..book_order import get_book_order_for_form
+from ..book_order import get_book_order_for_form, get_hidden_isbns_for_form
 from ..hub import get_hub
 from ..sessions import (
     advance_helper,
+    apply_hidden_books,
     booking_isbn_sets_from_info,
     end_student,
     expected_isbns_from_info,
@@ -84,6 +85,7 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                 info["form"] = student.form
                 book_order = await get_book_order_for_form(state, student.form)
                 info["book_order"] = book_order
+                apply_hidden_books(info, await get_hidden_isbns_for_form(state, student.form))
                 helper.expected_isbns = expected_isbns_from_info(info)
                 helper.vormerk_isbns, helper.lent_isbns = booking_isbn_sets_from_info(info)
                 await websocket.send_json({"type": "student_info", "student": info})
@@ -282,6 +284,7 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
             qs = state.find_student(session.student_id)
             info["form"] = qs.form if qs else ""
             info["book_order"] = await get_book_order_for_form(state, info["form"])
+            apply_hidden_books(info, await get_hidden_isbns_for_form(state, info["form"]))
             session.expected_isbns = expected_isbns_from_info(info)
             session.vormerk_isbns, session.lent_isbns = booking_isbn_sets_from_info(info)
             await websocket.send_json({

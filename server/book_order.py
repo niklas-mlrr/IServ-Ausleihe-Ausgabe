@@ -53,3 +53,29 @@ async def get_book_order_for_form(state: AppState, form: str) -> list[str]:
         return state.book_order
     stored = state.book_orders_by_grade.get(grade)
     return normalize_book_order(catalog_isbns, stored) if stored else catalog_isbns
+
+
+async def get_hidden_isbns_for_form(state: AppState, form: str) -> set[str]:
+    """Ausgeblendete ISBNs (Einstellungen-Dialog) für den Jahrgang eines Schülers.
+
+    Analog zu `get_book_order_for_form`: nutzt denselben `form_catalog_cache`
+    für die Jahrgangs-Ermittlung, daher i. d. R. kein zusätzlicher IServ-
+    Roundtrip, wenn `get_book_order_for_form` für dieselbe `form` bereits
+    gerufen wurde. Leeres Set bei nicht ermittelbarem Jahrgang oder IServ-
+    Fehlern — Ausblenden ist eine reine Anzeige-/Buchungsfilterung, darf
+    `student_info` nie verhindern."""
+    if not form or state.iserv is None:
+        return set()
+    cached = state.form_catalog_cache.get(form)
+    if cached is None:
+        try:
+            grade, catalog = await state.iserv.get_class_book_catalog(form, state.selected_schoolyear)
+        except Exception:
+            log.exception("Jahrgangs-Katalog für Klasse %r konnte nicht geladen werden", form)
+            return set()
+        cached = (grade, [b["isbn"] for b in catalog])
+        state.form_catalog_cache[form] = cached
+    grade, _ = cached
+    if grade is None:
+        return set()
+    return state.hidden_isbns_by_grade.get(grade, set())

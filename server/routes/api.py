@@ -339,7 +339,8 @@ async def get_booklist_order(
     catalog_isbns = [b["isbn"] for b in catalog]
     stored = state.book_orders_by_grade.get(grade)
     order = normalize_book_order(catalog_isbns, stored) if stored else catalog_isbns
-    return {"grade": grade, "catalog": catalog, "order": order}
+    hidden = sorted(state.hidden_isbns_by_grade.get(grade, set()) & set(catalog_isbns))
+    return {"grade": grade, "catalog": catalog, "order": order, "hidden": hidden}
 
 
 @router.post("/api/booklist-order")
@@ -383,6 +384,40 @@ async def set_booklist_order(
         state.book_order = list(order)
         await hub.broadcast_host(state.state_snapshot())
     return {"ok": True, "grade": grade, "order": order}
+
+
+@router.post("/api/booklist-hidden")
+async def set_booklist_hidden(
+    body: dict, session_id: str | None = Cookie(default=None)
+) -> dict:
+    """Ausgeblendete Buchreihen eines Jahrgangs (Einstellungen-Dialog, „Ausblenden"-
+    Button je Buch) setzen.
+
+    Reiner In-Memory-State (kein DB-/IServ-Write, kein PUT/POST gegen IServ —
+    nur der lesende Katalog-Check zur ISBN-Validierung). Ausgeblendete Reihen
+    gelten für neu geladene/neu verbundene Schüler dieses Jahrgangs nicht mehr
+    als „vorgemerkt" (`apply_hidden_books` in `sessions.py`/`routes/ws.py`) und
+    sind damit auch nicht mehr buchbar (`evaluate_scan_for_booking` sieht die
+    ISBN nicht mehr in `vormerk_isbns`)."""
+    _require_host(session_id)
+    state = get_state()
+    grade = body.get("grade")
+    requested = body.get("hidden")
+    if not isinstance(grade, int) or not isinstance(requested, list):
+        raise HTTPException(400, "grade (int) und hidden (Liste) erforderlich")
+    try:
+        catalog = await state.iserv.get_booklist_catalog_by_grade(
+            grade, state.selected_schoolyear
+        )
+    except Exception as e:
+        log.exception("Jahrgangs-Bücherliste konnte nicht geladen werden")
+        raise HTTPException(502, f"IServ-Fehler: {e}")
+    catalog_isbns = {b["isbn"] for b in catalog}
+    hidden = {isbn for isbn in requested if isinstance(isbn, str) and isbn in catalog_isbns}
+    state.hidden_isbns_by_grade[grade] = hidden
+    hub = get_hub()
+    await hub.broadcast_settings()
+    return {"ok": True, "grade": grade, "hidden": sorted(hidden)}
 
 
 @router.post("/api/add-student")

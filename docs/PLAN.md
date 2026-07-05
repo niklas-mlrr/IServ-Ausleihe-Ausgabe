@@ -435,6 +435,32 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
       extrahiertem `host.html`-Inline-Script grün, Grep bestätigt 0
       verbleibende `on*=`-Attribute in `web/`. Kein Verhaltensunterschied im
       Buchungspfad, `ALLOW_BOOKING`-Gate unangetastet.
+- [x] **Buchreihen ausblenden** (2026-07-05, Einstellungen-Dialog) — jedes Buch
+      im Reiter „Bücherlisten ordnen" (`host.html`) hat einen 👁/🚫-Button;
+      ausgeblendete Reihen (`state.hidden_isbns_by_grade: dict[grade→set[isbn]]`,
+      reiner In-Memory-State, kein DB-/IServ-Write) gelten beim Scannen nicht
+      mehr als „vorgemerkt" (weder Scanner- noch Schüler-Anzeige) und sind
+      damit nicht buchbar. Neue Funktionen `get_hidden_isbns_for_form()`
+      (`server/book_order.py`, spiegelt `get_book_order_for_form()`) und
+      `apply_hidden_books()` (`server/sessions.py`), gefiltert direkt nach
+      jedem `get_student_info`-Aufruf (4 Call-Sites: Modus A/B je Zuweisung +
+      Reconnect in `sessions.py`/`routes/ws.py`). Neuer Endpoint
+      `POST /api/booklist-hidden` (mirrort `/api/booklist-order`);
+      `GET /api/booklist-order` liefert zusätzlich `hidden: [isbn...]`. Tests:
+      `tests/test_class_book_order.py` +5, Suite 90 grün. **Live-Effekt bei
+      bereits geladenem Schüler bewusst nicht sofort** — analog zur
+      bestehenden Bücher-Reihenfolge greift eine Änderung erst beim nächsten
+      Laden/Reconnect, nicht rückwirkend auf eine schon offene
+      Scanner-Session. **Gotcha:** direkt nach dem Deploy meldete der Nutzer
+      „anwählbar, aber nicht speicherbar" — Ursache war kein Code-Bug, sondern
+      ein laufender Server-Prozess (`reload=False`, kein systemd), der vor dem
+      Code-Edit gestartet war und die neue Route noch nicht kannte, während
+      das statische `host.html` sofort die neue UI zeigte. Diagnostiziert via
+      `ps -o lstart` vs. `stat -c %y`; Neustart bewusst dem Nutzer überlassen
+      (aktive Helfer-/Queue-Sessions wären sonst verloren gegangen). Details:
+      `docs/test_status.md`,
+      `~/cc/_logs/2026-07-05_sba_hide_book_series_and_reload_gotcha.md`,
+      `~/cc/wiki/40_experience_logs/lessons_learned.md`.
 - [ ] End-to-End-Test mit ausgemusterten Büchern **inkl. Buchung** (wartet auf Buchungstest-Freigabe Niklas + Lukas)
 
 ### Phase 3 — Generalprobe Teil 1 (vor Ferienbeginn, Anfang Juli)

@@ -132,6 +132,21 @@
 - [ ] **Reconnect-Backoff** (scan/student/qr-display): Trennung → exponentieller
       Backoff bis 30 s, Reset bei Verbindung.
 
+### Neu 2026-07-05 (Einstellungen: Buchreihen ausblenden)
+
+- [ ] **„Ausblenden"-Button je Buch** im Einstellungen-Dialog (`host.html`,
+      Reiter „Bücherlisten ordnen"): ausgeblendete Buchreihen eines Jahrgangs
+      (`state.hidden_isbns_by_grade`, In-Memory, kein DB-/IServ-Write) gelten
+      beim Scannen nicht mehr als „vorgemerkt" — weder in der Scanner- noch
+      der Schüler-Anzeige — und sind damit auch nicht buchbar (gefiltert via
+      `apply_hidden_books()` in `sessions.py`/`routes/ws.py`, direkt nach
+      jedem `get_student_info`-Aufruf). Logik unit-getestet
+      (`tests/test_class_book_order.py`: `apply_hidden_books`,
+      `get_hidden_isbns_for_form`, State-Reset); **UI-Interaktion am Gerät
+      noch zu sichten** (Toggle-Button, Persistenz über „Speichern",
+      Live-Effekt bei bereits geladenem Schüler bewusst nicht sofort — analog
+      zur bestehenden Bücher-Reihenfolge, erst beim nächsten Laden/Reconnect).
+
 ### Aus Review Tier 2 (2026-07-05, PLAN §5 Phase 2)
 
 - [ ] **`current_books`-Jahrgangsfilter gegen echtes `?books=true`-Payload**
@@ -165,8 +180,8 @@
 ## Unit-Tests (pytest, `uv run pytest`)
 
 Reine Logik, kein IServ/Playwright/Server — schnell + produktionsneutral, als
-Regressions-Netz und QS-Beleg. **85 Tests, grün (2026-07-05, nach Review
-Tier 1–3).** Coverage (`--cov=server` in `addopts`): **43 %** gesamt
+Regressions-Netz und QS-Beleg. **90 Tests, grün (2026-07-05, +5 für
+„Buchreihen ausblenden").** Coverage (`--cov=server` in `addopts`): **43 %** gesamt
 (vorher 39 %/2026-06-18, 37 %, initial 20 %); Kernlogik deutlich höher —
 `hub.py` 82 %, `state.py` 93 %, `sessions.py` 60 %, `config.py` 93 %,
 `ratelimit.py` 100 %, `tls.py` 69 %, `book_order.py` 76 %.

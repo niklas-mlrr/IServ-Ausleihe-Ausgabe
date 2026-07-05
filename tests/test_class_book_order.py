@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import asyncio
 
+from server.book_order import get_hidden_isbns_for_form
 from server.iserv_client import IsServClient
 from server.routes.api import normalize_book_order
+from server.sessions import apply_hidden_books
 from server.state import AppState
 
 
@@ -179,3 +181,58 @@ def test_snapshot_includes_book_order():
     st = AppState()
     st.book_order = ["A", "B"]
     assert st.state_snapshot()["book_order"] == ["A", "B"]
+
+
+def test_reset_booklist_orders_clears_hidden_too():
+    st = AppState()
+    st.book_orders_by_grade = {9: ["A"]}
+    st.hidden_isbns_by_grade = {9: {"A"}}
+    st.reset_booklist_orders()
+    assert st.book_orders_by_grade == {} and st.hidden_isbns_by_grade == {}
+
+
+# ---------------------------------------------------------------------------
+# Ausgeblendete Buchreihen (Einstellungen-Dialog, „Ausblenden"-Button je Buch)
+# ---------------------------------------------------------------------------
+
+def test_apply_hidden_books_removes_hidden_isbns_from_info():
+    info = {"books": [
+        {"isbn": "A", "status": "vorgemerkt"},
+        {"isbn": "B", "status": "vorgemerkt"},
+        {"isbn": "C", "status": "ausgeliehen"},
+    ]}
+    apply_hidden_books(info, {"B"})
+    assert [b["isbn"] for b in info["books"]] == ["A", "C"]
+
+
+def test_apply_hidden_books_noop_when_nothing_hidden():
+    info = {"books": [{"isbn": "A", "status": "vorgemerkt"}]}
+    apply_hidden_books(info, set())
+    assert [b["isbn"] for b in info["books"]] == ["A"]
+
+
+def test_get_hidden_isbns_for_form_resolves_grade_via_class_catalog():
+    forms = [{"name": "9a", "grade": 9}]
+    items = [_item("A", "Mathe", "Mathematik"), _item("B", "Bio", "Biologie")]
+    c = IsServClient("d", "u", "p")
+    c._client = _FakeClient(forms, [{"grade": 9, "id": 100}], {100: _booklist(items)})
+    c._series_map = {}
+    st = AppState()
+    st.iserv = c
+    st.selected_schoolyear = "2025/2026"
+    st.hidden_isbns_by_grade = {9: {"A"}}
+    hidden = asyncio.run(get_hidden_isbns_for_form(st, "9a"))
+    assert hidden == {"A"}
+
+
+def test_get_hidden_isbns_for_form_empty_when_grade_unresolvable():
+    c = IsServClient("d", "u", "p")
+    c._client = _FakeClient([{"name": "8a", "grade": 8}], [{"grade": 8, "id": 8}],
+                             {8: _booklist([_item("A", "X", "Y")])})
+    c._series_map = {}
+    st = AppState()
+    st.iserv = c
+    st.selected_schoolyear = "2025/2026"
+    st.hidden_isbns_by_grade = {8: {"A"}}
+    hidden = asyncio.run(get_hidden_isbns_for_form(st, "9z"))
+    assert hidden == set()

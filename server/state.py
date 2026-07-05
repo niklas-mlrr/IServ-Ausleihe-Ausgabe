@@ -171,6 +171,13 @@ class AppState:
         # `book_order` (Jahrgang der Klasse). Reiner In-Memory-State, kein DB-/
         # IServ-Write. Wird erst beim Schuljahreswechsel geleert.
         self.book_orders_by_grade: dict[int, list[str]] = {}
+        # Ausgeblendete Buchreihen pro Jahrgang (Einstellungen-Dialog, „Ausblenden"-
+        # Button je Buch). Ausgeblendete ISBNs werden beim Scannen nicht mehr als
+        # „vorgemerkt" geführt/angezeigt (weder Scanner- noch Handy-Anzeige) und
+        # sind daher auch nicht buchbar. Reiner In-Memory-State, kein DB-/IServ-
+        # Write — betrifft nur die lokale Anzeige/Buchungsprüfung. Wird wie
+        # `book_orders_by_grade` erst beim Schuljahreswechsel geleert.
+        self.hidden_isbns_by_grade: dict[int, set[str]] = {}
         # Katalog-Cache für klassenübergreifende Warteschlangen (einzeln
         # hinzugefügte Schüler/„Test Config", ggf. aus verschiedenen Jahrgängen):
         # form-Name -> (grade, catalog_isbns). Erspart einen IServ-Roundtrip pro
@@ -191,6 +198,7 @@ class AppState:
         """Alle jahrgangsweiten Bücher-Reihenfolgen leeren (Schuljahreswechsel:
         andere Booklists, ISBNs passen nicht mehr)."""
         self.book_orders_by_grade = {}
+        self.hidden_isbns_by_grade = {}
         self.form_catalog_cache = {}
 
     # --- Host-Login-Sessions (gleitendes TTL) ---
