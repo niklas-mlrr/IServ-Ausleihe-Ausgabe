@@ -329,6 +329,68 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
       bleiben (jetzt einzig von `select_class` genutzt). Bestehende Tests
       (`tests/test_class_book_order.py`) testen nur die Katalog-/Normalisierungs-
       Logik, nicht die entfernten Endpunkte — unverändert grün (Suite 92).
+- [x] **Bücher-Reihenfolge pro Schüler-Jahrgang statt globaler Klassen-Order**
+      (2026-07-05) — bis hierhin hing die Helfer-Anzeige an **einer** globalen
+      `state.book_order` für „die aktive Klasse". Für klassenübergreifende
+      Warteschlangen (einzeln hinzugefügte Schüler, „Test Config"-Tab) mit
+      Schülern aus verschiedenen Jahrgängen war das falsch: alle Helfer
+      bekamen dieselbe (meist leere oder zum falschen Jahrgang passende)
+      Reihenfolge. Fix: neues Modul `server/book_order.py` mit
+      `get_book_order_for_form(state, form)` — ermittelt den Jahrgang **des
+      jeweils zugewiesenen Schülers** (über `IsServClient.get_class_book_catalog`)
+      und liefert dessen `book_orders_by_grade`-Konfiguration, mit
+      `state.form_catalog_cache` (form → (grade, catalog_isbns)) gegen
+      wiederholte IServ-Roundtrips. `hub.broadcast_settings()` berechnet die
+      Reihenfolge jetzt **pro verbundenem Helfer** anhand seines eigenen
+      Schülers, statt einen globalen Wert an alle zu pushen; alle vier
+      `student_info`-Baustellen (`sessions.py` ×2, `routes/ws.py` ×2 —
+      Scanner-Reconnect + Modus-B-Reconnect) nutzen dieselbe Funktion. Live
+      per Playwright-freiem WS-Test verifiziert: zwei Helfer mit Schülern aus
+      Jahrgang 10 und 12 (ohne geladene Klasse, reiner Test-Config-Betrieb)
+      bekamen nach einer Jahrgangs-Umsortierung im Einstellungen-Dialog sofort
+      ihre jeweils eigene, unterschiedliche Reihenfolge gepusht.
+      `get_book_order_for_form` fängt IServ-Fehler intern ab (Fallback
+      `state.book_order`) — ein Fehler dort darf `student_info` nie
+      verhindern, da der Aufruf in `load_and_push_helper_student` außerhalb
+      des einzigen Try/Except-Blocks liegt. Suite weiter grün (85).
+- [x] **Review-Tier-2-Hardening** (2026-07-05, gebündelt in Commit `63a4cb3`)
+      — Edge-Case-Bugs + Härtung aus dem Codebase-Review (4 Review-Agenten,
+      Tier 2). Dateibegrenzt parallel umgesetzt, Suite grün (85):
+      (a) `automation/worker.py`: `new_page()` an beiden Stellen im
+      try/except (Context wird bei Fehlschlag zurück in den Pool gelegt);
+      `release()` Double-Release-Guard (`session._context = None`);
+      `start()`-Cancel schließt aufgebaute Contexts; `_read_booking_result`
+      scoped auf Bücher-Liste (exkl. Eingabefeld), bleibt `unknown`-Default.
+      (b) `server/iserv_client.py`: `(b.get("BookView") or {})` (null-safe);
+      `threading.Lock` um Lazy-Init von `_client`/`_resolve_sy`/
+      `_get_series_map` (Lock hält nicht während API-Calls);
+      konservativer `current_books`-Jahrgangsfilter via `distributed_at`
+      (keep-when-unknown — sicher gegen falsche Enter; **validierungsbedürftig**
+      gegen echtes `?books=true`-Payload, falls Vorjahres-Bücher kommen).
+      (c) `web/`: `escapeHtml` auf Kamera-id/-label (scan+student);
+      `host.html` `JSON.parse` try/catch; `pushSlipDefault` erst post-Login;
+      `qr-img.src` nur bei `data:image/`-Prefix.
+      (d) `server/routes/api.py`: 7× `int(student_id)`→400; `secrets.compare_digest`
+      für Host-Passwort + `join_secret` + neues `login_limiter` (5/15s);
+      `request.client is None`→400; `_base_url` vertraut **nicht mehr** dem
+      `Host`-Header-Hostnamen (IP aus `cfg.host_ip`/Auto-Erkennung, nur Port
+      aus Host — sonst Host-Header-Injection ins QR-URL mit `join_secret`).
+      `ws.py`: `receive_json` fängt `json.JSONDecodeError`. `ratelimit.py`:
+      Dead-Pop-then-recreate entfernt (leere Deques werden jetzt echt
+      evicted). `config.py`: `req_int`-Helper (klare `SystemExit`-Fehler).
+      (e) `server/printing.py`: PDF-Dateiname µs+`token_hex` (keine
+      Sekunden-Kollision); PowerShell UTF-8-Console-Prefix; `_print_win_default`
+      via `asyncio.to_thread` (blockiert nicht den Event-Loop); `pages`-Regex-
+      Validierung. `server/tls.py`: Zertifikat-Expiry-Check beim Start
+      (regeneriert <30d); Key via `os.open(0o600)` (kein world-readable-Fenster).
+      (f) `automation/`: Spike-Login-Check `and`→`or` (wie `worker.py`);
+      `test_printer.py` Single-Quote-Escaping; e2e `HOST_PASSWORD` in `main()`
+      mit klarem `SystemExit`. Test `test_base_url_keeps_routable_host` →
+      `test_base_url_ignores_spoofed_host_header_uses_config_ip` (asserted
+      jetzt die neue Security-Eigenschaft). Siehe
+      `_logs/2026-07-05_sba_tier2_hardening.md` +
+      `wiki/40_experience_logs/lessons_learned.md` („Host-Header nicht für
+      URL-Hostnamen vertrauen").
 - [ ] End-to-End-Test mit ausgemusterten Büchern **inkl. Buchung** (wartet auf Buchungstest-Freigabe Niklas + Lukas)
 
 ### Phase 3 — Generalprobe Teil 1 (vor Ferienbeginn, Anfang Juli)
