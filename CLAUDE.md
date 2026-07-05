@@ -85,8 +85,10 @@ Rückbau-Plan; Real-Buchungen nie unbeaufsichtigt.
 
 | Pfad | Inhalt |
 |------|--------|
-| `server/` | FastAPI-App: HTTPS, WebSocket-Hub, Rollen/Sessions (Phase 2) |
-| `automation/` | Playwright-Worker + Spikes; Ausgaben in `automation/out/` (gitignored) |
-| `web/` | Statische UI ohne Build-Step: `scan.html`, `html5-qrcode.min.js`, `beep.mp3` |
-| `docs/PLAN.md` | Projektplan — bei Entscheidungen fortschreiben |
+| `server/` | FastAPI-App: HTTPS (`tls.py`), WebSocket-Hub (`hub.py`), Rollen/Sessions (`sessions.py`, `state.py`), IServ-Read-Client (`iserv_client.py`), Druck (`printing.py`), Bücher-Reihenfolge (`book_order.py`), Rate-Limiting (`ratelimit.py`), Endpunkte (`routes/`) |
+| `automation/` | Playwright-Worker (`worker.py`) + Spikes + E2E-Skripte (`e2e_*.py`); Ausgaben in `automation/out/` (gitignored) |
+| `web/` | Statische UI ohne Build-Step: `host.html` (Host), `scan.html`/`scan.js` (Helfer-Scanner, Modus A), `student.html` (Schüler, Modus B), `qr-display.html` (iPad), `html5-qrcode.min.js`, `beep.mp3` |
+| `docs/PLAN.md` | Projektplan — bei Entscheidungen fortschreiben (Arbeitsgrundlage) |
+| `docs/test_status.md` | Lebender Test-/Verifizierungsstand (verifiziert vs. offen) |
 | `docs/spikes/` | Spike-Protokolle (Seminarfach-Material) |
+| `tests/` | pytest-Unit-Tests (Suite grün, siehe `docs/test_status.md` für aktuellen Stand) |

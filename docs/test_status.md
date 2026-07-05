@@ -5,7 +5,8 @@
 > Risiko hier unter „Offen / zu testen" eintragen; nach erfolgreichem Test in
 > „Verifiziert" verschieben (mit Datum + Skript/Befund). Bezug: `docs/PLAN.md`.
 >
-> Stand: 2026-06-15. Alle bisherigen Tests sind **read-only** gegen IServ
+> Stand: 2026-07-05 (Unit-Test-Zahlen aktualisiert nach Review Tier 1–3).
+> Alle bisherigen Tests sind **read-only** gegen IServ
 > (kein Submit, keine Buchung — PLAN §6).
 
 ## Verifiziert (grün)
@@ -14,10 +15,10 @@
 |---|-----|--------------|-------|--------|
 | V1 | Spike A — Counter-Seite headless bedienbar (Login, Schülersuche, Kartei) | `automation/spike_a_counter.py --explore` | 2026-06-12 | Selektoren stabil; Login ohne 2FA/Captcha; `docs/spikes/spike_a_protokoll.md` |
 | V2 | Spike B — parallele Sessions desselben Accounts (O2) | `automation/spike_b_parallel.py` | 2026-06-12 | 3/3 Logins + 3/3 Cookie-Sharing, keine Invalidierung |
-| V3 | Phase-2 E2E-Smoke Modus A (Host→Scanner→Worker→Kartei→staged) | `automation/e2e_smoke.py` | 2026-06-15 | bestanden; Bug in `scan.html` (Panel-Display) gefixt |
-| V4 | Worker-Recovery (Re-Login bei Session-Ablauf) | `automation/recovery_test.py` | 2026-06-15 | deterministisch via `clear_cookies()`, bestanden |
-| V5 | 2-Helfer-Paralleltest (zwei Schüler gleichzeitig, getrennte Karteien) | `automation/e2e_parallel.py` | 2026-06-15 | bestanden, keine Vermischung |
-| V6 | Pool-Härtung (fehlgeschlagene Logins werden nachgezogen, kein Context-Leak) | `WorkerPool.start()` | 2026-06-15 | im Paralleltest mitverifiziert |
+| V3 | Phase-2 E2E-Smoke Modus A (Host→Scanner→Worker→Kartei→staged) | `automation/e2e_smoke.py` | 2026-06-15 | bestanden; Bug in `scan.html` (Panel-Display) gefixt; `docs/phase2_e2e_2026-06-15.md` §1 |
+| V4 | Worker-Recovery (Re-Login bei Session-Ablauf) | `automation/recovery_test.py` | 2026-06-15 | deterministisch via `clear_cookies()`, bestanden; `docs/phase2_e2e_2026-06-15.md` §2 |
+| V5 | 2-Helfer-Paralleltest (zwei Schüler gleichzeitig, getrennte Karteien) | `automation/e2e_parallel.py` | 2026-06-15 | bestanden, keine Vermischung; `docs/phase2_e2e_2026-06-15.md` §3 |
+| V6 | Pool-Härtung (fehlgeschlagene Logins werden nachgezogen, kein Context-Leak) | `WorkerPool.start()` | 2026-06-15 | im Paralleltest mitverifiziert; `docs/phase2_e2e_2026-06-15.md` §3 |
 | V7 | Phase-4 E2E Modus B (Pairing-Flow + harte Token-Invalidierung) | `automation/e2e_modus_b.py` | 2026-06-15 | bestanden inkl. Reconnect mit totem Token (Close 4006); `docs/phase4_modus_b_2026-06-15.md` §5 |
 | V8 | Druck-Backend-Logik `file`/`auto`-Resolution (ohne Drucker) | `server/printing.py` Smoke (py) | 2026-06-15 | auto→file auf Linux, PDF wird geschrieben (reiner Logik-Check, **kein** echter Druck) |
 | V9 | Rate-Limit-Logik (sliding window 5/10 s, pro-IP) | `server/ratelimit.py` Smoke | 2026-06-15 | erste 5 erlaubt, 6. gedrosselt; andere IP unbetroffen |
@@ -131,6 +132,14 @@
 - [ ] **Reconnect-Backoff** (scan/student/qr-display): Trennung → exponentieller
       Backoff bis 30 s, Reset bei Verbindung.
 
+### Aus Review Tier 2 (2026-07-05, PLAN §5 Phase 2)
+
+- [ ] **`current_books`-Jahrgangsfilter gegen echtes `?books=true`-Payload**
+      (`server/iserv_client.py`): Fix ist konservativ (keep-when-unknown via
+      `distributed_at`, sicher gegen falsche Enter), aber unverifiziert gegen
+      ein echtes Payload mit Vorjahres-Büchern — im Betrieb beobachten, ob je
+      ein Buch fälschlich als „aktuelles Jahr" durchrutscht.
+
 ### Aus dem bisherigen Plan (Phase 3/4)
 
 - [ ] **Lasttest: 5 parallele Schüler-Sessions** (Modus B) — `WORKER_CONTEXTS`
@@ -156,13 +165,14 @@
 ## Unit-Tests (pytest, `uv run pytest`)
 
 Reine Logik, kein IServ/Playwright/Server — schnell + produktionsneutral, als
-Regressions-Netz und QS-Beleg. **50 Tests, grün (2026-06-18).** Coverage
-(`uv run pytest`, jetzt mit `pytest-cov` als dev-dep + `--cov=server` in
-`addopts`): **39 %** gesamt (vorher 37 % / initial 20 %); Kernlogik deutlich
-höher — `hub.py` 93 %, `state.py` 92 %, `sessions.py` 49 %, `routes/api.py`
-34 %, `config.py` 98 %.
-Bewusst niedrig bleiben IServ-/Playwright-/Wiring-Module (`iserv_client.py`,
-`routes/ws.py`, `app.py`, `main.py`) — die decken die E2E-Skripte V3–V7 ab.
+Regressions-Netz und QS-Beleg. **85 Tests, grün (2026-07-05, nach Review
+Tier 1–3).** Coverage (`--cov=server` in `addopts`): **43 %** gesamt
+(vorher 39 %/2026-06-18, 37 %, initial 20 %); Kernlogik deutlich höher —
+`hub.py` 82 %, `state.py` 93 %, `sessions.py` 60 %, `config.py` 93 %,
+`ratelimit.py` 100 %, `tls.py` 69 %, `book_order.py` 76 %.
+Bewusst niedrig bleiben IServ-/Playwright-/Wiring-Module (`iserv_client.py`
+31 %, `routes/api.py` 31 %, `routes/ws.py`, `app.py`, `main.py`) — die decken
+die E2E-Skripte V3–V7 ab.
 
 | Datei | Deckt ab |
 |-------|----------|

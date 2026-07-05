@@ -1,6 +1,7 @@
 # Projektplan: IServ Ausleihe-Ausgabe
 
-> Initialisierungsplan, Stand 2026-06-12. Basiert auf der Projektskizze
+> Initialisierungsplan vom 2026-06-12, seither laufend fortgeschrieben
+> (zuletzt 2026-07-05, Review Tier 1–3). Basiert auf der Projektskizze
 > (Seminarfach) und den Klärungsfragen vom 2026-06-12.
 > Dieses Dokument ist die Arbeitsgrundlage — Änderungen hier einpflegen.
 
@@ -129,15 +130,15 @@ Sicherheitsanforderungen (aus Klärung 2026-06-12, „keine Sicherheitslücken")
 Timeline-Anker: **Teil 1 muss zum Ferienbeginn (Anfang/Mitte Juli 2026)
 einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
 
-### Phase 0 — Projekt-Setup (KW 24/25, jetzt)
+### Phase 0 — Projekt-Setup (KW 24/25) — abgeschlossen
 
-- [ ] Repo umstrukturieren: Alt-Code raus, Python-Projektgerüst
+- [x] Repo umstrukturiert: Alt-Code raus, Python-Projektgerüst
       (`server/`, `web/`, `automation/`, `docs/`, `pyproject.toml`)
-- [ ] Scanner-Assets übernehmen (`html5-qrcode.min.js`, `beep.mp3`,
-      Scan-Logik aus `scanner.html`)
-- [ ] `.env`-Handling + `CLAUDE.md` mit Read-only-/Produktions-Schutzregeln
+- [x] Scanner-Assets übernommen (`html5-qrcode.min.js`, `beep.mp3`,
+      Scan-Logik aus `scanner.html` → `web/scan.html`/`web/scan.js`)
+- [x] `.env`-Handling + `CLAUDE.md` mit Read-only-/Produktions-Schutzregeln
       (analog `ausleihe-api`)
-- [ ] Dieses Plandokument committen; README neu schreiben
+- [x] Dieses Plandokument committen; README neu geschrieben
 
 ### Phase 1 — Spikes: Risiken zuerst (KW 25/26)
 

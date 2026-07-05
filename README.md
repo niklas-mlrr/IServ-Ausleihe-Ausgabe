@@ -129,10 +129,18 @@ print(AusleiheClient().get('/schoolyears/current')['id'])"
 
 ```
 ├── server/        FastAPI-App: HTTPS, WebSocket-Hub, Rollen/Sessions, Druck
-│   └── printing.py          Leihschein-Druck (file/lp/sumatra, plattformabhängig)
-├── automation/    Playwright-Worker + Spikes (Ausgaben: automation/out/, gitignored)
+│   ├── sessions.py          Session-/Queue-Logik (Modus A + B)
+│   ├── iserv_client.py      Read-only IServ-Wrapper
+│   ├── book_order.py        Bücher-Reihenfolge pro Schüler-Jahrgang
+│   ├── printing.py          Leihschein-Druck (file/lp/sumatra, plattformabhängig)
+│   ├── tls.py               Selbstsigniertes HTTPS-Zertifikat
+│   └── routes/              API- + WebSocket-Endpunkte
+├── automation/    Playwright-Worker + Spikes + E2E-Skripte (Ausgaben: automation/out/, gitignored)
 ├── web/           statische UI ohne Build-Step
-│   ├── scan.html            Kamera-Scanner (html5-qrcode, Beep, Torch)
+│   ├── host.html            Host-UI (Laptop): Klasse/Queue/Helfer/Modus B
+│   ├── scan.html / scan.js  Helfer-Scanner (Modus A, html5-qrcode, Beep, Torch)
+│   ├── student.html         Schüler-UI (Modus B)
+│   ├── qr-display.html      iPad-QR-Anzeige (Modus B)
 │   ├── html5-qrcode.min.js  vendored
 │   └── beep.mp3
 ├── docs/
@@ -140,6 +148,7 @@ print(AusleiheClient().get('/schoolyears/current')['id'])"
 │   ├── deployment.md    Windows-/Macbook-Setup + USB-Drucker
 │   ├── test_status.md   Test-/Verifizierungsstand (lebend)
 │   └── spikes/          Spike-Protokolle
+├── tests/         pytest-Unit-Tests (reine Logik, kein IServ/Playwright)
 ├── setup.bat / start.bat / start.sh
 └── pyproject.toml
 ```
@@ -158,7 +167,14 @@ print(AusleiheClient().get('/schoolyears/current')['id'])"
 
 ## Status
 
-Phase 0 (Projekt-Setup) — siehe Phasenplan in [`docs/PLAN.md`](docs/PLAN.md).
+Modus A (Stapelerstellung) ist funktional fertig: Host-UI, Helfer-Scanner,
+Playwright-Worker-Pool, Leihschein-Druck, Auto-Buchung mit Vorabprüfung
+(gegated per `ALLOW_BOOKING`, Default `false` = read-only). Modus B
+(Live-Ausgabe-Pilot) ist initial gebaut (Pairing-Flow, QR-Anzeige, E2E grün).
+Noch offen: echter Buchungstest gegen Produktion (wartet auf Freigabe),
+Generalprobe im Schul-WLAN. Details/Phasenstand: [`docs/PLAN.md`](docs/PLAN.md)
+§5, laufender Verifizierungsstand: [`docs/test_status.md`](docs/test_status.md).
+
 Historie: Das Repo ist ein entkoppelter Fork des
 [Barcode-Scanners](https://github.com/niklas-mlrr/Barcode-Scanner); der alte
 Node-Server/Keyboard-Client liegt in der Git-Historie (bis `0bd06bc`).
