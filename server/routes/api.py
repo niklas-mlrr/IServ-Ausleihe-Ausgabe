@@ -1116,15 +1116,18 @@ async def student_pair(body: dict, session_id: str | None = Cookie(default=None)
     # unentschieden) — der Host muss den Schüler bewusst freigeben. Beide
     # Blocker werden gesammelt und in einem einzigen Bestätigungs-Dialog
     # angezeigt; `override_payment` hebt alle Blocker auf einmal auf.
+    # Nicht angemeldete Schüler haben keinen Bezahl-/Nachweis-Status → keine
+    # Nachfrage, sie werden direkt gepaart.
     blockers = []
-    if not info.get("paid"):
-        blockers.append({"kind": "unpaid", "amount_open": info.get("amount_open")})
-    if info.get("remission_pending") or info.get("exemption_pending"):
-        blockers.append({
-            "kind": "nachweis",
-            "remission": bool(info.get("remission_pending")),
-            "exemption": bool(info.get("exemption_pending")),
-        })
+    if info.get("enrolled"):
+        if not info.get("paid"):
+            blockers.append({"kind": "unpaid", "amount_open": info.get("amount_open")})
+        if info.get("remission_pending") or info.get("exemption_pending"):
+            blockers.append({
+                "kind": "nachweis",
+                "remission": bool(info.get("remission_pending")),
+                "exemption": bool(info.get("exemption_pending")),
+            })
     if blockers and not override:
         raise HTTPException(
             409,

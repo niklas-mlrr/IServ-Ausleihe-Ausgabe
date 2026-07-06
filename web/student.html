@@ -110,6 +110,7 @@
     .pay-badge.paid { color: #4caf50; }
     .pay-badge.unpaid { color: #e69500; }
     .pay-badge.override { color: #0a84ff; }
+    .pay-badge.wait { color: #888; }
 
     /* ---- Bücher-Tabelle (einziger Scroll-Bereich) ---- */
     .book-table-wrap { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; width: 100%; }
@@ -385,7 +386,7 @@
       document.getElementById('s-form').textContent = (s.form || '').replace(/^Klasse\s+/i, '');
       const pay = document.getElementById('s-pay');
       if (!s.enrolled) {
-        pay.innerHTML = '<span class="pay-badge unpaid">Nicht angemeldet</span>';
+        pay.innerHTML = '<span class="pay-badge wait">Nicht angemeldet</span>';
       } else {
         // „Nachweis fehlt" (Ermäßigung/Befreiung): Antrag gestellt, aber noch
         // unentschieden — gleiche Farbe wie „Offen". Reihenfolge: erst die
