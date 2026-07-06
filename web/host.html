@@ -996,7 +996,25 @@
       if (r.status === 409) {
         const d = await r.json();
         const det = d.detail;
-        if (det && det.reason === 'unpaid') {
+        // Blocker-Sammelfall („blocked"): nicht bezahlt und/oder ausstehender
+        // Nachweis — alle Gründe in einem Dialog dem Host zur Freigabe vorlegen.
+        if (det && det.reason === 'blocked' && Array.isArray(det.blockers) && det.blockers.length) {
+          const lines = det.blockers.map(b => {
+            if (b.kind === 'unpaid') return `Nicht bezahlt (offen: ${b.amount_open} €)`;
+            if (b.kind === 'nachweis') {
+              const parts = [];
+              if (b.remission)  parts.push('Ermäßigungsnachweis fehlt');
+              if (b.exemption) parts.push('Befreiungsnachweis fehlt');
+              return parts.join(' + ');
+            }
+            return null;
+          }).filter(Boolean);
+          if (!lines.length) { showMsg(det.msg || 'Pairing fehlgeschlagen'); return; }
+          if (!await confirmDialog(`${lines.join('\n')}\n\nTrotzdem freigeben?`, 'Trotzdem freigeben')) return;
+          r = await fetch('/api/student/pair', { method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ student_id: studentId, pairing_code: code, override_payment: true }) });
+        } else if (det && det.reason === 'unpaid') {
+          // Alte Server-Antwort (Kompatibilität): nur nicht bezahlt.
           if (!await confirmDialog(`Schüler nicht bezahlt (offen: ${det.amount_open} €).\n\nTrotzdem freigeben?`, 'Trotzdem freigeben')) return;
           r = await fetch('/api/student/pair', { method: 'POST', headers: {'Content-Type':'application/json'},
             body: JSON.stringify({ student_id: studentId, pairing_code: code, override_payment: true }) });
