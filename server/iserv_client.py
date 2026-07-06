@@ -308,7 +308,7 @@ class IsServClient:
             if current_enrollment:
                 for item in current_enrollment.get("booklistItems", []):
                     sd = item.get("series_data", {})
-                    isbn = item.get("series", "")
+                    isbn = sd.get("isbn") or item.get("series", "")
                     books_to_receive.append({
                         "isbn": isbn,
                         "title": _title(isbn, sd.get("title", "")),
