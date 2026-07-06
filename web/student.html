@@ -392,15 +392,19 @@
         // Nachweise, dann der Bezahlstatus. Beim Override bleibt der
         // Betreuer-Freigabe-Badge erhalten, der Offen-Betrag folgt dahinter.
         const parts = [];
+        const nachweis = s.remission_pending || s.exemption_pending;
         if (s.remission_pending)  parts.push('<span class="pay-badge unpaid">Ermäßigungsnachweis fehlt</span>');
         if (s.exemption_pending) parts.push('<span class="pay-badge unpaid">Befreiungsnachweis fehlt</span>');
-        if (s.paid) {
+        // „Bezahlt" entfallen, wenn ein Nachweis fehlt — der Hinweis geht vor.
+        if (s.paid && !nachweis) {
           parts.push('<span class="pay-badge paid">Bezahlt</span>');
-        } else if (overridden) {
-          parts.push('<span class="pay-badge override">Vom Betreuer freigegeben</span>');
-          parts.push(`<span class="pay-badge unpaid">offen: ${escapeHtml(s.amount_open)} €</span>`);
-        } else {
-          parts.push(`<span class="pay-badge unpaid">Nicht bezahlt — offen: ${escapeHtml(s.amount_open)} €</span>`);
+        } else if (!s.paid) {
+          if (overridden) {
+            parts.push('<span class="pay-badge override">Vom Betreuer freigegeben</span>');
+            parts.push(`<span class="pay-badge unpaid">offen: ${escapeHtml(s.amount_open)} €</span>`);
+          } else {
+            parts.push(`<span class="pay-badge unpaid">Nicht bezahlt — offen: ${escapeHtml(s.amount_open)} €</span>`);
+          }
         }
         pay.innerHTML = parts.join(' · ');
       }

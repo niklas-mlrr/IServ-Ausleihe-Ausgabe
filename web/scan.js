@@ -128,11 +128,13 @@ function handleServerMessage(msg) {
     if (!s.enrolled) {
       payParts.push('<span class="wait">Nicht angemeldet</span>');
     } else {
+      const nachweis = s.remission_pending || s.exemption_pending;
       if (s.remission_pending)  payParts.push('<span class="unpaid">Ermäßigungsnachweis fehlt</span>');
       if (s.exemption_pending) payParts.push('<span class="unpaid">Befreiungsnachweis fehlt</span>');
-      if (s.paid) {
+      // „Bezahlt" entfallen, wenn ein Nachweis fehlt — der Hinweis geht vor.
+      if (s.paid && !nachweis) {
         payParts.push('<span class="paid">Bezahlt</span>');
-      } else {
+      } else if (!s.paid) {
         payParts.push(`<span class="unpaid">Offen: ${escapeHtml(s.amount_open)} €</span>`);
       }
     }
