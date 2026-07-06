@@ -260,21 +260,32 @@ class IsServClient:
             # `?books=true` nur "aktuell ausgeliehen" — nicht, ob Bücher aus
             # Vorjahren (noch nicht zurückgegeben) enthalten sind. Da das
             # Book-Schema kein `schoolyear`/`enrollment`-Feld trägt, filtern wir
-            # heuristisch über `distributed_at`: nur Bücher, die innerhalb des
-            # gewählten Schuljahrs (begin ≤ distributed_at ≤ end) ausgegeben
-            # wurden, gelten als current-year. Bücher ohne distributed_at
-            # behalten wir (verlässlicher Zeitstempel fehlt → nicht aussortieren).
-            # Vorjahr-Bücher ohne Vormerkung würden sonst als "ausgeliehen" in der
-            # Scanner-Tabelle auftauchen und ein schon zurückgegebenes Buch
-            # (falls die API es wider Erwarten doch liefert) als ausgeliehen
-            # anzeigen. Siehe PLAN §6.1 / Review-Hinweis.
+            # heuristisch über `distributed_at`. Bücher werden typischerweise
+            # VOR dem offiziellen Schuljahresbeginn ausgegeben (Sommerferien-
+            # Ausgabe, siehe Wiki-Gotcha) — daher reicht das Fenster vom Ende
+            # des VORJAHRS bis zum Ende des gewählten Schuljahrs
+            # (Vorjahr.end ≤ distributed_at ≤ Jahr.end), nicht [begin, end].
+            # Bücher ohne distributed_at behalten wir (verlässlicher Zeitstempel
+            # fehlt → nicht aussortieren). Vorjahr-Bücher ohne Vormerkung würden
+            # sonst als "ausgeliehen" in der Scanner-Tabelle auftauchen und ein
+            # schon zurückgegebenes Buch (falls die API es wider Erwarten doch
+            # liefert) als ausgeliehen anzeigen. Siehe PLAN §6.1 / Review-Hinweis.
+            sorted_years = sorted(
+                (
+                    (y, _sy_date(y.get("begin")), _sy_date(y.get("end")))
+                    for y in self._active_years(client)
+                ),
+                key=lambda t: t[1] or date.min,
+            )
             sy_begin = None
             sy_end = None
-            for y in self._active_years(client):
+            prev_end = None
+            for y, b, e in sorted_years:
                 if y.get("id") == sy_id:
-                    sy_begin = _sy_date(y.get("begin"))
-                    sy_end = _sy_date(y.get("end"))
+                    sy_begin = prev_end if prev_end is not None else b
+                    sy_end = e
                     break
+                prev_end = e
 
             def _in_current_sy(dist_at: object) -> bool:
                 if dist_at is None:
