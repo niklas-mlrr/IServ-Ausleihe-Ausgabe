@@ -167,7 +167,8 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
             # noch nicht ausgeliehen?) → buchen (Enter) oder — Gate aus — stagen.
             # Nicht erfüllt → Feld wird NICHT berührt (Freigabe 2026-07-02).
             result = await process_scan(
-                state, student_id, helper.vormerk_isbns, helper.lent_isbns, barcode
+                state, student_id, helper.vormerk_isbns, helper.lent_isbns, barcode,
+                source="helper",
             )
             # ISBN mitgeben, damit der Helferclient das gescannte Buch in seiner
             # Liste markieren kann.

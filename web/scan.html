@@ -217,12 +217,16 @@
     </div>
   </div>
 
-  <!-- Ausgemustertes-Buch-Hinweis: bewusst OHNE Schließen-Button, schließt nur
-       per Klick außerhalb der Box oder automatisch beim nächsten Scan. -->
+  <!-- Ausgemustertes-Buch-Hinweis: der Helfer schließt dieses Modal selbst
+       (Button) — per Klick außerhalb oder beim nächsten Scan geht es ebenfalls
+       zu. Am Host erscheint diese Meldung bewusst OHNE Schließen-Button. -->
   <div class="modal-overlay" id="book-deleted-modal">
     <div class="modal-box">
       <h3 style="color:#f44336">Ausgemustertes Buch gescannt</h3>
       <p id="book-deleted-text"></p>
+      <div class="modal-actions">
+        <button class="primary" id="book-deleted-close">Schließen</button>
+      </div>
     </div>
   </div>
 

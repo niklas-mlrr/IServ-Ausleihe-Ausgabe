@@ -220,6 +220,7 @@ const camDropdown = document.getElementById('cam-dropdown');
 const readerEl = document.getElementById('reader');
 const bookDeletedModal = document.getElementById('book-deleted-modal');
 const bookDeletedText = document.getElementById('book-deleted-text');
+const bookDeletedCloseBtn = document.getElementById('book-deleted-close');
 const printModal = document.getElementById('print-modal');
 const printWarnEl = document.getElementById('print-warn');
 const slipCheck = document.getElementById('slip-second-page');
@@ -268,14 +269,16 @@ modalNextConfirmBtn.addEventListener('click', () => { closeNextModal(); advanceT
 modalNextCancelBtn.addEventListener('click', closeNextModal);
 nextModal.addEventListener('click', (e) => { if (e.target === nextModal) closeNextModal(); });
 
-// ---- Ausgemustertes-Buch-Hinweis: bewusst ohne Schließen-Button (siehe
-// scan.html) — schließt nur per Klick außerhalb der Box oder automatisch,
-// sobald der nächste Barcode gescannt wird. ----
+// ---- Ausgemustertes-Buch-Hinweis: der Helfer schließt dieses Modal selbst
+// (Button) — per Klick außerhalb oder beim nächsten Scan geht es ebenfalls
+// zu. Am Host erscheint die Meldung ohne Schließen-Button (s. server:
+// process_scan source="helper"). ----
 function showBookDeletedModal(msg) {
   bookDeletedText.textContent = `${escapeHtml(msg.barcode)} — ${escapeHtml(msg.msg || 'Buch ausgemustert')}`;
   bookDeletedModal.classList.add('show');
 }
 function closeBookDeletedModal() { bookDeletedModal.classList.remove('show'); }
+bookDeletedCloseBtn.addEventListener('click', closeBookDeletedModal);
 bookDeletedModal.addEventListener('click', (e) => { if (e.target === bookDeletedModal) closeBookDeletedModal(); });
 
 // ---- Druck-Dialog ----

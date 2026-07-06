@@ -1121,8 +1121,14 @@
         const helper = helpers.find(h => h.student_id === s.student_id);
         const helperLbl = helper ? `<span class="ns-helper"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> ${escapeHtml(helper.name)}</span>` : '';
         const alert = studentAlerts[s.student_id];
+        // Schließen-Button nur am Schüler-Client-Modal (Modus B): dort hat der
+        // Client bewusst keinen eigenen, also muss der Host freigeben. Am Helfer
+        // (Modus A) schließt der Helfer sein Modal selbst → kein Host-Button.
+        const alertBtn = alert && alert.source !== 'helper'
+          ? ` <button class="secondary" data-action="clear-book-alert" data-student-id="${s.student_id}">Schließen</button>`
+          : '';
         const alertLbl = alert
-          ? `<div class="ns-alert">${escapeHtml(alert.text)} <button class="secondary" data-action="clear-book-alert" data-student-id="${s.student_id}">Schließen</button></div>`
+          ? `<div class="ns-alert">${escapeHtml(alert.text)}${alertBtn}</div>`
           : '';
         return `<div class="ns-tile${alert ? ' ns-tile-alert' : ''}">
           <div class="ns-name">${escapeHtml(s.lastname)}, ${escapeHtml(s.firstname)}</div>
@@ -1317,7 +1323,10 @@
     const label = msg.kind === 'book_deleted' ? 'Ausgemustertes Buch gescannt' : 'Bereits verliehenes Buch gescannt';
     const who = msg.student ? ` (${escapeHtml(msg.student)})` : '';
     showMsg(`${label}: ${escapeHtml(msg.title || msg.barcode)}${who}`, 'warn');
-    studentAlerts[msg.student_id] = { text: `${label}: ${msg.title || msg.barcode}` };
+    studentAlerts[msg.student_id] = {
+      text: `${label}: ${msg.title || msg.barcode}`,
+      source: msg.source || 'student',
+    };
     renderNowServing();
   }
 

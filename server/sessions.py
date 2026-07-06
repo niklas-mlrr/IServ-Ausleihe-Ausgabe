@@ -216,6 +216,7 @@ async def process_scan(
     vormerk_isbns: set[str],
     lent_isbns: set[str],
     barcode: str,
+    source: str = "student",
 ) -> dict:
     """Vollständige Scan-Verarbeitung, gemeinsam für Scanner (Modus A) und
     Schüler (Modus B). Returnt das scan_result-Payload (ohne `type`/`barcode`).
@@ -226,6 +227,11 @@ async def process_scan(
       2. Erfüllt UND `ALLOW_BOOKING=true` → tatsächlich buchen (Enter).
       3. Erfüllt, aber Gate aus (Default) → nur stagen (fill, kein Enter) —
          Standardbetrieb bleibt read-only, bis explizit scharfgeschaltet.
+
+    ``source`` ("helper" Modus A / "student" Modus B) steuert, ob der Host für
+    die Meldung einen Schließen-Button bekommt: am Helfer-Scanner schließt der
+    Helfer das eigene Modal selbst (Button im Client), am Schüler-Client hat
+    der Client keinen Schließen-Button → nur der Host darf freigeben.
     """
     decision = await evaluate_scan_for_booking(state, vormerk_isbns, lent_isbns, barcode)
     if not decision["ok"]:
@@ -237,6 +243,7 @@ async def process_scan(
             await get_hub().broadcast_host({
                 "type": "book_alert",
                 "kind": decision["status"],
+                "source": source,
                 "student_id": student_id,
                 "barcode": barcode,
                 "isbn": decision.get("isbn"),
