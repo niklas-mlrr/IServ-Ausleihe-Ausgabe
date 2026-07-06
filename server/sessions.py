@@ -229,13 +229,19 @@ async def process_scan(
     """
     decision = await evaluate_scan_for_booking(state, vormerk_isbns, lent_isbns, barcode)
     if not decision["ok"]:
-        if decision["status"] == "book_deleted":
+        # Ausgemustert ODER anderweitig verliehen (nicht im Lager) → am Host
+        # sichtbar machen, inkl. student_id für die Zuordnung im „Aktuell in
+        # Ausgabe"-Kästchen der betreffenden Person.
+        if decision["status"] in ("book_deleted", "not_in_stock"):
             student = state.find_student(student_id)
             await get_hub().broadcast_host({
-                "type": "book_deleted_alert",
+                "type": "book_alert",
+                "kind": decision["status"],
+                "student_id": student_id,
                 "barcode": barcode,
                 "isbn": decision.get("isbn"),
                 "title": decision.get("title"),
+                "msg": decision.get("msg"),
                 "student": f"{student.lastname}, {student.firstname}" if student else None,
             })
         return {

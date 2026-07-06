@@ -294,6 +294,9 @@
     .ns-name { font-size: 1.35rem; font-weight: 700; line-height: 1.15; }
     .ns-meta { font-size: .85rem; color: var(--text-muted); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
     .ns-helper { color: var(--info); }
+    /* Ausgemustertes/verliehenes Buch bei diesem Schüler gescannt — Kästchen rot. */
+    .ns-tile-alert { background: var(--alert-bg); outline: 2px solid var(--danger); }
+    .ns-alert { font-size: .85rem; font-weight: 600; color: var(--danger); }
     .ns-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
     .ns-empty { color: var(--text-muted); font-size: .95rem; padding: 6px 0; }
     .ns-next { margin-top: 12px; font-size: .9rem; color: var(--text-muted); }
@@ -609,6 +612,7 @@
   // { kind: 'student'|'display', baseline: <Zählerstand beim Öffnen> }
   let qrWatch = null;
   let armedStudentId = null;  // Schüler, der per "Pairing"-Button scharfgestellt ist (Code-Klick ordnet zu)
+  let studentAlerts = {};  // student_id -> {text} — ausgemustert/verliehen-Meldung fürs Now-Serving-Kästchen
   let singleStudents = [];  // Schülerliste der aktuell im Einzel-Reiter gewählten Klasse
   let prevPendingCount = null;  // letzter mb.pending_count — Anstieg => neuer Code (Beep+Blink)
 
@@ -699,7 +703,7 @@
       try { msg = JSON.parse(e.data); }
       catch (err) { console.warn('Bad WS frame', err); return; }
       if (msg.type === 'state') applyState(msg);
-      else if (msg.type === 'book_deleted_alert') showBookDeletedAlert(msg);
+      else if (msg.type === 'book_alert') showBookAlert(msg);
     };
   }
 
@@ -1102,6 +1106,13 @@
     const next = queue.find(s => s.status === 'pending');
     const helpers = Object.values(state.helpers || {});
 
+    // Alerts abgelaufener/nicht mehr aktiver Schüler wegräumen — sonst bliebe
+    // ein Kästchen rot, obwohl der Schüler längst abgeschlossen/entfernt ist.
+    const activeIds = new Set(active.map(s => s.student_id));
+    for (const id of Object.keys(studentAlerts)) {
+      if (!activeIds.has(Number(id))) delete studentAlerts[id];
+    }
+
     let body;
     if (!active.length) {
       body = '<div class="ns-empty">Niemand aktiv — Schüler per „Pairing" oder „Nächster" zuweisen.</div>';
@@ -1109,9 +1120,12 @@
       body = '<div class="ns-grid">' + active.map(s => {
         const helper = helpers.find(h => h.student_id === s.student_id);
         const helperLbl = helper ? `<span class="ns-helper"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> ${escapeHtml(helper.name)}</span>` : '';
-        return `<div class="ns-tile">
+        const alert = studentAlerts[s.student_id];
+        const alertLbl = alert ? `<div class="ns-alert">${escapeHtml(alert.text)}</div>` : '';
+        return `<div class="ns-tile${alert ? ' ns-tile-alert' : ''}">
           <div class="ns-name">${escapeHtml(s.lastname)}, ${escapeHtml(s.firstname)}</div>
           <div class="ns-meta"><span>${escapeHtml(s.form)}</span>${helperLbl}</div>
+          ${alertLbl}
           <div class="ns-actions">
             <button class="success" data-action="finish" data-student-id="${s.student_id}">Abschließen</button>
             <button class="secondary" data-action="print" data-student-id="${s.student_id}">Leihschein</button>
@@ -1287,10 +1301,18 @@
     if (_modalPrevFocus) { _modalPrevFocus.focus(); _modalPrevFocus = null; }
   }
 
-  // Ausgemustertes Buch wurde am Scanner gescannt — deutlich sichtbar melden.
-  function showBookDeletedAlert(msg) {
+  // Ausgemustertes oder anderweitig verliehenes Buch wurde gescannt (Scanner
+  // oder Schüler-Client) — als Toast melden UND im „Aktuell in Ausgabe"-
+  // Kästchen der betreffenden Person festhalten (bis die Ausgabe abgeschlossen
+  // wird bzw. state.queue diesen Schüler nicht mehr als aktiv führt).
+  function showBookAlert(msg) {
+    const label = msg.kind === 'book_deleted' ? 'Ausgemustertes Buch gescannt' : 'Bereits verliehenes Buch gescannt';
     const who = msg.student ? ` (${escapeHtml(msg.student)})` : '';
-    showMsg(`Ausgemustertes Buch gescannt: ${escapeHtml(msg.title || msg.barcode)}${who}`, 'warn');
+    showMsg(`${label}: ${escapeHtml(msg.title || msg.barcode)}${who}`, 'warn');
+    if (msg.student_id != null) {
+      studentAlerts[msg.student_id] = { text: `${label}: ${msg.title || msg.barcode}` };
+      renderNowServing();
+    }
   }
 
   // ---- Util: Toast-Stack (mehrere Meldungen gleichzeitig) ----

@@ -97,6 +97,8 @@
     }
     .dot { display: none; }
     .dot.ok { background: #4caf50; } .dot.err { background: #f44336; }
+    /* Ausgemustertes Buch gescannt — deutlich in Rot in der Statuszeile. */
+    #status-text.status-book-deleted { color: #f44336; font-weight: 700; }
 
     /* ---- Name (groß, ohne Box) + Klasse/Bezahlstatus rechtsbündig ---- */
     .name-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin: 12px 2px 8px; width: 100%; }
@@ -125,6 +127,24 @@
     .book-empty { opacity: .4; padding: 14px 4px; font-size: .9rem; }
 
     #finish-btn { margin-top: 10px; width: 100%; background: #30d158; color: #000; font-weight: 600; font-size: 1.05rem; padding: 14px; }
+
+    /* ---- Ausgemustertes-Buch-Hinweis (Modal) ---- */
+    .modal-overlay {
+      position: fixed; inset: 0; z-index: 100; padding: 20px;
+      display: none; align-items: center; justify-content: center;
+      background: rgba(0,0,0,.55);
+    }
+    .modal-overlay.show { display: flex; }
+    .modal-box {
+      width: 100%; max-width: 420px; background: var(--surface);
+      border: 1px solid var(--border); border-radius: 14px; padding: 20px;
+      box-shadow: 0 12px 40px var(--shadow);
+      display: flex; flex-direction: column; gap: 14px;
+    }
+    .modal-box h3 { font-size: 1.2rem; font-weight: 700; color: #f44336; }
+    .modal-box p { font-size: .95rem; }
+    .modal-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+    .modal-actions button { padding: 12px; font-size: .95rem; width: 100%; background: #2e7d32; color: #fff; }
 
     /* Done / Error */
     .big-msg { text-align: center; margin-top: 60px; }
@@ -173,6 +193,17 @@
       <div id="book-rows"></div>
     </div>
     <button id="finish-btn">Fertig — Vorgang abschließen</button>
+  </div>
+
+  <!-- Ausgemustertes-Buch-Hinweis -->
+  <div class="modal-overlay" id="book-deleted-modal">
+    <div class="modal-box">
+      <h3>Ausgemustertes Buch gescannt</h3>
+      <p id="book-deleted-text"></p>
+      <div class="modal-actions">
+        <button id="book-deleted-close">Schließen</button>
+      </div>
+    </div>
   </div>
 
   <!-- Abgeschlossen (neutral, keine Daten) -->
@@ -276,8 +307,11 @@
         show('active');
         startScanner();
       } else if (msg.type === 'scan_result') {
-        document.getElementById('status-text').textContent =
-          `${escapeHtml(msg.barcode)} — ${escapeHtml(msg.msg || msg.status)}`;
+        const statusTextEl = document.getElementById('status-text');
+        statusTextEl.textContent = `${escapeHtml(msg.barcode)} — ${escapeHtml(msg.msg || msg.status)}`;
+        // Ausgemustertes Buch (im System gelöscht) → Statuszeile rot + Hinweis-Modal.
+        statusTextEl.classList.toggle('status-book-deleted', msg.status === 'book_deleted');
+        if (msg.status === 'book_deleted') showBookDeletedModal(msg);
         // Erfolgreicher Scan → Buch als „erledigt" markieren (sinkt nach unten).
         if ((msg.status === 'staged' || msg.status === 'booked') && msg.isbn) {
           scannedIsbns.add(msg.isbn);
@@ -291,7 +325,20 @@
       }
     }
 
+    // ---- Ausgemustertes-Buch-Hinweis (Modal) ----
+    const bookDeletedModal = document.getElementById('book-deleted-modal');
+    const bookDeletedText = document.getElementById('book-deleted-text');
+    function showBookDeletedModal(msg) {
+      bookDeletedText.textContent = `${msg.barcode || ''} — ${msg.msg || 'Buch ausgemustert'}`;
+      bookDeletedModal.classList.add('show');
+    }
+    function closeBookDeletedModal() { bookDeletedModal.classList.remove('show'); }
+    document.getElementById('book-deleted-close').addEventListener('click', closeBookDeletedModal);
+    bookDeletedModal.addEventListener('click', (e) => { if (e.target === bookDeletedModal) closeBookDeletedModal(); });
+
     function renderStudent(s, overridden) {
+      closeBookDeletedModal();
+      document.getElementById('status-text').classList.remove('status-book-deleted');
       document.getElementById('s-name').textContent = `${s.lastname}, ${s.firstname}`;
       document.getElementById('s-form').textContent = (s.form || '').replace(/^Klasse\s+/i, '');
       const pay = document.getElementById('s-pay');
@@ -412,6 +459,7 @@
 
     function onScanSuccess(value) {
       if (cooldown || value === lastValue) return;
+      closeBookDeletedModal();
       if (soundEnabled) playBeep();
       lastValue = value; cooldown = true;
       setTimeout(() => { cooldown = false; lastValue = ''; }, 2000);

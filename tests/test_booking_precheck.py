@@ -36,6 +36,9 @@ class _State:
         self.iserv = iserv
         self.student_worker_sessions = {42: worker} if worker else {}
 
+    def find_student(self, student_id):
+        return None
+
 
 def _book(isbn="978-1", available=True, distributed=False, deleted=False):
     return {

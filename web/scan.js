@@ -129,6 +129,7 @@ function handleServerMessage(msg) {
     resetScannedState();
     renderBooks(currentBooks);
     statusEl.classList.remove('status-book-deleted');
+    closeBookDeletedModal();
     statusEl.textContent = 'Scanner bereit — Buch scannen';
   } else if (msg.type === 'scan_result') {
     if (pendingScans > 0) pendingScans--;
@@ -145,6 +146,7 @@ function handleServerMessage(msg) {
     // Prüfung greift server-seitig noch vor der Anmeldeprüfung.
     statusEl.classList.toggle('status-book-deleted', msg.status === 'book_deleted');
     statusEl.textContent = `${escapeHtml(msg.barcode)} — ${escapeHtml(msg.msg || msg.status)}`;
+    if (msg.status === 'book_deleted') showBookDeletedModal(msg);
   } else if (msg.type === 'settings') {
     slipSecondPageDefault = !!msg.slip_second_page;
     if (Array.isArray(msg.book_order)) {
@@ -173,6 +175,7 @@ function handleServerMessage(msg) {
     pendingScans = 0;
     drainScanWaiters();
     statusEl.classList.remove('status-book-deleted');
+    closeBookDeletedModal();
     if (typeof msg.queue_size === 'number') queueSize = msg.queue_size;
     if (msg.msg) waitingMsg = msg.msg;
     renderWaitingStatus();
@@ -215,6 +218,8 @@ const printBtn = document.getElementById('print-btn');
 const nextBtn = document.getElementById('next-btn');
 const camDropdown = document.getElementById('cam-dropdown');
 const readerEl = document.getElementById('reader');
+const bookDeletedModal = document.getElementById('book-deleted-modal');
+const bookDeletedText = document.getElementById('book-deleted-text');
 const printModal = document.getElementById('print-modal');
 const printWarnEl = document.getElementById('print-warn');
 const slipCheck = document.getElementById('slip-second-page');
@@ -262,6 +267,16 @@ nextBtn.addEventListener('click', requestNext);
 modalNextConfirmBtn.addEventListener('click', () => { closeNextModal(); advanceToNext(); });
 modalNextCancelBtn.addEventListener('click', closeNextModal);
 nextModal.addEventListener('click', (e) => { if (e.target === nextModal) closeNextModal(); });
+
+// ---- Ausgemustertes-Buch-Hinweis: bewusst ohne Schließen-Button (siehe
+// scan.html) — schließt nur per Klick außerhalb der Box oder automatisch,
+// sobald der nächste Barcode gescannt wird. ----
+function showBookDeletedModal(msg) {
+  bookDeletedText.textContent = `${escapeHtml(msg.barcode)} — ${escapeHtml(msg.msg || 'Buch ausgemustert')}`;
+  bookDeletedModal.classList.add('show');
+}
+function closeBookDeletedModal() { bookDeletedModal.classList.remove('show'); }
+bookDeletedModal.addEventListener('click', (e) => { if (e.target === bookDeletedModal) closeBookDeletedModal(); });
 
 // ---- Druck-Dialog ----
 function closePrintModal() { printModal.classList.remove('show'); }
@@ -322,6 +337,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   if (printModal.classList.contains('show')) closePrintModal();
   if (nextModal.classList.contains('show')) closeNextModal();
+  if (bookDeletedModal.classList.contains('show')) closeBookDeletedModal();
 });
 
 let audioCtx = null, audioBuffer = null;
@@ -370,6 +386,7 @@ document.addEventListener('click', () => camDropdown.classList.remove('open'));
 
 function onScanSuccess(value) {
   if (cooldown || value === lastValue) return;
+  closeBookDeletedModal();
   if (soundEnabled) playBeep();
   lastValue = value; cooldown = true;
   setTimeout(() => { cooldown = false; lastValue = ''; }, 2000);

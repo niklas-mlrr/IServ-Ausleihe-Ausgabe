@@ -614,10 +614,14 @@ Schüler das Buch überhaupt bestellt hat. Grund: ein ausgemustertes Buch soll
 sofort als solches erkennbar sein, statt hinter „nicht bestellt" versteckt zu
 werden. Die Bedingung „im Lager" (`not_in_stock`) prüft jetzt nur noch
 `distributed`/`available`, `deleted` läuft separat vorher. Sichtbarkeit:
-`process_scan()` broadcastet bei `book_deleted` einen
-`{"type": "book_deleted_alert"}` an alle Host-WS-Verbindungen (roter Toast in
-`web/host.html`); der Scanner (`web/scan.html`) färbt die Statuszeile rot
-(`status-book-deleted`). Tests: `tests/test_booking_precheck.py`
+`process_scan()` broadcastet bei `book_deleted` UND `not_in_stock` (bereits
+verliehen) einen `{"type": "book_alert", "kind", "student_id", ...}` an alle
+Host-WS-Verbindungen (roter Toast + rot markiertes Kästchen der betreffenden
+Person unter „Aktuell in Ausgabe" in `web/host.html`); Scanner (`web/scan.html`)
+und Schüler-Client (`web/student.html`) färben bei `book_deleted` die
+Statuszeile rot (`status-book-deleted`) und zeigen zusätzlich ein Hinweis-Modal
+(im Scanner ohne Schließen-Button — schließt nur per Klick außerhalb oder beim
+nächsten Scan). Tests: `tests/test_booking_precheck.py`
 (`test_reject_deleted_before_not_enrolled`,
 `test_reject_deleted_before_not_in_stock`).
 
