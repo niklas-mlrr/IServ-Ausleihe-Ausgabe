@@ -825,6 +825,37 @@ async def finish_student(body: dict, session_id: str | None = Cookie(default=Non
     return {"ok": True}
 
 
+@router.post("/api/clear-book-alert")
+async def clear_book_alert(body: dict, session_id: str | None = Cookie(default=None)) -> dict:
+    """Blockierendes Ausgemustert-Hinweis-Modal am Schüler-Client (Modus B)
+    freigeben — der Client selbst hat dafür bewusst keinen Schließen-Button
+    (Freigabe nur durch den Host). Wird das Buch am Helfer-Scanner (Modus A)
+    gemeldet, gibt es keine Client-Session dazu — dann räumt dieser Call nur
+    das Host-Kästchen auf."""
+    _require_host(session_id)
+    student_id = body.get("student_id")
+    if student_id is None:
+        raise HTTPException(400, "student_id fehlt")
+    try:
+        student_id = int(student_id)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "student_id ungültig")
+
+    state = get_state()
+    session = state.find_session_by_student(student_id)
+    if session is not None and session.book_alert_open:
+        session.book_alert_open = False
+        session.book_alert_payload = None
+        if session.ws is not None:
+            try:
+                await session.ws.send_json({"type": "book_alert_clear"})
+            except Exception:
+                pass
+
+    await get_hub().broadcast_host({"type": "book_alert", "student_id": student_id, "cleared": True})
+    return {"ok": True}
+
+
 # ---------------------------------------------------------------------------
 # Leihschein-Druck (read-only PDF-Abruf + lokaler Druck)
 # ---------------------------------------------------------------------------

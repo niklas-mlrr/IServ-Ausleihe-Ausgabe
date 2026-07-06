@@ -296,7 +296,7 @@
     .ns-helper { color: var(--info); }
     /* Ausgemustertes/verliehenes Buch bei diesem Schüler gescannt — Kästchen rot. */
     .ns-tile-alert { background: var(--alert-bg); outline: 2px solid var(--danger); }
-    .ns-alert { font-size: .85rem; font-weight: 600; color: var(--danger); }
+    .ns-alert { font-size: .85rem; font-weight: 600; color: var(--danger); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
     .ns-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
     .ns-empty { color: var(--text-muted); font-size: .95rem; padding: 6px 0; }
     .ns-next { margin-top: 12px; font-size: .9rem; color: var(--text-muted); }
@@ -1121,7 +1121,9 @@
         const helper = helpers.find(h => h.student_id === s.student_id);
         const helperLbl = helper ? `<span class="ns-helper"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> ${escapeHtml(helper.name)}</span>` : '';
         const alert = studentAlerts[s.student_id];
-        const alertLbl = alert ? `<div class="ns-alert">${escapeHtml(alert.text)}</div>` : '';
+        const alertLbl = alert
+          ? `<div class="ns-alert">${escapeHtml(alert.text)} <button class="secondary" data-action="clear-book-alert" data-student-id="${s.student_id}">Schließen</button></div>`
+          : '';
         return `<div class="ns-tile${alert ? ' ns-tile-alert' : ''}">
           <div class="ns-name">${escapeHtml(s.lastname)}, ${escapeHtml(s.firstname)}</div>
           <div class="ns-meta"><span>${escapeHtml(s.form)}</span>${helperLbl}</div>
@@ -1306,13 +1308,28 @@
   // Kästchen der betreffenden Person festhalten (bis die Ausgabe abgeschlossen
   // wird bzw. state.queue diesen Schüler nicht mehr als aktiv führt).
   function showBookAlert(msg) {
+    if (msg.student_id == null) return;
+    if (msg.cleared) {
+      delete studentAlerts[msg.student_id];
+      renderNowServing();
+      return;
+    }
     const label = msg.kind === 'book_deleted' ? 'Ausgemustertes Buch gescannt' : 'Bereits verliehenes Buch gescannt';
     const who = msg.student ? ` (${escapeHtml(msg.student)})` : '';
     showMsg(`${label}: ${escapeHtml(msg.title || msg.barcode)}${who}`, 'warn');
-    if (msg.student_id != null) {
-      studentAlerts[msg.student_id] = { text: `${label}: ${msg.title || msg.barcode}` };
-      renderNowServing();
-    }
+    studentAlerts[msg.student_id] = { text: `${label}: ${msg.title || msg.barcode}` };
+    renderNowServing();
+  }
+
+  // Host gibt das blockierende Hinweis-Modal am Schüler-Client wieder frei
+  // (der Client hat bewusst keinen eigenen Schließen-Button).
+  async function clearBookAlert(studentId) {
+    delete studentAlerts[studentId];
+    renderNowServing();
+    await fetch('/api/clear-book-alert', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ student_id: studentId }),
+    });
   }
 
   // ---- Util: Toast-Stack (mehrere Meldungen gleichzeitig) ----
@@ -1720,6 +1737,7 @@
       case 'pair-student': pairStudent(parseInt(el.dataset.studentId)); break;
       case 'skip': skipStudent(parseInt(el.dataset.studentId)); break;
       case 'disconnect': disconnectStudent(parseInt(el.dataset.studentId)); break;
+      case 'clear-book-alert': clearBookAlert(parseInt(el.dataset.studentId)); break;
     }
   }
   document.getElementById('mb-arm-banner').addEventListener('click', handleDelegatedAction);

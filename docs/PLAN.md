@@ -617,11 +617,24 @@ werden. Die Bedingung „im Lager" (`not_in_stock`) prüft jetzt nur noch
 `process_scan()` broadcastet bei `book_deleted` UND `not_in_stock` (bereits
 verliehen) einen `{"type": "book_alert", "kind", "student_id", ...}` an alle
 Host-WS-Verbindungen (roter Toast + rot markiertes Kästchen der betreffenden
-Person unter „Aktuell in Ausgabe" in `web/host.html`); Scanner (`web/scan.html`)
-und Schüler-Client (`web/student.html`) färben bei `book_deleted` die
-Statuszeile rot (`status-book-deleted`) und zeigen zusätzlich ein Hinweis-Modal
-(im Scanner ohne Schließen-Button — schließt nur per Klick außerhalb oder beim
-nächsten Scan). Tests: `tests/test_booking_precheck.py`
+Person unter „Aktuell in Ausgabe" in `web/host.html`, inkl. eigenem
+„Schließen"-Button pro Kästchen). Scanner (`web/scan.html`) und Schüler-Client
+(`web/student.html`) färben bei `book_deleted` die Statuszeile rot
+(`status-book-deleted`) und zeigen ein Hinweis-Modal ohne eigenen
+Schließen-Button.
+
+- Scanner (Modus A, Helfer bedient): schließt per Klick außerhalb der Box
+  oder automatisch beim nächsten Scan — der Helfer steuert das selbst.
+- Schüler-Client (Modus B, Schüler scannt selbst): das Modal ist **blockierend**
+  — kein Klick-außerhalb, kein Auto-Close. `StudentSessionB.book_alert_open`
+  wird server-seitig gesetzt; jeder weitere Scan wird ignoriert
+  (`ws.py`/`ws_student`, vor `process_scan`), bis der Host über
+  `POST /api/clear-book-alert` (Button im Now-Serving-Kästchen) freigibt —
+  das schickt `{"type": "book_alert_clear"}` an die Schüler-WS und löscht das
+  Kästchen bei allen Host-Verbindungen. Überlebt Reconnect (`book_alert_payload`
+  wird erneut gesendet).
+
+Tests: `tests/test_booking_precheck.py`
 (`test_reject_deleted_before_not_enrolled`,
 `test_reject_deleted_before_not_in_stock`).
 

@@ -95,6 +95,11 @@ class StudentSessionB:
     # Buchungs-Vorabprüfung (Freigabe 2026-07-02) — s. HelperSession.
     vormerk_isbns: set[str] = field(default_factory=set)
     lent_isbns: set[str] = field(default_factory=set)
+    # Ausgemustertes/verliehenes Buch gescannt → Client zeigt ein blockierendes
+    # Hinweis-Modal ohne eigenen Schließen-Button; erst der Host darf es per
+    # `/api/clear-book-alert` wieder freigeben. Solange True: Scans ignorieren.
+    book_alert_open: bool = False
+    book_alert_payload: dict | None = None  # letztes scan_result-Payload (für Reconnect)
     # In-flight Lade-Task (load_and_push_paired_student) — cancel bei
     # invalidate_session, sonst leakt der Worker-Context (s. HelperSession).
     load_task: object | None = None

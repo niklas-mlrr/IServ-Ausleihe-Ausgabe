@@ -292,6 +292,10 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
                 "student": info,
                 "payment_overridden": session.payment_overridden,
             })
+            # Blockierendes Ausgemustert-Hinweis-Modal überlebt einen Reconnect
+            # (z. B. Seiten-Reload) — erst der Host darf es per Button schließen.
+            if session.book_alert_open and session.book_alert_payload:
+                await websocket.send_json(session.book_alert_payload)
         except Exception as e:
             await websocket.send_json({"type": "error", "msg": str(e)})
 
@@ -324,13 +328,21 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
                         "msg": "Noch nicht freigegeben",
                     })
                     continue
+                if session.book_alert_open:
+                    # Blockierendes Hinweis-Modal (ausgemustertes Buch) noch offen —
+                    # erst der Host darf per Button freigeben. Barcode ignorieren.
+                    continue
                 session.last_scan = barcode
                 # Scan verarbeiten: Buchungs-Vorabprüfung → buchen (Enter) oder
                 # — Gate aus — stagen. Nicht erfüllt → Feld wird NICHT berührt.
                 result = await process_scan(
                     state, session.student_id, session.vormerk_isbns, session.lent_isbns, barcode
                 )
-                await websocket.send_json({"type": "scan_result", "barcode": barcode, **result})
+                payload = {"type": "scan_result", "barcode": barcode, **result}
+                if result.get("status") == "book_deleted":
+                    session.book_alert_open = True
+                    session.book_alert_payload = payload
+                await websocket.send_json(payload)
                 await hub.broadcast_host(state.state_snapshot())
 
             elif mtype == "finish":
