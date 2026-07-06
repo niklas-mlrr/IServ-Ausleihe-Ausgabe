@@ -129,7 +129,7 @@ function handleServerMessage(msg) {
     resetScannedState();
     renderBooks(currentBooks);
     statusEl.classList.remove('status-book-deleted');
-    closeBookDeletedModal();
+    closeBookAlertModal();
     statusEl.textContent = 'Scanner bereit — Buch scannen';
   } else if (msg.type === 'scan_result') {
     if (pendingScans > 0) pendingScans--;
@@ -142,11 +142,12 @@ function handleServerMessage(msg) {
       renderBooks(currentBooks);
     }
     drainScanWaiters();
-    // Ausgemustertes Buch (im System gelöscht) → Statuszeile deutlich rot,
-    // Prüfung greift server-seitig noch vor der Anmeldeprüfung.
-    statusEl.classList.toggle('status-book-deleted', msg.status === 'book_deleted');
+    // Ausgemustert / verliehen-an-andere / verliehen-an-sich-selbst → Statuszeile
+    // deutlich rot, Prüfung greift server-seitig noch vor der Anmeldeprüfung.
+    const isAlert = ALERT_STATUSES.has(msg.status);
+    statusEl.classList.toggle('status-book-deleted', isAlert);
     statusEl.textContent = `${escapeHtml(msg.barcode)} — ${escapeHtml(msg.msg || msg.status)}`;
-    if (msg.status === 'book_deleted') showBookDeletedModal(msg);
+    if (isAlert) showBookAlertModal(msg);
   } else if (msg.type === 'settings') {
     slipSecondPageDefault = !!msg.slip_second_page;
     if (Array.isArray(msg.book_order)) {
@@ -175,7 +176,7 @@ function handleServerMessage(msg) {
     pendingScans = 0;
     drainScanWaiters();
     statusEl.classList.remove('status-book-deleted');
-    closeBookDeletedModal();
+    closeBookAlertModal();
     if (typeof msg.queue_size === 'number') queueSize = msg.queue_size;
     if (msg.msg) waitingMsg = msg.msg;
     renderWaitingStatus();
@@ -218,9 +219,10 @@ const printBtn = document.getElementById('print-btn');
 const nextBtn = document.getElementById('next-btn');
 const camDropdown = document.getElementById('cam-dropdown');
 const readerEl = document.getElementById('reader');
-const bookDeletedModal = document.getElementById('book-deleted-modal');
-const bookDeletedText = document.getElementById('book-deleted-text');
-const bookDeletedCloseBtn = document.getElementById('book-deleted-close');
+const bookAlertModal = document.getElementById('book-alert-modal');
+const bookAlertTitleEl = document.getElementById('book-alert-title');
+const bookAlertTextEl = document.getElementById('book-alert-text');
+const bookAlertCloseBtn = document.getElementById('book-alert-close');
 const printModal = document.getElementById('print-modal');
 const printWarnEl = document.getElementById('print-warn');
 const slipCheck = document.getElementById('slip-second-page');
@@ -269,30 +271,39 @@ modalNextConfirmBtn.addEventListener('click', () => { closeNextModal(); advanceT
 modalNextCancelBtn.addEventListener('click', closeNextModal);
 nextModal.addEventListener('click', (e) => { if (e.target === nextModal) closeNextModal(); });
 
-// ---- Ausgemustertes-Buch-Hinweis: der Helfer schließt dieses Modal selbst
-// (Button) — per Klick außerhalb oder beim nächsten Scan geht es ebenfalls
-// zu. Am Host erscheint die Meldung ohne Schließen-Button (s. server:
-// process_scan source="helper"). Schließt der Helfer das Modal bewusst
-// (Button/Klick-außerhalb/Escape/nächster Scan), wird zusätzlich der Host-
-// Eintrag für diesen Schüler freigegeben, damit das Now-Serving-Kästchen
-// wieder normal angezeigt wird. ----
-function showBookDeletedModal(msg) {
-  bookDeletedText.textContent = `${escapeHtml(msg.barcode)} — ${escapeHtml(msg.msg || 'Buch ausgemustert')}`;
-  bookDeletedModal.classList.add('show');
+// ---- Buch-Hinweis-Modal (ausgemustert / verliehen-an-andere / verliehen-an-
+// sich-selbst). Der Helfer schließt es selbst (Button/Klick-außerhalb/Escape/
+// nächster Scan). Bei ausgemustert/verliehen-an-andere räumt der Schließen-
+// Button zusätzlich die Host-Meldung auf (server: clear_book_alert); bei
+// „an sich selbst verliehen" wird der Host gar nicht informiert → das Clear
+// ist dort ein No-op. ----
+const ALERT_STATUSES = new Set(['book_deleted', 'not_in_stock', 'series_already_lent']);
+// status → {title, color} für das Hinweis-Modal.
+const ALERT_META = {
+  book_deleted:        { title: 'Ausgemustertes Buch gescannt',  color: '#f44336' },
+  not_in_stock:        { title: 'Buch noch verliehen',           color: '#f44336' },
+  series_already_lent: { title: 'Buch bereits an dich verliehen', color: '#e69500' },
+};
+function showBookAlertModal(msg) {
+  const meta = ALERT_META[msg.status] || { title: 'Buch-Hinweis', color: '#f44336' };
+  bookAlertTitleEl.textContent = meta.title;
+  bookAlertTitleEl.style.color = meta.color;
+  bookAlertTextEl.textContent = `${escapeHtml(msg.barcode)} — ${escapeHtml(msg.msg || meta.title)}`;
+  bookAlertModal.classList.add('show');
 }
-function closeBookDeletedModal() { bookDeletedModal.classList.remove('show'); }
-// Bewusstes Schließen through den Helfer → zusätzlich Host-Meldung aufräumen.
+function closeBookAlertModal() { bookAlertModal.classList.remove('show'); }
+// Bewusstes Schließen durch den Helfer → zusätzlich Host-Meldung aufräumen.
 // Guard: nur senden, wenn das Modal wirklich offen war (vermeidet redundante
 // Clears bei Kontextwechseln, die ohnehin die Queue aufräumt).
-function dismissBookDeletedAlert() {
-  const wasOpen = bookDeletedModal.classList.contains('show');
-  closeBookDeletedModal();
+function dismissBookAlert() {
+  const wasOpen = bookAlertModal.classList.contains('show');
+  closeBookAlertModal();
   if (wasOpen && ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: 'clear_book_alert' }));
   }
 }
-bookDeletedCloseBtn.addEventListener('click', dismissBookDeletedAlert);
-bookDeletedModal.addEventListener('click', (e) => { if (e.target === bookDeletedModal) dismissBookDeletedAlert(); });
+bookAlertCloseBtn.addEventListener('click', dismissBookAlert);
+bookAlertModal.addEventListener('click', (e) => { if (e.target === bookAlertModal) dismissBookAlert(); });
 
 // ---- Druck-Dialog ----
 function closePrintModal() { printModal.classList.remove('show'); }
@@ -353,7 +364,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   if (printModal.classList.contains('show')) closePrintModal();
   if (nextModal.classList.contains('show')) closeNextModal();
-  if (bookDeletedModal.classList.contains('show')) dismissBookDeletedAlert();
+  if (bookAlertModal.classList.contains('show')) dismissBookAlert();
 });
 
 let audioCtx = null, audioBuffer = null;
@@ -403,8 +414,8 @@ document.addEventListener('click', () => camDropdown.classList.remove('open'));
 function onScanSuccess(value) {
   if (cooldown || value === lastValue) return;
   // Nächster Scan → evtl. offenes Hinweis-Modal bewusst schließen (auch Host
-  // aufräumen); war keins offen, ist dismissBookDeletedAlert ein No-op.
-  dismissBookDeletedAlert();
+  // aufräumen); war keins offen, ist dismissBookAlert ein No-op.
+  dismissBookAlert();
   if (soundEnabled) playBeep();
   lastValue = value; cooldown = true;
   setTimeout(() => { cooldown = false; lastValue = ''; }, 2000);

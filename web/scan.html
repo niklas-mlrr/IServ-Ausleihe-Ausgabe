@@ -217,15 +217,18 @@
     </div>
   </div>
 
-  <!-- Ausgemustertes-Buch-Hinweis: der Helfer schließt dieses Modal selbst
-       (Button) — per Klick außerhalb oder beim nächsten Scan geht es ebenfalls
-       zu. Am Host erscheint diese Meldung bewusst OHNE Schließen-Button. -->
-  <div class="modal-overlay" id="book-deleted-modal">
+  <!-- Buch-Hinweis (ausgemustert / an andere verliehen / an sich selbst
+       verliehen): der Helfer schließt dieses Modal selbst (Button) — per Klick
+       außerhalb oder beim nächsten Scan geht es ebenfalls zu. Am Host erscheint
+       die Meldung bei ausgemustert/verliehen-an-andere bewusst OHNE eigenen
+       Schließen-Button (der Helfer-Schließen räumt den Host mit auf); bei
+       „an sich selbst verliehen" wird der Host gar nicht erst informiert. -->
+  <div class="modal-overlay" id="book-alert-modal">
     <div class="modal-box">
-      <h3 style="color:#f44336">Ausgemustertes Buch gescannt</h3>
-      <p id="book-deleted-text"></p>
+      <h3 id="book-alert-title" style="color:#f44336">Buch-Hinweis</h3>
+      <p id="book-alert-text"></p>
       <div class="modal-actions">
-        <button class="primary" id="book-deleted-close">Schließen</button>
+        <button class="primary" id="book-alert-close">Schließen</button>
       </div>
     </div>
   </div>

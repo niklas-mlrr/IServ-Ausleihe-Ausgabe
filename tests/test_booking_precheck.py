@@ -169,3 +169,42 @@ def test_process_scan_no_field_touch_when_conditions_fail(monkeypatch):
     res = asyncio.run(sessions.process_scan(state, 42, {"978-1"}, set(), "B1"))
     assert res["status"] == "not_in_stock"
     assert worker.committed is None and worker.staged is None
+
+
+class _FakeHub:
+    def __init__(self):
+        self.broadcasts = []
+
+    async def broadcast_host(self, payload):
+        self.broadcasts.append(payload)
+
+
+def _patch_hub(monkeypatch):
+    hub = _FakeHub()
+    monkeypatch.setattr(sessions, "get_hub", lambda: hub)
+    return hub
+
+
+def test_process_scan_broadcasts_alert_for_not_in_stock(monkeypatch):
+    # „An jemand anderen verliehen" → Host-Alert mit source (wie ausgemustert).
+    monkeypatch.setattr(sessions, "get_config", lambda: _Cfg(False))
+    hub = _patch_hub(monkeypatch)
+    state = _State(_FakeIserv(_book(distributed=True)))
+    res = asyncio.run(sessions.process_scan(state, 42, {"978-1"}, set(), "B1", source="helper"))
+    assert res["status"] == "not_in_stock"
+    assert len(hub.broadcasts) == 1
+    alert = hub.broadcasts[0]
+    assert alert["type"] == "book_alert"
+    assert alert["kind"] == "not_in_stock"
+    assert alert["source"] == "helper"
+    assert alert["student_id"] == 42
+
+
+def test_process_scan_no_alert_for_series_already_lent(monkeypatch):
+    # „An sich selbst verliehen" → nur Hinweis am Client, kein Host-Alert.
+    monkeypatch.setattr(sessions, "get_config", lambda: _Cfg(False))
+    hub = _patch_hub(monkeypatch)
+    state = _State(_FakeIserv(_book()))
+    res = asyncio.run(sessions.process_scan(state, 42, set(), {"978-1"}, "B1", source="helper"))
+    assert res["status"] == "series_already_lent"
+    assert hub.broadcasts == []

@@ -354,7 +354,12 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
                     state, session.student_id, session.vormerk_isbns, session.lent_isbns, barcode
                 )
                 payload = {"type": "scan_result", "barcode": barcode, **result}
-                if result.get("status") == "book_deleted":
+                # Ausgemustert ODER an jemand anderen verliehen → blockierendes
+                # Hinweis-Modal am Schüler-Client (kein eigener Schließen-Button,
+                # Host gibt per /api/clear-book-alert frei). „An sich selbst
+                # verliehen" (series_already_lent) ist nur ein Hinweis und nicht
+                # blockierend — der Schüler schließt ihn selbst.
+                if result.get("status") in ("book_deleted", "not_in_stock"):
                     session.book_alert_open = True
                     session.book_alert_payload = payload
                 await websocket.send_json(payload)

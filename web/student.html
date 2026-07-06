@@ -143,6 +143,8 @@
     }
     .modal-box h3 { font-size: 1.2rem; font-weight: 700; color: #f44336; }
     .modal-box p { font-size: .95rem; }
+    .modal-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+    .modal-actions button { padding: 12px; font-size: .95rem; width: 100%; background: #2e7d32; color: #fff; }
 
     /* Done / Error */
     .big-msg { text-align: center; margin-top: 60px; }
@@ -193,14 +195,20 @@
     <button id="finish-btn">Fertig — Vorgang abschließen</button>
   </div>
 
-  <!-- Ausgemustertes-Buch-Hinweis: bewusst OHNE Schließen-Button und ohne
-       Klick-außerhalb-schließt — nur der Host darf dieses Fenster (per
-       Button im Now-Serving-Kästchen) wieder freigeben. -->
-  <div class="modal-overlay" id="book-deleted-modal">
+  <!-- Buch-Hinweis-Modal. Bei ausgemustert / verliehen-an-andere: bewusst
+       OHNE Schließen-Button und ohne Klick-außerhalb-schließt — nur der Host
+       darf dieses Fenster (per Button im Now-Serving-Kästchen) freigeben
+       (server: book_alert_open blockiert weitere Scans). Bei „an sich selbst
+       verliehen" (series_already_lent): nur ein Hinweis, den der Schüler selbst
+       per Schließen-Button (oder nächster Scan) schließt — kein Host-Bezug. -->
+  <div class="modal-overlay" id="book-alert-modal">
     <div class="modal-box">
-      <h3>Ausgemustertes Buch gescannt</h3>
-      <p id="book-deleted-text"></p>
-      <p style="opacity:.6;font-size:.85rem">Bitte warte, bis der Betreuer dies freigibt.</p>
+      <h3 id="book-alert-title">Buch-Hinweis</h3>
+      <p id="book-alert-text"></p>
+      <p id="book-alert-hint" style="opacity:.6;font-size:.85rem"></p>
+      <div class="modal-actions" id="book-alert-actions" style="display:none">
+        <button id="book-alert-close">Schließen</button>
+      </div>
     </div>
   </div>
 
@@ -307,12 +315,17 @@
       } else if (msg.type === 'scan_result') {
         const statusTextEl = document.getElementById('status-text');
         statusTextEl.textContent = `${escapeHtml(msg.barcode)} — ${escapeHtml(msg.msg || msg.status)}`;
-        // Ausgemustertes Buch (im System gelöscht) → Statuszeile rot + blockierendes
-        // Hinweis-Modal. Solange offen, ignoriert der Server weitere Scans (s.
-        // Server: `session.book_alert_open`) — nur der Host kann per Button
-        // freigeben (`book_alert_clear`).
-        statusTextEl.classList.toggle('status-book-deleted', msg.status === 'book_deleted');
-        if (msg.status === 'book_deleted') { bookAlertOpen = true; showBookDeletedModal(msg); }
+        // Ausgemustert / verliehen-an-andere → Statuszeile rot + blockierendes
+        // Hinweis-Modal (kein eigener Schließen-Button). Solange offen, ignoriert
+        // der Server weitere Scans (s. `session.book_alert_open`) — nur der Host
+        // kann per Button freigeben (`book_alert_clear`).
+        // „An sich selbst verliehen" (series_already_lent) → nur Hinweis, nicht
+        // blockierend; der Schüler schließt ihn selbst per Button/nächster Scan.
+        const blocking = msg.status === 'book_deleted' || msg.status === 'not_in_stock';
+        const dismissible = msg.status === 'series_already_lent';
+        statusTextEl.classList.toggle('status-book-deleted', blocking || dismissible);
+        if (blocking) { bookAlertOpen = true; showBookAlertModal(msg, false); }
+        else if (dismissible) { showBookAlertModal(msg, true); }
         // Erfolgreicher Scan → Buch als „erledigt" markieren (sinkt nach unten).
         if ((msg.status === 'staged' || msg.status === 'booked') && msg.isbn) {
           scannedIsbns.add(msg.isbn);
@@ -322,7 +335,7 @@
       } else if (msg.type === 'book_alert_clear') {
         bookAlertOpen = false;
         document.getElementById('status-text').classList.remove('status-book-deleted');
-        closeBookDeletedModal();
+        closeBookAlertModal();
       } else if (msg.type === 'closed') {
         finished = true; clearToken(); show('done');
       } else if (msg.type === 'error') {
@@ -330,20 +343,43 @@
       }
     }
 
-    // ---- Ausgemustertes-Buch-Hinweis (Modal) — bewusst ohne eigenen Schließen-
-    // Button/Klick-außerhalb; nur der Host kann per `book_alert_clear` schließen. ----
+    // ---- Buch-Hinweis-Modal. Blocking-Variante (ausgemustert / verliehen-an-
+    // andere): kein Schließen-Button, nur der Host gibt per `book_alert_clear`
+    // frei (book_alert_open blockiert weitere Scans). Hinweis-Variante (an sich
+    // selbst verliehen): Schließen-Button, vom Schüler lokal schließbar. ----
     let bookAlertOpen = false;
-    const bookDeletedModal = document.getElementById('book-deleted-modal');
-    const bookDeletedText = document.getElementById('book-deleted-text');
-    function showBookDeletedModal(msg) {
-      bookDeletedText.textContent = `${msg.barcode || ''} — ${msg.msg || 'Buch ausgemustert'}`;
-      bookDeletedModal.classList.add('show');
+    const bookAlertModalEl = document.getElementById('book-alert-modal');
+    const bookAlertTitleEl = document.getElementById('book-alert-title');
+    const bookAlertTextEl = document.getElementById('book-alert-text');
+    const bookAlertHintEl = document.getElementById('book-alert-hint');
+    const bookAlertActionsEl = document.getElementById('book-alert-actions');
+    const bookAlertCloseBtn = document.getElementById('book-alert-close');
+    const ALERT_META_STUDENT = {
+      book_deleted:        { title: 'Ausgemustertes Buch gescannt',   color: '#f44336' },
+      not_in_stock:        { title: 'Buch noch verliehen',            color: '#f44336' },
+      series_already_lent: { title: 'Buch bereits an dich verliehen', color: '#e69500' },
+    };
+    function showBookAlertModal(msg, dismissible) {
+      const meta = ALERT_META_STUDENT[msg.status] || { title: 'Buch-Hinweis', color: '#f44336' };
+      bookAlertTitleEl.textContent = meta.title;
+      bookAlertTitleEl.style.color = meta.color;
+      bookAlertTextEl.textContent = `${msg.barcode || ''} — ${msg.msg || meta.title}`;
+      if (dismissible) {
+        bookAlertHintEl.textContent = 'Du kannst diese Meldung selbst schließen.';
+        bookAlertActionsEl.style.display = '';
+      } else {
+        bookAlertHintEl.textContent = 'Bitte warte, bis der Betreuer dies freigibt.';
+        bookAlertActionsEl.style.display = 'none';
+      }
+      bookAlertModalEl.classList.add('show');
     }
-    function closeBookDeletedModal() { bookDeletedModal.classList.remove('show'); }
+    function closeBookAlertModal() { bookAlertModalEl.classList.remove('show'); }
+    // „An sich selbst verliehen"-Hinweis: lokal schließbar (kein Host-Bezug).
+    bookAlertCloseBtn.addEventListener('click', closeBookAlertModal);
 
     function renderStudent(s, overridden) {
       bookAlertOpen = false;
-      closeBookDeletedModal();
+      closeBookAlertModal();
       document.getElementById('status-text').classList.remove('status-book-deleted');
       document.getElementById('s-name').textContent = `${s.lastname}, ${s.firstname}`;
       document.getElementById('s-form').textContent = (s.form || '').replace(/^Klasse\s+/i, '');
@@ -468,6 +504,9 @@
       // Blockierendes Hinweis-Modal offen → Barcode ignorieren, bis der Host
       // freigibt (kein eigener Schließen-Button am Client, s. book_alert_clear).
       if (bookAlertOpen) return;
+      // Dismissibler Hinweis („an sich selbst verliehen") offen → beim nächsten
+      // Scan selbst schließen (nicht-blockierend, kein Host-Bezug).
+      if (bookAlertModalEl.classList.contains('show')) closeBookAlertModal();
       if (soundEnabled) playBeep();
       lastValue = value; cooldown = true;
       setTimeout(() => { cooldown = false; lastValue = ''; }, 2000);
