@@ -250,10 +250,20 @@ class IsServClient:
             enrolled = current_enrollment is not None
             paid = False
             amount_open = None
+            # Ermäßigung (remission) / Befreiung (exemption): „Nachweis fehlt" =
+            # Antrag gestellt (`*_request`), aber weder akzeptiert noch abgelehnt
+            # (`*_accepted` ist None — True=akzeptiert, False=abgelehnt). Read-only,
+            # vgl. PLAN §6.1; ausschließlich für die Scanner-Anzeige.
+            remission_pending = False
+            exemption_pending = False
             if current_enrollment:
                 amount_open = current_enrollment.get("amountOpen")
                 exemption = current_enrollment.get("exemption_accepted")
                 paid = exemption is True or (amount_open is not None and float(amount_open) <= 0)
+                if current_enrollment.get("remission_request") and current_enrollment.get("remission_accepted") is None:
+                    remission_pending = True
+                if current_enrollment.get("exemption_request") and current_enrollment.get("exemption_accepted") is None:
+                    exemption_pending = True
 
             # Bereits ausgeliehene Bücher — laut `?books=true`-Payload (API-
             # Referenz: „aktuell ausgeliehen") alle Exemplare, die der Schüler
@@ -337,6 +347,8 @@ class IsServClient:
                 "enrolled": enrolled,
                 "paid": paid,
                 "amount_open": amount_open,
+                "remission_pending": remission_pending,
+                "exemption_pending": exemption_pending,
                 "current_books": current_books,
                 "books_to_receive": books_to_receive,
                 "books": books,

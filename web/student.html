@@ -386,12 +386,23 @@
       const pay = document.getElementById('s-pay');
       if (!s.enrolled) {
         pay.innerHTML = '<span class="pay-badge unpaid">Nicht angemeldet</span>';
-      } else if (s.paid) {
-        pay.innerHTML = '<span class="pay-badge paid">Bezahlt</span>';
-      } else if (overridden) {
-        pay.innerHTML = `<span class="pay-badge override">Vom Betreuer freigegeben</span> · offen: ${escapeHtml(s.amount_open)} €`;
       } else {
-        pay.innerHTML = `<span class="pay-badge unpaid">Nicht bezahlt — offen: ${escapeHtml(s.amount_open)} €</span>`;
+        // „Nachweis fehlt" (Ermäßigung/Befreiung): Antrag gestellt, aber noch
+        // unentschieden — gleiche Farbe wie „Offen". Reihenfolge: erst die
+        // Nachweise, dann der Bezahlstatus. Beim Override bleibt der
+        // Betreuer-Freigabe-Badge erhalten, der Offen-Betrag folgt dahinter.
+        const parts = [];
+        if (s.remission_pending)  parts.push('<span class="pay-badge unpaid">Ermäßigungsnachweis fehlt</span>');
+        if (s.exemption_pending) parts.push('<span class="pay-badge unpaid">Befreiungsnachweis fehlt</span>');
+        if (s.paid) {
+          parts.push('<span class="pay-badge paid">Bezahlt</span>');
+        } else if (overridden) {
+          parts.push('<span class="pay-badge override">Vom Betreuer freigegeben</span>');
+          parts.push(`<span class="pay-badge unpaid">offen: ${escapeHtml(s.amount_open)} €</span>`);
+        } else {
+          parts.push(`<span class="pay-badge unpaid">Nicht bezahlt — offen: ${escapeHtml(s.amount_open)} €</span>`);
+        }
+        pay.innerHTML = parts.join(' · ');
       }
       if (Array.isArray(s.book_order)) bookOrder = s.book_order;
       currentBooks = s.books || [];

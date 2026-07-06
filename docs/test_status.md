@@ -149,11 +149,12 @@
 
 ### Aus Review Tier 2 (2026-07-05, PLAN §5 Phase 2)
 
-- [ ] **`current_books`-Jahrgangsfilter gegen echtes `?books=true`-Payload**
-      (`server/iserv_client.py`): Fix ist konservativ (keep-when-unknown via
-      `distributed_at`, sicher gegen falsche Enter), aber unverifiziert gegen
-      ein echtes Payload mit Vorjahres-Büchern — im Betrieb beobachten, ob je
-      ein Buch fälschlich als „aktuelles Jahr" durchrutscht.
+- [x] **`current_books`-Jahrgangsfilter entfernt (2026-07-06).** Der
+      konservative `distributed_at`-Schuljahresfilter in `get_student_info`
+      ist raus; `?books=true` liefert zuverlässig nur aktuell ausgeliehene
+      Bücher (API-Referenz), so dass alle aktuell ausgeliehenen Exemplare —
+      auch noch nicht zurückgegebene Vorjahres-Bücher — als „ausgeliehen"
+      ausgewiesen werden. Siehe PLAN §5 Phase 2 (2026-07-06).
 
 ### Aus dem bisherigen Plan (Phase 3/4)
 

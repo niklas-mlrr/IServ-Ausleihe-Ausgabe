@@ -121,9 +121,22 @@ function handleServerMessage(msg) {
     const s = msg.student;
     sNameEl.textContent = `${s.lastname}, ${s.firstname}`;
     sFormEl.textContent = (s.form || '').replace(/^Klasse\s+/i, '');
-    const paidClass = !s.enrolled ? 'wait' : s.paid ? 'paid' : 'unpaid';
-    const paidText = !s.enrolled ? 'Nicht angemeldet' : s.paid ? 'Bezahlt' : `Offen: ${escapeHtml(s.amount_open)} €`;
-    sPayEl.innerHTML = `<span class="${paidClass}">${paidText}</span>`;
+    // Bezahlt-/Offen-Status, ergänzt um „Nachweis fehlt"-Hinweise (Ermäßigung
+    // bzw. Befreiung): Antrag gestellt, aber noch unentschieden — gleiche Farbe
+    // wie „Offen". Reihenfolge: erst die Nachweise, dann der Offene Betrag.
+    const payParts = [];
+    if (!s.enrolled) {
+      payParts.push('<span class="wait">Nicht angemeldet</span>');
+    } else {
+      if (s.remission_pending)  payParts.push('<span class="unpaid">Ermäßigungsnachweis fehlt</span>');
+      if (s.exemption_pending) payParts.push('<span class="unpaid">Befreiungsnachweis fehlt</span>');
+      if (s.paid) {
+        payParts.push('<span class="paid">Bezahlt</span>');
+      } else {
+        payParts.push(`<span class="unpaid">Offen: ${escapeHtml(s.amount_open)} €</span>`);
+      }
+    }
+    sPayEl.innerHTML = payParts.join(' · ');
     if (Array.isArray(s.book_order)) bookOrder = s.book_order;
     currentBooks = s.books || [];
     resetScannedState();
