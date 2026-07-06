@@ -366,8 +366,12 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
       `threading.Lock` um Lazy-Init von `_client`/`_resolve_sy`/
       `_get_series_map` (Lock hält nicht während API-Calls);
       konservativer `current_books`-Jahrgangsfilter via `distributed_at`
-      (keep-when-unknown — sicher gegen falsche Enter; **validierungsbedürftig**
-      gegen echtes `?books=true`-Payload, falls Vorjahres-Bücher kommen).
+      (keep-when-unknown — sicher gegen falsche Enter). **Wieder entfernt
+      2026-07-06**: `?books=true` liefert zuverlässig nur aktuell ausgeliehene
+      Bücher (API-Referenz); der Filter hat legitime Vorjahres-Bücher (noch
+      nicht zurückgegeben) unterschlagen. Jetzt werden alle aktuell ausgeliehenen
+      Exemplare ungefiltert als „ausgeliehen" ausgewiesen — unabhängig vom
+      Ausgabezeitpunkt. Siehe `iserv_client.get_student_info`.
       (c) `web/`: `escapeHtml` auf Kamera-id/-label (scan+student);
       `host.html` `JSON.parse` try/catch; `pushSlipDefault` erst post-Login;
       `qr-img.src` nur bei `data:image/`-Prefix.

@@ -255,57 +255,19 @@ class IsServClient:
                 exemption = current_enrollment.get("exemption_accepted")
                 paid = exemption is True or (amount_open is not None and float(amount_open) <= 0)
 
-            # Schuljahr-Fenster für die konservative Bücher-Filterung bestimmen.
-            # Annahme (konservativ, zur Review): die API doku sagt zu
-            # `?books=true` nur "aktuell ausgeliehen" — nicht, ob Bücher aus
-            # Vorjahren (noch nicht zurückgegeben) enthalten sind. Da das
-            # Book-Schema kein `schoolyear`/`enrollment`-Feld trägt, filtern wir
-            # heuristisch über `distributed_at`. Bücher werden typischerweise
-            # VOR dem offiziellen Schuljahresbeginn ausgegeben (Sommerferien-
-            # Ausgabe, siehe Wiki-Gotcha) — daher reicht das Fenster vom Ende
-            # des VORJAHRS bis zum Ende des gewählten Schuljahrs
-            # (Vorjahr.end ≤ distributed_at ≤ Jahr.end), nicht [begin, end].
-            # Bücher ohne distributed_at behalten wir (verlässlicher Zeitstempel
-            # fehlt → nicht aussortieren). Vorjahr-Bücher ohne Vormerkung würden
-            # sonst als "ausgeliehen" in der Scanner-Tabelle auftauchen und ein
-            # schon zurückgegebenes Buch (falls die API es wider Erwarten doch
-            # liefert) als ausgeliehen anzeigen. Siehe PLAN §6.1 / Review-Hinweis.
-            sorted_years = sorted(
-                (
-                    (y, _sy_date(y.get("begin")), _sy_date(y.get("end")))
-                    for y in self._active_years(client)
-                ),
-                key=lambda t: t[1] or date.min,
-            )
-            sy_begin = None
-            sy_end = None
-            prev_end = None
-            for y, b, e in sorted_years:
-                if y.get("id") == sy_id:
-                    sy_begin = prev_end if prev_end is not None else b
-                    sy_end = e
-                    break
-                prev_end = e
-
-            def _in_current_sy(dist_at: object) -> bool:
-                if dist_at is None:
-                    return True  # kein Zeitstempel → nicht aussortieren
-                d = _sy_date(dist_at)
-                if d is None:
-                    return True  # ungültiger Zeitstempel → nicht aussortieren
-                if sy_begin is None or sy_end is None:
-                    return True  # Schuljahrs-Fenster unbekannt → nicht aussortieren
-                return sy_begin <= d <= sy_end
-
-            # Bereits ausgeliehene Bücher (compact format for UI)
+            # Bereits ausgeliehene Bücher — laut `?books=true`-Payload (API-
+            # Referenz: „aktuell ausgeliehen") alle Exemplare, die der Schüler
+            # aktuell noch hat. Wir übernehmen sie ungefiltert: ein Buch, das der
+            # Schüler — egal wann — ausgeliehen hat und noch nicht zurückgegeben
+            # hat, wird durchgehend als „ausgeliehen" ausgewiesen. Vorher wurde
+            # heuristisch via `distributed_at` auf ein Schuljahrsfenster
+            # gefiltert; das hat Vorjahres-Bücher (noch nicht zurückgegeben)
+            # fälschlich unterschlagen. Siehe PLAN §6.1.
             current_books = []
             for b in detail.get("books", []):
                 bv = b.get("BookView") or {}
                 isbn = b.get("isbn") or bv.get("isbn", "")
                 dist_at = b.get("distributed_at") or bv.get("distributed_at")
-                # Konservative Vorjahres-Filterung (siehe Annahme oben).
-                if not _in_current_sy(dist_at):
-                    continue
                 current_books.append({
                     "code": b.get("code") or bv.get("code"),
                     "isbn": isbn,
