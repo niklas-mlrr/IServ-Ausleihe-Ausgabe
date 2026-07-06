@@ -125,6 +125,20 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                 await advance_helper(state, hub, helper)
                 continue
 
+            if mtype == "clear_book_alert":
+                # Helfer schließt sein Ausgemustert-Hinweis-Modal selbst (Button)
+                # → Host-Meldung für diesen Schüler ebenfalls aufräumen, damit das
+                # Now-Serving-Kästchen wieder normal angezeigt wird. Read-only,
+                # kein IServ-/DB-Zugriff; nur ein Host-Broadcast.
+                sid = helper.student_id
+                if sid is not None:
+                    await hub.broadcast_host({
+                        "type": "book_alert",
+                        "student_id": sid,
+                        "cleared": True,
+                    })
+                continue
+
             if mtype == "print":
                 # Leihschein des aktuell zugewiesenen Schülers drucken.
                 # Read-only PDF-Abruf + lokaler Druck (kein IServ-Submit).

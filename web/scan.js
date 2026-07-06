@@ -272,14 +272,27 @@ nextModal.addEventListener('click', (e) => { if (e.target === nextModal) closeNe
 // ---- Ausgemustertes-Buch-Hinweis: der Helfer schließt dieses Modal selbst
 // (Button) — per Klick außerhalb oder beim nächsten Scan geht es ebenfalls
 // zu. Am Host erscheint die Meldung ohne Schließen-Button (s. server:
-// process_scan source="helper"). ----
+// process_scan source="helper"). Schließt der Helfer das Modal bewusst
+// (Button/Klick-außerhalb/Escape/nächster Scan), wird zusätzlich der Host-
+// Eintrag für diesen Schüler freigegeben, damit das Now-Serving-Kästchen
+// wieder normal angezeigt wird. ----
 function showBookDeletedModal(msg) {
   bookDeletedText.textContent = `${escapeHtml(msg.barcode)} — ${escapeHtml(msg.msg || 'Buch ausgemustert')}`;
   bookDeletedModal.classList.add('show');
 }
 function closeBookDeletedModal() { bookDeletedModal.classList.remove('show'); }
-bookDeletedCloseBtn.addEventListener('click', closeBookDeletedModal);
-bookDeletedModal.addEventListener('click', (e) => { if (e.target === bookDeletedModal) closeBookDeletedModal(); });
+// Bewusstes Schließen through den Helfer → zusätzlich Host-Meldung aufräumen.
+// Guard: nur senden, wenn das Modal wirklich offen war (vermeidet redundante
+// Clears bei Kontextwechseln, die ohnehin die Queue aufräumt).
+function dismissBookDeletedAlert() {
+  const wasOpen = bookDeletedModal.classList.contains('show');
+  closeBookDeletedModal();
+  if (wasOpen && ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'clear_book_alert' }));
+  }
+}
+bookDeletedCloseBtn.addEventListener('click', dismissBookDeletedAlert);
+bookDeletedModal.addEventListener('click', (e) => { if (e.target === bookDeletedModal) dismissBookDeletedAlert(); });
 
 // ---- Druck-Dialog ----
 function closePrintModal() { printModal.classList.remove('show'); }
@@ -340,7 +353,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   if (printModal.classList.contains('show')) closePrintModal();
   if (nextModal.classList.contains('show')) closeNextModal();
-  if (bookDeletedModal.classList.contains('show')) closeBookDeletedModal();
+  if (bookDeletedModal.classList.contains('show')) dismissBookDeletedAlert();
 });
 
 let audioCtx = null, audioBuffer = null;
@@ -389,7 +402,9 @@ document.addEventListener('click', () => camDropdown.classList.remove('open'));
 
 function onScanSuccess(value) {
   if (cooldown || value === lastValue) return;
-  closeBookDeletedModal();
+  // Nächster Scan → evtl. offenes Hinweis-Modal bewusst schließen (auch Host
+  // aufräumen); war keins offen, ist dismissBookDeletedAlert ein No-op.
+  dismissBookDeletedAlert();
   if (soundEnabled) playBeep();
   lastValue = value; cooldown = true;
   setTimeout(() => { cooldown = false; lastValue = ''; }, 2000);
