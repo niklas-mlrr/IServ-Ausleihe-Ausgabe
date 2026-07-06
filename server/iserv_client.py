@@ -479,13 +479,22 @@ class IsServClient:
         """Buch zu einem gescannten Barcode auflösen (read-only GET /books/{code}).
 
         Liefert `{code, isbn, title, subject, available, distributed, deleted,
-        student_id}` oder `None`, wenn die API das Buch nicht kennt (404). Andere
-        Fehler (Auth/Netz) werden durchgereicht, damit sie nicht fälschlich als
-        „Buch unbekannt" interpretiert werden.
+        student_id, loaned_to, loaned_to_id}` oder `None`, wenn die API das Buch
+        nicht kennt (404). Andere Fehler (Auth/Netz) werden durchgereicht, damit
+        sie nicht fälschlich als „Buch unbekannt" interpretiert werden.
 
         `available`/`distributed`/`deleted` bilden den Lager-Status ab: „im Lager"
         = `available and not distributed and not deleted` (Grundlage für die
         Buchungs-Vorabprüfung, PLAN §6 / Freigabe 2026-07-02).
+
+        `loaned_to` („Vorname Nachname") ist der **aktueller Ausleiher**, wenn das
+        Buch verliehen ist (`distributed`); `loaned_to_id` dessen student_id. Die
+        `/books/:code`-Antwort bettet den Ausleiher bereits als `Student` ein, der
+        Normalfall braucht also keinen Extra-Request. Fehlt die Einbettung (oder
+        ist anonymisiert), wird per `get_by_id` nachgeladen — read-only
+        `GET /students/:id`. Bei Fehlern bleiben beide Felder `None` (die
+        Lager-Prüfung bleibt davon unberührt). Namen werden NUR an die UI
+        durchgereicht, nie geloggt (PLAN §3.7).
         """
         def _sync() -> dict | None:
             client = self._get_client()
@@ -498,6 +507,7 @@ class IsServClient:
             s = series_map.get(isbn)
             subject = ", ".join(s.subjects_flat or s.subjects or []) if s else ""
             title = (s.title if s else "") or isbn
+            loaned_to, loaned_to_id = self._resolve_current_borrower(client, book)
             return {
                 "code": book.code,
                 "isbn": isbn,
@@ -507,8 +517,37 @@ class IsServClient:
                 "distributed": bool(book.distributed),
                 "deleted": bool(book.deleted),
                 "student_id": book.student_id,
+                "loaned_to": loaned_to,
+                "loaned_to_id": loaned_to_id,
             }
         return await asyncio.to_thread(_sync)
+
+    @staticmethod
+    def _resolve_current_borrower(
+        client: AusleiheClient, book: object
+    ) -> tuple[str | None, int | None]:
+        """Name + id des aktuellen Ausleihers eines Buches (read-only).
+
+        Bevorzugt die in `/books/:code` eingebettete `Student`-Struktur (kein
+        Extra-GET). Fehlt sie, Nachladen via `GET /students/:id`. Tolerant bei
+        Fehlern/anonymisierten Datensätzen → `(None, student_id)`, sodass die
+        UI nur zeigt, was sicher bekannt ist.
+        """
+        sid = getattr(book, "student_id", None)
+        student = getattr(book, "student", None)
+        if student is not None:
+            name = f"{student.firstname} {student.lastname}".strip()
+            if name:
+                return name, sid
+        if sid is None:
+            return None, None
+        try:
+            st = client.students.get_by_id(sid)
+            name = f"{st.firstname} {st.lastname}".strip()
+            return (name or None), sid
+        except Exception as e:  # noqa: BLE001 — Name ist Kosmetik, nie fatal
+            log.warning("Ausleiher zu student_id=%s nicht auflösbar: %s", sid, e)
+            return None, sid
 
     async def get_loan_slip_pdf(self, student_id: int, variant: str = "student") -> bytes:
         """Leihschein als PDF-Bytes (read-only GET).

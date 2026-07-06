@@ -297,6 +297,7 @@
     /* Ausgemustertes/verliehenes Buch bei diesem Schüler gescannt — Kästchen rot. */
     .ns-tile-alert { background: var(--alert-bg); outline: 2px solid var(--danger); }
     .ns-alert { font-size: .85rem; font-weight: 600; color: var(--danger); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .ns-borrower { font-size: .8rem; font-weight: 600; color: var(--danger); margin-top: 2px; }
     .ns-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
     .ns-empty { color: var(--text-muted); font-size: .95rem; padding: 6px 0; }
     .ns-next { margin-top: 12px; font-size: .9rem; color: var(--text-muted); }
@@ -1146,7 +1147,9 @@
           ? ` <button class="secondary" data-action="clear-book-alert" data-student-id="${s.student_id}">Schließen</button>`
           : '';
         const alertLbl = alert
-          ? `<div class="ns-alert">${escapeHtml(alert.text)}${alertBtn}</div>`
+          ? `<div class="ns-alert-wrap"><div class="ns-alert">${escapeHtml(alert.text)}${alertBtn}</div>` +
+            (alert.borrower ? `<div class="ns-borrower">verliehen an ${escapeHtml(alert.borrower)}</div>` : '') +
+            `</div>`
           : '';
         return `<div class="ns-tile${alert ? ' ns-tile-alert' : ''}">
           <div class="ns-name">${escapeHtml(s.lastname)}, ${escapeHtml(s.firstname)}</div>
@@ -1340,9 +1343,13 @@
     }
     const label = msg.kind === 'book_deleted' ? 'Ausgemustertes Buch gescannt' : 'Bereits verliehenes Buch gescannt';
     const who = msg.student ? ` (${escapeHtml(msg.student)})` : '';
-    showMsg(`${label}: ${escapeHtml(msg.title || msg.barcode)}${who}`, 'warn');
+    // „currently lent to someone else": aktuellen Ausleiher namentlich nennen
+    // (nur bei not_in_stock belegt; read-only aus /books/:code, PLAN §3.7).
+    const loaned = msg.loaned_to ? ` — verliehen an ${escapeHtml(msg.loaned_to)}` : '';
+    showMsg(`${label}: ${escapeHtml(msg.title || msg.barcode)}${who}${loaned}`, 'warn');
     studentAlerts[msg.student_id] = {
       text: `${label}: ${msg.title || msg.barcode}`,
+      borrower: msg.loaned_to || null,
       source: msg.source || 'student',
     };
     renderNowServing();

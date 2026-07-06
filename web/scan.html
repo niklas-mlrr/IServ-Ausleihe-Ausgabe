@@ -147,6 +147,10 @@
       display: flex; flex-direction: column; gap: 14px;
     }
     .modal-box h3 { font-size: 1.2rem; font-weight: 700; }
+    #book-alert-borrower {
+      margin: -6px 0 0; font-weight: 600; color: #c0392b;
+      font-size: .95rem;
+    }
     .modal-warn {
       background: rgba(230,126,34,.14); border: 1px solid rgba(230,126,34,.55);
       border-radius: 8px; padding: 10px 12px; font-size: .9rem; color: var(--fg);
@@ -227,6 +231,7 @@
     <div class="modal-box">
       <h3 id="book-alert-title" style="color:#f44336">Buch-Hinweis</h3>
       <p id="book-alert-text"></p>
+      <p id="book-alert-borrower" hidden></p>
       <div class="modal-actions">
         <button class="primary" id="book-alert-close">Schließen</button>
       </div>

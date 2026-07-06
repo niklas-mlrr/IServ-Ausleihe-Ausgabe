@@ -71,6 +71,28 @@ def test_reject_not_in_stock_unavailable():
     assert res["ok"] is False and res["status"] == "not_in_stock"
 
 
+def test_not_in_stock_carries_loaned_to():
+    # Verliehenes Buch → aktueller Ausleiher wird (read-only aus /books/:code)
+    # durchgereicht, damit Helfer + Host den Namen zeigen.
+    book = _book(distributed=True)
+    book["loaned_to"] = "Max Mustermann"
+    book["loaned_to_id"] = 4321
+    res = _eval(_State(_FakeIserv(book)), {"978-1"}, set())
+    assert res["ok"] is False and res["status"] == "not_in_stock"
+    assert res["loaned_to"] == "Max Mustermann"
+    assert res["loaned_to_id"] == 4321
+    assert "Max Mustermann" in res["msg"]
+
+
+def test_not_in_stock_without_borrower_stays_silent():
+    # Lager-Status „verliehen", aber kein Ausleiher auflösbar → keine
+    # Namensnennung (Felder None), Meldung bleibt ohne „verliehen an …".
+    res = _eval(_State(_FakeIserv(_book(distributed=True))), {"978-1"}, set())
+    assert res["status"] == "not_in_stock"
+    assert res["loaned_to"] is None and res["loaned_to_id"] is None
+    assert "verliehen an" not in res["msg"]
+
+
 def test_reject_series_already_lent():
     res = _eval(_State(_FakeIserv(_book())), set(), {"978-1"})
     assert res["ok"] is False

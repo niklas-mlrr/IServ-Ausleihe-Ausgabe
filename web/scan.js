@@ -237,6 +237,7 @@ const readerEl = document.getElementById('reader');
 const bookAlertModal = document.getElementById('book-alert-modal');
 const bookAlertTitleEl = document.getElementById('book-alert-title');
 const bookAlertTextEl = document.getElementById('book-alert-text');
+const bookAlertBorrowerEl = document.getElementById('book-alert-borrower');
 const bookAlertCloseBtn = document.getElementById('book-alert-close');
 const printModal = document.getElementById('print-modal');
 const printWarnEl = document.getElementById('print-warn');
@@ -304,6 +305,15 @@ function showBookAlertModal(msg) {
   bookAlertTitleEl.textContent = meta.title;
   bookAlertTitleEl.style.color = meta.color;
   bookAlertTextEl.textContent = `${escapeHtml(msg.barcode)} — ${escapeHtml(msg.msg || meta.title)}`;
+  // „currently lent to someone else": Name des aktuellen Ausleihers als
+  // eigene Zeile (nur bei not_in_stock belegt; read-only aus /books/:code).
+  if (msg.loaned_to) {
+    bookAlertBorrowerEl.textContent = `Aktuell verliehen an: ${msg.loaned_to}`;
+    bookAlertBorrowerEl.hidden = false;
+  } else {
+    bookAlertBorrowerEl.textContent = '';
+    bookAlertBorrowerEl.hidden = true;
+  }
   bookAlertModal.classList.add('show');
 }
 function closeBookAlertModal() { bookAlertModal.classList.remove('show'); }

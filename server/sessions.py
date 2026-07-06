@@ -199,12 +199,22 @@ async def evaluate_scan_for_booking(
 
     # Bedingung 1: Buch im Lager.
     if book["distributed"] or not book["available"]:
+        # Buch aktuell an jemand anders verliehen → Namen des Ausleihers
+        # durchreichen (read-only aus /books/:code, siehe get_book_by_code),
+        # damit Helfer-Scanner und Host anzeigen, WEM es gerade gehört.
+        loaned_to = book.get("loaned_to")
+        loaned_to_id = book.get("loaned_to_id")
+        msg = f"Nicht im Lager (verliehen): {title}"
+        if loaned_to:
+            msg = f"Nicht im Lager (verliehen an {loaned_to}): {title}"
         return {
             "ok": False,
             "status": "not_in_stock",
-            "msg": f"Nicht im Lager (verliehen): {title}",
+            "msg": msg,
             "isbn": isbn,
             "title": title,
+            "loaned_to": loaned_to,
+            "loaned_to_id": loaned_to_id,
         }
 
     return {"ok": True, "isbn": isbn, "title": title, "code": book["code"]}
@@ -250,11 +260,17 @@ async def process_scan(
                 "title": decision.get("title"),
                 "msg": decision.get("msg"),
                 "student": f"{student.lastname}, {student.firstname}" if student else None,
+                # „currently lent to someone else": Name des aktuellen Ausleihers
+                # (nur bei not_in_stock belegt; read-only, PLAN §3.7 — nicht loggen).
+                "loaned_to": decision.get("loaned_to"),
+                "loaned_to_id": decision.get("loaned_to_id"),
             })
         return {
             "status": decision["status"],
             "msg": decision["msg"],
             "isbn": decision.get("isbn"),
+            "loaned_to": decision.get("loaned_to"),
+            "loaned_to_id": decision.get("loaned_to_id"),
         }
     if get_config().allow_booking:
         result = await handle_commit(state, student_id, barcode)
