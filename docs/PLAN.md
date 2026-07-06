@@ -638,6 +638,48 @@ Tests: `tests/test_booking_precheck.py`
 (`test_reject_deleted_before_not_enrolled`,
 `test_reject_deleted_before_not_in_stock`).
 
+**Update (2026-07-06) — Alert-Topologie verfeinert (Helfer schließt selbst,
+verliehen-an-andere symmetrisch zu ausgemustert, Selbst-Leihe als Hinweis):**
+Drei aufeinander aufbauende Nutzer-Korrekturen am Ausgemustert/verliehen-Alarm.
+
+1. **Helfer-Modal bekommt Schließen-Button, Host ohne für Helfer-Scans.**
+   `process_scan()` trägt jetzt `source` (`"helper"` Modus A / `"student"`
+   Modus B) in den `book_alert`-Broadcast ein. Der Host rendert seinen
+   Schließen-Button im Now-Serving-Kästchen **nur** für `source !== "helper"`
+   — am Helfer-Scanner schließt der Helfer sein Modal selbst (Button im
+   `web/scan.html`-Modal), der Host zeigt die Meldung rot, aber ohne Button.
+2. **Helfer-Schließen räumt den Host mit auf.** Neuer WS-Message-Typ
+   `clear_book_alert` am Helfer-Scanner (`server/routes/ws.py`/`ws_scanner`)
+   — der Server feuert `{"type": "book_alert", "student_id", "cleared": true}`
+   an alle Host-Verbindungen. `dismissBookAlert()` im Helfer schließt das
+   Modal **und** sendet das Clear (guard: nur wenn Modal offen war). Kontext-
+   wechsel (neuer Schüler/Wartend) bleiben rein lokal — dort räumt die Queue
+   das Host-Kästchen ohnehin.
+3. **Verliehen-Unterscheidung: an andere vs. an sich selbst.**
+   - `not_in_stock` (Buch an **jemand anderen** verliehen) → **symmetrisch zu
+     `book_deleted`**: Helfer-Modal mit Schließen-Button (räumt Host),
+     Schüler-Modal **ohne** Button + **blockierend**
+     (`StudentSessionB.book_alert_open` jetzt auch für `not_in_stock`,
+     Scans werden serverseitig ignoriert bis Host-Clear), Host-Kästchen rot
+     ohne Button (bei Helfer-Source) / mit Button (bei Schüler-Source).
+   - `series_already_lent` (Buch bereits an **sich selbst** verliehen) → nur
+     ein **Hinweis**, den Helfer wie Schüler **lokal** selbst schließen
+     können (Button/nächster Scan), **nicht blockierend**, **ohne Host-Bezug**
+     (`process_scan` broadcastet bei `series_already_lent` bewusst **nicht**).
+
+   Modal-Titel/Farbe sind dynamisch per Status: `book_deleted`/`not_in_stock`
+   rot („Ausgemustertes Buch gescannt" / „Buch noch verliehen"),
+   `series_already_lent` orange („Buch bereits an dich verliehen"). Der
+   Schüler-Client zeigt bei der blockierenden Variante „Bitte warte, bis der
+   Betreuer dies freigibt.", beim Hinweis „Du kannst diese Meldung selbst
+   schließen." + Schließen-Button.
+
+Kein DB-/IServ-Write — nur read-only `book["deleted"]`/`distributed`/
+`available` + WS-Broadcasts. Tests: `tests/test_booking_precheck.py` +2
+(`test_process_scan_broadcasts_alert_for_not_in_stock`,
+`test_process_scan_no_alert_for_series_already_lent`), Suite 92 grün.
+Commits `09296f2`, `440f5b4`, `b4610de`.
+
 **Bugfix (2026-07-05) — Scanner reagiert nicht auf Host-Trennung:**
 `end_student()` löste die Helfer-Zuordnung serverseitig, informierte aber nie
 den Scanner-WebSocket selbst — `web/scan.html` hat keinen Host-State-Feed und
