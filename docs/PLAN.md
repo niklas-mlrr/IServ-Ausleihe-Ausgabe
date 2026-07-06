@@ -685,6 +685,25 @@ Kein DB-/IServ-Write — nur read-only `book["deleted"]`/`distributed`/
 `test_process_scan_no_alert_for_series_already_lent`), Suite 92 grün.
 Commits `09296f2`, `440f5b4`, `b4610de`.
 
+**Update (2026-07-06) — Verliehen-an-Name bei `not_in_stock`:** Wird ein
+Buch gescannt, das derzeit an **jemand anders** verliehen ist (`not_in_stock`,
+`distributed`), zeigen Helfer-Scanner und Host zusätzlich, **an wen** es
+verliehen ist. `server/iserv_client.py::get_book_by_code` liefert neben
+`student_id` jetzt `loaned_to` („Vorname Nachname") + `loaned_to_id`. Der
+aktuelle Ausleiher ist in `GET /books/:code` bereits als eingebetteter
+`Student` enthalten → im Normalfall **kein Extra-Request**; nur falls die
+Einbettung fehlt/anonymisiert ist, Nachladen per `GET /students/:id`
+(read-only, tolerant bei Fehlern → `None`). `evaluate_scan_for_booking`
+hängt die Felder im `not_in_stock`-Zweig ans Return-dict und baut den Namen
+in die Meldung ein („Nicht im Lager (verliehen an …): …"); `process_scan`
+reicht sie in den `book_alert`-Broadcast (Host) und das `scan_result`-Payload
+(Scanner) durch. UI: `web/scan.html` eigene Zeile „Aktuell verliehen an: …"
+im Buch-Hinweis-Modal; `web/host.html` ergänzt Toast („— verliehen an …")
+und eine `ns-borrower`-Zeile im Now-Serving-Kästchen. Namen werden **nicht
+geloggt** (PLAN §3.7), nur an die UI durchgereicht. Kein DB-/IServ-Write.
+Tests: `tests/test_booking_precheck.py` +2 (`test_not_in_stock_carries_loaned_to`,
+`test_not_in_stock_without_borrower_stays_silent`), Suite 92 grün. Commit `15bf5f1`.
+
 **Bugfix (2026-07-05) — Scanner reagiert nicht auf Host-Trennung:**
 `end_student()` löste die Helfer-Zuordnung serverseitig, informierte aber nie
 den Scanner-WebSocket selbst — `web/scan.html` hat keinen Host-State-Feed und

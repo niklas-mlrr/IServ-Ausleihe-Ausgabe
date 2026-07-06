@@ -224,7 +224,7 @@ die E2E-Skripte V3–V7 ab.
 | `tests/test_printing.py` | Backend-Resolution (auto je Plattform) + `file`-Backend |
 | `tests/test_worker_pool.py` | `WorkerPool.stats()` (total/available/in_use) |
 | `tests/test_tls.py` | Cert hat SAN (localhost/127.0.0.1/cn), idempotent |
-| `tests/test_booking_precheck.py` | Buchungs-Vorabprüfung (`evaluate_scan_for_booking`: `book_deleted`-Vorrang, `not_in_stock`, `series_already_lent`, `not_enrolled`, `unknown_book`, `not_ready`, Lookup-Fehler) + `process_scan`-Gate-Verhalten (Buchen/Stagen/kein Feldkontakt) + Alert-Broadcast (`not_in_stock`→Alert mit `source`, `series_already_lent`→kein Alert) |
+| `tests/test_booking_precheck.py` | Buchungs-Vorabprüfung (`evaluate_scan_for_booking`: `book_deleted`-Vorrang, `not_in_stock`, `series_already_lent`, `not_enrolled`, `unknown_book`, `not_ready`, Lookup-Fehler) + `process_scan`-Gate-Verhalten (Buchen/Stagen/kein Feldkontakt) + Alert-Broadcast (`not_in_stock`→Alert mit `source`, `series_already_lent`→kein Alert) + `loaned_to`-Durchreichung (`not_in_stock` trägt Ausleiher-Namen/-id, Meldung „verliehen an …", None bei nicht auflösbarem Ausleiher) |
 
 ## Hinweise zum Testen (wenn es so weit ist)
 
