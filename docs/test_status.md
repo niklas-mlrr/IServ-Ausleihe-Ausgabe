@@ -156,6 +156,29 @@
       auch noch nicht zurückgegebene Vorjahres-Bücher — als „ausgeliehen"
       ausgewiesen werden. Siehe PLAN §5 Phase 2 (2026-07-06).
 
+### Neu 2026-07-06 (Ermäßigungs-/Befreiungsnachweis + Modus-B-Host-Freigabe)
+
+- [x] **Nachweis-Feldsemantik read-only verifiziert.** Enrollment-Payload
+      trägt `remission_request`/`remission_accepted`/`remission_judged_*`
+      (Ermäßigung) bzw. `exemption_*` (Befreiung); `*_accepted` ist tri-state
+      (`null`=unentschieden, `true`=akzeptiert, `false`=abgelehnt).
+      „Nachweis fehlt" = `*_request is True and *_accepted is None`.
+      Verifiziert am Testschüler 2159 (kein Antrag → beide Pending=False).
+      Gebaut: `get_student_info` liefert `remission_pending`/`exemption_pending`;
+      `web/scan.js` + `web/student.html` zeigen den Hinweis in Offen-Farbe
+      vor dem Betrag; „Bezahlt" bei Nachweis unterdrückt; „Nicht angemeldet"
+      im Schülerclient grau. Suite 92 grün.
+- [ ] **Nachweis-Hinweis am Gerät mit echtem Pending-Fall.** Bislang nur
+      gegen „kein Antrag" verifiziert — ein Schüler mit unentschiedenem
+      Ermäßigungs-/Befreiungsantrag ist auf Prod nicht bekannt. Visueller
+      Check der Hinweis-Anzeige + der kombinierte Host-Freigabe-Dialog
+      (Modus B, `POST /api/student/pair` → `reason:"blocked"`-409 +
+      `blockers`-Liste) steht aus, sobald ein solcher Fall vorliegt.
+- [x] **Nicht-angemeldet paaren ohne Nachfrage.** Blocker-Prüfung auf
+      `enrolled` gegated — kein False-Positive-Dialog „Nicht bezahlt
+      (offen: None €)" mehr. Logik-Review (kein echter Nicht-angemeldet-
+      Schüler auf Prod verfügbar).
+
 ### Aus dem bisherigen Plan (Phase 3/4)
 
 - [ ] **Lasttest: 5 parallele Schüler-Sessions** (Modus B) — `WORKER_CONTEXTS`

@@ -119,8 +119,8 @@ Sicherheitsanforderungen (aus Klärung 2026-06-12, „keine Sicherheitslücken")
 | O2 | Erlaubt IServ mehrere parallele Sessions desselben Accounts? | **Geklärt (Spike B, 2026-06-12):** Ja — 3/3 parallele unabhängige Logins + 3/3 Cookie-Sharing-Contexts, keine Invalidierung. Context-Pool mit unabhängigen Contexts. |
 | O3 | Exaktes Verhalten der offiziellen Counter-Seite (DOM, Fehlerfälle, Schüler-Wechsel) | Spike A erkundet das mit Test-Account + ausgemustertem Buch. |
 | O4 | Welcher Drucker (USB am Laptop? Netzwerk? Treiberlage unter Windows)? | **Teil-adressiert (2026-06-15):** Druck-Service gebaut (`server/printing.py`, Backends `file`/`lp`/`sumatra`/`win-default`/`auto`), read-only PDF-Abruf via `get_loan_slip_pdf`. Echter Silent-Print am Zielgerät (= Spike C) noch offen → `docs/test_status.md`, `docs/deployment.md`. |
-| O5 | Bezahlstatus-Anzeige: genaue Quelle (`enrollments`/`payments` via Admin-API) und Sonderfälle (Befreiung/Ermäßigung) | In Phase 2 gegen echte Daten read-only verifizieren. |
-| O6 | Modus B: Was passiert bei „nicht bezahlt"? (Buch zurücklegen, Helfer rufen?) | **Teil-geklärt (2026-06-15):** UI zeigt Bücher + „nicht bezahlt"-Banner; Host kann beim Pairing per `override_payment` freigeben (Befreiung/Ermäßigung). Fachlicher Wortlaut/Workflow noch mit Hr. Pühn final. |
+| O5 | Bezahlstatus-Anzeige: genaue Quelle (`enrollments`/`payments` via Admin-API) und Sonderfälle (Befreiung/Ermäßigung) | **Geklärt (2026-07-06):** `enrollments`-Payload trägt `remission_*` (Ermäßigung) / `exemption_*` (Befreiung) je Jahrganmeldung; `*_accepted` ist tri-state (`null`=unentschieden). `get_student_info` liefert `paid`/`amount_open`/`remission_pending`/`exemption_pending`; Clients zeigen „Nachweis fehlt" in Offen-Farbe vor dem Betrag, „Bezahlt" bei Nachweis unterdrückt. Read-only verifiziert am Testschüler (kein Antrag). |
+| O6 | Modus B: Was passiert bei „nicht bezahlt"? (Buch zurücklegen, Helfer rufen?) | **Erweitert (2026-07-06):** UI zeigt Bücher + „nicht bezahlt"-Banner; Host kann beim Pairing per `override_payment` freigeben. **Neu:** auch ein ausstehender Ermäßigungs-/Befreiungsnachweis blockt das Pairing; beide Blocker (nicht bezahlt + Nachweis) werden gesammelt und in **einem** kombinierten Host-Dialog freigegeben (`reason:"blocked"`-409 + `blockers`-Liste; `override_payment` hebt alle auf). Nicht-angemeldete Schüler lösen keine Nachfrage aus (Prüfung auf `enrolled` gegated). Fachlicher Wortlaut/Workflow noch mit Hr. Pühn final. |
 | O7 | Deployment-Packaging für den Windows-Laptop (Python-Installation? portable venv? `start.bat`?) | Phase 3; Kandidat: `uv` + Lockfile + Start-Skript, alternativ portable Python. |
 | O8 | Zeigt das QR-Display Namen/Initialen zur Orientierung oder nur anonyme QRs? | **Geklärt (2026-06-15): anonym.** Ein allgemeiner QR, keine Schülerdaten auf dem iPad (Mechanismus geändert → `docs/phase4_modus_b_2026-06-15.md`). |
 | O9 | Schul-WLAN: Client-Isolation zwischen Handy und Laptop? | Spike D; Erfahrung mit dem bisherigen Barcode-Scanner spricht dagegen, trotzdem vor Ort verifizieren. |
@@ -548,7 +548,8 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
       Erschöpfung), WS-Reconnect-Leak, Host-Login-TTL (`HOST_SESSION_TTL_S`),
       QR-IP-Override (`HOST_IP`), Pairing-TOCTOU, `commit-book`-ok-nur-bei-booked
       u. a. Write-Pfad-Gating unangetastet. Details: `docs/hardening_2026-06-18.md`.
-- [ ] O6 fachlich mit Hr. Pühn finalisieren
+- [ ] O6 fachlich mit Hr. Pühn finalisieren (Wortlaut „Nachweis fehlt" +
+      kombinierter Host-Freigabe-Dialog bei nicht-bezahlt/Nachweis, 2026-07-06)
 - [ ] Generalprobe vor Schuljahresbeginn
 - [ ] **Meilenstein: Pilot mit Testklasse/-jahrgang**
 
