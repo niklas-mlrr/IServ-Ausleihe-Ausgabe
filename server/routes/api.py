@@ -558,6 +558,37 @@ async def set_force_tailscale_ip(
     return {"ok": True, "force_tailscale_ip": state.force_tailscale_ip}
 
 
+@router.post("/api/save-pdf-locally")
+async def set_save_pdf_locally(
+    body: dict, session_id: str | None = Cookie(default=None)
+) -> dict:
+    """Entwickler-Toggle „PDF lokal speichern": beim Drucken das `file`-Backend
+    erzwingen (Leihschein wird gespeichert statt gedruckt) — unabhängig von
+    PRINT_BACKEND. Rein lokal, kein IServ-/DB-Zugriff.
+    """
+    _require_host(session_id)
+    state = get_state()
+    state.save_pdf_locally = bool(body.get("enabled"))
+    await get_hub().broadcast_host(state.state_snapshot())
+    return {"ok": True, "save_pdf_locally": state.save_pdf_locally}
+
+
+@router.post("/api/fix-class-on-slip")
+async def set_fix_class_on_slip(
+    body: dict, session_id: str | None = Cookie(default=None)
+) -> dict:
+    """Experimenteller Entwickler-Toggle „Klasse auf Leihschein korrigieren":
+    ersetzt beim Drucken den (teils falschen) Klassen-Code auf dem IServ-
+    Leihschein durch die echte Klasse des Schülers. Rein lokale PDF-Bearbeitung,
+    kein IServ-/DB-Write.
+    """
+    _require_host(session_id)
+    state = get_state()
+    state.fix_class_on_slip = bool(body.get("enabled"))
+    await get_hub().broadcast_host(state.state_snapshot())
+    return {"ok": True, "fix_class_on_slip": state.fix_class_on_slip}
+
+
 @router.post("/api/slip-default")
 async def set_slip_default(body: dict, session_id: str | None = Cookie(default=None)) -> dict:
     """Host-Toggle „Schüler-Leihschein" (2. Seite) als Default für die Helfer.

@@ -32,9 +32,16 @@ if errorlevel 1 (
   echo [INFO] 'uv' installiert.
 )
 
+REM 'uv sync' installiert alle Abhaengigkeiten aus pyproject.toml - darunter
+REM 'pymupdf' (PyMuPDF, native Wheel) fuer die lokale Leihschein-Bearbeitung
+REM (Klasse auf dem Leihschein korrigieren). Danach pruefen wir, dass sich das
+REM native Modul wirklich importieren laesst, damit ein kaputtes Wheel hier
+REM auffaellt und nicht erst beim Drucken.
 echo [1/3] Python-Umgebung + Abhaengigkeiten (uv sync) ...
 call uv sync
 if errorlevel 1 ( echo [FEHLER] uv sync fehlgeschlagen. & pause & exit /b 1 )
+call uv run python -c "import fitz" >nul 2>nul
+if errorlevel 1 ( echo [FEHLER] PyMuPDF ^(pymupdf^) konnte nicht importiert werden. & pause & exit /b 1 )
 
 echo [2/3] Playwright-Browser (Chromium) ...
 call uv run playwright install chromium

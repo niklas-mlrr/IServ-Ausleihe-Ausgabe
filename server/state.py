@@ -165,6 +165,16 @@ class AppState:
         # Header-Toggle „Tailscale-IP": erzwingt die Tailscale/CGNAT-IP in
         # QR-/Join-URLs statt der Auto-Auswahl (LAN-first). False = Auto.
         self.force_tailscale_ip: bool = False
+        # Entwickler-Toggle „PDF lokal speichern": erzwingt beim Drucken das
+        # `file`-Backend (Leihschein wird ins Ausgabeverzeichnis geschrieben
+        # statt an den Drucker geschickt) — unabhängig von PRINT_BACKEND. Für
+        # Tests ohne physischen Drucker. False = normaler Druckweg.
+        self.save_pdf_locally: bool = False
+        # Experimenteller Entwickler-Toggle „Klasse auf Leihschein korrigieren":
+        # ersetzt beim Drucken den (teils falschen) Klassen-Code hinter „Klasse "
+        # auf dem IServ-Leihschein durch die echte Klasse des Schülers aus dem
+        # Serverstate. Rein lokale PDF-Bearbeitung, kein IServ-Write. False = aus.
+        self.fix_class_on_slip: bool = False
         # Host-Toggle „Schüler-Leihschein" (2. Seite): Default für den Druck-
         # Dialog im Helferclient. Wird vom Host gesetzt und an Helfer gesynct.
         self.slip_second_page_default: bool = False
@@ -268,6 +278,8 @@ class AppState:
             "allow_booking": get_config().allow_booking,
             "worker_pool": worker_stats,
             "force_tailscale_ip": self.force_tailscale_ip,
+            "save_pdf_locally": self.save_pdf_locally,
+            "fix_class_on_slip": self.fix_class_on_slip,
             "slip_second_page_default": self.slip_second_page_default,
             "printer_name": self.printer_name_override,
             "book_order": self.book_order,

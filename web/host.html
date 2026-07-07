@@ -389,6 +389,9 @@
     #settings-dialog .settings-bl-label { font-weight: 600; }
     #settings-dialog #bl-tabs { flex-wrap: wrap; border-bottom: none; margin-bottom: 6px; }
     #settings-dialog #bl-list { max-height: 46vh; overflow-y: auto; margin-top: 0; }
+    /* Abschnitts-Überschrift im Dialog (z. B. „Entwicklung") mit Trennlinie */
+    #settings-dialog .settings-section { font-size: .8rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); border-top: 1px solid var(--border); padding-top: 12px; margin-top: 4px; }
+    #settings-dialog .settings-hint { font-size: .8rem; color: var(--text-muted); margin-top: -6px; }
   </style>
 </head>
 <body>
@@ -569,11 +572,6 @@
 <div class="modal" id="settings-dialog">
   <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="settings-dialog-title">
     <h3 id="settings-dialog-title">Einstellungen</h3>
-    <label class="switch settings-row" title="QR-Codes auf die Tailscale-IP (100.x) erzwingen statt der Auto-Auswahl (LAN-first). Aus = Auto.">
-      <input type="checkbox" id="force-tailscale-ip">
-      <span class="track"></span>
-      Tailscale-IP
-    </label>
     <label class="settings-row settings-field" for="printer-select" title="Drucker, über den die Leihscheine gedruckt werden. Standard = PRINTER_NAME aus der .env bzw. Systemstandard.">
       Drucker
       <select id="printer-select"><option value="">Standard</option></select>
@@ -591,6 +589,24 @@
       <div class="tabs" id="bl-tabs"></div>
       <div id="bl-list" class="book-order-list"></div>
     </div>
+    <div class="settings-row settings-section">Entwicklung</div>
+    <label class="switch settings-row" title="QR-Codes auf die Tailscale-IP (100.x) erzwingen statt der Auto-Auswahl (LAN-first). Aus = Auto.">
+      <input type="checkbox" id="force-tailscale-ip">
+      <span class="track"></span>
+      Tailscale-IP
+    </label>
+    <label class="switch settings-row" title="Beim Drucken wird der Leihschein NICHT an den Drucker geschickt, sondern als PDF in den Browser dieses Host-Rechners heruntergeladen (Download-Prompt). Für Tests ohne Drucker.">
+      <input type="checkbox" id="save-pdf-locally">
+      <span class="track"></span>
+      PDF lokal speichern (statt drucken)
+    </label>
+    <p class="settings-hint">Wenn aktiv, wird jeder Druck als PDF in den Browser dieses Host-Rechners heruntergeladen statt an den Drucker geschickt.</p>
+    <label class="switch settings-row" title="Experimentell: ersetzt beim Drucken den (teils falschen) Klassen-Code hinter „Klasse" auf dem Leihschein durch die echte Klasse des Schülers aus dem System.">
+      <input type="checkbox" id="fix-class-on-slip">
+      <span class="track"></span>
+      Klasse auf Leihschein korrigieren (experimentell)
+    </label>
+    <p class="settings-hint">Überschreibt lokal den Klassen-Code auf dem gedruckten Leihschein mit der echten Klasse des Schülers — der IServ-Leihschein selbst bleibt unverändert.</p>
     <div class="modal-actions">
       <button class="primary" id="settings-dialog-save">Speichern</button>
       <button class="ghost" id="settings-dialog-cancel">Abbrechen</button>
@@ -682,6 +698,7 @@
       loadClasses();
       connectWs();
       if (_slipCb) pushSlipDefault(_slipCb.checked);  // Server auf Host-Stand bringen
+      pushDevTogglesToServer();  // PDF-lokal/Klasse-korrigieren aus localStorage übernehmen
     } else {
       document.getElementById('login-msg').textContent = 'Falsches Passwort';
     }
@@ -707,7 +724,31 @@
       catch (err) { console.warn('Bad WS frame', err); return; }
       if (msg.type === 'state') applyState(msg);
       else if (msg.type === 'book_alert') showBookAlert(msg);
+      else if (msg.type === 'loan_slip_download') downloadLoanSlip(msg);
     };
+  }
+
+  // „PDF lokal speichern": der Server schickt den Leihschein base64-kodiert über
+  // die Host-WS; hier als Blob-Download im Browser des Host-Rechners auslösen
+  // (Download-Prompt bzw. Ablage im Download-Ordner, je nach Browsereinstellung).
+  function downloadLoanSlip(msg) {
+    try {
+      const bin = atob(msg.data_b64 || '');
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = msg.filename || 'leihschein.pdf';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      showMsg('Leihschein heruntergeladen: ' + (msg.filename || 'leihschein.pdf'));
+    } catch (err) {
+      console.error('Leihschein-Download fehlgeschlagen', err);
+      showMsg('Leihschein-Download fehlgeschlagen');
+    }
   }
 
   // HTML-Escaping für alle Strings, die per innerHTML eingesetzt werden
@@ -1211,6 +1252,9 @@
     const tsCb = document.getElementById('force-tailscale-ip');
     if (tsCb && !settingsOpen())
       tsCb.checked = !!state.force_tailscale_ip;
+    // „PDF lokal speichern" und „Klasse korrigieren" werden NICHT vom Server-
+    // State gespiegelt — sie leben per Browser in localStorage (Quelle der
+    // Wahrheit) und werden beim Login an den Server gepusht.
   }
 
   // Toggle „Tailscale-IP": erzwingt die Tailscale-IP in allen QR-Codes (Server-
@@ -1221,6 +1265,53 @@
       body: JSON.stringify({ enabled }),
     });
     if (r.ok) showMsg(enabled ? 'QR-Codes nutzen jetzt die Tailscale-IP' : 'QR-Codes nutzen wieder die Auto-IP');
+  }
+
+  // Entwickler-Toggle „PDF lokal speichern": erzwingt beim Drucken das
+  // file-Backend (Leihschein wird gespeichert statt gedruckt). Persistent in
+  // localStorage (siehe DEV_TOGGLES) und beim (Auto-)Login an den Server gepusht;
+  // hier nur der stille Server-Push, ohne Toast (für den Login-Sync).
+  async function pushSavePdfLocally(enabled) {
+    try {
+      await fetch('/api/save-pdf-locally', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ enabled }),
+      });
+    } catch (_) {}
+  }
+
+  // Experimenteller Toggle „Klasse auf Leihschein korrigieren": ersetzt beim
+  // Drucken den Klassen-Code auf dem Leihschein durch die echte Klasse. Wie oben
+  // localStorage-persistent + Login-Push; hier der stille Server-Push.
+  async function pushFixClassOnSlip(enabled) {
+    try {
+      await fetch('/api/fix-class-on-slip', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ enabled }),
+      });
+    } catch (_) {}
+  }
+
+  // Die zwei Entwickler-Toggles, die per localStorage persistiert und beim Login
+  // an den Server gepusht werden: DOM-Checkbox-ID, localStorage-Schlüssel und
+  // die Push-Funktion. Zentral, damit Init/Login-Sync/Speichern konsistent bleiben.
+  const DEV_TOGGLES = [
+    { id: 'save-pdf-locally', key: 'savePdfLocally', push: pushSavePdfLocally },
+    { id: 'fix-class-on-slip', key: 'fixClassOnSlip', push: pushFixClassOnSlip },
+  ];
+
+  // localStorage -> Checkbox (beim Laden) und Checkbox -> Server (nach Login).
+  function initDevTogglesFromStorage() {
+    for (const t of DEV_TOGGLES) {
+      const cb = document.getElementById(t.id);
+      if (cb) cb.checked = localStorage.getItem(t.key) === '1';
+    }
+  }
+  function pushDevTogglesToServer() {
+    for (const t of DEV_TOGGLES) {
+      const cb = document.getElementById(t.id);
+      if (cb) t.push(cb.checked);  // Server auf den gespeicherten Host-Stand bringen
+    }
   }
 
   // Einstellungen: Leihschein-Drucker setzen (In-Memory-Override im Server-
@@ -1460,6 +1551,9 @@
     // doLogin() bzw. den /api/state-Lade-Check weiter unten. Ein Push vor
     // dem Login läuft ohnehin ins 401 und rauscht nur im Log.
   }
+  // Dev-Toggles (PDF lokal / Klasse korrigieren) aus localStorage in die
+  // Checkboxen laden; der Server-Push folgt (wie beim Leihschein) nach dem Login.
+  initDevTogglesFromStorage();
 
   // Einstellungen-Dialog: Tailscale-IP + Schüler-Leihschein. Änderungen werden
   // erst bei „Speichern" übernommen (Server-State bzw. localStorage); Abbrechen/
@@ -1468,14 +1562,19 @@
     const modal = document.getElementById('settings-dialog');
     const box = modal.querySelector('.modal-box');
     const tsCb = document.getElementById('force-tailscale-ip');
+    const pdfCb = document.getElementById('save-pdf-locally');
+    const fixCb = document.getElementById('fix-class-on-slip');
     const slipCb = document.getElementById('slip-second-page');
     const printerSel = document.getElementById('printer-select');
     const saveBtn = document.getElementById('settings-dialog-save');
     const cancelBtn = document.getElementById('settings-dialog-cancel');
     const prevFocus = document.activeElement;
-    // Ausgangswerte festhalten: Tailscale + Drucker aus dem Server-State, Leihschein lokal.
+    // Ausgangswerte festhalten: Tailscale + Drucker aus dem Server-State;
+    // PDF/Klasse/Leihschein lokal aus localStorage.
     tsCb.checked = !!state.force_tailscale_ip;
-    const prev = { ts: tsCb.checked, slip: slipCb.checked, printer: state.printer_name || '' };
+    pdfCb.checked = localStorage.getItem('savePdfLocally') === '1';
+    fixCb.checked = localStorage.getItem('fixClassOnSlip') === '1';
+    const prev = { ts: tsCb.checked, pdf: pdfCb.checked, fix: fixCb.checked, slip: slipCb.checked, printer: state.printer_name || '' };
     // Druckerliste vom Server holen (rein lesend) und das Dropdown füllen.
     printerSel.innerHTML = '<option value="">wird geladen …</option>';
     printerSel.disabled = true;
@@ -1515,6 +1614,16 @@
     const finish = (save) => {
       if (save) {
         if (tsCb.checked !== prev.ts) setForceTailscaleIp(tsCb.checked);
+        if (pdfCb.checked !== prev.pdf) {
+          localStorage.setItem('savePdfLocally', pdfCb.checked ? '1' : '0');
+          pushSavePdfLocally(pdfCb.checked);
+          showMsg(pdfCb.checked ? 'Drucke werden lokal als PDF gespeichert' : 'Drucke gehen wieder an den Drucker');
+        }
+        if (fixCb.checked !== prev.fix) {
+          localStorage.setItem('fixClassOnSlip', fixCb.checked ? '1' : '0');
+          pushFixClassOnSlip(fixCb.checked);
+          showMsg(fixCb.checked ? 'Klasse wird auf dem Leihschein korrigiert' : 'Leihschein wird wieder unverändert gedruckt');
+        }
         if (slipCb.checked !== prev.slip) {
           localStorage.setItem('slipSecondPage', slipCb.checked ? '1' : '0');
           pushSlipDefault(slipCb.checked);
@@ -1523,6 +1632,8 @@
         saveChangedBooklistOrders();
       } else {
         tsCb.checked = prev.ts;
+        pdfCb.checked = prev.pdf;
+        fixCb.checked = prev.fix;
         slipCb.checked = prev.slip;
       }
       modal.classList.remove('show');
@@ -1802,6 +1913,7 @@
       loadClasses();
       connectWs();
       if (_slipCb) pushSlipDefault(_slipCb.checked);  // Server auf Host-Stand bringen
+      pushDevTogglesToServer();  // PDF-lokal/Klasse-korrigieren aus localStorage übernehmen
       // Auto-Login hat keine Login-Geste -> AudioContext beim ersten Klick entsperren
       document.addEventListener('pointerdown', () => initAudio(), { once: true });
     }

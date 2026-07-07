@@ -351,6 +351,18 @@ async def handle_commit(state: AppState, student_id: int, barcode: str) -> dict:
         return {"status": "error", "msg": str(e)}
 
 
+def _student_form(state: AppState, student_id: int) -> str | None:
+    """Echte Klasse des Schülers ermitteln — bevorzugt aus der Warteschlange
+    (korrekt auch bei klassenübergreifenden Queues), sonst die aktive Klasse.
+
+    Für den Leihschein-Klassen-Toggle. Gibt None zurück, wenn nichts bekannt ist
+    (dann bleibt der Leihschein unverändert)."""
+    for s in state.queue:
+        if s.student_id == student_id and s.form:
+            return s.form
+    return state.active_form
+
+
 async def print_loan_slip_for(
     state: AppState,
     student_id: int,
@@ -383,6 +395,48 @@ async def print_loan_slip_for(
 
     cfg = get_config()
     pdf = await state.iserv.get_loan_slip_pdf(student_id, variant=variant)
+    # Experimenteller Toggle „Klasse auf Leihschein korrigieren": den (teils
+    # falschen) Klassen-Code auf dem IServ-PDF lokal durch die echte Klasse des
+    # Schülers ersetzen. Rein lokale PDF-Bearbeitung, kein IServ-Write.
+    if getattr(state, "fix_class_on_slip", False):
+        form = _student_form(state, student_id)
+        if form:
+            from .loan_slip import override_class_on_slip
+
+            pdf = await asyncio.to_thread(override_class_on_slip, pdf, form)
+        else:
+            log.warning(
+                "Klasse-Korrektur aktiv, aber keine Klasse für student_id=%s "
+                "ermittelbar — Leihschein wird unverändert gedruckt", student_id,
+            )
+
+    # Entwickler-Toggle „PDF lokal speichern": nicht drucken, sondern das PDF in
+    # den Browser des Host-Rechners herunterladen (Download-Prompt) — die
+    # Anzeige/Weiterverarbeitung passiert dort lokal, kein IServ-Write.
+    if state.save_pdf_locally:
+        delivered = await _download_slip_to_host(state, student_id, pdf, pages=pages)
+        if delivered:
+            log.info(
+                "Leihschein an %d Host-Browser gesendet: student_id=%s pages=%s",
+                delivered, student_id, pages or "alle",
+            )
+            return {
+                "ok": True, "backend": "download",
+                "detail": f"an {delivered} Host-Browser gesendet",
+            }
+        # Kein Host-Browser verbunden → Download unmöglich. Als Sicherheitsnetz
+        # ins Ausgabeverzeichnis schreiben, damit der Leihschein nicht verloren geht.
+        log.warning(
+            "PDF-lokal aktiv, aber kein Host-Browser verbunden — student_id=%s "
+            "wird ins Ausgabeverzeichnis gespeichert", student_id,
+        )
+        result = await print_pdf(
+            pdf, backend="file", output_dir=cfg.print_output_dir,
+            label=f"leihschein_{student_id}", pages=pages,
+        )
+        result["detail"] = "kein Host-Browser verbunden — " + result.get("detail", "")
+        return result
+
     result = await print_pdf(
         pdf,
         backend=cfg.print_backend,
@@ -397,6 +451,33 @@ async def print_loan_slip_for(
         student_id, result.get("backend"), pages or "alle",
     )
     return result
+
+
+async def _download_slip_to_host(
+    state: AppState, student_id: int, pdf: bytes, *, pages: str | None
+) -> int:
+    """Leihschein-PDF an alle verbundenen Host-Browser zum Download pushen.
+
+    Beschränkt das PDF auf denselben Seitenbereich, der sonst gedruckt würde,
+    und schickt es base64-kodiert über die Host-WebSocket. Gibt die Anzahl der
+    erreichten Host-Browser zurück (0 = keiner verbunden)."""
+    import base64
+    from datetime import datetime
+
+    from .loan_slip import select_pages
+
+    pdf = await asyncio.to_thread(select_pages, pdf, pages)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"leihschein_{student_id}_{ts}.pdf"
+    msg = {
+        "type": "loan_slip_download",
+        "filename": filename,
+        "size": len(pdf),
+        "data_b64": base64.b64encode(pdf).decode("ascii"),
+    }
+    from .hub import get_hub
+
+    return await get_hub().send_all_hosts(msg, state)
 
 
 def release_worker(state: AppState, worker) -> None:
