@@ -66,7 +66,7 @@ function isBookDone(b) {
   return b.status === 'ausgeliehen' || !!(b.isbn && scannedIsbns.has(b.isbn));
 }
 
-function renderBooks(books) {
+function renderBooks(books, animate = false) {
   if (!books || !books.length) {
     bookRowsEl.innerHTML = '<div class="book-empty">Keine Bücher hinterlegt</div>';
     return;
@@ -88,6 +88,15 @@ function renderBooks(books) {
     const t = b.distributed_at ? Date.parse(b.distributed_at) : NaN;
     return Number.isNaN(t) ? -1 : t;
   };
+  // FLIP-Vorbereitung: alte Positionen je Buch (Original-Index als stabiler
+  // Schlüssel) merken, BEVOR innerHTML ausgetauscht wird. Nur bei animate=true
+  // (erfolgreicher Scan) — nicht beim initialen Laden oder reiner Settings-Änderung.
+  const oldRects = new Map();
+  if (animate) {
+    bookRowsEl.querySelectorAll('.book-row[data-book-idx]').forEach(row => {
+      oldRects.set(row.dataset.bookIdx, row.getBoundingClientRect());
+    });
+  }
   const ordered = books
     .map((b, i) => [b, i])
     .sort((a, b) => {
@@ -101,18 +110,36 @@ function renderBooks(books) {
         if (diff) return diff;
       }
       return a[1] - b[1];
-    })
-    .map(pair => pair[0]);
-  bookRowsEl.innerHTML = ordered.map(b => {
+    });
+  bookRowsEl.innerHTML = ordered.map(([b, idx]) => {
     const done = isBookDone(b);
     const icon = done
       ? '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>'
       : '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
-    return `<div class="book-row row-${done ? 'ausgeliehen' : 'vorgemerkt'}">`
+    return `<div class="book-row row-${done ? 'ausgeliehen' : 'vorgemerkt'}" data-book-idx="${idx}">`
       + `<div class="b-fach">${escapeHtml(b.subject)}</div>`
       + `<div class="b-title">${escapeHtml(b.title)}</div>`
       + `<div class="b-icon">${icon}</div></div>`;
   }).join('');
+  // FLIP-Animation: jede Zeile, die schon da war, startet an ihrer alten
+  // Position (translate) und fährt zur neuen (translate→0). Neue Zeilen
+  // (z. B. nach Schülerwechsel) haben keinen alten Eintrag und erscheinen sofort.
+  if (animate && oldRects.size) {
+    const rows = bookRowsEl.querySelectorAll('.book-row[data-book-idx]');
+    rows.forEach(row => {
+      const old = oldRects.get(row.dataset.bookIdx);
+      if (!old) return;  // neue Zeile — keine alte Position
+      const cur = row.getBoundingClientRect();
+      const dx = old.left - cur.left;
+      const dy = old.top - cur.top;
+      if (!dx && !dy) return;
+      row.style.transition = 'none';
+      row.style.transform = `translate(${dx}px, ${dy}px)`;
+      row.offsetWidth;  // Reflow erzwingen, damit die Startposition greift
+      row.style.transition = '';
+      row.style.transform = '';
+    });
+  }
 }
 
 function handleServerMessage(msg) {
@@ -154,7 +181,7 @@ function handleServerMessage(msg) {
     if ((msg.status === 'staged' || msg.status === 'booked') && msg.isbn) {
       scannedIsbns.add(msg.isbn);
       scanOrder.set(msg.isbn, ++scanSeq);   // zuletzt gescanntes zuoberst in „erledigt"
-      renderBooks(currentBooks);
+      renderBooks(currentBooks, true);     // FLIP: Zeilen an neue Position fahren
     }
     drainScanWaiters();
     // Ausgemustert / verliehen-an-andere / verliehen-an-sich-selbst → Statuszeile
