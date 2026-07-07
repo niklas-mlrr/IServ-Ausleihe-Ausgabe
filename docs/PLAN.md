@@ -705,8 +705,12 @@ Modus A), für den Schüler werden beide auf `None` gesetzt. UI:
 `web/scan.html` eigene Zeile „Aktuell verliehen an: …" im Buch-Hinweis-Modal
 (liest `msg.loaned_to`); `web/host.html` ergänzt Toast („— verliehen an …")
 und eine `ns-borrower`-Zeile im Now-Serving-Kästchen; `web/student.html`
-zeigt unverändert nur die name-freie `msg`. Namen werden **nicht geloggt**
-(PLAN §3.7), nur an Host + Helfer durchgereicht. Kein DB-/IServ-Write.
+zeigt unverändert nur die name-freie `msg`. **Host-Farbigkeit (Verliehen-Alert):
+nur der „verliehen an …"-Text ist rot** (`ns-borrower`-Zeile bzw. `.toast-loaned`-
+Span im Toast); Alert-Meldungstext und Now-Serving-Kästchen bleiben normal
+(`ns-alert-muted`, kein `ns-tile-alert`). Ausgemustert-Alert (ohne Ausleiher)
+bleibt wie gehabt rot. Namen werden **nicht geloggt** (PLAN §3.7), nur an Host +
+Helfer durchgereicht. Kein DB-/IServ-Write.
 Tests: `tests/test_booking_precheck.py` +4 (`test_not_in_stock_carries_loaned_to`,
 `test_not_in_stock_without_borrower_stays_silent`,
 `test_process_scan_loaned_to_for_helper`,

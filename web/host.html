@@ -297,6 +297,8 @@
     /* Ausgemustertes/verliehenes Buch bei diesem Schüler gescannt — Kästchen rot. */
     .ns-tile-alert { background: var(--alert-bg); outline: 2px solid var(--danger); }
     .ns-alert { font-size: .85rem; font-weight: 600; color: var(--danger); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    /* Verliehen-an-Alert: Meldungstext normal (nur „verliehen an …" ist rot). */
+    .ns-alert.ns-alert-muted { color: var(--text); font-weight: 500; }
     .ns-borrower { font-size: .8rem; font-weight: 600; color: var(--danger); margin-top: 2px; }
     .ns-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
     .ns-empty { color: var(--text-muted); font-size: .95rem; padding: 6px 0; }
@@ -318,6 +320,8 @@
     }
     .toast.show { opacity: 1; transform: translateY(0); }
     .toast-warn { background: #c0392b; color: #fff; font-weight: 600; }
+    /* Im Verliehen-an-Toast ist nur „verliehen an …" rot (Rest normal). */
+    .toast-loaned { color: #c0392b; font-weight: 600; }
     /* Sticky Tabellenkopf — klebt am oberen Rand des .table-scroll-Containers.
        border-collapse:separate, sonst bleibt der th-Hintergrund nicht deckend (Chrome-Bug). */
     #queue-table { border-collapse: separate; border-spacing: 0; }
@@ -1147,11 +1151,14 @@
           ? ` <button class="secondary" data-action="clear-book-alert" data-student-id="${s.student_id}">Schließen</button>`
           : '';
         const alertLbl = alert
-          ? `<div class="ns-alert-wrap"><div class="ns-alert">${escapeHtml(alert.text)}${alertBtn}</div>` +
+          ? `<div class="ns-alert-wrap"><div class="ns-alert${alert.borrower ? ' ns-alert-muted' : ''}">${escapeHtml(alert.text)}${alertBtn}</div>` +
             (alert.borrower ? `<div class="ns-borrower">verliehen an ${escapeHtml(alert.borrower)}</div>` : '') +
             `</div>`
           : '';
-        return `<div class="ns-tile${alert ? ' ns-tile-alert' : ''}">
+        // Verliehen-an-Alert: nur der „verliehen an …"-Text ist rot, Kästchen +
+        // Meldungstext bleiben normal (Ausgemustert-Alert ohne Ausleiher weiterhin rot).
+        const tileAlert = alert && !alert.borrower;
+        return `<div class="ns-tile${tileAlert ? ' ns-tile-alert' : ''}">
           <div class="ns-name">${escapeHtml(s.lastname)}, ${escapeHtml(s.firstname)}</div>
           <div class="ns-meta"><span>${escapeHtml(s.form)}</span>${helperLbl}</div>
           ${alertLbl}
@@ -1345,8 +1352,16 @@
     const who = msg.student ? ` (${escapeHtml(msg.student)})` : '';
     // „currently lent to someone else": aktuellen Ausleiher namentlich nennen
     // (nur bei not_in_stock belegt; read-only aus /books/:code, PLAN §3.7).
-    const loaned = msg.loaned_to ? ` — verliehen an ${escapeHtml(msg.loaned_to)}` : '';
-    showMsg(`${label}: ${escapeHtml(msg.title || msg.barcode)}${who}${loaned}`, 'warn');
+    // Im Toast ist NUR „verliehen an …" rot (Rest normal); ohne Ausleiher-Name
+    // (ausgemustert / nicht auflösbar) bleibt der ganze Toast rot (warn).
+    if (msg.loaned_to) {
+      showMsg(
+        `${escapeHtml(label)}: ${escapeHtml(msg.title || msg.barcode)}${who}` +
+        ` <span class="toast-loaned">— verliehen an ${escapeHtml(msg.loaned_to)}</span>`,
+        null, { html: true });
+    } else {
+      showMsg(`${label}: ${escapeHtml(msg.title || msg.barcode)}${who}`, 'warn');
+    }
     studentAlerts[msg.student_id] = {
       text: `${label}: ${msg.title || msg.barcode}`,
       borrower: msg.loaned_to || null,
@@ -1367,11 +1382,11 @@
   }
 
   // ---- Util: Toast-Stack (mehrere Meldungen gleichzeitig) ----
-  function showMsg(text, variant) {
+  function showMsg(text, variant, { html = false } = {}) {
     const stack = document.getElementById('toast-stack');
     const t = document.createElement('div');
     t.className = 'toast' + (variant ? ` toast-${variant}` : '');
-    t.textContent = text;
+    if (html) t.innerHTML = text; else t.textContent = text;
     stack.appendChild(t);
     requestAnimationFrame(() => t.classList.add('show'));
     setTimeout(() => {
