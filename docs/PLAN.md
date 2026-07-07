@@ -822,6 +822,27 @@ bereits in `state.student_worker_sessions` registriert oder kein Lade-Task
 (`helper.load_task`/`session.load_task`) mehr läuft — sonst liefert der Task
 es an die neue WS.
 
+**Scanner-Reconnect-Grace (Modus A, 2026-07-07):** Das `finally` des Scanner-WS
+ruft den Schüler-Teardown (`end_student`: Schüler `pending`, Worker zu) nicht
+mehr inline auf, sondern verzögert als Task (`_deferred_end`,
+`_RECONNECT_GRACE_S=3.0`). Lädt der Helfer die Seite neu (Reconnect), cancelt
+der neue WS den Grace-Task, übernimmt `helper.ws` synchron (vor jedem await —
+so erkennt das alte `finally` an `helper.ws is websocket` den Reconnect und
+löst keinen Teardown aus), lädt `student_info` (GET) neu und — falls der
+Worker bereits bereit stand — `StudentSession.reload()` (Re-Navigation über
+`load_card`/GET-Routen inkl. Re-Login-Recovery, bewusst KEIN `page.reload()`
+wegen Post-Re-Post-Risiko) auf dem **bestehenden** Context, dann `worker_ready`.
+Läuft der Lade-Task noch, liefert dieser `worker_ready` selbst an den neuen WS
+(`student_info` steht schon). Re-Checks in `_deferred_end` (`helper.ws` gesetzt
+bzw. `helper.student_id` ≠ Original) machen den Task zum No-op, falls er doch
+durchläuft (Cancel-RC, `/api/skip`, neuer Schüler, …). Echte Trennung (Tab zu,
+kein Reconnect) → Teardown nach der Frist — so steht kein „active" auf einem
+toten Helfer-Token (Modus-A-Queue-Einträge räumt der Sweeper nicht ab).
+Vorbild war Modus-B `ws_student`, dessen `finally` die Session ohnehin nicht
+abbaut. `Hub.send_websocket` serialisiert die Reconnect-Sends über das
+Per-WS-Lock gegen den In-Flight-Lade-Task. Nur GET, kein DB-/IServ-Write.
+Tests: `tests/test_scanner_reconnect.py` (14). Live am Gerät noch offen.
+
 Nur GET / read-only — `get_student_info` (GET) + `open_student` (Browser-
 Navigation ohne Submit), keine DB-/IServ-Writes, keine neuen Endpoints.
 Tests: `tests/test_queue_flow.py` +Assertion (`student_info` mit `books==[]`
