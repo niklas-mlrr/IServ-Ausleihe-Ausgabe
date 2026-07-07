@@ -644,6 +644,15 @@ async def remove_helper(token: str, session_id: str | None = Cookie(default=None
         with contextlib.suppress(asyncio.CancelledError):
             await helper.load_task
         helper.load_task = None
+    # Ein noch laufender Grace-Teardown-Task (Verbindung kürzlich getrennt)
+    # wird hiermit ebenfalls cancelt — sonst hinge er bis zu 3 s als No-op
+    # im Raum (die Re-Checks in _deferred_end machen ihn ohnehin unschädlich,
+    # aber sauber ist, ihn deterministisch abzuräumen).
+    if helper.end_task is not None and not helper.end_task.done():
+        helper.end_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await helper.end_task
+        helper.end_task = None
     if helper.student_id is not None:
         await end_student(
             state, hub, helper.student_id,

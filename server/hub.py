@@ -58,6 +58,27 @@ class Hub:
         # darum die aktuelle Größe live an alle unzugewiesenen Scanner schicken.
         await self.broadcast_queue_size(s)
 
+    async def send_all_hosts(self, msg: dict, state: AppState | None = None) -> int:
+        """Eine Nachricht an alle verbundenen Host-Browser schicken; Anzahl der
+        erfolgreich erreichten Verbindungen zurückgeben.
+
+        Anders als `broadcast_host` ohne den Queue-Size-Folgebroadcast — für
+        gezielte Host-Nachrichten (z. B. Leihschein-Download-Push), die keine
+        Zustandsänderung sind."""
+        s = state or get_state()
+        delivered, dead = 0, []
+        for ws in list(s.host_ws_connections):
+            if await self._safe_send(ws, msg):
+                delivered += 1
+            else:
+                dead.append(ws)
+        for ws in dead:
+            try:
+                s.host_ws_connections.remove(ws)
+            except ValueError:
+                pass
+        return delivered
+
     async def broadcast_queue_size(self, state: AppState | None = None) -> None:
         s = state or get_state()
         qsize = s.pending_count()
@@ -102,6 +123,16 @@ class Hub:
         if not await self._safe_send(helper.ws, msg):
             helper.ws = None
             log.warning("Scanner WS für Token %s ist tot", token)
+
+    async def send_websocket(self, ws: object, msg: dict) -> bool:
+        """Einmaliges Senden an eine konkrete WebSocket-Verbindung, serialisiert
+        über das selbe Per-WS-Lock wie ``send_scanner``/``broadcast_*``.
+
+        Für den Scanner-Reconnect-Pfad: dort konkurriert der Reconnect-Send mit
+        dem In-Flight-Lade-Task (``load_and_push_helper_student`` →
+        ``send_scanner``) um denselben (neuen) WS. Ohne das Lock könnten beide
+        ``send_json``-Aufrufe am ASGI-Layer interleaven. Gibt True bei Erfolg."""
+        return await self._safe_send(ws, msg)
 
 
 _hub = Hub()

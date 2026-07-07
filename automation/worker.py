@@ -97,6 +97,18 @@ class StudentSession:
         self._card_loaded = True
         log.info("Kartei für Schüler %d geladen", self._student_id)
 
+    async def reload(self) -> None:
+        """Kartei auf der bereits offenen Page neu laden (read-only GET).
+
+        Re-navigiert ``self._page`` über :meth:`load_card` (inkl. Re-Login-
+        Recovery). Bewusst KEIN ``page.reload()`` — das könnte ein vorheriges
+        POST-Result re-posten; ``load_card`` nutzt ausschließlich GET-Routen
+        (App-Root + Schüler-Route). Einsatzfall: Helfer lädt die Seite neu,
+        während der Worker bereits bereit stand — die Kartei wird auf dem
+        bestehenden Context frisch geladen statt einen neuen zu öffnen.
+        """
+        await self.load_card()
+
     # Selektor des Counter-Eingabefeldes nach Schülerauswahl (Spike A).
     _BARCODE_SEL = 'input.tt-input[placeholder*="Buch scannen"]'
 

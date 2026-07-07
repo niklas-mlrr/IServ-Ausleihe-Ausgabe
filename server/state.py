@@ -61,6 +61,13 @@ class HelperSession:
     # seinen Worker-Context zurückgibt — sonst leakt der Context, weil er erst
     # nach open_student in student_worker_sessions registriert wird.
     load_task: object | None = None
+    # Verzögerter Disconnect-Teardown („Grace"): beim Trennen des Scanner-WS
+    # wird end_student nicht sofort, sondern nach _RECONNECT_GRACE_S als Task
+    # angestoßen. Lädt der Helfer die Seite neu (Reconnect innerhalb der Frist),
+    # wird dieser Task cancel't und der Schüler stattdessen neugeladen
+    # (s. ws_scanner). Ohne Reconnect → echte Trennung → Schüler zurück auf
+    # 'pending', Worker zu (wie bisher inline im finally).
+    end_task: object | None = None
 
     def as_dict(self) -> dict:
         return {

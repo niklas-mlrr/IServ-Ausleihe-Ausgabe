@@ -28,6 +28,52 @@ from ..state import DisplaySession, get_state
 log = logging.getLogger(__name__)
 router = APIRouter()
 
+# Grace-Frist für den Scanner-Disconnect: das finally des Scanner-WS stößt den
+# Schüler-Teardown (end_student: Schüler zurück auf 'pending', Worker zu) nicht
+# sofort an, sondern verzögert als Task. Lädt der Helfer die Seite neu, nimmt
+# die neue Verbindung den Grace-Task cancel't und lädt den Schüler neu (Reconnect
+# mit ggf. Worker-Reload). Ohne Reconnect innerhalb der Frist gilt die Trennung
+# als echt → Teardown läuft (so bleibt ein „active" auf einem toten Helfer-Token
+# nicht stehen; Modus-A-Queue-Einträge werden vom Sweeper nicht abgeräumt).
+_RECONNECT_GRACE_S = 3.0
+
+
+async def _deferred_end(state, hub, helper, student_id: int) -> None:
+    """Verzögerter Teardown des Helfer-Schülers nach WS-Trennung (s. ws_scanner).
+
+    Re-Checks vor dem Eingreifen schützen gegen Reconnect / Weiter-Schalten
+    während der Frist: ein Reconnect cancelt diesen Task (dann läuft er nicht
+    mehr bis hier); zur Sicherheit prüfen wir trotzdem ``helper.ws`` (neue
+    Verbindung?) und ``helper.student_id`` (noch derselbe Schüler?)."""
+    try:
+        await asyncio.sleep(_RECONNECT_GRACE_S)
+    except asyncio.CancelledError:
+        return
+    # Re-Check 1: Helfer hat wieder eine Verbindung (Reconnect) → kein Teardown.
+    if helper.ws is not None:
+        return
+    # Re-Check 2: Helfer wurde inzwischen weitergeschaltet/zurückgesetzt
+    # (z. B. /api/skip, /api/reset-queue, /api/disconnect-all — alle setzen
+    # helper.student_id auf None bzw. einen neuen Schüler).
+    if helper.student_id != student_id:
+        return
+    try:
+        if helper.load_task is not None and not helper.load_task.done():
+            helper.load_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await helper.load_task
+            helper.load_task = None
+        await end_student(
+            state, hub, student_id,
+            queue_status="pending", session_state="revoked",
+        )
+    except Exception:  # noqa: BLE001 — Sweeper-Loop-artige Robustheit: ein fehlgeschlagener Teardown darf den Task nicht crashen
+        log.exception("deferred end_student für %d fehlgeschlagen", student_id)
+    try:
+        await hub.broadcast_host(state.state_snapshot())
+    except Exception:  # noqa: BLE001 — Broadcast-Fehler nicht propagieren
+        pass
+
 
 @router.websocket("/ws/host")
 async def ws_host(websocket: WebSocket, session_id: str | None = Cookie(default=None)) -> None:
@@ -63,15 +109,27 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
 
     await websocket.accept()
     helper = state.helper_sessions[token]
-    # Reconnect (Seite erneut geöffnet): die alte Verbindung sauber schließen,
-    # statt sie verwaist offen zu lassen.
+    # Reconnect (Seite erneut geöffnet): einen noch laufenden Grace-Teardown-
+    # Task des gerade getrennten alten WS abräumen (sonst würde er nach der
+    # Frist den soeben neugeladenen Schüler doch noch abbrechen).
+    t = helper.end_task
+    helper.end_task = None
+    if t is not None and not t.done():
+        t.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await t
+    # Synchron übernehmen — VOR jedem await. So erkennt das finally des alten
+    # WS (das asynchron zum Reconnect läuft) an `helper.ws is websocket`, dass
+    # ein Reconnect übernommen hat, und löst KEINEN Teardown aus.
     old_ws = helper.ws
+    helper.ws = websocket
+    # Reconnect: die alte Verbindung sauber schließen, statt sie verwaist offen
+    # zu lassen.
     if old_ws is not None and old_ws is not websocket:
         try:
             await old_ws.close(code=4009, reason="Neue Verbindung")
         except Exception:
             pass
-    helper.ws = websocket
 
     # Schüler bereits zugewiesen? Info sofort schicken. Die Reihenfolge wird
     # anhand des Jahrgangs *dieses* Schülers ermittelt (nicht der einen globalen
@@ -89,24 +147,55 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                 apply_hidden_books(info, await get_hidden_isbns_for_form(state, student.form))
                 helper.expected_isbns = expected_isbns_from_info(info)
                 helper.vormerk_isbns, helper.lent_isbns = booking_isbn_sets_from_info(info)
-                # Modus A: Bücherliste sofort (wie bisher). `worker_ready` wird
-                # nur dann weggelassen, wenn der Lade-Task noch läuft und den
-                # Ready-Push selbst liefert — sonst würde der Helferclient in
-                # „Warten…" stecken bleiben.
-                await websocket.send_json({"type": "student_info", "student": info})
+                helper.last_scan = None  # Worker-Page wird ggf. neu geladen → Feld leer
+                # Modus A: Bücherliste sofort. Sends über das Hub-Lock
+                # (send_websocket), damit sie nicht mit den Sends des In-Flight-
+                # Lade-Tasks (send_scanner auf denselben neuen WS) interleaven.
+                await hub.send_websocket(websocket, {"type": "student_info", "student": info})
                 load_inflight = helper.load_task is not None and not helper.load_task.done()
-                worker_present = state.student_worker_sessions.get(helper.student_id) is not None
-                if not load_inflight or worker_present:
-                    await websocket.send_json({"type": "worker_ready"})
+                worker_session = state.student_worker_sessions.get(helper.student_id)
+                worker_present = worker_session is not None
+                if worker_present:
+                    # Worker war bereits bereit → Seite im Worker neu laden
+                    # (read-only GET-Reload auf dem bestehenden Context, kein
+                    # neuer Context). Identität danach re-checken: wurde der
+                    # Worker während des Reloads freigegeben (z. B. /api/skip),
+                    # KEIN `worker_ready` senden, sondern Fehler.
+                    ws_ref = worker_session
+                    reload_ok = False
+                    try:
+                        await ws_ref.reload()
+                        reload_ok = state.student_worker_sessions.get(helper.student_id) is ws_ref
+                    except Exception as e:  # noqa: BLE001
+                        log.warning("Worker-Reload (Reconnect) für %d fehlgeschlagen: %s", helper.student_id, e)
+                        reload_ok = False
+                    if reload_ok:
+                        await hub.send_websocket(websocket, {"type": "worker_ready"})
+                    else:
+                        await hub.send_websocket(
+                            websocket, {"type": "error", "msg": "Worker-Reload fehlgeschlagen"}
+                        )
+                elif load_inflight:
+                    # Worker wird gerade erst geöffnet (open_student läuft).
+                    # KEIN `worker_ready` senden — der In-Flight-Lade-Task
+                    # (`load_and_push_helper_student`) liefert ihn über
+                    # send_scanner(token) an den neuen WS. student_info steht
+                    # schon (oben gesendet), ggf. doppelt (vom In-Flight-Task) —
+                    # harmlos.
+                    pass
+                else:
+                    # Degraded-Modus (kein worker_pool) oder Worker nie
+                    # bereit: wie bisher sofort `worker_ready` senden.
+                    await hub.send_websocket(websocket, {"type": "worker_ready"})
             except Exception as e:
-                await websocket.send_json({"type": "error", "msg": str(e)})
+                await hub.send_websocket(websocket, {"type": "error", "msg": str(e)})
         elif student is None:
-            await websocket.send_json({"type": "waiting", "msg": "Warte auf Schüler-Zuweisung", "queue_size": state.pending_count(), "queue": state.pending_queue_as_list()})
+            await hub.send_websocket(websocket, {"type": "waiting", "msg": "Warte auf Schüler-Zuweisung", "queue_size": state.pending_count(), "queue": state.pending_queue_as_list()})
     else:
-        await websocket.send_json({"type": "waiting", "msg": "Warte auf Schüler-Zuweisung", "queue_size": state.pending_count(), "queue": state.pending_queue_as_list()})
+        await hub.send_websocket(websocket, {"type": "waiting", "msg": "Warte auf Schüler-Zuweisung", "queue_size": state.pending_count(), "queue": state.pending_queue_as_list()})
 
     # Host-Default „Schüler-Leihschein" (Druck-Dialog) + Bücher-Reihenfolge.
-    await websocket.send_json({
+    await hub.send_websocket(websocket, {
         "type": "settings",
         "slip_second_page": state.slip_second_page_default,
         "book_order": book_order,
@@ -229,39 +318,33 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
     except WebSocketDisconnect:
         pass
     finally:
-        # WS-Referenz nur lösen, wenn es noch unsere Verbindung ist — bei einem
-        # Reconnect hat die neue Verbindung helper.ws bereits übernommen
-        # (analog ws_student), sonst würde der alte Disconnect sie wegräumen.
+        # WS-Referenz nur lösen, wenn keine neue Verbindung übernommen hat.
         if helper.ws is websocket:
             helper.ws = None
-        # Trennt der Helfer-WS, muss der Schüler zurück auf 'pending' (Modus A)
-        # bzw. die Modus-B-Session revoked werden — sonst bleibt der Schüler
-        # "active" auf einen toten Helfer-Token zeigend stehen, und der Worker-
-        # Context leakt. Modus B hat TTL-Recovery via Sweeper, Modus A nicht
-        # (active-Queue-Einträge werden nie gesweept) → hier zwingend aufräumen.
-        # end_student ist idempotent: falls ein anderer Pfad (z. B. /api/skip)
-        # im selben Disconnect-Zyklus schon beendet hat, ist student_id None
-        # bzw. der Schüler nicht mehr 'active' → No-op. Guard gegen Doppel-End:
-        # nur aufrufen, wenn helper.student_id noch gesetzt ist (bedeutet, der
-        # Schüler wurde noch nicht via end_student zurückgesetzt).
-        if helper.student_id is not None:
-            try:
-                # In-flight Lade-Task erst canceln+awaiten, sonst leakt sein
-                # Worker-Context während end_student's eigenem pop läuft.
-                if helper.load_task is not None and not helper.load_task.done():
-                    helper.load_task.cancel()
+            # Echte Trennung (kein Reconnect hat übernommen): Schüler-Teardown
+            # verzögert anstoßen (Grace-Frist). Ein innerhalb der Frist
+            # folgender Reconnect (Seite neu laden) cancelt diesen Task und lädt
+            # den Schüler neu — so geht der Schüler beim Helfer-Neuladen nicht
+            # verloren. Ohne Reconnect läuft der Teardown nach der Frist
+            # (Schüler zurück auf 'pending', Worker zu) — so bleibt kein
+            # „active" auf einem toten Helfer-Token stehen (Modus-A-Queue-
+            # Einträge werden vom Sweeper nicht abgeräumt, s. _deferred_end).
+            if helper.student_id is not None:
+                # Eventuell noch laufenden Grace-Task der vorigen Trennung
+                # abräumen (z. B. zweite Trennung während der Frist) — synchron
+                # lesen+nullen, damit ein konkurrierender Reconnect nicht den
+                # neu gesetzten Task überschreibt.
+                t0 = helper.end_task
+                helper.end_task = None
+                if t0 is not None and not t0.done():
+                    t0.cancel()
                     with contextlib.suppress(asyncio.CancelledError):
-                        await helper.load_task
-                    helper.load_task = None
-                await end_student(
-                    state, hub, helper.student_id,
-                    queue_status="pending", session_state="revoked",
+                        await t0
+                helper.end_task = asyncio.create_task(
+                    _deferred_end(state, hub, helper, helper.student_id)
                 )
-            except Exception:
-                log.exception(
-                    "end_student im ws_scanner-finally für student_id=%s fehlgeschlagen",
-                    helper.student_id,
-                )
+        # else: Reconnect hat helper.ws bereits übernommen → Student/Worker
+        # unangetastet lassen (der Reconnect-Pfad lädt den Schüler neu).
         try:
             await hub.broadcast_host(state.state_snapshot())
         except Exception:
