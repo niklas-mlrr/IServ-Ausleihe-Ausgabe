@@ -1150,7 +1150,7 @@
           : '';
         const alertLbl = alert
           ? `<div class="ns-alert-wrap"><div class="ns-alert${alert.borrower ? ' ns-alert-muted' : ''}">${escapeHtml(alert.text)}${alertBtn}</div>` +
-            (alert.borrower ? `<div class="ns-borrower">verliehen an ${escapeHtml(alert.borrower)}</div>` : '') +
+            (alert.borrower ? `<div class="ns-borrower">${alert.kind === 'book_deleted' ? 'Ersatzanspruch' : 'verliehen an'} ${escapeHtml(alert.borrower)}</div>` : '') +
             `</div>`
           : '';
         // Kästchen bleibt rot (wie gehabt); nur der Meldungstext ist beim
@@ -1350,12 +1350,18 @@
     // „currently lent to someone else": aktuellen Ausleiher namentlich nennen
     // (nur bei not_in_stock belegt; read-only aus /books/:code, PLAN §3.7).
     // Toast bleibt als rotes Kästchen (warn) — nur im Now-Serving-Kästchen ist
-    // der Meldungstext normal und „verliehen an …" rot.
-    const loaned = msg.loaned_to ? ` — verliehen an ${escapeHtml(msg.loaned_to)}` : '';
+    // der Meldungstext normal und „verliehen an …" rot. Bei book_deleted mit
+    // loaned_to → „Ersatzanspruch …" (ausgemustert, aber noch Schüler-verknüpft).
+    const loaned = msg.loaned_to
+      ? (msg.kind === 'book_deleted'
+          ? ` — Ersatzanspruch ${escapeHtml(msg.loaned_to)}`
+          : ` — verliehen an ${escapeHtml(msg.loaned_to)}`)
+      : '';
     showMsg(`${label}: ${escapeHtml(msg.title || msg.barcode)}${who}${loaned}`, 'warn');
     studentAlerts[msg.student_id] = {
       text: `${label}: ${msg.title || msg.barcode}`,
       borrower: msg.loaned_to || null,
+      kind: msg.kind || null,
       source: msg.source || 'student',
     };
     renderNowServing();

@@ -307,8 +307,11 @@ function showBookAlertModal(msg) {
   bookAlertTextEl.textContent = `${escapeHtml(msg.barcode)} — ${escapeHtml(msg.msg || meta.title)}`;
   // „currently lent to someone else": Name des aktuellen Ausleihers als
   // eigene Zeile (nur bei not_in_stock belegt; read-only aus /books/:code).
+  // Bei book_deleted mit loaned_to → Ersatzanspruch-Hinweis statt „verliehen".
   if (msg.loaned_to) {
-    bookAlertBorrowerEl.textContent = `Aktuell verliehen an: ${msg.loaned_to}`;
+    bookAlertBorrowerEl.textContent = msg.status === 'book_deleted'
+      ? `Ersatzanspruch: ${msg.loaned_to}`
+      : `Aktuell verliehen an: ${msg.loaned_to}`;
     bookAlertBorrowerEl.hidden = false;
   } else {
     bookAlertBorrowerEl.textContent = '';

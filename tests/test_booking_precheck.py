@@ -45,6 +45,8 @@ def _book(isbn="978-1", available=True, distributed=False, deleted=False):
         "code": "B1", "isbn": isbn, "title": "Mathe 5", "subject": "Mathematik",
         "available": available, "distributed": distributed, "deleted": deleted,
         "student_id": None,
+        "loaned_to": None,
+        "loaned_to_id": None,
     }
 
 
@@ -111,6 +113,31 @@ def test_reject_deleted_before_not_enrolled():
 def test_reject_deleted_before_not_in_stock():
     res = _eval(_State(_FakeIserv(_book(deleted=True, distributed=True))), {"978-1"}, set())
     assert res["ok"] is False and res["status"] == "book_deleted"
+
+
+def test_reject_deleted_carries_loaned_to_when_student_id():
+    # Ausgemustert UND noch mit einem Schüler verknüpft (student_id != null,
+    # z. B. [not_timely]/[unusable]) → loaned_to/loaned_to_id durchreichen,
+    # damit Host + Helfer den Ersatzanspruch-Hinweis zeigen können. Die msg
+    # bleibt name-frei (Name wandert nur via loaned_to).
+    book = _book(isbn="978-9", deleted=True)
+    book["loaned_to"] = "Max Mustermann"
+    book["loaned_to_id"] = 4321
+    res = _eval(_State(_FakeIserv(book)), {"978-1"}, set())
+    assert res["ok"] is False and res["status"] == "book_deleted"
+    assert res["loaned_to"] == "Max Mustermann"
+    assert res["loaned_to_id"] == 4321
+    assert "Max Mustermann" not in res["msg"]
+    assert "ausgemustert" in res["msg"]
+
+
+def test_reject_deleted_without_student_id_silent():
+    # Ausgemustert ohne Schüler-Verknüpfung → keine Ersatzanspruch-Daten
+    # (loaned_to/loaned_to_id None), msg ohne Hinweis.
+    res = _eval(_State(_FakeIserv(_book(isbn="978-9", deleted=True))), {"978-1"}, set())
+    assert res["status"] == "book_deleted"
+    assert res["loaned_to"] is None and res["loaned_to_id"] is None
+    assert "Ersatzanspruch" not in res["msg"]
 
 
 def test_reject_not_enrolled():
@@ -267,3 +294,45 @@ def test_process_scan_hides_loan_from_student(monkeypatch):
     assert res["loaned_to_id"] is None
     assert "Max Mustermann" not in (res.get("msg") or "")
     assert hub.broadcasts and hub.broadcasts[0]["loaned_to"] == "Max Mustermann"
+
+
+def _deleted_book_with_borrower():
+    b = _book(isbn="978-9", deleted=True)
+    b["loaned_to"] = "Max Mustermann"
+    b["loaned_to_id"] = 4321
+    return b
+
+
+def test_process_scan_deleted_alert_with_loaned_to_helper(monkeypatch):
+    # Ausgemustert mit Schüler-Verknüpfung → book_alert-Broadcast mit
+    # kind=="book_deleted" UND loaned_to (für Ersatzanspruch-Hinweis am Host).
+    # Helfer-Scanner (Modus A) sieht den Namen im scan_result.
+    monkeypatch.setattr(sessions, "get_config", lambda: _Cfg(False))
+    hub = _patch_hub(monkeypatch)
+    state = _State(_FakeIserv(_deleted_book_with_borrower()))
+    res = asyncio.run(sessions.process_scan(state, 42, {"978-1"}, set(), "B1", source="helper"))
+    assert res["status"] == "book_deleted"
+    assert res["loaned_to"] == "Max Mustermann"
+    assert res["loaned_to_id"] == 4321
+    assert len(hub.broadcasts) == 1
+    alert = hub.broadcasts[0]
+    assert alert["type"] == "book_alert"
+    assert alert["kind"] == "book_deleted"
+    assert alert["loaned_to"] == "Max Mustermann"
+    assert alert["loaned_to_id"] == 4321
+
+
+def test_process_scan_deleted_hides_loan_from_student(monkeypatch):
+    # Schüler-Client (Modus B) sieht bei ausgemustertem Buch nur „ausgemustert"
+    # — kein Ersatzanspruch-Hinweis, kein Name. Der Host bekommt den Namen
+    # trotzdem über den book_alert-Broadcast.
+    monkeypatch.setattr(sessions, "get_config", lambda: _Cfg(False))
+    hub = _patch_hub(monkeypatch)
+    state = _State(_FakeIserv(_deleted_book_with_borrower()))
+    res = asyncio.run(sessions.process_scan(state, 42, {"978-1"}, set(), "B1"))
+    assert res["status"] == "book_deleted"
+    assert res["loaned_to"] is None
+    assert res["loaned_to_id"] is None
+    assert "Max Mustermann" not in (res.get("msg") or "")
+    assert hub.broadcasts and hub.broadcasts[0]["loaned_to"] == "Max Mustermann"
+    assert hub.broadcasts[0]["kind"] == "book_deleted"

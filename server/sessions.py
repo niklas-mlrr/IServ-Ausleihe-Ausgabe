@@ -171,12 +171,19 @@ async def evaluate_scan_for_booking(
     # ausgemustertes Buch immer als solches erkannt wird, auch wenn der Schüler
     # es gar nicht bestellt hat. Muss am Scanner (rot) und am Host sichtbar sein.
     if book["deleted"]:
+        # Ausgemustert, aber noch mit einem Schüler verknüpft (student_id !=
+        # null, z. B. [not_timely]/[unusable]) → loaned_to/loaned_to_id
+        # durchreichen. Host + Helfer zeigen daraus den Ersatzanspruch-Hinweis,
+        # der Schüler-Client bekommt die Felder via process_send als None
+        # (siehe dort: `if source != "student"`). msg bleibt name-frei.
         return {
             "ok": False,
             "status": "book_deleted",
             "msg": f"Buch ausgemustert: {title}",
             "isbn": isbn,
             "title": title,
+            "loaned_to": book.get("loaned_to"),
+            "loaned_to_id": book.get("loaned_to_id"),
         }
 
     # Bedingung 2: bestellt UND Reihe noch nicht ausgeliehen.
