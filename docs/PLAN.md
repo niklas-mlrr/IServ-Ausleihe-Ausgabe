@@ -718,6 +718,46 @@ Tests: `tests/test_booking_precheck.py` +4 (`test_not_in_stock_carries_loaned_to
 `test_process_scan_hides_loan_from_student`), Suite 96 grün. Commits `15bf5f1`,
 `<follow-up>`.
 
+**Bugfix (2026-07-07) — „Reihe an dich ausgeliehen" greift bei ausgeblendeten
+Reihen UND nach Buchung in derselben Session:** zwei Lücken im Erkennen
+„Buch bereits an dich selbst verliehen" (`series_already_lent`), die beide den
+selben Symptom-Pfad hatten — ein Scan des *eigenen* Exemplars fiel zu
+`not_in_stock` und deklarierte es fälschlich als „verliehen an jemand anderes".
+
+1. **Ausgeblendete Buchserie, die der Schüler bereits hat.**
+   `apply_hidden_books` entfernt eine ausgeblendete Reihe nur aus
+   `info["books"]`, **nicht** aus `info["current_books"]`. Bisher baute
+   `booking_isbn_sets_from_info` die `lent`-Menge aus `info["books"]`
+   status-basiert auf → eine ausgeblendete, aber bereits ausgeliehene Reihe
+   fehlte in `lent` → der Scan des eigenen (durch `distributed`
+   gekennzeichneten) Exemplars lief auf die Lager-Prüfung auf (`not_in_stock`).
+   Fix: `lent` wird **autoritativ aus `info["current_books"]`** (ungefiltert)
+   gebildet; nur falls `current_books` fehlt (Unit-Test-Fixture), wird auf die
+   status-basierte Menge aus `info["books"]` zurückgefallen. `current_books`
+   ist in echten `info`-Payloads aus `get_student_info` stets vorhanden.
+
+2. **In derselben Session frisch gebuchtes Buch.** Nach einer Buchung
+   (`status == "booked"`) ist das Exemplar serverseitig `distributed` an den
+   Schüler, aber `lent_isbns` stammt noch aus der Lade-Zeit (ISBN steht dort
+   in `vormerk_isbns`). Ein erneuter Scan desselben Exemplars — oder eines
+   weiteren Exemplars derselben Reihe — in derselben Session (ohne
+   Schüler-Neuladen) lief deshalb ebenfalls auf `not_in_stock` (mit `loaned_to` =
+   Schüler selbst). Fix: `process_scan` hängt nach `booked` die ISBN von
+   `vormerk_isbns` nach `lent_isbns` um. Die übergebenen Mengen sind die
+   Session-Mutables (passed-by-reference) — das Update greift am Helfer- bzw.
+   Schüler-Session-State direkt, ein Neuladen ist nicht nötig.
+
+Beide Fixes sind reine read-only-Logik (kein IServ-/DB-Write, keine neuen
+Endpunkte). **Lesson:** eine „ist das Buch an dich ausgeliehen"-Prüfung muss
+die *ungefilterte* Buchliste des Schülers sehen — ein UI-Filter, der Reihen
+für die Anzeige/Tabelle ausblendet (`apply_hidden_books`), darf nicht die
+autoritative Quelle für den Verliehen-Status sein; und ein serverseitiger
+Zustandswechsel (Buchung) muss die gecachten Prüf-Mengen der Session
+mitschreiben, sonst veraltet der Cache bis zum nächsten Neuladen.
+Tests: `tests/test_booking_precheck.py` +2 (`test_lent_from_current_books_ignores_hidden_filter`,
+`test_process_scan_booked_isbn_moves_to_lent`), Suite 107 grün. Live-Verifikation
+am Testschüler offen. Details: `_logs/2026-07-07_sba_reihe_an_dich_erkannt.md`.
+
 **Update (2026-07-07) — Ersatzanspruch-Hinweis + Lager-Prüfung vor
 Bestell-Prüfung:** Zwei aufbauende Änderungen an `evaluate_scan_for_booking`.
 

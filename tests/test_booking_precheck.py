@@ -203,6 +203,23 @@ def test_sets_split_by_status():
     assert vormerk == {"A"} and lent == {"B"}
 
 
+def test_lent_from_current_books_ignores_hidden_filter():
+    """Eine ausgeblendete Reihe, die der Schüler bereits hat, muss trotzdem in
+    `lent` stehen — `apply_hidden_books` entfernt sie nur aus `info["books"]`,
+    nicht aus `info["current_books"]`. Sonst würde ein Scan des eigenen Exemplars
+    als „verliehen an jemand anderes" (`not_in_stock`) statt „an dich selbst
+    verliehen" (`series_already_lent`) deklariert."""
+    info = {
+        # `info["books"]` OHNE ISBN X — simuliert apply_hidden_books (X ausgeblendet)
+        "books": [{"isbn": "A", "status": "vorgemerkt"}],
+        # `current_books` ist die ungefilterte Quelle: X ist darin (Schüler hat X)
+        "current_books": [{"isbn": "X"}, {"isbn": "B"}],
+    }
+    vormerk, lent = sessions.booking_isbn_sets_from_info(info)
+    assert vormerk == {"A"}
+    assert lent == {"X", "B"}   # X bleibt trotz Ausblendung in lent
+
+
 # --- process_scan (Gate-Verhalten) --------------------------------------------
 
 class _SpyWorker:
@@ -226,6 +243,27 @@ def test_process_scan_books_when_gate_on(monkeypatch):
     res = asyncio.run(sessions.process_scan(state, 42, {"978-1"}, set(), "B1"))
     assert res["status"] == "booked"
     assert worker.committed == "B1" and worker.staged is None
+
+
+def test_process_scan_booked_isbn_moves_to_lent(monkeypatch):
+    """Nach einer Buchung in derselben Session muss die ISBN von vormerk nach
+    lent umgehängt werden — sonst würde ein erneuter Scan (das Exemplar ist
+    jetzt `distributed` an den Schüler selbst) als „verliehen an jemand anderes"
+    (`not_in_stock`, loaned_to = Schüler selbst) statt als „an dich selbst
+    verliehen" (`series_already_lent`) deklariert, weil `lent_isbns` noch aus
+    der Lade-Zeit stammt. Die übergebenen Sets sind die Session-Mutables."""
+    monkeypatch.setattr(sessions, "get_config", lambda: _Cfg(True))
+    vormerk = {"978-1"}
+    lent: set[str] = set()
+    # 1. Scan: buchbar (vorgemerkt, im Lager) → wird gebucht.
+    state = _State(_FakeIserv(_book(isbn="978-1", available=True, distributed=False)), _SpyWorker())
+    res = asyncio.run(sessions.process_scan(state, 42, vormerk, lent, "B1", source="helper"))
+    assert res["status"] == "booked"
+    assert "978-1" in lent and "978-1" not in vormerk   # ISBN umgehängt
+    # 2. Scan: Exemplar jetzt an den Schüler selbst verliehen (distributed).
+    state2 = _State(_FakeIserv(_book(isbn="978-1", available=False, distributed=True)), _SpyWorker())
+    res2 = asyncio.run(sessions.process_scan(state2, 42, vormerk, lent, "B1", source="helper"))
+    assert res2["status"] == "series_already_lent"
 
 
 def test_process_scan_stages_when_gate_off(monkeypatch):

@@ -114,7 +114,7 @@ def booking_isbn_sets_from_info(info: dict) -> tuple[set[str], set[str]]:
     Fehlermeldung „Reihe schon ausgeliehen").
     """
     vormerk: set[str] = set()
-    lent: set[str] = set()
+    lent_from_books: set[str] = set()
     for b in info.get("books", []):
         isbn = b.get("isbn")
         if not isbn:
@@ -122,7 +122,21 @@ def booking_isbn_sets_from_info(info: dict) -> tuple[set[str], set[str]]:
         if b.get("status") == "vorgemerkt":
             vormerk.add(isbn)
         elif b.get("status") == "ausgeliehen":
-            lent.add(isbn)
+            lent_from_books.add(isbn)
+    # `lent` autoritativ aus `info["current_books"]` (UNGEFILTERT —
+    # `apply_hidden_books` entfernt nur `info["books"]`): eine ausgeblendete
+    # Reihe, die der Schüler bereits hat, muss trotzdem als „an dich selbst
+    # verliehen" (`series_already_lent`) erkannt werden — sonst fällt der Scan
+    # zu `not_in_stock` und deklariert das eigene Exemplar als „verliehen an
+    # jemand anderes". `current_books` ist in echten `info`-Payloads immer
+    # vorhanden (`get_student_info`); fehlt es (Unit-Test), wird auf die
+    # status-basierte Menge aus `info["books"]` zurückgefallen.
+    current = info.get("current_books")
+    lent: set[str] = (
+        {b.get("isbn") for b in current if b.get("isbn")}
+        if current is not None
+        else lent_from_books
+    )
     return vormerk, lent
 
 
@@ -301,6 +315,19 @@ async def process_scan(
     else:
         result = await handle_scan(state, student_id, barcode)
     result.setdefault("isbn", decision.get("isbn"))
+    # Erfolgreiche Buchung (Enter) macht die Reihe auf dem Schüler ausgeliehen:
+    # ISBN von `vormerk` nach `lent` umhängen. Sonst würde ein erneuter Scan
+    # desselben Exemplars (oder eines weiteren Exemplars derselben Reihe) in
+    # derselben Session — ohne Neuladen des Schülers — als „verliehen an jemand
+    # anderes" (`not_in_stock`, loaned_to = der Schüler selbst) statt als „an
+    # dich selbst verliehen" (`series_already_lent`) deklariert, weil das
+    # serverseitig verliehene Exemplar `distributed` ist, `lent_isbns` aber
+    # noch aus der Lade-Zeit stammt. Die übergebenen Mengen sind die Session-
+    # Sets (Mutables, passed-by-reference) — das Update greift am Helper-/
+    # Schüler-Session-State; ein Neuladen ist nicht nötig.
+    if result.get("status") == "booked" and decision.get("isbn"):
+        lent_isbns.add(decision["isbn"])
+        vormerk_isbns.discard(decision["isbn"])
     return result
 
 

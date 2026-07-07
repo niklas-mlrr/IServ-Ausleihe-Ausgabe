@@ -240,8 +240,9 @@
 ## Unit-Tests (pytest, `uv run pytest`)
 
 Reine Logik, kein IServ/Playwright/Server — schnell + produktionsneutral, als
-Regressions-Netz und QS-Beleg. **92 Tests, grün (2026-07-06, +2 für
-Alert-Topologie `not_in_stock`/`series_already_lent`).** Coverage (`--cov=server` in `addopts`): **43 %** gesamt
+Regressions-Netz und QS-Beleg. **107 Tests, grün (2026-07-07; +2 für
+`lent`-Menge aus `current_books` bei ausgeblendeten Reihen + ISBN-Umhängung
+`vormerk→lent` nach Buchung in derselben Session — siehe PLAN §6.1).** Coverage (`--cov=server` in `addopts`): **42 %** gesamt
 (vorher 39 %/2026-06-18, 37 %, initial 20 %); Kernlogik deutlich höher —
 `hub.py` 82 %, `state.py` 93 %, `sessions.py` 60 %, `config.py` 93 %,
 `ratelimit.py` 100 %, `tls.py` 69 %, `book_order.py` 76 %.
@@ -260,7 +261,7 @@ die E2E-Skripte V3–V7 ab.
 | `tests/test_printing.py` | Backend-Resolution (auto je Plattform) + `file`-Backend |
 | `tests/test_worker_pool.py` | `WorkerPool.stats()` (total/available/in_use) |
 | `tests/test_tls.py` | Cert hat SAN (localhost/127.0.0.1/cn), idempotent |
-| `tests/test_booking_precheck.py` | Buchungs-Vorabprüfung (`evaluate_scan_for_booking`: Prüf-Reihenfolge `deleted → series_already_lent → not_in_stock → not_enrolled`; `book_deleted`-Vorrang; `not_in_stock`-vor-`not_enrolled`; `series_already_lent`-vor-`not_in_stock` auch bei lagerndem Exemplar; `unknown_book`, `not_ready`, Lookup-Fehler) + `process_scan`-Gate-Verhalten (Buchen/Stagen/kein Feldkontakt) + Alert-Broadcast (`not_in_stock`/`book_deleted`→Alert mit `source`; `series_already_lent`→kein Alert) + `loaned_to`-Durchreichung (Name-Feld getrennt von `msg`; Helfer-`scan_result`+Host-`book_alert` carry `loaned_to`, Schüler-Source strippt es auf `None`; msg bleibt name-frei) — auch für `book_deleted` mit `student_id` (Ersatzanspruch) |
+| `tests/test_booking_precheck.py` | Buchungs-Vorabprüfung (`evaluate_scan_for_booking`: Prüf-Reihenfolge `deleted → series_already_lent → not_in_stock → not_enrolled`; `book_deleted`-Vorrang; `not_in_stock`-vor-`not_enrolled`; `series_already_lent`-vor-`not_in_stock` auch bei lagerndem Exemplar; `unknown_book`, `not_ready`, Lookup-Fehler) + `process_scan`-Gate-Verhalten (Buchen/Stagen/kein Feldkontakt) + Alert-Broadcast (`not_in_stock`/`book_deleted`→Alert mit `source`; `series_already_lent`→kein Alert) + `loaned_to`-Durchreichung (Name-Feld getrennt von `msg`; Helfer-`scan_result`+Host-`book_alert` carry `loaned_to`, Schüler-Source strippt es auf `None`; msg bleibt name-frei) — auch für `book_deleted` mit `student_id` (Ersatzanspruch) + `lent` autoritativ aus `current_books` (ungefiltert, ignoriert `apply_hidden_books` — ausgeblendete Reihe die der Schüler hat bleibt `series_already_lent`) + ISBN-Umhängung `vormerk→lent` nach `booked` in derselben Session (Session-Mutables passed-by-reference, kein Neuladen) |
 
 ## Hinweise zum Testen (wenn es so weit ist)
 
