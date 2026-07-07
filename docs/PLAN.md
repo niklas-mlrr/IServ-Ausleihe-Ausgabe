@@ -796,3 +796,45 @@ Verbindungen trennen". Fix: `end_student()` schickt jetzt zusätzlich
 Helfer. **Lesson:** jede neue serverseitige Aktion, die einen Helfer-Zustand
 ändert, braucht einen expliziten `send_scanner`-Push — ein
 `broadcast_host`-Aufruf allein erreicht den Scanner nicht.
+
+**Update (2026-07-07) — Warteschlange im Helferclient + gezielter Aufruf
+(`call`):** Bisher zeigte der Helfer-Scanner bei keinem zugewiesenen Schüler
+eine *leere* Buchliste + in der Statuszeile nur die Warteschlangen-**größe**
+(`queue_update` trug nur `queue_size`, nie die Einträge); „Weiter" nahm den
+ältesten Wartenden (`next_pending`), ein *gezielter* Aufruf fehlte. Neu: bei
+keinem Schüler zeigt der Buchlistenbereich die **Warteschlange** — selbes
+Zeilenformat wie die Bücherliste, aber **ohne Farbgebung**, mit
+**„Aufrufen"-Button** pro wartendem Schüler. Klick ruft genau diesen Schüler
+gezielt auf (neuer WS-Handler `{type:'call', student_id}`).
+
+- **Server (read-only, nur lokale Helfer-Zuweisung — kein DB-/IServ-Write):**
+  `state.pending_queue_as_list()` (nur `status='pending'`); `queue_update` +
+  alle `waiting`-Nachrichten tragen jetzt die `queue`-Liste (nur an
+  unzugewiesene Helfer); `assign_student_to_helper()` aus
+  `assign_next_pending_to_helper` extrahiert (wird von „nächster" und „aufrufen"
+  geteilt); `call`-Handler prüft `target.status == 'pending'` **atomar** (kein
+  Await zwischen Prüfung und Zuweisung → kein Doppel-Aufruf zweier Helfer auf
+  denselben Schüler), beendet ggf. den alten Schüler, weist den gezielten zu;
+  bei Nicht-verfügbar `error` + sofortiger `queue_update`-Push.
+- **Client (`web/scan.js`/`scan.html`):** `renderQueue()` rendert `.queue-row`
+  (transparent, keine `row-vorgemerkt`/`row-ausgeliehen`-Tint) mit
+  `.call-btn`; delegierter Klick-Handler sendet `{type:'call', student_id}`.
+
+**Bugfix (2026-07-07) — Queue während des Schüler-Ladens verbergen (auch
+„Weiter"):** die Queue darf nur erscheinen, wenn *weder* ein Schüler geladen
+ist *noch* gerade einer geladen wird. Erster Entwurf flaggte nur den
+„Aufrufen"-Klick (`awaitingCall`) — bei „Weiter" (`next`) stand der nächste
+Schüler schon fest, aber `student_info` fehlte noch; in diesem Fenster konnte
+eine späte `queue_update` die Queue wieder aufblitzen lassen. Generalisiert:
+`awaitingCall` → `loadingStudent`, gesetzt in **beiden** Pfaden
+(`advanceToNext` für `next` UND Aufrufen-Klick für `call`); Queue rendert nur
+bei `!studentActive && !loadingStudent`; freigegeben bei `student_info`/
+`waiting`/`error`. **Lesson:** ein Lade-Flag vor der ersten Server-Bestätigung
+muss *jede* Aktion abdecken, die `student_info` nach sich zieht — nicht nur
+den neu eingeführten Pfad.
+
+Nur GET / read-only, keine DB-/IServ-Writes, keine neuen REST-Endpoints.
+Tests: 105 grün (+2 in `test_queue_flow.py`: `assign_student_to_helper`
+gezielt, `pending_queue_as_list`; 2 angepasste Assertions wegen neuem
+`queue`-Feld). Live-Verifikation am Testschüler offen. Details:
+`_logs/2026-07-07_sba_helfer_queue_anzeige.md`.
