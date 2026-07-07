@@ -1155,10 +1155,9 @@
             (alert.borrower ? `<div class="ns-borrower">verliehen an ${escapeHtml(alert.borrower)}</div>` : '') +
             `</div>`
           : '';
-        // Verliehen-an-Alert: nur der „verliehen an …"-Text ist rot, Kästchen +
-        // Meldungstext bleiben normal (Ausgemustert-Alert ohne Ausleiher weiterhin rot).
-        const tileAlert = alert && !alert.borrower;
-        return `<div class="ns-tile${tileAlert ? ' ns-tile-alert' : ''}">
+        // Kästchen bleibt rot (wie gehabt); nur der Meldungstext ist beim
+        // Verliehen-Alert normal — „verliehen an …" ist das einzige Rot im Text.
+        return `<div class="ns-tile${alert ? ' ns-tile-alert' : ''}">
           <div class="ns-name">${escapeHtml(s.lastname)}, ${escapeHtml(s.firstname)}</div>
           <div class="ns-meta"><span>${escapeHtml(s.form)}</span>${helperLbl}</div>
           ${alertLbl}
