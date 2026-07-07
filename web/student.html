@@ -118,6 +118,11 @@
       display: grid; grid-template-columns: 5rem 1fr 1.8rem; align-items: center;
       gap: 8px; padding: 8px 10px; margin-bottom: 6px; color: var(--fg);
       border-radius: 8px; border: 2px solid transparent; font-size: .9rem;
+      /* FLIP-Animation: nach einem erfolgreichen Scan wandern die Zeilen an
+         ihre neue Position, statt sofort zu springen. transform wird nur
+         während der Animation gesetzt; ohne Animation bleibt die Zeile ruhig. */
+      position: relative;
+      transition: transform .5s cubic-bezier(.22, .61, .36, 1);
     }
     .book-row .b-fach { font-weight: 600; }
     .book-row .b-title { overflow: hidden; text-overflow: ellipsis; }
@@ -126,6 +131,10 @@
     .row-vorgemerkt  { background: rgba(230,126,34,.14); border-color: rgba(230,126,34,.55); }
     .row-ausgeliehen { background: rgba(46,125,50,.16);  border-color: rgba(46,125,50,.55); }
     .book-empty { opacity: .4; padding: 14px 4px; font-size: .9rem; }
+    /* Bewegungsreduktion respektieren: FLIP-Transition praktisch sofort. */
+    @media (prefers-reduced-motion: reduce) {
+      .book-row { transition: transform .01ms !important; }
+    }
 
     #finish-btn { margin-top: 10px; width: 100%; background: #30d158; color: #000; font-weight: 600; font-size: 1.05rem; padding: 14px; }
 
@@ -331,7 +340,7 @@
         if ((msg.status === 'staged' || msg.status === 'booked') && msg.isbn) {
           scannedIsbns.add(msg.isbn);
           scanOrder.set(msg.isbn, ++scanSeq);
-          renderBooks(currentBooks);
+          renderBooks(currentBooks, true);   // FLIP: Zeilen an neue Position fahren
         }
       } else if (msg.type === 'book_alert_clear') {
         bookAlertOpen = false;
@@ -419,7 +428,7 @@
       return b.status === 'ausgeliehen' || !!(b.isbn && scannedIsbns.has(b.isbn));
     }
 
-    function renderBooks(books) {
+    function renderBooks(books, animate = false) {
       const rows = document.getElementById('book-rows');
       if (!books || !books.length) {
         rows.innerHTML = '<div class="book-empty">Keine Bücher hinterlegt</div>';
@@ -440,6 +449,15 @@
         const t = b.distributed_at ? Date.parse(b.distributed_at) : NaN;
         return Number.isNaN(t) ? -1 : t;
       };
+      // FLIP-Vorbereitung: alte Positionen je Buch (Original-Index als stabiler
+      // Schlüssel) merken, BEVOR innerHTML ausgetauscht wird. Nur bei
+      // animate=true (erfolgreicher Scan) — nicht beim initialen Laden.
+      const oldRects = new Map();
+      if (animate) {
+        rows.querySelectorAll('.book-row[data-book-idx]').forEach(row => {
+          oldRects.set(row.dataset.bookIdx, row.getBoundingClientRect());
+        });
+      }
       const ordered = books
         .map((b, i) => [b, i])
         .sort((a, b) => {
@@ -453,19 +471,35 @@
             if (diff) return diff;
           }
           return a[1] - b[1];
-        })
-        .map(pair => pair[0]);
-      rows.innerHTML = ordered.map(b => {
+        });
+      rows.innerHTML = ordered.map(([b, idx]) => {
         const done = isBookDone(b);
         const icon = done
           ? '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>'
           : '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
         const cls = done ? 'ausgeliehen' : 'vorgemerkt';
-        return `<div class="book-row row-${cls}">`
+        return `<div class="book-row row-${cls}" data-book-idx="${idx}">`
           + `<div class="b-fach">${escapeHtml(b.subject)}</div>`
           + `<div class="b-title">${escapeHtml(b.title)}</div>`
           + `<div class="b-icon">${icon}</div></div>`;
       }).join('');
+      // FLIP-Animation: jede Zeile, die schon da war, startet an ihrer alten
+      // Position und fährt zur neuen. Neue Zeilen erscheinen sofort.
+      if (animate && oldRects.size) {
+        rows.querySelectorAll('.book-row[data-book-idx]').forEach(row => {
+          const old = oldRects.get(row.dataset.bookIdx);
+          if (!old) return;  // neue Zeile — keine alte Position
+          const cur = row.getBoundingClientRect();
+          const dx = old.left - cur.left;
+          const dy = old.top - cur.top;
+          if (!dx && !dy) return;
+          row.style.transition = 'none';
+          row.style.transform = `translate(${dx}px, ${dy}px)`;
+          row.offsetWidth;  // Reflow erzwingen, damit die Startposition greift
+          row.style.transition = '';
+          row.style.transform = '';
+        });
+      }
     }
 
     // ---- Finish ----
