@@ -196,6 +196,25 @@
       bereits offen → `worker_ready` + Bücher sofort wiederhergestellt (nicht
       „Warten…"/„Wird geladen…" hängen bleiben).
 
+### Neu 2026-07-07 (Helferclient: Ausleih-Freigabe-Dialog bei Unstimmigkeit)
+
+- [ ] **Freigabe-Dialog bei Unstimmigkeit (`web/scan.js`/`scan.html`, PLAN O10):**
+      Schüler mit `remission_pending`/`exemption_pending`/`!paid` (nur bei
+      `enrolled`) laden → erstes Buch scannen → `lend-confirm-modal` erscheint
+      mit gelisteter Unstimmigkeit, Scan geht **nicht** raus (Buch bleibt
+      vorgemerkt, `pendingScans` unverändert).
+      - **„Ja, ausleihen"**: Scan wird gesendet (`scan_result` wie gehabt —
+        `staged` bei `ALLOW_BOOKING=false`); zweites Buch scannen → **kein**
+        Modal (Flag `lendingApproved` gesetzt).
+      - **„Nicht ausleihen"** / Escape / Click außerhalb: Status „Nicht
+        ausgeliehen — Buch nicht eingegeben", Scan verworfen; selben Barcode
+        neu scannen → Modal fragt **erneut**.
+      - **Neuladen** („Nächster"/„Aufrufen"/Reconnect): Flag resetted → Modal
+        fragt wieder beim ersten Scan.
+      Rein client-seitig, nur GET (`student_info`-Flags), kein DB-/IServ-Schreib-
+      zugriff. Kein automatisierter Test (UI-Gate); live am Testschüler mit
+      künstlicher Unstimmung offen (read-only — Niklas+Lukas-Freigabe).
+
 ### Aus dem bisherigen Plan (Phase 3/4)
 
 - [ ] **Lasttest: 5 parallele Schüler-Sessions** (Modus B) — `WORKER_CONTEXTS`

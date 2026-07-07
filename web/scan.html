@@ -268,6 +268,24 @@
     </div>
   </div>
 
+  <!-- Ausleih-Freigabe-Dialog: Bei einem Schüler mit Unstimmigkeit (Nachweis
+       fehlt / Rechnung offen) wird vor dem ersten Buch-Scan gefragt, ob für diese
+       Person ausgeliehen werden darf. „Ja" merkt die Freigabe bis zum Neuladen
+       des Schülers; „Nein" verwirft den Scan, bei erneutem Scannen wird erneut
+       gefragt. Rein client-seitig — der Scan wird erst nach „Ja" gesendet, die
+       server-seitige Lager-/Anmeldeprüfung + Worker-Eintragung läuft danach wie
+       gehabt. Kein DB-/IServ-Schreibzugriff. -->
+  <div class="modal-overlay" id="lend-confirm-modal">
+    <div class="modal-box">
+      <h3>Ausleihe freigeben?</h3>
+      <div class="modal-warn" id="lend-warn"></div>
+      <div class="modal-actions">
+        <button class="primary" id="modal-lend-yes">Ja, ausleihen</button>
+        <button class="ghost" id="modal-lend-no">Nicht ausleihen</button>
+      </div>
+    </div>
+  </div>
+
   <script src="scan.js"></script>
 </body>
 </html>

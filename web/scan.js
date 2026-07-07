@@ -25,6 +25,17 @@ let pendingScans = 0;               // noch nicht quittierte Scans (Sequenzierun
 const scanWaiters = [];             // Resolver, die auf pendingScans===0 warten
 let printThenNext = false;          // „Drucken & nächster Schüler" angeklickt?
 
+// ---- Ausleih-Freigabe bei Unstimmigkeit (Nachweis fehlt / Rechnung offen) ----
+// Rein client-seitig: pupil-Flags kommen mit `student_info` (GET, s. server/
+// iserv_client.py). Beim ersten Scan eines betroffenen Schülers wird der Scan
+// zurückgehalten und ein Bestätigungsdialog gezeigt, bevor server-seitig die
+// Lager-/Anmeldeprüfung + Worker-Eintragung laufen. „Ja" merkt die Freigabe
+// bis zum Neuladen des Schülers; „Nein" verwirft den Scan (nächster Scan fragt
+// erneut). Kein DB-/IServ-Schreibzugriff.
+let currentStudent = null;          // Schüler-Objekt aus dem letzten student_info
+let lendingApproved = false;        // Freigabe für den aktuellen Schüler erteilt?
+let heldScanValue = null;           // Scan, der auf die Freigabe-Entscheidung wartet
+
 function drainScanWaiters() {
   if (pendingScans <= 0) {
     pendingScans = 0;
@@ -189,6 +200,10 @@ function handleServerMessage(msg) {
     studentActive = true;
     loadingStudent = false;  // Schüler geladen — Bücherliste ersetzt die Queue
     const s = msg.student;
+    currentStudent = s;          // Flags für den Freigabe-Dialog (s. unten)
+    lendingApproved = false;     // neuer Schüler → Freigabe zurücksetzen
+    heldScanValue = null;
+    closeLendModal();
     sNameEl.textContent = `${s.lastname}, ${s.firstname}`;
     sFormEl.textContent = (s.form || '').replace(/^Klasse\s+/i, '');
     // Bezahlt-/Offen-Status, ergänzt um „Nachweis fehlt"-Hinweise (Ermäßigung
@@ -238,6 +253,10 @@ function handleServerMessage(msg) {
     bookRowsEl.innerHTML = '<div class="book-empty">Schüler wird geladen …</div>';
     statusEl.classList.remove('status-book-deleted');
     closeBookAlertModal();
+    currentStudent = null;
+    lendingApproved = false;
+    heldScanValue = null;
+    closeLendModal();
     statusEl.textContent = 'Warten…';
   } else if (msg.type === 'scan_result') {
     if (pendingScans > 0) pendingScans--;
@@ -287,6 +306,10 @@ function handleServerMessage(msg) {
     drainScanWaiters();
     statusEl.classList.remove('status-book-deleted');
     closeBookAlertModal();
+    currentStudent = null;
+    lendingApproved = false;
+    heldScanValue = null;
+    closeLendModal();
     if (typeof msg.queue_size === 'number') queueSize = msg.queue_size;
     if (Array.isArray(msg.queue)) queueList = msg.queue;
     if (msg.msg) waitingMsg = msg.msg;
@@ -302,6 +325,8 @@ function handleServerMessage(msg) {
     loadingStudent = false;  // Laden gescheitert → Queue wieder freigeben
     statusEl.textContent = 'Fehler: ' + (msg.msg || '');
     dotEl.className = 'dot err';
+    heldScanValue = null;
+    closeLendModal();
     if (!studentActive) renderQueue();
   }
 }
@@ -351,6 +376,10 @@ const nextModal = document.getElementById('next-modal');
 const nextWarnEl = document.getElementById('next-warn');
 const modalNextConfirmBtn = document.getElementById('modal-next-confirm');
 const modalNextCancelBtn = document.getElementById('modal-next-cancel');
+const lendConfirmModal = document.getElementById('lend-confirm-modal');
+const lendWarnEl = document.getElementById('lend-warn');
+const modalLendYesBtn = document.getElementById('modal-lend-yes');
+const modalLendNoBtn = document.getElementById('modal-lend-no');
 let scanFlashTimeout = null;
 
 // Nächster Schüler: aktuellen abschließen + nächsten aus der Queue laden.
@@ -493,11 +522,84 @@ modalPrintBtn.addEventListener('click', () => sendPrint(false));
 modalPrintNextBtn.addEventListener('click', () => sendPrint(true));
 modalCancelBtn.addEventListener('click', closePrintModal);
 printModal.addEventListener('click', (e) => { if (e.target === printModal) closePrintModal(); });
+
+// ---- Ausleih-Freigabe-Dialog (Unstimmigkeit: Nachweis fehlt / Rechnung offen) ----
+// Hat der geladene Schüler eine Unstimmigkeit (und wurde noch nicht freigegeben),
+// wird der Scan zurückgehalten und ein Dialog gezeigt. Erst nach „Ja" geht der
+// Scan raus — die server-seitige Lager-/Anmeldeprüfung + Worker-Eintragung läuft
+// danach wie gehabt. „Nein"/Escape/Click-außerhalb verwirft den Scan; da
+// `lendingApproved` dann weiterhin false steht, fragt der nächste Scan erneut.
+// „Ja" setzt `lendingApproved` → weitere Bücher werden nicht mehr angefragt,
+// bis der Schüler neu geladen wird (Reset in student_info/loading/waiting).
+function studentHasUnstimmigkeit() {
+  const s = currentStudent;
+  if (!s || !s.enrolled) return false;   // „nicht angemeldet" bleibt außen vor
+  return !!(s.remission_pending || s.exemption_pending || !s.paid);
+}
+
+// Unstimmigkeit-Liste im Dialog rendern (gleiche Texte wie der s-pay-Block).
+function renderLendWarning(el) {
+  const s = currentStudent || {};
+  const items = [];
+  if (s.remission_pending)  items.push('Ermäßigungsnachweis fehlt');
+  if (s.exemption_pending)  items.push('Befreiungsnachweis fehlt');
+  if (!s.paid)              items.push(`Rechnung offen: ${escapeHtml(s.amount_open)} €`);
+  el.innerHTML = `Für diese Person liegt eine Unstimmigkeit vor:<ul>`
+    + items.map(t => `<li>${escapeHtml(t)}</li>`).join('')
+    + `</ul>Trotzdem ausleihen?`;
+  el.style.display = '';
+}
+
+function closeLendModal() { lendConfirmModal.classList.remove('show'); }
+
+// Scan tatsächlich senden (aus onScanSuccess ausgelagert, damit der Freigabe-
+// Pfad denselben Sendeweg nutzt). `pendingScans++` nur hier → zurückgehaltene
+// Scans erzeugen keinen Drift in der Sequenzierung.
+function sendScan(value) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  pendingScans++;
+  ws.send(JSON.stringify({ type: 'scan', value }));
+}
+
+// „Ja, ausleihen": Freigabe merken, Modal schließen, gehaltenen Scan senden.
+// Cooldown/lastValue erneut scharfstellen, damit die noch laufende Kamera
+// denselben Barcode nicht sofort wieder feuert (Duplicate-Scan-Schutz).
+modalLendYesBtn.addEventListener('click', () => {
+  lendingApproved = true;
+  closeLendModal();
+  const v = heldScanValue;
+  heldScanValue = null;
+  if (v == null) return;
+  lastValue = v; cooldown = true;
+  setTimeout(() => { cooldown = false; lastValue = ''; }, 2000);
+  statusEl.textContent = 'Gesendet: ' + v;
+  sendScan(v);
+});
+
+// „Nicht ausleihen": Scan verwerfen, nichts senden. Flag bleibt false → beim
+// erneuten Einscannen wird erneut gefragt.
+modalLendNoBtn.addEventListener('click', () => {
+  closeLendModal();
+  heldScanValue = null;
+  statusEl.textContent = 'Nicht ausgeliehen — Buch nicht eingegeben';
+});
+lendConfirmModal.addEventListener('click', (e) => {
+  if (e.target === lendConfirmModal) {  // Click außerhalb der Box = verwerfen
+    closeLendModal();
+    heldScanValue = null;
+    statusEl.textContent = 'Nicht ausgeliehen — Buch nicht eingegeben';
+  }
+});
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   if (printModal.classList.contains('show')) closePrintModal();
   if (nextModal.classList.contains('show')) closeNextModal();
   if (bookAlertModal.classList.contains('show')) dismissBookAlert();
+  if (lendConfirmModal.classList.contains('show')) {
+    closeLendModal();
+    heldScanValue = null;
+    statusEl.textContent = 'Nicht ausgeliehen — Buch nicht eingegeben';
+  }
 });
 
 let audioCtx = null, audioBuffer = null;
@@ -548,6 +650,9 @@ function onScanSuccess(value) {
   // Worker noch nicht bereit (Schüler gerade zugewiesen, open_student läuft) —
   // Scan ignorieren, nicht senden (wie beim ausgemusterten-Buch-Block).
   if (workerPending) return;
+  // Freigabe-Dialog noch offen → Helfer entscheidet gerade; Scan nicht erneut
+  // feuern (kein Doppelt-Beep, kein Überschreiben des gehaltenen Werts).
+  if (lendConfirmModal.classList.contains('show')) return;
   if (cooldown || value === lastValue) return;
   // Nächster Scan → evtl. offenes Hinweis-Modal bewusst schließen (auch Host
   // aufräumen); war keins offen, ist dismissBookAlert ein No-op.
@@ -555,10 +660,17 @@ function onScanSuccess(value) {
   if (soundEnabled) playBeep();
   lastValue = value; cooldown = true;
   setTimeout(() => { cooldown = false; lastValue = ''; }, 2000);
-  statusEl.textContent = 'Gesendet: ' + value;
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    pendingScans++;
-    ws.send(JSON.stringify({ type: 'scan', value }));
+  // Unstimmigkeit (Nachweis fehlt / Rechnung offen) und noch nicht freigegeben:
+  // Scan zurückhalten und Freigabe-Dialog zeigen — erst nach „Ja" geht der Scan
+  // raus, dann läuft die server-seitige Lager-/Anmeldeprüfung + Worker wie gehabt.
+  if (studentHasUnstimmigkeit() && !lendingApproved) {
+    heldScanValue = value;
+    renderLendWarning(lendWarnEl);
+    lendConfirmModal.classList.add('show');
+    statusEl.textContent = 'Freigabe erforderlich — Buch zurückgehalten';
+  } else {
+    statusEl.textContent = 'Gesendet: ' + value;
+    sendScan(value);
   }
   if (navigator.vibrate) navigator.vibrate(80);
   readerEl.classList.add('scan-success');
