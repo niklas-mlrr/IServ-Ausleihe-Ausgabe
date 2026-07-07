@@ -73,7 +73,8 @@ def test_reject_not_in_stock_unavailable():
 
 def test_not_in_stock_carries_loaned_to():
     # Verliehenes Buch → aktueller Ausleiher wird (read-only aus /books/:code)
-    # durchgereicht, damit Helfer + Host den Namen zeigen.
+    # als eigenes Feld durchgereicht; die `msg` bleibt bewusst name-frei (der
+    # Name wandert nur via `loaned_to`, damit Schüler-Client ihn weglassen kann).
     book = _book(distributed=True)
     book["loaned_to"] = "Max Mustermann"
     book["loaned_to_id"] = 4321
@@ -81,7 +82,8 @@ def test_not_in_stock_carries_loaned_to():
     assert res["ok"] is False and res["status"] == "not_in_stock"
     assert res["loaned_to"] == "Max Mustermann"
     assert res["loaned_to_id"] == 4321
-    assert "Max Mustermann" in res["msg"]
+    assert "Max Mustermann" not in res["msg"]
+    assert "verliehen" in res["msg"]
 
 
 def test_not_in_stock_without_borrower_stays_silent():
@@ -230,3 +232,38 @@ def test_process_scan_no_alert_for_series_already_lent(monkeypatch):
     res = asyncio.run(sessions.process_scan(state, 42, set(), {"978-1"}, "B1", source="helper"))
     assert res["status"] == "series_already_lent"
     assert hub.broadcasts == []
+
+
+def _book_with_borrower():
+    b = _book(distributed=True)
+    b["loaned_to"] = "Max Mustermann"
+    b["loaned_to_id"] = 4321
+    return b
+
+
+def test_process_scan_loaned_to_for_helper(monkeypatch):
+    # Helfer-Scanner (Modus A) sieht den Ausleiher-Namen im scan_result; der
+    # Host bekommt ihn immer via book_alert-Broadcast.
+    monkeypatch.setattr(sessions, "get_config", lambda: _Cfg(False))
+    hub = _patch_hub(monkeypatch)
+    state = _State(_FakeIserv(_book_with_borrower()))
+    res = asyncio.run(sessions.process_scan(state, 42, {"978-1"}, set(), "B1", source="helper"))
+    assert res["status"] == "not_in_stock"
+    assert res["loaned_to"] == "Max Mustermann"
+    assert res["loaned_to_id"] == 4321
+    assert hub.broadcasts and hub.broadcasts[0]["loaned_to"] == "Max Mustermann"
+    assert hub.broadcasts[0]["loaned_to_id"] == 4321
+
+
+def test_process_scan_hides_loan_from_student(monkeypatch):
+    # Schüler-Client (Modus B) bekommt den Ausleiher-Namen NICHT (Privatheit);
+    # der Host sieht ihn trotzdem (book_alert-Broadcast unabhängig vom Source).
+    monkeypatch.setattr(sessions, "get_config", lambda: _Cfg(False))
+    hub = _patch_hub(monkeypatch)
+    state = _State(_FakeIserv(_book_with_borrower()))
+    res = asyncio.run(sessions.process_scan(state, 42, {"978-1"}, set(), "B1"))
+    assert res["status"] == "not_in_stock"
+    assert res["loaned_to"] is None
+    assert res["loaned_to_id"] is None
+    assert "Max Mustermann" not in (res.get("msg") or "")
+    assert hub.broadcasts and hub.broadcasts[0]["loaned_to"] == "Max Mustermann"

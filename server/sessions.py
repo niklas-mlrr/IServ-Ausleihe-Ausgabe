@@ -199,18 +199,18 @@ async def evaluate_scan_for_booking(
 
     # Bedingung 1: Buch im Lager.
     if book["distributed"] or not book["available"]:
-        # Buch aktuell an jemand anders verliehen → Namen des Ausleihers
-        # durchreichen (read-only aus /books/:code, siehe get_book_by_code),
-        # damit Helfer-Scanner und Host anzeigen, WEM es gerade gehört.
+        # Buch aktuell an jemand anders verliehen. Den Namen des Ausleihers
+        # (read-only aus /books/:code, siehe get_book_by_code) halten wir
+        # bewusst AUSSERHALB der `msg` — er wandert nur als eigenes `loaned_to`-
+        # Feld in die Payloads. `process_scan` steuert dann, wer ihn sieht:
+        # Host (immer) + Helfer-Scanner (Modus A), aber NICHT den Schüler-Client
+        # (Modus B) — der Schüler sieht nur „Buch noch verliehen", ohne WEM.
         loaned_to = book.get("loaned_to")
         loaned_to_id = book.get("loaned_to_id")
-        msg = f"Nicht im Lager (verliehen): {title}"
-        if loaned_to:
-            msg = f"Nicht im Lager (verliehen an {loaned_to}): {title}"
         return {
             "ok": False,
             "status": "not_in_stock",
-            "msg": msg,
+            "msg": f"Nicht im Lager (verliehen): {title}",
             "isbn": isbn,
             "title": title,
             "loaned_to": loaned_to,
@@ -269,8 +269,12 @@ async def process_scan(
             "status": decision["status"],
             "msg": decision["msg"],
             "isbn": decision.get("isbn"),
-            "loaned_to": decision.get("loaned_to"),
-            "loaned_to_id": decision.get("loaned_to_id"),
+            # Name des Ausleihers NUR für den Helfer-Scanner (Modus A) — der
+            # Schüler-Client (Modus B) bekommt ihn bewusst nicht (Privatheit:
+            # der Schüler sieht nur „Buch noch verliehen", nicht WEM es gehört).
+            # Der Host erhält den Namen immer über den book_alert-Broadcast.
+            "loaned_to": decision.get("loaned_to") if source != "student" else None,
+            "loaned_to_id": decision.get("loaned_to_id") if source != "student" else None,
         }
     if get_config().allow_booking:
         result = await handle_commit(state, student_id, barcode)

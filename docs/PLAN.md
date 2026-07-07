@@ -687,22 +687,31 @@ Commits `09296f2`, `440f5b4`, `b4610de`.
 
 **Update (2026-07-06) — Verliehen-an-Name bei `not_in_stock`:** Wird ein
 Buch gescannt, das derzeit an **jemand anders** verliehen ist (`not_in_stock`,
-`distributed`), zeigen Helfer-Scanner und Host zusätzlich, **an wen** es
-verliehen ist. `server/iserv_client.py::get_book_by_code` liefert neben
-`student_id` jetzt `loaned_to` („Vorname Nachname") + `loaned_to_id`. Der
+`distributed`), zeigen **Helfer-Scanner und Host** zusätzlich, **an wen** es
+verliehen ist — der **Schüler-Client (Modus B) sieht den Namen bewusst nicht**
+(Privatheit: der Schüler scannt nur, der Betreuer am Host/Helfer muss wissen,
+wem das Buch gerade gehört). `server/iserv_client.py::get_book_by_code` liefert
+neben `student_id` `loaned_to` („Vorname Nachname") + `loaned_to_id`. Der
 aktuelle Ausleiher ist in `GET /books/:code` bereits als eingebetteter
 `Student` enthalten → im Normalfall **kein Extra-Request**; nur falls die
 Einbettung fehlt/anonymisiert ist, Nachladen per `GET /students/:id`
-(read-only, tolerant bei Fehlern → `None`). `evaluate_scan_for_booking`
-hängt die Felder im `not_in_stock`-Zweig ans Return-dict und baut den Namen
-in die Meldung ein („Nicht im Lager (verliehen an …): …"); `process_scan`
-reicht sie in den `book_alert`-Broadcast (Host) und das `scan_result`-Payload
-(Scanner) durch. UI: `web/scan.html` eigene Zeile „Aktuell verliehen an: …"
-im Buch-Hinweis-Modal; `web/host.html` ergänzt Toast („— verliehen an …")
-und eine `ns-borrower`-Zeile im Now-Serving-Kästchen. Namen werden **nicht
-geloggt** (PLAN §3.7), nur an die UI durchgereicht. Kein DB-/IServ-Write.
-Tests: `tests/test_booking_precheck.py` +2 (`test_not_in_stock_carries_loaned_to`,
-`test_not_in_stock_without_borrower_stays_silent`), Suite 92 grün. Commit `15bf5f1`.
+(read-only, tolerant bei Fehlern → `None`). `evaluate_scan_for_booking` hält
+die `msg` bewusst **name-frei** („Nicht im Lager (verliehen): …") und trägt den
+Namen nur als eigenes `loaned_to`-Feld. `process_scan` steuert die Sichtbarkeit
+pro Source: der `book_alert`-Broadcast an den Host enthält `loaned_to` immer
+(unabhängig davon, wer gescannt hat); das zurückgegebene `scan_result`-Payload
+enthält `loaned_to`/`loaned_to_id` **nur für `source != "student"`** (Helfer
+Modus A), für den Schüler werden beide auf `None` gesetzt. UI:
+`web/scan.html` eigene Zeile „Aktuell verliehen an: …" im Buch-Hinweis-Modal
+(liest `msg.loaned_to`); `web/host.html` ergänzt Toast („— verliehen an …")
+und eine `ns-borrower`-Zeile im Now-Serving-Kästchen; `web/student.html`
+zeigt unverändert nur die name-freie `msg`. Namen werden **nicht geloggt**
+(PLAN §3.7), nur an Host + Helfer durchgereicht. Kein DB-/IServ-Write.
+Tests: `tests/test_booking_precheck.py` +4 (`test_not_in_stock_carries_loaned_to`,
+`test_not_in_stock_without_borrower_stays_silent`,
+`test_process_scan_loaned_to_for_helper`,
+`test_process_scan_hides_loan_from_student`), Suite 96 grün. Commits `15bf5f1`,
+`<follow-up>`.
 
 **Bugfix (2026-07-05) — Scanner reagiert nicht auf Host-Trennung:**
 `end_student()` löste die Helfer-Zuordnung serverseitig, informierte aber nie
