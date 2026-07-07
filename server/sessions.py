@@ -138,6 +138,12 @@ async def evaluate_scan_for_booking(
       2. Schüler hat das Buch bestellt UND von der Reihe ist noch keins auf ihn
          ausgeliehen (= ISBN ∈ vormerk_isbns).
 
+    Prüf-Reihenfolge (Bedingung 1 VOR 2, damit ein verliehenes/ausgemustertes
+    Buch immer als solches angezeigt wird, auch wenn der Schüler es gar nicht
+    bestellt hat): deleted → series_already_lent → nicht-im-Lager → nicht
+    bestellt. „Reihe bereits an dich ausgeliehen" greift vor der Lager-Prüfung,
+    da das Exemplar an dich selbst verliehen sein kann (distributed).
+
     Streng bei Unsicherheit: fehlender API-Client, noch nicht geladene Buchliste
     oder ein Lookup-Fehler → `ok=False` (NICHT buchen). Bewusst strenger als eine
     reine „gehört das Buch zu dir?"-Prüfung: da wir bei Erfolg automatisch Enter
@@ -167,9 +173,8 @@ async def evaluate_scan_for_booking(
     isbn = book["isbn"]
     title = book.get("title") or isbn
 
-    # Ausgemustert-Prüfung ZUERST — noch vor der Anmeldeprüfung, damit ein
-    # ausgemustertes Buch immer als solches erkannt wird, auch wenn der Schüler
-    # es gar nicht bestellt hat. Muss am Scanner (rot) und am Host sichtbar sein.
+    # Ausgemustert-Prüfung ZUERST — ein ausgemustertes Buch wird immer als
+    # solches erkannt, egal ob bestellt oder verliehen (s. Ersatzanspruch).
     if book["deleted"]:
         # Ausgemustert, aber noch mit einem Schüler verknüpft (student_id !=
         # null, z. B. [not_timely]/[unusable]) → loaned_to/loaned_to_id
@@ -186,25 +191,23 @@ async def evaluate_scan_for_booking(
             "loaned_to_id": book.get("loaned_to_id"),
         }
 
-    # Bedingung 2: bestellt UND Reihe noch nicht ausgeliehen.
-    if isbn not in vormerk_isbns:
-        if isbn in lent_isbns:
-            return {
-                "ok": False,
-                "status": "series_already_lent",
-                "msg": f"Reihe bereits ausgeliehen: {title}",
-                "isbn": isbn,
-                "title": title,
-            }
+    # „Reihe bereits an dich ausgeliehen": ISBN steht schon auf dem Schüler
+    # als ausgeliehen. VOR der Lager-Prüfung, denn das Buch kann an dich
+    # selbst verliehen (distributed) ODER ein anderweitig lagerndes Exemplar
+    # derselben ISBN sein — beides „nicht nochmal ausleihen", unabhängig vom
+    # Lager-Status dieses Exemplars.
+    if isbn in lent_isbns:
         return {
             "ok": False,
-            "status": "not_enrolled",
-            "msg": f"Nicht bestellt: {title}",
+            "status": "series_already_lent",
+            "msg": f"Reihe bereits ausgeliehen: {title}",
             "isbn": isbn,
             "title": title,
         }
 
-    # Bedingung 1: Buch im Lager.
+    # Bedingung 1: Buch im Lager — VOR der Bestell-Prüfung, damit ein
+    # verliehenes Buch immer als solches angezeigt wird, auch wenn der Schüler
+    # es gar nicht bestellt hat (früher kam hier „Nicht bestellt" durch).
     if book["distributed"] or not book["available"]:
         # Buch aktuell an jemand anders verliehen. Den Namen des Ausleihers
         # (read-only aus /books/:code, siehe get_book_by_code) halten wir
@@ -222,6 +225,16 @@ async def evaluate_scan_for_booking(
             "title": title,
             "loaned_to": loaned_to,
             "loaned_to_id": loaned_to_id,
+        }
+
+    # Bedingung 2: bestellt UND Reihe noch nicht ausgeliehen.
+    if isbn not in vormerk_isbns:
+        return {
+            "ok": False,
+            "status": "not_enrolled",
+            "msg": f"Nicht bestellt: {title}",
+            "isbn": isbn,
+            "title": title,
         }
 
     return {"ok": True, "isbn": isbn, "title": title, "code": book["code"]}

@@ -717,6 +717,37 @@ Tests: `tests/test_booking_precheck.py` +4 (`test_not_in_stock_carries_loaned_to
 `test_process_scan_hides_loan_from_student`), Suite 96 grün. Commits `15bf5f1`,
 `<follow-up>`.
 
+**Update (2026-07-07) — Ersatzanspruch-Hinweis + Lager-Prüfung vor
+Bestell-Prüfung:** Zwei aufbauende Änderungen an `evaluate_scan_for_booking`.
+
+1. **Ersatzanspruch bei ausgemusterten Büchern mit Schülerbezug.** Ein
+   `book_deleted`-Buch, das noch eine `student_id != null` trägt (z. B.
+   `[not_timely]` verloren, `[unusable]` beschädigt), reicht `loaned_to`/
+   `loaned_to_id` durch — Host + Helfer zeigen zusätzlich „Ersatzanspruch: …"
+   (Toast, Now-Serving-Kästchen `ns-borrower`, Helfer-Modal-Borrower-Zeile),
+   der **Schüler-Client sieht nur „ausgemustert"** (kein Name, kein Hinweis;
+   `process_scan` strippt für `source="student"` wie bei `not_in_stock`).
+   `web/scan.js`/`web/host.html` branchen das Wording am `kind`/`status`
+   (`book_deleted` → „Ersatzanspruch …", sonst „verliehen an …"). Ablösend zur
+   früheren Idee, `[not_timely]` wie verliehen mit „verloren"-Wording zu
+   behandeln — solche Bücher bleiben auf dem `book_deleted`-Pfad.
+2. **Lager-Prüfung VOR Bestell-Prüfung.** Neue Prüf-Reihenfolge:
+   `deleted → series_already_lent → nicht-im-Lager (not_in_stock) → nicht
+   bestellt (not_enrolled)`. Ein verliehenes Buch zeigt jetzt immer
+   „verliehen", auch wenn der Schüler es gar nicht bestellt hat (früher kam
+   „Nicht bestellt" durch). `series_already_lent` (ISBN ∈ `lent_isbns`)
+   bleibt **vor** `not_in_stock`, da das Exemplar an dich selbst verliehen
+   sein kann (distributed) — sonst würde „verliehen an dich selbst"
+   gemeldet; es greift auch bei lagernden Exemplaren einer schon ausgeliehenen
+   Reihe. `book_deleted` bleibt erste Prüfung (Ersatzanspruch-Display).
+
+Kein DB-/IServ-Write — nur read-only Flags + WS-Broadcasts. Tests:
+`tests/test_booking_precheck.py` +8 (Ersatzanspruch: Durchreichung +
+Helper/Student-Unterschied für `book_deleted`; Reihenfolge:
+`not_in_stock`-vor-`not_enrolled`, `series_already_lent`-vor-`not_in_stock`,
+`series_already_lent`-bei-lagerndem-Exemplar), Suite 100 grün.
+Commit `9551f4e` (Ersatzanspruch), Reihenfolge-Update folgt.
+
 **Bugfix (2026-07-05) — Scanner reagiert nicht auf Host-Trennung:**
 `end_student()` löste die Helfer-Zuordnung serverseitig, informierte aber nie
 den Scanner-WebSocket selbst — `web/scan.html` hat keinen Host-State-Feed und

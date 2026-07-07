@@ -146,6 +146,31 @@ def test_reject_not_enrolled():
     assert res["ok"] is False and res["status"] == "not_enrolled"
 
 
+def test_reject_not_in_stock_before_not_enrolled():
+    # Verliehen (distributed) UND nicht bestellt → „nicht im Lager" geht VOR
+    # „nicht bestellt" (früher kam hier not_enrolled durch). Lager-Prüfung
+    # zuerst, damit ein verliehenes Buch immer als solches angezeigt wird.
+    res = _eval(_State(_FakeIserv(_book(isbn="978-9", distributed=True))), {"978-1"}, set())
+    assert res["ok"] is False and res["status"] == "not_in_stock"
+    assert "verliehen" in res["msg"]
+
+
+def test_reject_series_already_lent_before_not_in_stock():
+    # Reihe bereits an dich ausgeliehen (isbn in lent) UND Exemplar verliehen
+    # (distributed, z. B. dein eigenes Exemplar) → series_already_lent VOR
+    # not_in_stock, sonst wuerde „verliehen an dich selbst" gemeldet.
+    res = _eval(_State(_FakeIserv(_book(isbn="978-9", distributed=True))), set(), {"978-9"})
+    assert res["ok"] is False and res["status"] == "series_already_lent"
+
+
+def test_reject_series_already_lent_even_when_in_stock():
+    # Reihe bereits an dich ausgeliehen, aber das gescannte Exemplar liegt
+    # im Lager (available, nicht distributed) → trotzdem series_already_lent
+    # (du hast die Reihe schon, kein zweites Exemplar noetig).
+    res = _eval(_State(_FakeIserv(_book(isbn="978-9"))), set(), {"978-9"})
+    assert res["ok"] is False and res["status"] == "series_already_lent"
+
+
 def test_reject_unknown_book():
     res = _eval(_State(_FakeIserv(None)), {"978-1"}, set())
     assert res["ok"] is False and res["status"] == "unknown_book"
