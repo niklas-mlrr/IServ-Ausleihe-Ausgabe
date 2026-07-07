@@ -17,6 +17,7 @@ from ..hub import get_hub
 from ..ratelimit import join_limiter, login_limiter
 from ..sessions import (
     broadcast_displays,
+    assign_student_to_helper,
     create_student_session,
     end_student,
     gen_join_secret,
@@ -679,14 +680,9 @@ async def next_student(body: dict, session_id: str | None = Cookie(default=None)
     if not student:
         raise HTTPException(404, "Keine Schüler in der Queue")
 
-    student.status = "active"
-    student.assigned_helper = helper_token
-    helper.student_id = student.student_id
-
-    await hub.broadcast_host(state.state_snapshot())
-    helper.load_task = asyncio.create_task(
-        load_and_push_helper_student(state, hub, student, helper)
-    )
+    # Zuweisung + `loading`-Push an den Scanner (verbirgt die Queue, während
+    # der Schüler geladen wird) zentral in `assign_student_to_helper`.
+    await assign_student_to_helper(state, hub, helper, student)
 
     return {"ok": True, "student_id": student.student_id,
             "name": f"{student.lastname}, {student.firstname}"}

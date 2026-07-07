@@ -250,6 +250,10 @@ def test_advance_helper_picks_next_and_completes_previous():
     assert si is not None and si["student"]["books"] == []  # Fake liefert books=[]
     assert any(m["type"] == "worker_ready" for m in msgs)
     assert helper.student_id == 2
+    # Advance schickt `loading` (Queue verbergen), KEIN Idle-`waiting` — sonst
+    # würde die Warteschlange während des Ladens des nächsten Schülers aufblitzen.
+    assert any(m["type"] == "loading" for m in msgs)
+    assert not any(m["type"] == "waiting" for m in msgs)
 
 
 # ---------------------------------------------------------------------------
@@ -284,6 +288,10 @@ def test_assign_student_to_helper_assigns_specific_student():
     msgs = [m for _, m in hub.scanner_msgs]
     assert any(m["type"] == "student_info" for m in msgs)
     assert any(m["type"] == "worker_ready" for m in msgs)
+    # `loading`-Push: Client verbirgt die Queue, während der Schüler geladen wird
+    # (deckt den Fall, dass der Helfer keinen alten Schüler hatte → kein
+    # end_student-`loading`, dieser Send ist das einzige Signal).
+    assert any(m["type"] == "loading" for m in msgs)
 
 
 def test_pending_queue_as_list_returns_only_pending():

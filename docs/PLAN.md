@@ -838,3 +838,25 @@ Tests: 105 grün (+2 in `test_queue_flow.py`: `assign_student_to_helper`
 gezielt, `pending_queue_as_list`; 2 angepasste Assertions wegen neuem
 `queue`-Feld). Live-Verifikation am Testschüler offen. Details:
 `_logs/2026-07-07_sba_helfer_queue_anzeige.md`.
+
+**Bugfix (2026-07-07) — Queue während des Schüler-Ladens verbergen, auch bei
+Host-„Nächster":** das reine Client-`loadingStudent`-Flag reichte nicht — der
+Host-„Nächster"-Button (`/api/next-student`) triggert `advance_helper`/
+Zuweisung serverseitig, ohne dass der Helfer-Client davon weiß; und das
+`waiting`, das `end_student` beim alten Schüler schickt, renderte die Queue
+(„Warteschlange angezeigt, obwohl schon ein neuer Schüler geladen wird").
+Neue WS-Nachricht `{"type":"loading"}`: versetzt den Helfer-Client in den
+Lade-Zustand (Queue verbergen, „Schüler wird geladen …", `loadingStudent=true`,
+kein `studentActive`). Gesendet (a) von `end_student` im Advance-Kontext statt
+des Idle-`waiting` (neuer Param `helper_notify={"type":"loading"}`; Default
+`None` → weiter Idle-`waiting` für Disconnect/Skip/Reset, dort soll die Queue
+erscheinen), (b) von `assign_student_to_helper` beim Zuweisen — deckt auch den
+Fall, dass der Helfer keinen alten Schüler hatte (Host-„Nächster", „Aufrufen"
+aus der Queue-Anzeige → kein `end_student`). `/api/next-student` nutzt jetzt
+`assign_student_to_helper` (DRY, bekommt den `loading`-Send gratis). `waiting`
+heißt jetzt zuverlässig „idle" → Queue. **Lesson:** ein serverseitig
+ausgelöster Übergang am Client braucht ein eigenes Signal (`loading`), wenn
+der Client den Zustand nicht selbst initiiert hat — ein Client-Flag greift
+nur bei selbst getätigten Aktionen. Tests: `test_queue_flow.py` +Assertion
+(`advance_helper` sendet `loading`, kein `waiting`; `assign_student_to_helper`
+sendet `loading`), Suite 105 grün.

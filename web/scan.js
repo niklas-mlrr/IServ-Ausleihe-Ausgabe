@@ -222,6 +222,23 @@ function handleServerMessage(msg) {
   } else if (msg.type === 'worker_ready') {
     workerPending = false;
     setReadyStatus();
+  } else if (msg.type === 'loading') {
+    // Server beginnt, einen neuen Schüler für diesen Helfer zu laden („Weiter"/
+    // „Nächster"/„Aufrufen"). Queue verbergen, „wird geladen …" zeigen — NICHT
+    // die Warteschlange aufblitzen lassen, selbst wenn kurz vorher ein
+    // Idle-`waiting` stand (Host-„Nächster" ohne vorherigen Schüler).
+    studentActive = false;
+    workerPending = true;
+    loadingStudent = true;
+    sNameEl.textContent = '';
+    sFormEl.textContent = '';
+    sPayEl.innerHTML = '';
+    currentBooks = [];
+    resetScannedState();
+    bookRowsEl.innerHTML = '<div class="book-empty">Schüler wird geladen …</div>';
+    statusEl.classList.remove('status-book-deleted');
+    closeBookAlertModal();
+    statusEl.textContent = 'Warten…';
   } else if (msg.type === 'scan_result') {
     if (pendingScans > 0) pendingScans--;
     // Erfolgreicher Scan → Buch in der Liste als „erledigt" markieren:

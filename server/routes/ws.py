@@ -157,6 +157,7 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                     await end_student(
                         state, hub, helper.student_id,
                         queue_status="done", session_state="completed",
+                        helper_notify={"type": "loading"},  # Queue verbergen — neuer wird geladen
                     )
                 await assign_student_to_helper(state, hub, helper, target)
                 continue

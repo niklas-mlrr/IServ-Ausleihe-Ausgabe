@@ -476,6 +476,7 @@ async def end_student(
     queue_status: str,
     session_state: str,
     broadcast: bool = True,
+    helper_notify: dict | None = None,
 ) -> None:
     """Schüler beenden (Abschluss/Skip/Abbruch) für Modus A UND B.
 
@@ -484,6 +485,14 @@ async def end_student(
 
     `broadcast=False` unterdrückt den Host-Snapshot-Push — für Batch-Aufrufe
     (disconnect-all/reset-queue), die am Ende einmal selbst broadcasten.
+
+    `helper_notify`: Nachricht an den bisherigen Helfer-Scanner (Modus A).
+    Default `None` → Idle-`waiting` (Queue wird im Client angezeigt, Helfer ist
+    frei). Beim *Advance* („Weiter"/„Nächster"/„Aufrufen") übergibt der Aufrufer
+    `{"type": "loading"}`, damit der Client die Queue **nicht** zeigt, während
+    der nächste Schüler geladen wird — statt eines Idle-`waiting`, das die Queue
+    aufblitzen ließe (s. `assign_student_to_helper` für den zweiten `loading`-
+    Push beim Zuweisen).
     """
     student = state.find_student(student_id)
     if student:
@@ -520,7 +529,10 @@ async def end_student(
             # Scanner sonst ohne jede Rückmeldung mit dem alten (getrennten)
             # Schüler stehen — der Helfer sieht dann weder Trennung noch neuen
             # Wartezustand ("Alle Verbindungen trennen" wirkte sonst nur am Host).
-            await hub.send_scanner(old_helper, {
+            # Default: Idle-`waiting` (Queue anzeigen). Beim Advance übergibt der
+            # Aufrufer `{"type":"loading"}` → Client verbirgt die Queue, während
+            # der nächste Schüler geladen wird.
+            await hub.send_scanner(old_helper, helper_notify or {
                 "type": "waiting",
                 "msg": "Warte auf Schüler-Zuweisung",
                 "queue_size": state.pending_count(),
@@ -619,6 +631,7 @@ async def advance_helper(state: AppState, hub, helper) -> dict:
         await end_student(
             state, hub, helper.student_id,
             queue_status="done", session_state="completed",
+            helper_notify={"type": "loading"},  # Queue verbergen — nächster wird geladen
         )
 
     return await assign_next_pending_to_helper(state, hub, helper)
@@ -656,6 +669,12 @@ async def assign_student_to_helper(state: AppState, hub, helper, student) -> dic
     student.assigned_helper = helper.token
     helper.student_id = student.student_id
     await hub.broadcast_host(state.state_snapshot())
+    # Client in den Lade-Zustand versetzen: Queue verbergen, „wird geladen …"
+    # zeigen — bevor der (langsame) IServ-Fetch + Worker-Aufbau läuft. Deckt
+    # auch den Fall ab, dass der Helfer keinen alten Schüler hatte (Host-
+    # „Nächster", „Aufrufen" aus der Queue-Anzeige) → hier gibt es kein
+    # `end_student`-`loading`, dieser Send ist das einzige Signal.
+    await hub.send_scanner(helper.token, {"type": "loading"})
     helper.load_task = asyncio.create_task(
         load_and_push_helper_student(state, hub, student, helper)
     )
