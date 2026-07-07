@@ -9,7 +9,8 @@ let studentActive = false;          // ist gerade ein Schüler zugewiesen?
 let workerPending = false;          // Schüler zugewiesen, aber Worker noch nicht bereit
 let queueSize = null;               // zuletzt gemeldete Warteschlangengröße
 let queueList = [];                // wartende Schüler (für die Queue-Anzeige)
-let awaitingCall = false;          // Aufrufen geklickt — warte auf student_info/error
+let loadingStudent = false;        // Schüler wird geladen (next/call gesendet,
+                                  //  student_info steht noch aus) — Queue verbergen
 let waitingMsg = 'Warte auf Schüler-Zuweisung';
 
 // ---- Druck-Dialog / Buch-Status ----
@@ -177,7 +178,7 @@ bookRowsEl.addEventListener('click', (e) => {
   const sid = row ? row.dataset.studentId : null;
   if (sid == null) return;
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  awaitingCall = true;
+  loadingStudent = true;
   statusEl.textContent = 'Schüler wird aufgerufen …';
   bookRowsEl.innerHTML = '<div class="book-empty">Schüler wird geladen …</div>';
   ws.send(JSON.stringify({ type: 'call', student_id: Number(sid) }));
@@ -186,7 +187,7 @@ bookRowsEl.addEventListener('click', (e) => {
 function handleServerMessage(msg) {
   if (msg.type === 'student_info') {
     studentActive = true;
-    awaitingCall = false;  // Aufruf erfolgreich — Bücherliste ersetzt die Queue
+    loadingStudent = false;  // Schüler geladen — Bücherliste ersetzt die Queue
     const s = msg.student;
     sNameEl.textContent = `${s.lastname}, ${s.firstname}`;
     sFormEl.textContent = (s.form || '').replace(/^Klasse\s+/i, '');
@@ -258,7 +259,7 @@ function handleServerMessage(msg) {
   } else if (msg.type === 'waiting') {
     studentActive = false;
     workerPending = false;
-    awaitingCall = false;  // ggf. Aufruf wurde zurückgesetzt — Queue anzeigen
+    loadingStudent = false;  // kein Schüler (mehr) geladen — Queue anzeigen
     sNameEl.textContent = '';
     sFormEl.textContent = '';
     sPayEl.innerHTML = '';
@@ -277,9 +278,11 @@ function handleServerMessage(msg) {
   } else if (msg.type === 'queue_update') {
     if (typeof msg.queue_size === 'number') queueSize = msg.queue_size;
     if (Array.isArray(msg.queue)) queueList = msg.queue;
-    if (!studentActive && !awaitingCall) { renderWaitingStatus(); renderQueue(); }
+    // Queue nur anzeigen, wenn weder ein Schüler geladen ist noch gerade
+    // einer geladen wird (next/call bereits gesendet, student_info steht aus).
+    if (!studentActive && !loadingStudent) { renderWaitingStatus(); renderQueue(); }
   } else if (msg.type === 'error') {
-    awaitingCall = false;  // Aufruf gescheitert → Queue wieder freigeben
+    loadingStudent = false;  // Laden gescheitert → Queue wieder freigeben
     statusEl.textContent = 'Fehler: ' + (msg.msg || '');
     dotEl.className = 'dot err';
     if (!studentActive) renderQueue();
@@ -346,6 +349,7 @@ function advanceToNext() {
   currentBooks = [];
   resetScannedState();
   workerPending = true;
+  loadingStudent = true;  // nächste Schülerzugewiesen, wird gerade geladen → Queue verbergen
   statusEl.classList.remove('status-book-deleted');
   statusEl.textContent = 'Warten…';
   ws.send(JSON.stringify({ type: 'next' }));
