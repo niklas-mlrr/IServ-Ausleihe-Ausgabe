@@ -137,6 +137,15 @@
     .row-vorgemerkt  { background: rgba(230,126,34,.14); border-color: rgba(230,126,34,.55); }
     .row-ausgeliehen { background: rgba(46,125,50,.16);  border-color: rgba(46,125,50,.55); }
     .book-empty { opacity: .4; padding: 14px 4px; font-size: .9rem; }
+    /* Warteschlangen-Anzeige (kein Schüler zugewiesen): gleiche Zeilenform
+       wie die Bücherliste, aber ohne Farbgebung — transparenter Hintergrund
+       und Rand, dafür mit „Aufrufen"-Button statt des Status-Icons. */
+    .book-row.queue-row { grid-template-columns: 4.5rem 1fr auto; background: transparent; border-color: transparent; }
+    .book-row.queue-row .b-call { display: flex; justify-content: flex-end; align-items: center; }
+    .call-btn { padding: 7px 14px; font-size: .85rem; font-weight: 600; border-radius: 8px;
+      background: var(--surface-2); color: var(--fg); border: 1px solid var(--border); cursor: pointer; transition: background .2s; }
+    .call-btn:hover { background: var(--surface-3); }
+    .call-btn:active { background: var(--surface-4); }
     /* Bewegungsreduktion respektieren: FLIP-Transition praktisch sofort. */
     @media (prefers-reduced-motion: reduce) {
       .book-row { transition: transform .01ms !important; }

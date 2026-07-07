@@ -236,6 +236,11 @@ class AppState:
     def queue_as_list(self) -> list[dict]:
         return [s.as_dict() for s in self.queue]
 
+    def pending_queue_as_list(self) -> list[dict]:
+        """Nur die wartenden Schüler (status='pending') — für die Warteschlangen-
+        Anzeige im Helferclient, solange dieser keinen Schüler zugewiesen hat."""
+        return [s.as_dict() for s in self.queue if s.status == "pending"]
+
     def helpers_as_dict(self) -> dict:
         return {t: h.as_dict() for t, h in self.helper_sessions.items()}
 

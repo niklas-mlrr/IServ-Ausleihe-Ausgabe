@@ -8,6 +8,8 @@ let ws, reconnectDelay = 2000;
 let studentActive = false;          // ist gerade ein Schüler zugewiesen?
 let workerPending = false;          // Schüler zugewiesen, aber Worker noch nicht bereit
 let queueSize = null;               // zuletzt gemeldete Warteschlangengröße
+let queueList = [];                // wartende Schüler (für die Queue-Anzeige)
+let awaitingCall = false;          // Aufrufen geklickt — warte auf student_info/error
 let waitingMsg = 'Warte auf Schüler-Zuweisung';
 
 // ---- Druck-Dialog / Buch-Status ----
@@ -146,9 +148,45 @@ function renderBooks(books, animate = false) {
   }
 }
 
+// Warteschlange anzeigen, solange kein Schüler zugewiesen ist — gleiche
+// Zeilenform wie die Bücherliste, aber ohne Farbgebung (kein vorgemerkt/-
+// ausgeliehen-Tint) und mit „Aufrufen"-Button pro Zeile statt des Status-Icons.
+// Klick ruft genau diesen Schüler gezielt auf (WS `call`) — read-only gegen
+// IServ/DB; nur die lokale Helfer-Zuweisung wird gesetzt.
+function renderQueue() {
+  const list = Array.isArray(queueList) ? queueList : [];
+  if (!list.length) {
+    bookRowsEl.innerHTML = '<div class="book-empty">Warteschlange leer</div>';
+    return;
+  }
+  bookRowsEl.innerHTML = list.map(s => {
+    const form = (s.form || '').replace(/^Klasse\s+/i, '');
+    const name = `${s.lastname}, ${s.firstname}`;
+    return `<div class="book-row queue-row" data-student-id="${escapeHtml(String(s.student_id))}">`
+      + `<div class="b-fach">${escapeHtml(form)}</div>`
+      + `<div class="b-title">${escapeHtml(name)}</div>`
+      + `<div class="b-call"><button class="call-btn">Aufrufen</button></div></div>`;
+  }).join('');
+}
+
+// Aufrufen-Button in der Queue-Anzeige: gezielten Schüler anfordern.
+bookRowsEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.call-btn');
+  if (!btn) return;
+  const row = btn.closest('.queue-row');
+  const sid = row ? row.dataset.studentId : null;
+  if (sid == null) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  awaitingCall = true;
+  statusEl.textContent = 'Schüler wird aufgerufen …';
+  bookRowsEl.innerHTML = '<div class="book-empty">Schüler wird geladen …</div>';
+  ws.send(JSON.stringify({ type: 'call', student_id: Number(sid) }));
+});
+
 function handleServerMessage(msg) {
   if (msg.type === 'student_info') {
     studentActive = true;
+    awaitingCall = false;  // Aufruf erfolgreich — Bücherliste ersetzt die Queue
     const s = msg.student;
     sNameEl.textContent = `${s.lastname}, ${s.firstname}`;
     sFormEl.textContent = (s.form || '').replace(/^Klasse\s+/i, '');
@@ -220,6 +258,7 @@ function handleServerMessage(msg) {
   } else if (msg.type === 'waiting') {
     studentActive = false;
     workerPending = false;
+    awaitingCall = false;  // ggf. Aufruf wurde zurückgesetzt — Queue anzeigen
     sNameEl.textContent = '';
     sFormEl.textContent = '';
     sPayEl.innerHTML = '';
@@ -231,14 +270,19 @@ function handleServerMessage(msg) {
     statusEl.classList.remove('status-book-deleted');
     closeBookAlertModal();
     if (typeof msg.queue_size === 'number') queueSize = msg.queue_size;
+    if (Array.isArray(msg.queue)) queueList = msg.queue;
     if (msg.msg) waitingMsg = msg.msg;
     renderWaitingStatus();
+    renderQueue();
   } else if (msg.type === 'queue_update') {
     if (typeof msg.queue_size === 'number') queueSize = msg.queue_size;
-    if (!studentActive) renderWaitingStatus();
+    if (Array.isArray(msg.queue)) queueList = msg.queue;
+    if (!studentActive && !awaitingCall) { renderWaitingStatus(); renderQueue(); }
   } else if (msg.type === 'error') {
+    awaitingCall = false;  // Aufruf gescheitert → Queue wieder freigeben
     statusEl.textContent = 'Fehler: ' + (msg.msg || '');
     dotEl.className = 'dot err';
+    if (!studentActive) renderQueue();
   }
 }
 

@@ -110,6 +110,7 @@ def test_end_student_sets_status_and_releases_helper():
         "type": "waiting",
         "msg": "Warte auf Schüler-Zuweisung",
         "queue_size": st.pending_count(),
+        "queue": st.pending_queue_as_list(),
     })]
 
 
@@ -249,6 +250,52 @@ def test_advance_helper_picks_next_and_completes_previous():
     assert si is not None and si["student"]["books"] == []  # Fake liefert books=[]
     assert any(m["type"] == "worker_ready" for m in msgs)
     assert helper.student_id == 2
+
+
+# ---------------------------------------------------------------------------
+# assign_student_to_helper — gezielter Aufruf eines wartenden Schülers
+# (Helfer wählt per Button aus der Warteschlange, statt „nächster").
+# ---------------------------------------------------------------------------
+
+async def _assign_and_drain(st, hub, helper, student):
+    res = await sessions.assign_student_to_helper(st, hub, helper, student)
+    await asyncio.sleep(0)  # load_and_push_helper_student-Task abarbeiten
+    return res
+
+
+def test_assign_student_to_helper_assigns_specific_student():
+    st = _state_with_iserv()
+    hub = _FakeHub()
+    first = _add_student(st, 1, status="pending")   # würde von „nächster" gewählt
+    target = _add_student(st, 2, status="pending")  # gezielt aufrufen
+    helper = HelperSession(token="h1", name="Helfer")
+    st.helper_sessions["h1"] = helper
+
+    res = asyncio.run(_assign_and_drain(st, hub, helper, target))
+
+    assert res == {"ok": True, "student_id": 2}
+    assert target.status == "active"
+    assert target.assigned_helper == "h1"
+    assert helper.student_id == 2
+    # Der erste (ältere) Wartende bleibt unangetastet — gezielte Zuweisung
+    # nimmt NICHT automatisch den nächsten.
+    assert first.status == "pending"
+    assert first.assigned_helper is None
+    msgs = [m for _, m in hub.scanner_msgs]
+    assert any(m["type"] == "student_info" for m in msgs)
+    assert any(m["type"] == "worker_ready" for m in msgs)
+
+
+def test_pending_queue_as_list_returns_only_pending():
+    st = AppState()
+    _add_student(st, 1, status="pending")
+    _add_student(st, 2, status="active")
+    _add_student(st, 3, status="done")
+    _add_student(st, 4, status="pending")
+
+    pending = st.pending_queue_as_list()
+    assert [s["student_id"] for s in pending] == [1, 4]
+    assert all(s["status"] == "pending" for s in pending)
 
 
 # ---------------------------------------------------------------------------

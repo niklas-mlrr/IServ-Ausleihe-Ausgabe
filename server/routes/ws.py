@@ -14,6 +14,7 @@ from ..hub import get_hub
 from ..sessions import (
     advance_helper,
     apply_hidden_books,
+    assign_student_to_helper,
     booking_isbn_sets_from_info,
     end_student,
     expected_isbns_from_info,
@@ -100,9 +101,9 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
             except Exception as e:
                 await websocket.send_json({"type": "error", "msg": str(e)})
         elif student is None:
-            await websocket.send_json({"type": "waiting", "msg": "Warte auf Schüler-Zuweisung", "queue_size": state.pending_count()})
+            await websocket.send_json({"type": "waiting", "msg": "Warte auf Schüler-Zuweisung", "queue_size": state.pending_count(), "queue": state.pending_queue_as_list()})
     else:
-        await websocket.send_json({"type": "waiting", "msg": "Warte auf Schüler-Zuweisung", "queue_size": state.pending_count()})
+        await websocket.send_json({"type": "waiting", "msg": "Warte auf Schüler-Zuweisung", "queue_size": state.pending_count(), "queue": state.pending_queue_as_list()})
 
     # Host-Default „Schüler-Leihschein" (Druck-Dialog) + Bücher-Reihenfolge.
     await websocket.send_json({
@@ -131,6 +132,33 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                 # Aktuellen Schüler abschließen (kein Browser-Submit) und
                 # nächsten Wartenden auf diesen Helfer setzen.
                 await advance_helper(state, hub, helper)
+                continue
+
+            if mtype == "call":
+                # Helfer ruft einen konkreten wartenden Schüler aus der
+                # Warteschlange auf (Button in der Queue-Anzeige). Rein lokale
+                # Zuweisung — kein IServ-/DB-Schreibzugriff. Der Schüler muss
+                # noch 'pending' sein; zwischen Prüfung und Zuweisung liegt kein
+                # Await, also atomar im Eventloop (kein Doppel-Aufruf zweier
+                # Helfer auf denselben Schüler).
+                sid = raw.get("student_id")
+                target = state.find_student(sid) if sid is not None else None
+                if target is None or target.status != "pending":
+                    await websocket.send_json({
+                        "type": "error",
+                        "msg": "Schüler nicht (mehr) in der Warteschlange",
+                    })
+                    # Queue sofort nachpushen, damit der Client die aktuelle
+                    # Liste sieht (z. B. zwischenzeitlich von anderem Helfer
+                    # aufgerufen) — statt auf den nächsten Broadcast zu warten.
+                    await hub.broadcast_queue_size(state)
+                    continue
+                if helper.student_id is not None:
+                    await end_student(
+                        state, hub, helper.student_id,
+                        queue_status="done", session_state="completed",
+                    )
+                await assign_student_to_helper(state, hub, helper, target)
                 continue
 
             if mtype == "clear_book_alert":

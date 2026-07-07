@@ -63,7 +63,7 @@ def test_broadcast_host_pushes_queue_size_to_unassigned_scanners() -> None:
     asyncio.run(Hub().broadcast_host({"type": "state"}, s))
 
     # Nur der unzugewiesene Scanner bekommt die Queue-Größe.
-    assert {"type": "queue_update", "queue_size": 3} in unassigned.sent
+    assert {"type": "queue_update", "queue_size": 3, "queue": s.pending_queue_as_list()} in unassigned.sent
     assert assigned.sent == []
 
 

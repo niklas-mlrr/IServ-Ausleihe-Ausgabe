@@ -61,9 +61,12 @@ class Hub:
     async def broadcast_queue_size(self, state: AppState | None = None) -> None:
         s = state or get_state()
         qsize = s.pending_count()
+        queue = s.pending_queue_as_list()
         for helper in list(s.helper_sessions.values()):
             if helper.student_id is None and helper.ws is not None:
-                if not await self._safe_send(helper.ws, {"type": "queue_update", "queue_size": qsize}):
+                if not await self._safe_send(
+                    helper.ws, {"type": "queue_update", "queue_size": qsize, "queue": queue}
+                ):
                     helper.ws = None
 
     async def broadcast_settings(self, state: AppState | None = None) -> None:

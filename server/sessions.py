@@ -524,6 +524,7 @@ async def end_student(
                 "type": "waiting",
                 "msg": "Warte auf Schüler-Zuweisung",
                 "queue_size": state.pending_count(),
+                "queue": state.pending_queue_as_list(),
             })
 
     session = state.find_session_by_student(student_id)
@@ -634,9 +635,23 @@ async def assign_next_pending_to_helper(state: AppState, hub, helper) -> dict:
     """
     student = state.next_pending()
     if not student:
-        await hub.send_scanner(helper.token, {"type": "waiting", "msg": "Warteschlange leer", "queue_size": state.pending_count()})
+        await hub.send_scanner(helper.token, {"type": "waiting", "msg": "Warteschlange leer", "queue_size": state.pending_count(), "queue": state.pending_queue_as_list()})
         return {"ok": False, "reason": "empty"}
 
+    return await assign_student_to_helper(state, hub, helper, student)
+
+
+async def assign_student_to_helper(state: AppState, hub, helper, student) -> dict:
+    """Gezielten (wartenden) Schüler diesem Helfer zuweisen.
+
+    Genutzt von `assign_next_pending_to_helper` („nächster") und vom
+    `call`-Handler im Scanner-WS („aufrufen": Helfer wählt einen konkreten
+    Schüler aus der Warteschlange). Setzt den Schüler auf 'active', ordnet
+    ihn dem Helfer zu und stößt das Laden von Schülerinfo + Worker-Context
+    als Hintergrund-Task an. Rein lokale Zuweisung — kein IServ-/DB-Schreib.
+    Der Aufrufer stellt sicher, dass `student.status == 'pending'` ist und
+    der Helfer keinen aktiven Schüler mehr hat.
+    """
     student.status = "active"
     student.assigned_helper = helper.token
     helper.student_id = student.student_id
