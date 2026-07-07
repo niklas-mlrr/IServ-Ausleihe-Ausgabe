@@ -259,6 +259,7 @@
     const joinSecret = new URLSearchParams(location.search).get('j');
     let token = sessionStorage.getItem('mb_token');
     let ws = null, finished = false, scannerStarted = false, reconnectDelay = 2000;
+    let workerPending = false;         // Schüler zugewiesen, aber Worker noch nicht bereit
     let currentBooks = [];              // Buchliste des Schülers
     const scannedIsbns = new Set();     // in dieser Session gescannte ISBNs
     const scanOrder = new Map();        // ISBN -> Scan-Sequenz (für „zuletzt ausgegeben oben")
@@ -319,9 +320,17 @@
         document.getElementById('pair-code').textContent = msg.pairing_code;
         show('pending');
       } else if (msg.type === 'student_info') {
+        // Identität (Name/Klasse/Bezahlt) sofort; Bücherliste folgt mit
+        // `worker_ready`, sobald der Worker bereit ist.
         renderStudent(msg.student, msg.payment_overridden);
         show('active');
         startScanner();
+      } else if (msg.type === 'worker_ready') {
+        // Worker buchungsbereit: Bücherliste rendern, Status flippen, Scans frei.
+        workerPending = false;
+        currentBooks = msg.books || [];
+        renderBooks(currentBooks);
+        statusEl.textContent = 'Scanner bereit — Buch scannen';
       } else if (msg.type === 'scan_result') {
         const statusTextEl = document.getElementById('status-text');
         statusTextEl.textContent = `${escapeHtml(msg.barcode)} — ${escapeHtml(msg.msg || msg.status)}`;
@@ -419,9 +428,14 @@
         pay.innerHTML = parts.join(' · ');
       }
       if (Array.isArray(s.book_order)) bookOrder = s.book_order;
-      currentBooks = s.books || [];
+      // Bücherliste bleibt ausgeblendet, bis der Worker bereit ist (`worker_ready`):
+      // Statuszeile „Wird geladen…", Placeholder im Bücher-Bereich, Scans ignoriert.
+      workerPending = true;
+      currentBooks = [];
       scannedIsbns.clear(); scanOrder.clear(); scanSeq = 0;
-      renderBooks(currentBooks);
+      document.getElementById('book-rows').innerHTML =
+        '<div class="book-empty">Bücher werden geladen…</div>';
+      document.getElementById('status-text').textContent = 'Wird geladen…';
     }
 
     function isBookDone(b) {
@@ -551,6 +565,9 @@
 
     function onScanSuccess(value) {
       if (cooldown || value === lastValue) return;
+      // Worker noch nicht bereit (Schüler gerade gepaart, open_student läuft) —
+      // Scan ignorieren, nicht senden (wie beim ausgemusterten-Buch-Block).
+      if (workerPending) return;
       // Blockierendes Hinweis-Modal offen → Barcode ignorieren, bis der Host
       // freigibt (kein eigener Schließen-Button am Client, s. book_alert_clear).
       if (bookAlertOpen) return;
@@ -582,20 +599,22 @@
     async function initScanner(cameraId) {
       if (isRestarting) return;
       isRestarting = true; reloadBtn.disabled = true; reloadBtn.textContent = '…';
-      statusEl.textContent = 'Kamera startet…';
+      // Während des Ladens („Wird geladen…") Status nicht vom Kamera-Start
+      // überschreiben lassen — `worker_ready` setzt danach den Ready-Status.
+      if (!workerPending) statusEl.textContent = 'Kamera startet…';
       if (html5QrCode) { try { await html5QrCode.stop(); } catch (e) {} try { html5QrCode.clear(); } catch (e) {} html5QrCode = null; }
       html5QrCode = new Html5Qrcode('reader');
       try {
         await html5QrCode.start(cameraId, { fps: 15, aspectRatio: 2.0 }, onScanSuccess, () => {});
         currentCameraId = cameraId; isTorchOn = false;
         torchBtn.classList.remove('torch-on');
-        statusEl.textContent = 'Scanner bereit — Buch scannen';
+        if (!workerPending) statusEl.textContent = 'Scanner bereit — Buch scannen';
         const video = document.querySelector('#reader video');
         if (video && video.srcObject) {
           const caps = video.srcObject.getVideoTracks()[0].getCapabilities?.();
           torchBtn.disabled = !(caps && caps.torch);
         }
-      } catch (err) { statusEl.textContent = 'Kamerafehler — neu laden'; document.getElementById('dot').className = 'dot err'; }
+      } catch (err) { if (!workerPending) statusEl.textContent = 'Kamerafehler — neu laden'; document.getElementById('dot').className = 'dot err'; }
       reloadBtn.innerHTML = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>'; reloadBtn.disabled = false; isRestarting = false;
     }
 

@@ -6,6 +6,7 @@ const sPayEl = document.getElementById('s-pay');
 const bookRowsEl = document.getElementById('book-rows');
 let ws, reconnectDelay = 2000;
 let studentActive = false;          // ist gerade ein Schüler zugewiesen?
+let workerPending = false;          // Schüler zugewiesen, aber Worker noch nicht bereit
 let queueSize = null;               // zuletzt gemeldete Warteschlangengröße
 let waitingMsg = 'Warte auf Schüler-Zuweisung';
 
@@ -48,8 +49,11 @@ function renderWaitingStatus() {
 
 // Ruhezustand der Statuszeile: solange kein Schüler geladen ist (und keiner
 // gerade geladen wird), zeigt die Statuszeile immer die Warteschlangenlänge.
+// Ist ein Schüler zugewiesen, aber der Worker noch nicht bereit, steht hier
+// „Warten…" — die Bücherliste ist zwar schon da, aber Scans buchen erst nach
+// `worker_ready`.
 function setReadyStatus() {
-  if (studentActive) statusEl.textContent = 'Scanner bereit — Buch scannen';
+  if (studentActive) statusEl.textContent = workerPending ? 'Warten…' : 'Scanner bereit — Buch scannen';
   else renderWaitingStatus();
 }
 
@@ -172,7 +176,13 @@ function handleServerMessage(msg) {
     renderBooks(currentBooks);
     statusEl.classList.remove('status-book-deleted');
     closeBookAlertModal();
-    statusEl.textContent = 'Scanner bereit — Buch scannen';
+    // Bücher sofort sichtbar; Scans+„Scanner bereit"-Status aber erst, sobald
+    // der Worker bereit ist (`worker_ready`). Bis dahin „Warten…" + Scans ignor.
+    workerPending = true;
+    setReadyStatus();
+  } else if (msg.type === 'worker_ready') {
+    workerPending = false;
+    setReadyStatus();
   } else if (msg.type === 'scan_result') {
     if (pendingScans > 0) pendingScans--;
     // Erfolgreicher Scan → Buch in der Liste als „erledigt" markieren:
@@ -209,6 +219,7 @@ function handleServerMessage(msg) {
     }
   } else if (msg.type === 'waiting') {
     studentActive = false;
+    workerPending = false;
     sNameEl.textContent = '';
     sFormEl.textContent = '';
     sPayEl.innerHTML = '';
@@ -279,8 +290,9 @@ const modalNextCancelBtn = document.getElementById('modal-next-cancel');
 let scanFlashTimeout = null;
 
 // Nächster Schüler: aktuellen abschließen + nächsten aus der Queue laden.
-// Alten Schüler sofort entfernen und "Wird geladen…" zeigen, auch während
-// der neue Schüler serverseitig noch geladen wird.
+// Alten Schüler sofort entfernen und "Warten…" zeigen, auch während
+// der neue Schüler serverseitig noch geladen wird (Bücher folgen mit
+// student_info, Scan-Freigabe mit worker_ready).
 function advanceToNext() {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   sNameEl.textContent = '';
@@ -289,8 +301,9 @@ function advanceToNext() {
   bookRowsEl.innerHTML = '';
   currentBooks = [];
   resetScannedState();
+  workerPending = true;
   statusEl.classList.remove('status-book-deleted');
-  statusEl.textContent = 'Wird geladen…';
+  statusEl.textContent = 'Warten…';
   ws.send(JSON.stringify({ type: 'next' }));
 }
 
@@ -467,6 +480,9 @@ camDropdown.addEventListener('click', (e) => e.stopPropagation());
 document.addEventListener('click', () => camDropdown.classList.remove('open'));
 
 function onScanSuccess(value) {
+  // Worker noch nicht bereit (Schüler gerade zugewiesen, open_student läuft) —
+  // Scan ignorieren, nicht senden (wie beim ausgemusterten-Buch-Block).
+  if (workerPending) return;
   if (cooldown || value === lastValue) return;
   // Nächster Scan → evtl. offenes Hinweis-Modal bewusst schließen (auch Host
   // aufräumen); war keins offen, ist dismissBookAlert ein No-op.
@@ -509,7 +525,7 @@ async function initScanner(cameraId) {
   isCameraRunning = false;
   reloadBtn.disabled = true;
   reloadBtn.textContent = '...';
-  statusEl.textContent = 'Kamera startet…';
+  if (!workerPending) statusEl.textContent = 'Kamera startet…';
 
   if (html5QrCode) {
     try { await html5QrCode.stop(); } catch (e) {}

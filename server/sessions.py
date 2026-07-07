@@ -559,6 +559,9 @@ async def load_and_push_helper_student(state: AppState, hub, student, helper) ->
     apply_hidden_books(info, await get_hidden_isbns_for_form(state, info["form"]))
     helper.expected_isbns = expected_isbns_from_info(info)
     helper.vormerk_isbns, helper.lent_isbns = booking_isbn_sets_from_info(info)
+    # Modus A: Bücherliste sofort sichtbar. `worker_ready` (ohne Bücher) folgt,
+    # sobald der Worker buchungsbereit ist — bis dahin zeigt der Helferclient
+    # „Warten…" und ignoriert Scans (clientseitig).
     await hub.send_scanner(helper.token, {"type": "student_info", "student": info})
     await hub.broadcast_host(state.state_snapshot())
 
@@ -574,6 +577,8 @@ async def load_and_push_helper_student(state: AppState, hub, student, helper) ->
                 helper.token,
                 {"type": "error", "msg": f"Playwright-Fehler: {e}. Buchung manuell."},
             )
+            # Kein `worker_ready`: Worker nie bereit → Scans bleiben am Client
+            # ignoriert, Status zeigt den Fehler. Bücherliste ist bereits da.
             return
         # Stale-Guard: end_student/skip kann während open_student gelaufen sein
         # und helper.student_id auf None gesetzt haben. CancelledError trifft
@@ -594,6 +599,9 @@ async def load_and_push_helper_student(state: AppState, hub, student, helper) ->
                 log.exception("Schließen des stale Worker-Contexts fehlgeschlagen")
             return
         set_worker_session(state, student.student_id, worker_session)
+    # Worker bereit (oder Degraded-Modus ohne worker_pool): Helferclient flippt
+    # von „Warten…" auf „Scanner bereit" und gibt Scans frei.
+    await hub.send_scanner(helper.token, {"type": "worker_ready"})
 
 
 async def advance_helper(state: AppState, hub, helper) -> dict:
@@ -642,14 +650,14 @@ async def assign_next_pending_to_helper(state: AppState, hub, helper) -> dict:
 async def load_and_push_paired_student(
     state: AppState, hub, session: StudentSessionB, student, info: dict
 ) -> None:
-    """Nach erfolgreichem Pairing: Schülerinfo SOFORT ans Handy pushen, Worker danach.
+    """Nach erfolgreichem Pairing: Identität sofort ans Handy pushen, Worker danach.
 
-    `info` ist bereits im Endpoint geladen — das Handy kann seine Bestellliste
-    also unmittelbar rendern. Das Öffnen der Playwright-Worker-Session
-    (`open_student` → Browser-Navigation, mehrere Sekunden) blockiert die
-    Handy-Anzeige NICHT mehr; es läuft im Anschluss. Scannt der Schüler, bevor
-    der Worker bereit ist, meldet `handle_scan` sauber „Worker nicht bereit"
-    (der Schüler liest ohnehin erst die Liste → Worker ist rechtzeitig da).
+    `info` ist bereits im Endpoint geladen. Modus B trennt bewusst Identität und
+    Bücherliste: Name/Klasse/Bezahlstatus gehen sofort in `student_info` (ohne
+    Bücher), die Bücherliste folgt mit `worker_ready`, sobald der Worker
+    buchungsbereit ist. Bis dahin zeigt der Schülerclient „Wird geladen…" und
+    ignoriert Scans. Das Öffnen der Playwright-Worker-Session (`open_student` →
+    Browser-Navigation, mehrere Sekunden) blockiert die Identitäts-Anzeige nicht.
     """
     # Identität + Session-State festhalten — invalidate_session kann während
     # open_student die Session auf "revoked" setzen und aus student_sessions
@@ -661,12 +669,14 @@ async def load_and_push_paired_student(
     apply_hidden_books(info, await get_hidden_isbns_for_form(state, info["form"]))
     session.expected_isbns = expected_isbns_from_info(info)
     session.vormerk_isbns, session.lent_isbns = booking_isbn_sets_from_info(info)
+    # Bücher erst mit `worker_ready` senden — Identität (inkl. book_order) sofort.
+    books = info.get("books", [])
     if session.ws is not None:
         try:
             await session.ws.send_json(
                 {
                     "type": "student_info",
-                    "student": info,
+                    "student": {**info, "books": []},
                     "payment_overridden": session.payment_overridden,
                 }
             )
@@ -688,6 +698,8 @@ async def load_and_push_paired_student(
                     )
                 except Exception:
                     pass
+            # Kein `worker_ready`: Worker nie bereit → Bücherliste bleibt aus,
+            # Scans ignoriert. Host muss den Schüler überspringen/manuell lösen.
             await hub.broadcast_host(state.state_snapshot())
             return
         # Stale-Gard: invalidate_session/Modus-B-Close kann während open_student
@@ -707,6 +719,13 @@ async def load_and_push_paired_student(
             await hub.broadcast_host(state.state_snapshot())
             return
         set_worker_session(state, student.student_id, worker_session)
+    # Worker bereit (oder Degraded-Modus ohne worker_pool): Bücherliste an den
+    # Schüler pushen + Client flippt von „Wird geladen…" auf „Scanner bereit".
+    if session.ws is not None:
+        try:
+            await session.ws.send_json({"type": "worker_ready", "books": books})
+        except Exception:
+            pass
 
     await hub.broadcast_host(state.state_snapshot())
 

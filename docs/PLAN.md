@@ -748,6 +748,45 @@ Helper/Student-Unterschied für `book_deleted`; Reihenfolge:
 `series_already_lent`-bei-lagerndem-Exemplar), Suite 100 grün.
 Commit `9551f4e` (Ersatzanspruch), Reihenfolge-Update folgt.
 
+**Update (2026-07-07) — Lade-State bis Worker bereit (`worker_ready`):** Beim
+Aufrufen eines Schülers wurden bisher die komplette `student_info` (inkl.
+Bücherliste) sofort gepusht und der Playwright-Worker erst danach geöffnet
+(`open_student`, mehrere Sekunden Browser-Navigation) — die Bücherliste/der
+„Scanner bereit"-Status erschienen, bevor der Worker buchungsbereit war, und
+Früh-Scans liefen auf „Worker-Session nicht bereit". Neue getrennte Push-Phase
+über die WS-Nachricht `worker_ready` (signalisiert „Worker buchungsbereit, Scans
+frei"), client-spezifisch:
+
+- **Modus A (`web/scan.js`):** `student_info` bleibt vollständig (Bücher sofort
+  sichtbar). `worker_ready` (ohne Bücher-Payload) flippt nur Statuszeile von
+  „Warten…" auf „Scanner bereit — Buch scannen" + gibt Scans frei. Bis dahin
+  ignoriert `onScanSuccess` Scans clientseitig (früher „Wird geladen…"-Text
+  → jetzt „Warten…" konsistent mit `workerPending`-Flag).
+- **Modus B (`web/student.html`):** `student_info` künftig **ohne Bücher**
+  (`books: []`, nur Name/Klasse/Bezahlt + `book_order`). `worker_ready` trägt
+  die Bücherliste und flippt Status von „Wird geladen…" auf „Scanner bereit" +
+  gibt Scans frei. Bücher-Bereich zeigt bis dahin Placeholder
+  „Bücher werden geladen…"; `onScanSuccess` ignoriert Scans (wie der
+  ausgemusterte-Buch-Block via `workerPending`).
+
+Server: `load_and_push_helper_student` (Modus A) sendet `worker_ready` nach
+`set_worker_session` (oder sofort ohne `worker_pool`); bei Playwright-Fehler
+nur `error`, kein `worker_ready` (Worker nie bereit → Scans bleiben ignoriert,
+Helfer hat Bücher schon). `load_and_push_paired_student` (Modus B) sendet
+`student_info` ohne Bücher + `worker_ready` mit Büchern; bei Fehler nur
+`error` (Bücherliste bleibt aus, Host muss eingreifen). Stale-Guards in beiden
+Routinen senden kein `worker_ready` (neuer Schüler wird separat geladen).
+Reconnect (`routes/ws.py` ×2): `student_info` neu + `worker_ready`, wenn Worker
+bereits in `state.student_worker_sessions` registriert oder kein Lade-Task
+(`helper.load_task`/`session.load_task`) mehr läuft — sonst liefert der Task
+es an die neue WS.
+
+Nur GET / read-only — `get_student_info` (GET) + `open_student` (Browser-
+Navigation ohne Submit), keine DB-/IServ-Writes, keine neuen Endpoints.
+Tests: `tests/test_queue_flow.py` +Assertion (`student_info` mit `books==[]`
++ `worker_ready` nach `_advance_and_drain`), Suite grün. Live-Verifikation am
+Testschüler noch offen (read-only, braucht Niklas+Lukas-Freigabe).
+
 **Bugfix (2026-07-05) — Scanner reagiert nicht auf Host-Trennung:**
 `end_student()` löste die Helfer-Zuordnung serverseitig, informierte aber nie
 den Scanner-WebSocket selbst — `web/scan.html` hat keinen Host-State-Feed und

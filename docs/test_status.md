@@ -179,6 +179,23 @@
       (offen: None €)" mehr. Logik-Review (kein echter Nicht-angemeldet-
       Schüler auf Prod verfügbar).
 
+### Neu 2026-07-07 (Lade-State bis Worker bereit — `worker_ready`)
+
+- [ ] **Modus B live (`web/student.html`):** nach Pairing Statuszeile „Wird
+      geladen…", Name/Klasse/Bezahlt sichtbar, Bücher-Bereich zeigt Placeholder
+      „Bücher werden geladen…", Scans tun nichts. Sobald Worker ready
+      (`worker_ready`-Nachricht): Bücherliste erscheint, Status → „Scanner
+      bereit — Buch scannen", Scans funktionieren. **Unit:** Assertion in
+      `tests/test_queue_flow.py::test_advance_helper_picks_next_and_completes_previous`
+      (Modus A: `student_info` mit `books==[]` + `worker_ready`). Live am
+      Testschüler offen (read-only, kein Enter — Niklas+Lukas-Freigabe).
+- [ ] **Modus A live (`web/scan.js`):** nach Aufruf Bücherliste sofort sichtbar,
+      Status „Warten…", Scans ignoriert. Sobald Worker ready: Status →
+      „Scanner bereit — Buch scannen", Scans funktionieren.
+- [ ] **Reconnect (Seite neu laden) in aktiver Session** (Modus A + B): Worker
+      bereits offen → `worker_ready` + Bücher sofort wiederhergestellt (nicht
+      „Warten…"/„Wird geladen…" hängen bleiben).
+
 ### Aus dem bisherigen Plan (Phase 3/4)
 
 - [ ] **Lasttest: 5 parallele Schüler-Sessions** (Modus B) — `WORKER_CONTEXTS`

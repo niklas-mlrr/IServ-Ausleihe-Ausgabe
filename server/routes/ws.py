@@ -88,7 +88,15 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                 apply_hidden_books(info, await get_hidden_isbns_for_form(state, student.form))
                 helper.expected_isbns = expected_isbns_from_info(info)
                 helper.vormerk_isbns, helper.lent_isbns = booking_isbn_sets_from_info(info)
+                # Modus A: Bücherliste sofort (wie bisher). `worker_ready` wird
+                # nur dann weggelassen, wenn der Lade-Task noch läuft und den
+                # Ready-Push selbst liefert — sonst würde der Helferclient in
+                # „Warten…" stecken bleiben.
                 await websocket.send_json({"type": "student_info", "student": info})
+                load_inflight = helper.load_task is not None and not helper.load_task.done()
+                worker_present = state.student_worker_sessions.get(helper.student_id) is not None
+                if not load_inflight or worker_present:
+                    await websocket.send_json({"type": "worker_ready"})
             except Exception as e:
                 await websocket.send_json({"type": "error", "msg": str(e)})
         elif student is None:
@@ -293,7 +301,9 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
     if session.state == "pending_pairing":
         await websocket.send_json({"type": "pending", "pairing_code": session.pairing_code})
     elif session.state == "paired" and session.student_id is not None:
-        # Reconnect nach Pairing: Schülerinfo erneut senden.
+        # Reconnect nach Pairing: Identität (ohne Bücher) erneut senden; die
+        # Bücherliste kommt mit `worker_ready` — sofort, wenn der Worker bereits
+        # steht, sonst liefert sie der noch laufende Lade-Task.
         try:
             info = await state.iserv.get_student_info(session.student_id, state.selected_schoolyear)
             qs = state.find_student(session.student_id)
@@ -302,11 +312,16 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
             apply_hidden_books(info, await get_hidden_isbns_for_form(state, info["form"]))
             session.expected_isbns = expected_isbns_from_info(info)
             session.vormerk_isbns, session.lent_isbns = booking_isbn_sets_from_info(info)
+            books = info.get("books", [])
             await websocket.send_json({
                 "type": "student_info",
-                "student": info,
+                "student": {**info, "books": []},
                 "payment_overridden": session.payment_overridden,
             })
+            load_inflight = session.load_task is not None and not session.load_task.done()
+            worker_present = state.student_worker_sessions.get(session.student_id) is not None
+            if not load_inflight or worker_present:
+                await websocket.send_json({"type": "worker_ready", "books": books})
             # Blockierendes Ausgemustert-Hinweis-Modal überlebt einen Reconnect
             # (z. B. Seiten-Reload) — erst der Host darf es per Button schließen.
             if session.book_alert_open and session.book_alert_payload:

@@ -242,6 +242,12 @@ def test_advance_helper_picks_next_and_completes_previous():
     assert prev.status == "done"            # vorheriger abgeschlossen
     assert nxt.status == "active"           # nächster aktiv
     assert nxt.assigned_helper == "h1"
+    # Modus A: Bücher sofort in `student_info`; `worker_ready` (ohne Pool sofort)
+    # flippt den Helferclient von „Warten…" auf „Scanner bereit".
+    msgs = [m for _, m in hub.scanner_msgs]
+    si = next((m for m in msgs if m["type"] == "student_info"), None)
+    assert si is not None and si["student"]["books"] == []  # Fake liefert books=[]
+    assert any(m["type"] == "worker_ready" for m in msgs)
     assert helper.student_id == 2
 
 
