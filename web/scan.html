@@ -45,8 +45,38 @@
       display: flex; flex-direction: column;
     }
 
-    /* ---- Obere Leiste: Zahnrad | Kamera | Torch/Sound (52 + 7 + 610.5 + 7 + 52 px) ---- */
-    .top-bar { display: flex; gap: 7px; align-items: flex-start; }
+    /* ---- Obere Sektion: Steuerleiste (Kamera-Zeile) + Statuszeile.
+       Normal: zwei Grid-Zeilen (top / status). Im Menü-Modus (.app.menu-open)
+       kollabiert das Grid zu EINER Zeile mit drei Spalten
+       (Menü 52px | Status 1fr | Lupe 52px) — die Statuszeile rückt auf die
+       Höhe des Menü-Buttons, der restliche Inhalt darunter wandert mit nach
+       oben (per JS-FLIP animiert). ---- */
+    .top-section {
+      display: grid;
+      grid-template-areas: "top" "status";
+      grid-template-rows: auto auto;
+      row-gap: 7px; column-gap: 7px;
+    }
+    .top-bar { grid-area: top; display: flex; gap: 7px; align-items: flex-start; }
+    .status-bar { grid-area: status; }
+    .search-btn { display: none; }
+    .app.menu-open .top-section {
+      grid-template-areas: "menu status search";
+      grid-template-columns: 52px 1fr 52px;
+      grid-template-rows: auto;
+    }
+    .app.menu-open .top-bar { grid-area: menu; }
+    .app.menu-open .status-bar { grid-area: status; }
+    .app.menu-open .search-btn { grid-area: search; display: flex; }
+    /* Im Menü-Modus verschwinden Kamerafeld + alle Steuer-Buttons; nur der
+       Menü-Button (links) und die Lupe (rechts) bleiben, dazwischen #status. */
+    .app.menu-open #gear-btn,
+    .app.menu-open #cam-dropdown,
+    .app.menu-open #reader,
+    .app.menu-open .right-col,
+    .app.menu-open #print-btn,
+    .app.menu-open #next-btn { display: none; }
+
     .gear-wrap { position: relative; display: flex; flex-direction: column; gap: 7px; width: 52px; }
     .gear-wrap button { width: 52px; height: 52px; }
     #reader {
@@ -79,6 +109,18 @@
     .right-col button { font-size: 1.4rem; }
     .torch-on { background: #4caf50 !important; }
     .sound-on { background: #4caf50 !important; }
+    /* Lupen-Button (Menü-Modus): quadratisch wie die rechten Steuer-Buttons,
+       geometrisches Line-Icon (Kreis + Strich) im Stil der anderen Icons.
+       Im Normalmodus display:none; im Menü-Modus blendet er per opacity ein. */
+    .search-btn {
+      width: 52px; height: 52px; border: none; border-radius: 8px;
+      background: var(--surface-2); color: var(--fg); font-size: 1.4rem;
+      cursor: pointer; align-items: center; justify-content: center;
+      opacity: 0; transition: opacity .25s ease, background .2s;
+    }
+    .app.menu-open .search-btn { opacity: 1; }
+    .search-btn:hover { background: var(--surface-3); }
+    .search-btn:active { background: var(--surface-4); }
 
     /* ---- Kamera-Dropdown (über Zahnrad) ---- */
     .cam-dropdown {
@@ -91,8 +133,10 @@
     .cam-dropdown select { flex: 1; padding: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .cam-dropdown #reload-btn { padding: 10px 12px; font-size: 1.1rem; }
 
-    /* ---- Statuszeile: Höhe passt sich dem Text an (wie die Buchzeilen) ---- */
-    .status-bar { display: flex; gap: 7px; align-items: stretch; margin-top: 7px; }
+    /* ---- Statuszeile: Höhe passt sich dem Text an (wie die Buchzeilen) ----
+       Abstand nach oben kommt vom .top-section-Grid (row-gap), nicht mehr über
+       margin-top — sonst verdoppelt er sich. ---- */
+    .status-bar { display: flex; gap: 7px; align-items: stretch; }
     .status-bar button { width: 52px; height: auto; font-size: 1.2rem; flex-shrink: 0; }
     #status {
       flex: 1; min-width: 0; max-width: 610.5px; padding: 8px 14px; border-radius: 8px;
@@ -187,6 +231,7 @@
 </head>
 <body>
   <div class="app">
+  <div class="top-section">
     <div class="top-bar">
       <div class="gear-wrap">
         <button id="menu-btn" title="Menü"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></svg></button>
@@ -208,6 +253,11 @@
       <div id="status"><span class="dot" id="dot"></span><span id="status-text">Verbinde…</span></div>
       <button id="next-btn" title="Nächster Schüler"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg></button>
     </div>
+
+    <!-- Lupen-Button (nur im Menü-Modus sichtbar): geometrisches Icon
+         (Kreis + Strich) im Stil der anderen Line-Icons. Funktion folgt. -->
+    <button id="search-btn" class="search-btn" type="button" title="Lupe"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>
+  </div>
 
     <div class="name-row">
       <div class="s-name" id="s-name"></div>

@@ -392,6 +392,11 @@ const printBtn = document.getElementById('print-btn');
 const nextBtn = document.getElementById('next-btn');
 const camDropdown = document.getElementById('cam-dropdown');
 const readerEl = document.getElementById('reader');
+const searchBtn = document.getElementById('search-btn');
+const appEl = document.querySelector('.app');
+const statusbarEl = document.querySelector('.status-bar');
+const nameRowEl = document.querySelector('.name-row');
+const bookWrapEl = document.querySelector('.book-table-wrap');
 const bookAlertModal = document.getElementById('book-alert-modal');
 const bookAlertTitleEl = document.getElementById('book-alert-title');
 const bookAlertTextEl = document.getElementById('book-alert-text');
@@ -689,6 +694,33 @@ function setMenuTitle() {
 }
 setMenuTitle();
 
+// ---- Menü-Modus: Steuerleiste kollabieren, Statuszeile + Inhalt darunter
+// fahren animiert nach oben (bzw. beim Schließen wieder zurück). Die Bewegung
+// läuft als FLIP: Position vor dem Klassen-Toggle messen, Klasse umschalten,
+// dann die Differenz als inverse transform anwenden und nach 0 transitionen.
+// So animiert auch der Wechsel des CSS-Grid (.top-section von zwei Zeilen auf
+// eine), der selbst nicht transitionierbar ist. ----
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+function flipAnimate(open) {
+  const targets = [statusbarEl, nameRowEl, bookWrapEl];
+  const firsts = targets.map(t => t.getBoundingClientRect());
+  appEl.classList.toggle('menu-open', open);
+  targets.forEach((t, i) => {
+    const last = t.getBoundingClientRect();
+    const dy = firsts[i].top - last.top;
+    if (!dy) return;
+    t.style.transition = 'none';
+    t.style.transform = `translateY(${dy}px)`;
+    // reflow erzwingen, damit die Start-Transform greift, bevor wir nach 0 gehen.
+    t.offsetWidth;
+    t.style.transition = reduceMotion ? 'transform .01ms' : 'transform .35s cubic-bezier(.22,.61,.36,1)';
+    t.style.transform = '';
+    t.addEventListener('transitionend', () => {
+      t.style.transition = ''; t.style.transform = '';
+    }, { once: true });
+  });
+}
+
 function openPeek() {
   peeking = true;
   setMenuTitle();
@@ -696,6 +728,9 @@ function openPeek() {
   // Queue sofort aus letzter bekannter Liste rendern; Antwort/Updates ziehen sie nach.
   renderPeekStatus();
   renderQueue();
+  // Zuletzt FLIP: Erst hier messen, damit #status- und Queue-Inhalt bereits
+  // final sind und die Ziel-Position stimmt.
+  flipAnimate(true);
 }
 
 function closePeek() {
@@ -705,6 +740,7 @@ function closePeek() {
   // Bücherliste des Hintergrund-Schülers wiederherstellen.
   renderBooks(currentBooks);
   setReadyStatus();
+  flipAnimate(false);
 }
 
 menuBtn.addEventListener('click', (e) => {
@@ -714,6 +750,13 @@ menuBtn.addEventListener('click', (e) => {
   // sichtbar (Idle). Im Lade-Zustand (loadingStudent) ebenfalls nicht umschalten.
   if (!studentActive || loadingStudent) return;
   openPeek();
+});
+
+// Lupen-Button (nur im Menü-Modus sichtbar). Funktion folgt später —
+// vorerst ein No-op-Stub, der das Event schluckt (kein Default, kein Bubbling).
+searchBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  // TODO: Funktion des Lupen-Buttons — folgt.
 });
 
 function onScanSuccess(value) {
