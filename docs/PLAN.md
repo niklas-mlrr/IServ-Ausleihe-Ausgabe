@@ -466,6 +466,18 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
       `docs/test_status.md`,
       `~/cc/_logs/2026-07-05_sba_hide_book_series_and_reload_gotcha.md`,
       `~/cc/wiki/40_experience_logs/lessons_learned.md`.
+- [x] **Serverseitige Persistenz der Buchreihenfolge/Ausblendung** (2026-07-08) —
+      `book_orders_by_grade` + `hidden_isbns_by_grade` waren bislang reiner
+      In-Memory-State (weg beim Neustart). Neues `server/booklist_store.py`
+      speichert beide als einzelner globaler Satz in `data/booklist_settings.json`
+      (atomar, `data/` gitignored). Startup lädt sie (`app.py` lifespan, non-fatal);
+      `POST /api/booklist-order`/`POST /api/booklist-hidden` schreiben nach jeder
+      Mutation weg. Schuljahreswechsel wischt die Konfiguration **nicht mehr** —
+      nur `form_catalog_cache` (ISBNs jahresspezifisch); `reset_booklist_orders()`
+      bleibt als Utility. ISBN-Drift zwischen Schuljahren fängt `normalize_book_order`
+      + `hidden & catalog` beim Lesen ab: neue Katalog-Bücher sichtbar ans Ende,
+      weggefallene gedroppt. Tests: `tests/test_booklist_store.py` (+8); Suite grün.
+      **Manueller Smoke am Gerät offen** (Neustart → Konfiguration wieder da).
 - [ ] End-to-End-Test mit ausgemusterten Büchern **inkl. Buchung** (wartet auf Buchungstest-Freigabe Niklas + Lukas)
 
 ### Phase 3 — Generalprobe Teil 1 (vor Ferienbeginn, Anfang Juli)

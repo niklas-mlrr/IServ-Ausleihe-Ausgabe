@@ -28,6 +28,16 @@ async def lifespan(app: FastAPI):
 
     state.iserv = IsServClient(cfg.iserv_domain, cfg.iserv_username, cfg.iserv_password)
 
+    # Bücher-Reihenfolge/Ausblendung aus letzter Sitzung laden (Persistenz):
+    # reine Datei-IO, non-fatal — Fehler lässt den State leer wie ohne Persistenz.
+    from .booklist_store import load as load_booklist_state
+    try:
+        state.book_orders_by_grade, state.hidden_isbns_by_grade = load_booklist_state()
+        log.info("Bücher-Reihenfolge/Ausblendung geladen: %d Jahrgänge",
+                 len(state.book_orders_by_grade))
+    except Exception:
+        log.exception("Laden der booklist-Persistenz fehlgeschlagen (non-fatal)")
+
     # Liegengebliebene Druck-Temp-PDFs vom letzten Lauf wegräumen (win-default-Leak).
     from .printing import cleanup_stale_print_tempfiles
     try:

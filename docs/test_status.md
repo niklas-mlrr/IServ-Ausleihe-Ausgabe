@@ -147,6 +147,22 @@
       Live-Effekt bei bereits geladenem Schüler bewusst nicht sofort — analog
       zur bestehenden Bücher-Reihenfolge, erst beim nächsten Laden/Reconnect).
 
+### Neu 2026-07-08 (Serverseitige Persistenz der Buchreihenfolge/Ausblendung)
+
+- [x] **Persistenz `data/booklist_settings.json`** (`server/booklist_store.py`):
+      `book_orders_by_grade` + `hidden_isbns_by_grade` werden beim Start geladen
+      (`app.py` lifespan) und bei jeder Änderung (`POST /api/booklist-order`,
+      `POST /api/booklist-hidden`) atomar weggeschrieben. Einziger globaler Satz
+      (nicht pro Schuljahr) — beim Schuljahreswechsel bleibt die Konfiguration
+      erhalten, nur `form_catalog_cache` wird geleert (ISBNs jahresspezifisch).
+      ISBN-Drift fängt `normalize_book_order` + `hidden & catalog` ab: neue
+      Katalog-Bücher sichtbar ans Ende, weggefallene gedroppt (Anforderung).
+      Unit-getestet (`tests/test_booklist_store.py`: Round-Trip, fehlende/
+      korrupte Datei, data-Dir-Anlage, deterministische Serialisierung,
+      neue-ISBNs-ans-Ende, Nicht-String-Einträge gedroppt). Schreib-/Ladefehler
+      non-fatal (In-Memory-State bleibt Leading). **Manueller Smoke am Gerät
+      noch offen** (Serverneustart → Konfiguration wieder da).
+
 ### Aus Review Tier 2 (2026-07-05, PLAN §5 Phase 2)
 
 - [x] **`current_books`-Jahrgangsfilter entfernt (2026-07-06).** Der

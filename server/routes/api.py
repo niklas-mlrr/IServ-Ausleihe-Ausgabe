@@ -12,6 +12,7 @@ from pathlib import Path
 from fastapi import APIRouter, Cookie, HTTPException, Request, Response
 
 from ..book_order import get_book_order_for_form, normalize_book_order
+from ..booklist_store import save as save_booklist_state
 from ..config import get_config
 from ..hub import get_hub
 from ..ratelimit import join_limiter, login_limiter
@@ -182,7 +183,11 @@ async def select_schoolyear(body: dict, session_id: str | None = Cookie(default=
     state.active_form = None
     state.queue = []
     state.reset_class_book_order()
-    state.reset_booklist_orders()  # andere Booklists -> vorkonfigurierte Reihenfolgen weg
+    # Reihenfolge/Ausblendung bleiben erhalten (serverseitig persistiert, global
+    # über alle Schuljahre); `normalize_book_order` + `hidden & catalog` fangen
+    # ISBN-Drift zum anderen Schuljahr ab. Nur der Katalog-Cache muss weg, da
+    # die ISBNs jahresspezifisch sind.
+    state.form_catalog_cache.clear()
     await hub.broadcast_host(state.state_snapshot())
     return {"ok": True, "selected": schoolyear}
 
@@ -284,6 +289,17 @@ async def students_for_class(form: str, session_id: str | None = Cookie(default=
 # noch der Katalog-Aufbau für die aktive Klasse (`select_class` ruft ihn auf).
 # ---------------------------------------------------------------------------
 
+def _persist_booklist_settings(state) -> None:
+    """Aktuellen jahrgangsweiten Reihenfolge-/Ausblendungs-Stand auf die
+    Server-Persistenz (`data/booklist_settings.json`) wegschreiben. Non-fatal —
+    Schreibfehler werden geloggt, der In-Memory-State bleibt Leading und der
+    Endpoint crasht nicht."""
+    try:
+        save_booklist_state(state.book_orders_by_grade, state.hidden_isbns_by_grade)
+    except Exception:
+        log.exception("Speichern der booklist-Einstellungen fehlgeschlagen (non-fatal)")
+
+
 async def _ensure_class_catalog(state) -> None:
     """Katalog (ausleihbare Jahrgangs-Bücher) für die aktive Klasse bauen und
     cachen, falls noch nicht für diese Klasse geschehen. `book_order` wird beim
@@ -376,6 +392,7 @@ async def set_booklist_order(
     catalog_isbns = [b["isbn"] for b in catalog]
     order = normalize_book_order(catalog_isbns, requested)
     state.book_orders_by_grade[grade] = order
+    _persist_booklist_settings(state)
     hub = get_hub()
     # Jeder Helfer bekommt (unabhängig von der aktiven Klasse) seine eigene,
     # zum Jahrgang seines zugewiesenen Schülers passende Reihenfolge.
@@ -416,6 +433,7 @@ async def set_booklist_hidden(
     catalog_isbns = {b["isbn"] for b in catalog}
     hidden = {isbn for isbn in requested if isinstance(isbn, str) and isbn in catalog_isbns}
     state.hidden_isbns_by_grade[grade] = hidden
+    _persist_booklist_settings(state)
     hub = get_hub()
     await hub.broadcast_settings()
     return {"ok": True, "grade": grade, "hidden": sorted(hidden)}
