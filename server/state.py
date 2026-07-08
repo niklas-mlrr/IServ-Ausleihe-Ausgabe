@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Literal
@@ -47,6 +48,11 @@ class HelperSession:
     ws: object | None = None  # WebSocket (avoid import cycle)
     created_at: datetime = field(default_factory=datetime.now)
     last_scan: str | None = None
+    # Klasse (Kontext), die dieser Helfer bedient. „Nächster"/„Aufrufen" zieht
+    # aus der Queue dieses Kontexts; `None` = noch keiner Klasse zugewiesen
+    # (Fallback auf den aktiven Kontext, s. next_pending). Rein transient — kein
+    # IServ-/DB-Zustand. Umbindbar per /api/helper/{token}/class.
+    context_id: str | None = None
     # ISBNs des aktuell zugewiesenen Schülers (Anmeldung + bereits ausgeliehen),
     # für die Scan-Vorabprüfung (analog Modus B).
     expected_isbns: set[str] = field(default_factory=set)
@@ -81,6 +87,7 @@ class HelperSession:
             "name": self.name,
             "student_id": self.student_id,
             "connected": self.ws is not None,
+            "context_id": self.context_id,
             "last_scan": self.last_scan,
             "created_at": self.created_at.isoformat(),
         }
@@ -146,12 +153,39 @@ class DisplaySession:
     created_at: datetime = field(default_factory=datetime.now)
 
 
+@dataclass
+class ClassContext:
+    """Eine parallel bedienbare Klasse („Klassen-Tab" am Host).
+
+    Jeder Kontext hat eine eigene Queue + eigenen Bücher-Katalog / eigene
+    Reihenfolge. Helfer werden an einen Kontext gebunden (`HelperSession.
+    context_id`); Modus B, Schuljahr und jahrgangsweite Reihenfolgen bleiben
+    global. `implicit=True` markiert einen Übergangs-Kontext, der nur durch
+    den Kompat-Zugriff (s. AppState) entstanden ist — er wird aus dem Snapshot
+    ausgeblendet und beim ersten echten `open_context` aufgeräumt.
+    """
+
+    id: str
+    form: str
+    queue: list[QueueStudent] = field(default_factory=list)
+    book_order: list[str] = field(default_factory=list)
+    class_catalog: list[dict] = field(default_factory=list)
+    class_catalog_form: str | None = None
+    class_catalog_grade: int | None = None
+    implicit: bool = False
+
+
 class AppState:
     def __init__(self) -> None:
-        self.active_form: str | None = None
+        # --- Klassen-Kontexte (Multi-Tab) ---
+        # id -> Kontext. Der aktive Kontext (`active_context_id`) ist der gerade
+        # am Host fokussierte Klassen-Tab; er ist die Quelle für die Kompat-
+        # Felder `queue`/`active_form`/`book_order`/`class_catalog*` weiter unten.
+        self.contexts: dict[str, ClassContext] = {}
+        self.active_context_id: str | None = None
         # Gewähltes Schuljahr (ID wie '2025/2026'); None = aktuelles Schuljahr.
+        # Schuljahr ist global (in den Einstellungen gewählt), nicht pro Kontext.
         self.selected_schoolyear: str | None = None
-        self.queue: list[QueueStudent] = []
         self.helper_sessions: dict[str, HelperSession] = {}
         # session_id -> letzter Zugriff (für gleitendes TTL, siehe Methoden unten).
         self.host_sessions: dict[str, datetime] = {}
@@ -187,17 +221,10 @@ class AppState:
         # Einstellungen-Dialog: am Host gewählter Leihschein-Drucker. None =
         # PRINTER_NAME aus der .env bzw. Systemstandard. Reiner In-Memory-State.
         self.printer_name_override: str | None = None
-        # Klassenweite Bücher-Reihenfolge für den Scanner (per Drag & Drop am Host
-        # konfiguriert). Gilt für die ganze Klasse und bleibt beim Schülerwechsel
-        # bestehen; erst ein Klassen-/Schuljahreswechsel setzt sie zurück.
-        self.book_order: list[str] = []                 # konfigurierte ISBN-Sequenz
-        self.class_catalog: list[dict] = []             # [{isbn,title,subject}] Union der Klasse
-        self.class_catalog_form: str | None = None      # Cache-Key (für welche Klasse)
-        self.class_catalog_grade: int | None = None     # Jahrgang der aktiven Klasse
         # Jahrgangsweite Bücher-Reihenfolgen (im Einstellungen-Dialog vorab pro
         # Bücherliste gesetzt). grade -> ISBN-Sequenz. Speist beim Klassenladen
-        # `book_order` (Jahrgang der Klasse). Reiner In-Memory-State, kein DB-/
-        # IServ-Write. Wird erst beim Schuljahreswechsel geleert.
+        # den Kontext-`book_order` (Jahrgang der Klasse). Reiner In-Memory-State,
+        # kein DB-/IServ-Write. Wird erst beim Schuljahreswechsel geleert.
         self.book_orders_by_grade: dict[int, list[str]] = {}
         # Ausgeblendete Buchreihen pro Jahrgang (Einstellungen-Dialog, „Ausblenden"-
         # Button je Buch). Ausgeblendete ISBNs werden beim Scannen nicht mehr als
@@ -213,14 +240,145 @@ class AppState:
         # Schuljahreswechsel geleert.
         self.form_catalog_cache: dict[str, tuple[int | None, list[str]]] = {}
 
-    def reset_class_book_order(self) -> None:
-        """Aktive Klassen-Reihenfolge + Katalog-Cache leeren (Klassen-/
-        Schuljahreswechsel, Queue leeren). Die jahrgangsweiten Reihenfolgen
-        (`book_orders_by_grade`) bleiben bestehen — sie gelten schuljahrweit."""
-        self.book_order = []
-        self.class_catalog = []
-        self.class_catalog_form = None
-        self.class_catalog_grade = None
+    # -----------------------------------------------------------------
+    # Kontext-Verwaltung
+    # -----------------------------------------------------------------
+
+    @property
+    def active_context(self) -> ClassContext | None:
+        """Der aktuell fokussierte Klassen-Tab oder None."""
+        if self.active_context_id is None:
+            return None
+        return self.contexts.get(self.active_context_id)
+
+    def _ctx_or_active(self, context_id: str | None) -> ClassContext | None:
+        if context_id is not None:
+            return self.contexts.get(context_id)
+        return self.active_context
+
+    def ensure_active_context(self) -> ClassContext:
+        """Aktiven Kontext liefern; falls keiner existiert, einen impliziten
+        anlegen (Kompat-Pfad, s. Kompat-Properties). Implizite Kontexte sind
+        Übergangs-Speicher für Code, der noch nicht auf explizite Kontexte
+        umgestellt ist (z. B. Unit-Tests, die `state.queue.append` nutzen); sie
+        werden aus dem Snapshot ausgeblendet und beim ersten echten `open_context`
+        aufgeräumt."""
+        ctx = self.active_context
+        if ctx is not None:
+            return ctx
+        ctx = ClassContext(id=uuid.uuid4().hex[:12], form="", implicit=True)
+        self.contexts[ctx.id] = ctx
+        self.active_context_id = ctx.id
+        return ctx
+
+    def open_context(self, form: str) -> ClassContext:
+        """Neuen echten Klassen-Kontext öffnen und aktivieren. Einen noch
+        leeren impliziten Übergangs-Kontext aufräumen (nicht mehr nötig)."""
+        # Impliziten Kontext aufräumen, falls er noch leer/unbenutzt ist.
+        for cid, c in list(self.contexts.items()):
+            if c.implicit and not c.queue and not c.book_order and not c.class_catalog:
+                self.contexts.pop(cid, None)
+                if self.active_context_id == cid:
+                    self.active_context_id = None
+        ctx = ClassContext(id=uuid.uuid4().hex[:12], form=form)
+        self.contexts[ctx.id] = ctx
+        self.active_context_id = ctx.id
+        return ctx
+
+    def close_context(self, context_id: str) -> ClassContext | None:
+        """Kontext entfernen; falls er aktiv war, auf einen verbleibenden
+        echten Kontext umschalten (oder None). Gibt den entfernten Kontext
+        zurück bzw. None, falls er nicht existierte."""
+        ctx = self.contexts.pop(context_id, None)
+        if ctx is None:
+            return None
+        if self.active_context_id == context_id:
+            real = next(
+                (c for c in self.contexts.values() if not c.implicit),
+                None,
+            )
+            self.active_context_id = real.id if real else None
+        return ctx
+
+    def set_active_context(self, context_id: str | None) -> None:
+        if context_id is None or context_id in self.contexts:
+            self.active_context_id = context_id
+
+    # -----------------------------------------------------------------
+    # Kompat-Properties: `queue`/`active_form`/`book_order`/`class_catalog*`
+    # delegieren auf den aktiven Kontext. Bestehender Single-Context-Code
+    # (sessions/hub/ws/api) und Unit-Tests greifen weiterhin über `state.queue`
+    # etc. zu; Multi-Kontext-Endpoints nutzen die expliziten Kontext-Methoden
+    # (next_pending(context_id), queue_as_list(context_id), …). Übergangs-
+    # Schim (Strangler-Pattern) — entfernt, sobald alle Stellen kontextbewusst
+    # sind.
+    # -----------------------------------------------------------------
+
+    @property
+    def queue(self) -> list[QueueStudent]:
+        return self.ensure_active_context().queue
+
+    @queue.setter
+    def queue(self, value: list[QueueStudent]) -> None:
+        self.ensure_active_context().queue = value
+
+    @property
+    def active_form(self) -> str | None:
+        ctx = self.active_context
+        return ctx.form if ctx and ctx.form else None
+
+    @active_form.setter
+    def active_form(self, value: str | None) -> None:
+        self.ensure_active_context().form = value or ""
+
+    @property
+    def book_order(self) -> list[str]:
+        ctx = self.active_context
+        return ctx.book_order if ctx else []
+
+    @book_order.setter
+    def book_order(self, value: list[str]) -> None:
+        self.ensure_active_context().book_order = value
+
+    @property
+    def class_catalog(self) -> list[dict]:
+        ctx = self.active_context
+        return ctx.class_catalog if ctx else []
+
+    @class_catalog.setter
+    def class_catalog(self, value: list[dict]) -> None:
+        self.ensure_active_context().class_catalog = value
+
+    @property
+    def class_catalog_form(self) -> str | None:
+        ctx = self.active_context
+        return ctx.class_catalog_form if ctx else None
+
+    @class_catalog_form.setter
+    def class_catalog_form(self, value: str | None) -> None:
+        self.ensure_active_context().class_catalog_form = value
+
+    @property
+    def class_catalog_grade(self) -> int | None:
+        ctx = self.active_context
+        return ctx.class_catalog_grade if ctx else None
+
+    @class_catalog_grade.setter
+    def class_catalog_grade(self, value: int | None) -> None:
+        self.ensure_active_context().class_catalog_grade = value
+
+    def reset_class_book_order(self, context_id: str | None = None) -> None:
+        """Aktive Klassen-Reihenfolge + Katalog eines Kontexts leeren (Klassen-
+        wechsel/Tab schließen/Queue leeren). Die jahrgangsweiten Reihenfolgen
+        (`book_orders_by_grade`) bleiben bestehen — sie gelten schuljahrweit.
+        `context_id=None` → aktiver Kontext (Kompat)."""
+        ctx = self._ctx_or_active(context_id)
+        if ctx is None:
+            return
+        ctx.book_order = []
+        ctx.class_catalog = []
+        ctx.class_catalog_form = None
+        ctx.class_catalog_grade = None
 
     def reset_booklist_orders(self) -> None:
         """Alle jahrgangsweiten Bücher-Reihenfolgen leeren (Schuljahreswechsel:
@@ -229,40 +387,55 @@ class AppState:
         self.hidden_isbns_by_grade = {}
         self.form_catalog_cache = {}
 
-    # --- Host-Login-Sessions (gleitendes TTL) ---
-    def add_host_session(self, sid: str) -> None:
-        self.host_sessions[sid] = datetime.now()
+    # -----------------------------------------------------------------
+    # Kontextbewusste Lookups
+    # -----------------------------------------------------------------
 
-    def remove_host_session(self, sid: str) -> None:
-        self.host_sessions.pop(sid, None)
+    def find_student(self, student_id: int) -> QueueStudent | None:
+        """Schüler über ALLE Kontexte suchen (student_id ist schulweit eindeutig,
+        daher eindeutig zugeordnet). Gibt den QueueStudent zurück (lebt in
+        genau einem Kontext) oder None."""
+        for ctx in self.contexts.values():
+            for s in ctx.queue:
+                if s.student_id == student_id:
+                    return s
+        return None
 
-    def is_host_session_valid(self, sid: str | None, ttl_s: int) -> bool:
-        """Gültig, wenn bekannt und nicht abgelaufen. Bei Gültigkeit gleitend
-        verlängert (aktive Hosts werden nicht ausgeloggt)."""
-        if not sid:
-            return False
-        seen = self.host_sessions.get(sid)
-        if seen is None:
-            return False
-        if (datetime.now() - seen).total_seconds() > ttl_s:
-            self.host_sessions.pop(sid, None)
-            return False
-        self.host_sessions[sid] = datetime.now()
-        return True
+    def find_student_with_ctx(self, student_id: int) -> tuple[ClassContext, QueueStudent] | None:
+        """Wie `find_student`, zusätzlich den besitzenden Kontext."""
+        for ctx in self.contexts.values():
+            for s in ctx.queue:
+                if s.student_id == student_id:
+                    return ctx, s
+        return None
 
-    def sweep_host_sessions(self, ttl_s: int) -> None:
-        now = datetime.now()
-        for sid, seen in list(self.host_sessions.items()):
-            if (now - seen).total_seconds() > ttl_s:
-                del self.host_sessions[sid]
+    def next_pending(self, context_id: str | None = None) -> QueueStudent | None:
+        """Nächsten wartenden Schüler eines Kontexts. `context_id=None` →
+        aktiver Kontext (Kompat, z. B. Helfer ohne Klassen-Bindung)."""
+        ctx = self._ctx_or_active(context_id)
+        if ctx is None:
+            return None
+        return next((s for s in ctx.queue if s.status == "pending"), None)
 
-    def queue_as_list(self) -> list[dict]:
-        return [s.as_dict() for s in self.queue]
+    def pending_count(self, context_id: str | None = None) -> int:
+        ctx = self._ctx_or_active(context_id)
+        if ctx is None:
+            return 0
+        return sum(1 for s in ctx.queue if s.status == "pending")
 
-    def pending_queue_as_list(self) -> list[dict]:
-        """Nur die wartenden Schüler (status='pending') — für die Warteschlangen-
+    def pending_queue_as_list(self, context_id: str | None = None) -> list[dict]:
+        """Nur die wartenden Schüler eines Kontexts — für die Warteschlangen-
         Anzeige im Helferclient, solange dieser keinen Schüler zugewiesen hat."""
-        return [s.as_dict() for s in self.queue if s.status == "pending"]
+        ctx = self._ctx_or_active(context_id)
+        if ctx is None:
+            return []
+        return [s.as_dict() for s in ctx.queue if s.status == "pending"]
+
+    def queue_as_list(self, context_id: str | None = None) -> list[dict]:
+        ctx = self._ctx_or_active(context_id)
+        if ctx is None:
+            return []
+        return [s.as_dict() for s in ctx.queue]
 
     def helpers_as_dict(self) -> dict:
         return {t: h.as_dict() for t, h in self.helper_sessions.items()}
@@ -274,9 +447,24 @@ class AppState:
             pool.stats() if pool is not None and hasattr(pool, "stats")
             else {"total": 0, "available": 0, "in_use": 0}
         )
+        ctx = self.active_context
+        # Kontexte für den Host: nur echte (keine impliziten Übergangs-Kontexte).
+        contexts = {
+            c.id: {
+                "id": c.id,
+                "form": c.form,
+                "queue": [s.as_dict() for s in c.queue],
+            }
+            for c in self.contexts.values()
+            if not c.implicit
+        }
         return {
             "type": "state",
-            "active_form": self.active_form,
+            # Kompat-Flat-Felder (alle aus dem aktiven Kontext) — bestehender
+            # Host-Code liest weiter `state.queue`/`state.active_form` etc.
+            "active_form": ctx.form if ctx and ctx.form else None,
+            "active_context_id": self.active_context_id,
+            "contexts": contexts,
             "selected_schoolyear": self.selected_schoolyear,
             "queue": self.queue_as_list(),
             "helpers": self.helpers_as_dict(),
@@ -288,7 +476,7 @@ class AppState:
             "fix_class_on_slip": self.fix_class_on_slip,
             "slip_second_page_default": self.slip_second_page_default,
             "printer_name": self.printer_name_override,
-            "book_order": self.book_order,
+            "book_order": list(ctx.book_order) if ctx else [],
         }
 
     def modus_b_snapshot(self) -> dict:
@@ -314,6 +502,7 @@ class AppState:
         }
 
     # --- Modus-B-Lookups ---
+
     def find_session_by_code(self, code: str) -> StudentSessionB | None:
         return next(
             (
@@ -340,20 +529,39 @@ class AppState:
             for s in self.student_sessions.values()
         )
 
-    def next_pending(self) -> QueueStudent | None:
-        return next((s for s in self.queue if s.status == "pending"), None)
-
-    def pending_count(self) -> int:
-        return sum(1 for s in self.queue if s.status == "pending")
-
-    def find_student(self, student_id: int) -> QueueStudent | None:
-        return next((s for s in self.queue if s.student_id == student_id), None)
-
     def find_helper_for_student(self, student_id: int) -> HelperSession | None:
         return next(
             (h for h in self.helper_sessions.values() if h.student_id == student_id),
             None,
         )
+
+    # --- Host-Login-Sessions (gleitendes TTL) ---
+
+    def add_host_session(self, sid: str) -> None:
+        self.host_sessions[sid] = datetime.now()
+
+    def remove_host_session(self, sid: str) -> None:
+        self.host_sessions.pop(sid, None)
+
+    def is_host_session_valid(self, sid: str | None, ttl_s: int) -> bool:
+        """Gültig, wenn bekannt und nicht abgelaufen. Bei Gültigkeit gleitend
+        verlängert (aktive Hosts werden nicht ausgeloggt)."""
+        if not sid:
+            return False
+        seen = self.host_sessions.get(sid)
+        if seen is None:
+            return False
+        if (datetime.now() - seen).total_seconds() > ttl_s:
+            self.host_sessions.pop(sid, None)
+            return False
+        self.host_sessions[sid] = datetime.now()
+        return True
+
+    def sweep_host_sessions(self, ttl_s: int) -> None:
+        now = datetime.now()
+        for sid, seen in list(self.host_sessions.items()):
+            if (now - seen).total_seconds() > ttl_s:
+                del self.host_sessions[sid]
 
 
 _app_state = AppState()

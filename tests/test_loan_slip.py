@@ -134,6 +134,12 @@ def test_print_loan_slip_applies_class_override(tmp_path, monkeypatch):
         queue = [FakeQS()]
         active_form = "99z"
 
+        def find_student(self, student_id):
+            for qs in self.queue:
+                if qs.student_id == student_id:
+                    return qs
+            return None
+
     cfg = Config(
         iserv_domain="example.org", iserv_username="u", iserv_password="p",
         host_password="secret", print_backend="file", print_output_dir=tmp_path,

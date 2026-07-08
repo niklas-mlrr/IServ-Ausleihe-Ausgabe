@@ -352,14 +352,13 @@ async def handle_commit(state: AppState, student_id: int, barcode: str) -> dict:
 
 
 def _student_form(state: AppState, student_id: int) -> str | None:
-    """Echte Klasse des Schülers ermitteln — bevorzugt aus der Warteschlange
-    (korrekt auch bei klassenübergreifenden Queues), sonst die aktive Klasse.
-
-    Für den Leihschein-Klassen-Toggle. Gibt None zurück, wenn nichts bekannt ist
-    (dann bleibt der Leihschein unverändert)."""
-    for s in state.queue:
-        if s.student_id == student_id and s.form:
-            return s.form
+    """Echte Klasse des Schülers ermitteln — aus seinem Queue-Eintrag (sucht
+    über alle Klassen-Kontexte, da der Schüler in genau einem lebt), sonst
+    die aktive Klasse. Für den Leihschein-Klassen-Toggle. Gibt None zurück,
+    wenn nichts bekannt ist (dann bleibt der Leihschein unverändert)."""
+    s = state.find_student(student_id)
+    if s and s.form:
+        return s.form
     return state.active_form
 
 
@@ -640,12 +639,14 @@ async def end_student(
             # Wartezustand ("Alle Verbindungen trennen" wirkte sonst nur am Host).
             # Default: Idle-`waiting` (Queue anzeigen). Beim Advance übergibt der
             # Aufrufer `{"type":"loading"}` → Client verbirgt die Queue, während
-            # der nächste Schüler geladen wird.
+            # der nächste Schüler geladen wird. Die Queue des Helfer-Kontexts
+            # (Klasse, an die er gebunden ist) — sonst würde ein Helfer einer
+            # anderen Klasse die falsche Warteschlange sehen.
             await hub.send_scanner(old_helper, helper_notify or {
                 "type": "waiting",
                 "msg": "Warte auf Schüler-Zuweisung",
-                "queue_size": state.pending_count(),
-                "queue": state.pending_queue_as_list(),
+                "queue_size": state.pending_count(h.context_id),
+                "queue": state.pending_queue_as_list(h.context_id),
             })
 
     session = state.find_session_by_student(student_id)
@@ -755,9 +756,9 @@ async def assign_next_pending_to_helper(state: AppState, hub, helper) -> dict:
     von Schülerinfo + Worker-Context als Hintergrund-Task an
     (`load_and_push_helper_student`), ohne darauf zu warten.
     """
-    student = state.next_pending()
+    student = state.next_pending(helper.context_id)
     if not student:
-        await hub.send_scanner(helper.token, {"type": "waiting", "msg": "Warteschlange leer", "queue_size": state.pending_count(), "queue": state.pending_queue_as_list()})
+        await hub.send_scanner(helper.token, {"type": "waiting", "msg": "Warteschlange leer", "queue_size": state.pending_count(helper.context_id), "queue": state.pending_queue_as_list(helper.context_id)})
         return {"ok": False, "reason": "empty"}
 
     return await assign_student_to_helper(state, hub, helper, student)

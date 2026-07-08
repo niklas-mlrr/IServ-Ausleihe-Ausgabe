@@ -28,6 +28,51 @@
 
 ## Offen / zu testen
 
+### Neu 2026-07-08 (Host-Überarbeitung: Settings + Tab-System)
+
+Multi-Kontext-Refactor des Hosts (`web/host.html`) + Backend
+(`server/state.py`, `routes/api.py`, `ws.py`, `sessions.py`, `hub.py`).
+Zielbild + Phasen: `docs/PLAN.md` bzw. Plan in dieser Session.
+
+- [x] **Backend-Kontext-Modell** (`state.py`): `ClassContext`, `contexts`-Dict,
+      `active_context_id`, Kompat-Properties (`queue`/`active_form`/`book_order`
+      delegieren an aktiven Kontext), `find_student`/`find_student_with_ctx`
+      suchen über alle Kontexte, `next_pending`/`pending_count`/… nehmen
+      `context_id`. `HelperSession.context_id` neu. **Unit-Suite grün**
+      (143 passed) — bestehende Tests laufen über die Kompat-Properties weiter.
+- [x] **Routen-Migration**: `/api/open-class`, `/api/close-class`,
+      `/api/set-active-context`, `/api/helper/{token}/class` neu;
+      `add-student`/`add-test-students`/`disconnect-all`/`reset-queue`/
+      `clear-queue` nehmen `context_id` im Body; `next-student` zieht aus
+      `helper.context_id`; Scanner-WS-Handler (`peek_queue`, Waiting-Msg,
+      `call`-Guard) kontextbewusst. **Suite grün** (143 passed).
+- [ ] **Frontend Tab-Chrome** (manuell am Gerät): Tab-Leiste unter Status-Bar
+      `[Host] [Klasse … ×] … [+]`; Schuljahr-Auswahl aus `#setup-col` in den
+      Einstellungen-Dialog (erster Block, inkl. 409-Confirm + Reset aller
+      Klassen-Reiter); `hostTabs`-Persistenz in localStorage (Reihenfolge +
+      aktiver Tab). Reload stellt Tabs aus Snapshot + localStorage wieder her
+      (fehlende `context_id`s nach Server-Restart droppen).
+- [ ] **Klassen-Tab pro Kontext**: eigene Queue + eigenes Now-Serving +
+      Pairing-Card (Codes zugeordnet zu den wartenden Schülern DIESER Klasse);
+      „Schüler hinzufügen" (Einzelne + Test Config) hängt pro Kontext an.
+      Host-Tab: Helfer-Tabelle mit neuer **Klassen-Spalte** (Select zum
+      Umbinden) + Modus-B-Kontrolle (öffnen/schließen, QR, iPad-Freischalt),
+      keine eigene Queue. × pro Tab → `POST /api/close-class` (Confirm bei
+      aktiven Schülern).
+- [ ] **Helfer-Klassen-Bindung**: „Nächster" zieht aus `helper.context_id`;
+      `call`-Guard weist klassenfremde Aufrufe ab („Schüler nicht in deiner
+      Klasse"). Am Gerät mit ≥2 Klassen + ≥1 Helfer prüfen.
+- [ ] **E2E-Skripte migrieren** (`automation/e2e_smoke.py`,
+      `e2e_parallel.py`, `e2e_modus_b.py`): selektoren auf `#queue-tbody` /
+      `#now-serving` / `#setup-col` sind obsolet — die Queue lebt jetzt pro
+      Klassen-Tab (`[data-ctx-queue="<id>"]`, `[data-ctx-ns="<id>"]`). Skripte
+      müssen erst einen Tab öffnen (`POST /api/open-class` → Kontext-Panel)
+      und gegen dessen Selektoren prüfen. **Nur read-only / nach Freigabe**
+      (PLAN §6, Produktionsschutz).
+- [x] **JS-Syntax**: `node --check` auf den extrahierten `<script>`-Block → OK.
+- [x] **Server-Imports**: `server.main`/`routes.api`/`routes.ws`/`hub`/
+      `sessions`/`state` importieren sauber.
+
 ### Neu 2026-06-17 (Host: Reiter „Test Config")
 
 - [ ] **Reiter „Test Config"** (`host.html`): Auswahl des Reiters fügt die festen

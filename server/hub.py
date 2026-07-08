@@ -81,12 +81,14 @@ class Hub:
 
     async def broadcast_queue_size(self, state: AppState | None = None) -> None:
         s = state or get_state()
-        qsize = s.pending_count()
-        queue = s.pending_queue_as_list()
         for helper in list(s.helper_sessions.values()):
             # Unzugewiesene Helfer ODER zugewiesene im „Menü"-Peek (Queue-Ansicht
-            # bei verbundenem Hintergrund-Schüler) erhalten die Live-Queue.
+            # bei verbundenem Hintergrund-Schüler) erhalten die Live-Queue —
+            # jeweils die ihres Klassen-Kontexts (helper.context_id), sonst die
+            # des aktiven Kontexts (Kompat-Fallback).
             if (helper.student_id is None or helper.peeking) and helper.ws is not None:
+                qsize = s.pending_count(helper.context_id)
+                queue = s.pending_queue_as_list(helper.context_id)
                 if not await self._safe_send(
                     helper.ws, {"type": "queue_update", "queue_size": qsize, "queue": queue}
                 ):
@@ -108,7 +110,13 @@ class Hub:
             if helper.ws is None:
                 continue
             student = s.find_student(helper.student_id) if helper.student_id is not None else None
-            book_order = await get_book_order_for_form(s, student.form) if student else s.book_order
+            if student:
+                book_order = await get_book_order_for_form(s, student.form)
+            else:
+                # Kein zugewiesener Schüler → Reihenfolge des Helfer-Kontexts
+                # (Klasse, an die er gebunden ist), sonst aktive-Kontext-Fallback.
+                ctx = s.contexts.get(helper.context_id) if helper.context_id else None
+                book_order = ctx.book_order if ctx else s.book_order
             msg = {
                 "type": "settings",
                 "slip_second_page": s.slip_second_page_default,

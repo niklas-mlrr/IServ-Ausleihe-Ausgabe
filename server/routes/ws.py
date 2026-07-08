@@ -137,7 +137,9 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
     # anhand des Jahrgangs *dieses* Schülers ermittelt (nicht der einen globalen
     # `state.book_order`) — sonst würde die direkt danach folgende `settings`-
     # Nachricht sie bei klassenübergreifenden Warteschlangen wieder überschreiben.
-    book_order = state.book_order
+    # Fallback (ohne Schüler): Reihenfolge des Helfer-Kontexts, sonst aktiv.
+    _hctx = state.contexts.get(helper.context_id) if helper.context_id else None
+    book_order = _hctx.book_order if _hctx else state.book_order
     if helper.student_id is not None:
         student = state.find_student(helper.student_id)
         if student and state.iserv:
@@ -192,9 +194,9 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
             except Exception as e:
                 await hub.send_websocket(websocket, {"type": "error", "msg": str(e)})
         elif student is None:
-            await hub.send_websocket(websocket, {"type": "waiting", "msg": "Warte auf Schüler-Zuweisung", "queue_size": state.pending_count(), "queue": state.pending_queue_as_list()})
+            await hub.send_websocket(websocket, {"type": "waiting", "msg": "Warte auf Schüler-Zuweisung", "queue_size": state.pending_count(helper.context_id), "queue": state.pending_queue_as_list(helper.context_id)})
     else:
-        await hub.send_websocket(websocket, {"type": "waiting", "msg": "Warte auf Schüler-Zuweisung", "queue_size": state.pending_count(), "queue": state.pending_queue_as_list()})
+        await hub.send_websocket(websocket, {"type": "waiting", "msg": "Warte auf Schüler-Zuweisung", "queue_size": state.pending_count(helper.context_id), "queue": state.pending_queue_as_list(helper.context_id)})
 
     # Host-Default „Schüler-Leihschein" (Druck-Dialog) + Bücher-Reihenfolge.
     await hub.send_websocket(websocket, {
@@ -233,7 +235,8 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                 # Await, also atomar im Eventloop (kein Doppel-Aufruf zweier
                 # Helfer auf denselben Schüler).
                 sid = raw.get("student_id")
-                target = state.find_student(sid) if sid is not None else None
+                target_pair = state.find_student_with_ctx(sid) if sid is not None else None
+                target = target_pair[1] if target_pair else None
                 if target is None or target.status != "pending":
                     await websocket.send_json({
                         "type": "error",
@@ -242,6 +245,15 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                     # Queue sofort nachpushen, damit der Client die aktuelle
                     # Liste sieht (z. B. zwischenzeitlich von anderem Helfer
                     # aufgerufen) — statt auf den nächsten Broadcast zu warten.
+                    await hub.broadcast_queue_size(state)
+                    continue
+                # Helfer an eine Klasse gebunden → darf nur Schüler seines
+                # Kontexts aufrufen (andernfalls klassenübergreifender Zugriff).
+                if helper.context_id is not None and target_pair[0].id != helper.context_id:
+                    await websocket.send_json({
+                        "type": "error",
+                        "msg": "Schüler nicht in deiner Klasse",
+                    })
                     await hub.broadcast_queue_size(state)
                     continue
                 if helper.student_id is not None:
@@ -271,8 +283,8 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                 helper.peeking = True
                 await hub.send_scanner(token, {
                     "type": "queue_update",
-                    "queue_size": state.pending_count(),
-                    "queue": state.pending_queue_as_list(),
+                    "queue_size": state.pending_count(helper.context_id),
+                    "queue": state.pending_queue_as_list(helper.context_id),
                 })
                 continue
 
