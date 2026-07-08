@@ -67,6 +67,25 @@ def test_broadcast_host_pushes_queue_size_to_unassigned_scanners() -> None:
     assert assigned.sent == []
 
 
+def test_broadcast_queue_size_reaches_assigned_helper_while_peeking() -> None:
+    """Menü-Peek: ein zugewiesener Helfer mit `peeking=True` bekommt die Live-
+    Queue (wie ein unzugewiesener), ohne peekende zugewiesene Helfer nicht."""
+    s = _state_with_queue(pending=2)
+    peeking = _FakeWS()
+    assigned = _FakeWS()
+    s.helper_sessions["t1"] = HelperSession(
+        token="t1", name="A", student_id=7, ws=peeking, peeking=True
+    )
+    s.helper_sessions["t2"] = HelperSession(
+        token="t2", name="B", student_id=8, ws=assigned
+    )
+
+    asyncio.run(Hub().broadcast_queue_size(s))
+
+    assert {"type": "queue_update", "queue_size": 2, "queue": s.pending_queue_as_list()} in peeking.sent
+    assert assigned.sent == []
+
+
 def test_broadcast_queue_size_clears_dead_scanner_ws() -> None:
     s = _state_with_queue(pending=1)
     helper = HelperSession(token="t", name="A", ws=_FakeWS(broken=True))

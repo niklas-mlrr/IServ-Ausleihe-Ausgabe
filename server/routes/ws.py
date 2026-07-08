@@ -109,6 +109,8 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
 
     await websocket.accept()
     helper = state.helper_sessions[token]
+    # Frische Verbindung → Peek-Zustand ist clientseitig nicht mehr gesetzt.
+    helper.peeking = False
     # Reconnect (Seite erneut geöffnet): einen noch laufenden Grace-Teardown-
     # Task des gerade getrennten alten WS abräumen (sonst würde er nach der
     # Frist den soeben neugeladenen Schüler doch noch abbrechen).
@@ -243,12 +245,41 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                     await hub.broadcast_queue_size(state)
                     continue
                 if helper.student_id is not None:
+                    # Aufrufen aus der Peek-Ansicht (Menü): der alte Schüler wird
+                    # NICHT abgeschlossen, sondern als 'pending' zurück in die
+                    # Warteschlange gelegt (noch nicht bearbeitet). Der Worker-
+                    # Context schließt (revoked), der Schüler bleibt aber in der
+                    # Queue verfügbar — wie beim Disconnect-Teardown
+                    # (`_deferred_end`). Der „Weiter"-Button (`next`) dagegen
+                    # schließt den Schüler als 'done' ab (s. advance_helper).
                     await end_student(
                         state, hub, helper.student_id,
-                        queue_status="done", session_state="completed",
+                        queue_status="pending", session_state="revoked",
                         helper_notify={"type": "loading"},  # Queue verbergen — neuer wird geladen
                     )
                 await assign_student_to_helper(state, hub, helper, target)
+                continue
+
+            if mtype == "peek_queue":
+                # Menü-Toggle: Helfer schaltet auf die Warteschlangen-Ansicht,
+                # während sein Schüler im Hintergrund verbunden bleibt (kein
+                # Trennen, kein IServ-/DB-Zugriff). Peek-Flag setzen, damit
+                # nachfolgende `broadcast_queue_size`-Updates diesen Helfer
+                # erreichen, und sofort die aktuelle Queue pushen (für ein
+                # unmittelbares Rendern, ohne auf den nächsten Broadcast zu
+                # warten).
+                helper.peeking = True
+                await hub.send_scanner(token, {
+                    "type": "queue_update",
+                    "queue_size": state.pending_count(),
+                    "queue": state.pending_queue_as_list(),
+                })
+                continue
+
+            if mtype == "peek_close":
+                # Menü-Toggle zurück zur Schüler-Ansicht. Kein Push nötig — der
+                # Client stellt die Bücherliste lokal wieder her.
+                helper.peeking = False
                 continue
 
             if mtype == "clear_book_alert":

@@ -630,6 +630,7 @@ async def end_student(
             h.expected_isbns = set()
             h.vormerk_isbns = set()
             h.lent_isbns = set()
+            h.peeking = False  # Schüler weg → Queue-Ansicht hinfällig
             if h.load_task is not None and not h.load_task.done():
                 with contextlib.suppress(asyncio.CancelledError):
                     await h.load_task
@@ -776,6 +777,7 @@ async def assign_student_to_helper(state: AppState, hub, helper, student) -> dic
     student.status = "active"
     student.assigned_helper = helper.token
     helper.student_id = student.student_id
+    helper.peeking = False  # neuer Schüler → keine Queue-Ansicht mehr
     await hub.broadcast_host(state.state_snapshot())
     # Client in den Lade-Zustand versetzen: Queue verbergen, „wird geladen …"
     # zeigen — bevor der (langsame) IServ-Fetch + Worker-Aufbau läuft. Deckt

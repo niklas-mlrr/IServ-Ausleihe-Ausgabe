@@ -114,6 +114,21 @@ def test_end_student_sets_status_and_releases_helper():
     })]
 
 
+def test_end_student_resets_peeking():
+    """Menü-Peek: end_student muss `helper.peeking` zurücksetzen — sonst bekäme
+    ein freier Helfer weiter Live-Queues (und der Client-Ansichtsstatus driftet)."""
+    st = _state_with_iserv()
+    hub = _FakeHub()
+    student = _add_student(st, 7, status="active")
+    helper = HelperSession(token="h1", name="Helfer", student_id=7, peeking=True)
+    student.assigned_helper = "h1"
+    st.helper_sessions["h1"] = helper
+
+    asyncio.run(end_student_call(st, hub, 7, "done", "completed"))
+
+    assert helper.peeking is False
+
+
 def test_end_student_invalidates_modus_b_session_and_releases_worker():
     st = _state_with_iserv()
     hub = _FakeHub()
@@ -292,6 +307,21 @@ def test_assign_student_to_helper_assigns_specific_student():
     # (deckt den Fall, dass der Helfer keinen alten Schüler hatte → kein
     # end_student-`loading`, dieser Send ist das einzige Signal).
     assert any(m["type"] == "loading" for m in msgs)
+
+
+def test_assign_student_to_helper_resets_peeking():
+    """Menü-Peek: eine neue Schülerzuweisung beendet die Queue-Ansicht —
+    `helper.peeking` muss False sein, sonst driften Live-Queues in die
+    Schüler-Ansicht."""
+    st = _state_with_iserv()
+    hub = _FakeHub()
+    target = _add_student(st, 2, status="pending")
+    helper = HelperSession(token="h1", name="Helfer", peeking=True)
+    st.helper_sessions["h1"] = helper
+
+    asyncio.run(_assign_and_drain(st, hub, helper, target))
+
+    assert helper.peeking is False
 
 
 def test_pending_queue_as_list_returns_only_pending():

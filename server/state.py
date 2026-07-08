@@ -68,6 +68,12 @@ class HelperSession:
     # (s. ws_scanner). Ohne Reconnect → echte Trennung → Schüler zurück auf
     # 'pending', Worker zu (wie bisher inline im finally).
     end_task: object | None = None
+    # View-Toggle „Menü": Helfer hat per Menü-Button die Warteschlangen-Ansicht
+    # geöffnet, während sein zugewiesener Schüler im Hintergrund verbunden
+    # bleibt. Solange True bekommt dieser Helfer Live-`queue_update`s (wie ein
+    # unzugewiesener), damit die Queue-Ansicht aktuell bleibt. Rein transient —
+    # kein Schüler-/IServ-/DB-Zustand. Reset bei Schülerwechsel/ende/Reconnect.
+    peeking: bool = False
 
     def as_dict(self) -> dict:
         return {

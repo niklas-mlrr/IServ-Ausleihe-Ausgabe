@@ -212,6 +212,29 @@
       offen → `worker_ready` + Bücher sofort wiederhergestellt (nicht
       „Warten…"/„Wird geladen…" hängen bleiben).
 
+### Neu 2026-07-08 (Helferclient: Menü-Toggle / Peek zwischen Schüler- und Warteschlangen-Ansicht)
+
+- [ ] **Menü-Toggle (Peek) am Gerät** (`web/scan.js`/`scan.html` + Server-Peek-
+      Protokoll): Hamburger-Menü (≡) schaltet bei zugewiesenem Schüler auf die
+      Warteschlangen-Ansicht, **ohne** ihn zu trennen — er bleibt im Hintergrund
+      verbunden, Statuszeile zeigt ihn (`renderPeekStatus`), Name/Zeile bleibt
+      sichtbar. Nochmal Drücken kehrt zur Bücherliste zurück. Im Peek werden
+      Scans ignoriert. WS `{type:'peek_queue'}`/`{type:'peek_close'}` + transient
+      `helper.peeking` (Server) steuern Live-`queue_update`s
+      (`broadcast_queue_size`: `student_id is None or peeking`).
+      - **Aufrufen eines anderen Schülers aus der Peek-Ansicht** legt den alten
+        als **`pending`** (wartend) zurück in die Warteschlange, **nicht** als
+        `done` — `call`-Handler `end_student(queue_status="pending",
+        session_state="revoked")` (analog Disconnect-Teardown `_deferred_end`).
+        „Weiter" (`next`/`advance_helper`) schließt den alten weiter als `done`.
+      - Scheitert der Aufruf (Schüler inzwischen von anderem Helfer genommen),
+        kehrt der Client automatisch in die Peek-Ansicht zurück (kein
+        „Schüler wird geladen …"-Stuck).
+      Unit: `tests/test_hub.py` +1 (Peek-Helfer erhält `queue_update`),
+      `tests/test_queue_flow.py` +2 (`end_student`/`assign_student_to_helper`
+      resetten `peeking`); Suite **133 grün**; `node --check` OK. Live am Gerät
+      offen (read-only, kein Enter — Niklas+Lukas-Freigabe).
+
 ### Neu 2026-07-07 (Helferclient: Ausleih-Freigabe-Dialog bei Unstimmigkeit)
 
 - [ ] **Freigabe-Dialog bei Unstimmigkeit (`web/scan.js`/`scan.html`, PLAN O10):**
@@ -256,11 +279,14 @@
 ## Unit-Tests (pytest, `uv run pytest`)
 
 Reine Logik, kein IServ/Playwright/Server — schnell + produktionsneutral, als
-Regressions-Netz und QS-Beleg. **121 Tests, grün (2026-07-07; +14 für
-Scanner-Reconnect/Disconnect-Grace + `StudentSession.reload()` — siehe
-`tests/test_scanner_reconnect.py`; +2 für `lent`-Menge aus `current_books` bei
-ausgeblendeten Reihen + ISBN-Umhängung `vormerk→lent` nach Buchung in derselben
-Session — siehe PLAN §6.1).** Coverage (`--cov=server` in `addopts`): **42 %** gesamt
+Regressions-Netz und QS-Beleg. **133 Tests, grün (2026-07-08; +3 für
+Menü-Peek — `helper.peeking`-Reset in `end_student`/`assign_student_to_helper`
++ `broadcast_queue_size` an peekende zugewiesene Helfer — siehe
+`tests/test_hub.py`/`tests/test_queue_flow.py`; 2026-07-07: +14 für
+Scanner-Reconnect/Disconnect-Grace + `StudentSession.reload()`, +2 für `lent`-
+Menge aus `current_books` bei ausgeblendeten Reihen + ISBN-Umhängung
+`vormerk→lent` nach Buchung in derselben Session — siehe PLAN §6.1).** Coverage
+(`--cov=server` in `addopts`): **45 %** gesamt
 (vorher 39 %/2026-06-18, 37 %, initial 20 %); Kernlogik deutlich höher —
 `hub.py` 82 %, `state.py` 93 %, `sessions.py` 60 %, `config.py` 93 %,
 `ratelimit.py` 100 %, `tls.py` 69 %, `book_order.py` 76 %.
@@ -270,11 +296,11 @@ die E2E-Skripte V3–V7 ab.
 
 | Datei | Deckt ab |
 |-------|----------|
-| `tests/test_hub.py` | WS-Verteiler: `broadcast_host` (Auslieferung + tote Host-Sockets entfernt), `queue_update` (mit `queue`-Liste) nur an unzugewiesene Scanner, `broadcast_queue_size`/`send_scanner` lösen tote Scanner-Sockets (`ws=None`, kein Leak), no-op bei unbekanntem Token |
+| `tests/test_hub.py` | WS-Verteiler: `broadcast_host` (Auslieferung + tote Host-Sockets entfernt), `queue_update` (mit `queue`-Liste) nur an unzugewiesene Scanner, `broadcast_queue_size`/`send_scanner` lösen tote Scanner-Sockets (`ws=None`, kein Leak), no-op bei unbekanntem Token; **2026-07-08:** `broadcast_queue_size` erreicht zugewiesene Helfer mit `peeking=True` (Menü-Peek) |
 | `tests/test_ratelimit.py` | Drossel (allow/throttle, Fenster-Ablauf, pro-IP, sweep) |
 | `tests/test_booking_gate.py` | Buchungs-Gate: ohne Flag kein Worker-/Enter-Zugriff |
 | `tests/test_sessions.py` | Session-Lebenszyklus, Token/Code-Eindeutigkeit, harte Invalidierung |
-| `tests/test_queue_flow.py` | Queue-Übergänge: `gen_pairing_code` (skip/Erschöpfung), `end_student` (Status/Helfer-Lösung/Worker-Release), `advance_helper` (leer + nächster; sendet `loading`, kein Idle-`waiting`), `assign_student_to_helper` (gezielter Aufruf aus der Warteschlange — ältester Wartender bleibt unangetastet; `loading`-WS-Push), `pending_queue_as_list` (nur status='pending'), harte Worker-Freigabe |
+| `tests/test_queue_flow.py` | Queue-Übergänge: `gen_pairing_code` (skip/Erschöpfung), `end_student` (Status/Helfer-Lösung/Worker-Release), `advance_helper` (leer + nächster; sendet `loading`, kein Idle-`waiting`), `assign_student_to_helper` (gezielter Aufruf aus der Warteschlange — ältester Wartender bleibt unangetastet; `loading`-WS-Push), `pending_queue_as_list` (nur status='pending'), harte Worker-Freigabe; **2026-07-08:** `end_student`/`assign_student_to_helper` resetten `helper.peeking` (Menü-Peek) |
 | `tests/test_api_guards.py` | Endpunkt-Logik: Auth-Guard (`_require_host`), Login, `add-student` (Validierung/Duplikat 409), `add-test-students`-Idempotenz, skip/finish-Validierung, Buchungs-Gate HTTP-Ebene (403), `_base_url`/`_last_scan_for` |
 | `tests/test_printing.py` | Backend-Resolution (auto je Plattform) + `file`-Backend |
 | `tests/test_worker_pool.py` | `WorkerPool.stats()` (total/available/in_use) |

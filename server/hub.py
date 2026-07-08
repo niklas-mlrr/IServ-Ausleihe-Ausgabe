@@ -84,7 +84,9 @@ class Hub:
         qsize = s.pending_count()
         queue = s.pending_queue_as_list()
         for helper in list(s.helper_sessions.values()):
-            if helper.student_id is None and helper.ws is not None:
+            # Unzugewiesene Helfer ODER zugewiesene im „Menü"-Peek (Queue-Ansicht
+            # bei verbundenem Hintergrund-Schüler) erhalten die Live-Queue.
+            if (helper.student_id is None or helper.peeking) and helper.ws is not None:
                 if not await self._safe_send(
                     helper.ws, {"type": "queue_update", "queue_size": qsize, "queue": queue}
                 ):

@@ -12,6 +12,8 @@ let queueList = [];                // wartende Schüler (für die Queue-Anzeige)
 let loadingStudent = false;        // Schüler wird geladen (next/call gesendet,
                                   //  student_info steht noch aus) — Queue verbergen
 let waitingMsg = 'Warte auf Schüler-Zuweisung';
+let peeking = false;                // Menü-Toggle: Warteschlangen-Ansicht bei
+                                  //  verbundenem Hintergrund-Schüler (kein Trennen)
 
 // ---- Druck-Dialog / Buch-Status ----
 let currentBooks = [];              // Buchliste des aktuellen Schülers
@@ -59,6 +61,19 @@ function renderWaitingStatus() {
   statusEl.textContent = (typeof queueSize === 'number')
     ? `Warteschlange: ${queueSize}`
     : waitingMsg;
+}
+
+// Peek-Statuszeile: Warteschlange angezeigt, aber der zugewiesene Schüler ist
+// noch im Hintergrund verbunden. Name/Klasse stehen (weiterhin) in den
+// s-name/s-form-Elementen — die Bücherliste wird durch die Queue ersetzt, der
+// Schüler verschwindet nicht. Status zeigt ihn plus die aktuelle Queue-Größe.
+function renderPeekStatus() {
+  const name = sNameEl.textContent.trim();
+  const form = sFormEl.textContent.trim();
+  const who = name ? `${name}${form ? ` (${form})` : ''} im Hintergrund` : 'Schüler im Hintergrund';
+  statusEl.textContent = (typeof queueSize === 'number')
+    ? `${who} — Warteschlange: ${queueSize}`
+    : who;
 }
 
 // Ruhezustand der Statuszeile: solange kein Schüler geladen ist (und keiner
@@ -190,6 +205,9 @@ bookRowsEl.addEventListener('click', (e) => {
   if (sid == null) return;
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   loadingStudent = true;
+  // peeking bleibt bewusst true: scheitert der Aufruf (Schüler inzwischen
+  // genommen), kehrt der Client automatisch in die Peek-Ansicht zurück. Im
+  // Erfolgsfall setzt der `loading`-Handler peeking auf false.
   statusEl.textContent = 'Schüler wird aufgerufen …';
   bookRowsEl.innerHTML = '<div class="book-empty">Schüler wird geladen …</div>';
   ws.send(JSON.stringify({ type: 'call', student_id: Number(sid) }));
@@ -199,6 +217,8 @@ function handleServerMessage(msg) {
   if (msg.type === 'student_info') {
     studentActive = true;
     loadingStudent = false;  // Schüler geladen — Bücherliste ersetzt die Queue
+    peeking = false;          // (neuer) Schüler geladen → keine Queue-Ansicht
+    setMenuTitle();
     const s = msg.student;
     currentStudent = s;          // Flags für den Freigabe-Dialog (s. unten)
     lendingApproved = false;     // neuer Schüler → Freigabe zurücksetzen
@@ -245,6 +265,8 @@ function handleServerMessage(msg) {
     studentActive = false;
     workerPending = true;
     loadingStudent = true;
+    peeking = false;          // Schülerwechsel beendet den Peek
+    setMenuTitle();
     sNameEl.textContent = '';
     sFormEl.textContent = '';
     sPayEl.innerHTML = '';
@@ -296,6 +318,8 @@ function handleServerMessage(msg) {
     studentActive = false;
     workerPending = false;
     loadingStudent = false;  // kein Schüler (mehr) geladen — Queue anzeigen
+    peeking = false;          // kein Schüler → Peek hinfällig
+    setMenuTitle();
     sNameEl.textContent = '';
     sFormEl.textContent = '';
     sPayEl.innerHTML = '';
@@ -318,16 +342,22 @@ function handleServerMessage(msg) {
   } else if (msg.type === 'queue_update') {
     if (typeof msg.queue_size === 'number') queueSize = msg.queue_size;
     if (Array.isArray(msg.queue)) queueList = msg.queue;
-    // Queue nur anzeigen, wenn weder ein Schüler geladen ist noch gerade
-    // einer geladen wird (next/call bereits gesendet, student_info steht aus).
-    if (!studentActive && !loadingStudent) { renderWaitingStatus(); renderQueue(); }
+    // Peek (Menü): Queue anzeigen, obwohl ein Schüler zugewiesen ist — dieser
+    // bleibt im Hintergrund verbunden. Sonst nur anzeigen, wenn weder ein
+    // Schüler geladen ist noch gerade einer geladen wird (next/call gesendet,
+    // student_info steht aus).
+    if (peeking) { renderPeekStatus(); renderQueue(); }
+    else if (!studentActive && !loadingStudent) { renderWaitingStatus(); renderQueue(); }
   } else if (msg.type === 'error') {
     loadingStudent = false;  // Laden gescheitert → Queue wieder freigeben
     statusEl.textContent = 'Fehler: ' + (msg.msg || '');
     dotEl.className = 'dot err';
     heldScanValue = null;
     closeLendModal();
-    if (!studentActive) renderQueue();
+    // Peek geöffnet (z. B. Aufruf aus der Queue gescheitert) → zurück in die
+    // Peek-Ansicht; sonst nur bei freiem Helfer die Queue zeigen.
+    if (peeking) renderQueue();
+    else if (!studentActive) renderQueue();
   }
 }
 
@@ -357,6 +387,7 @@ const torchBtn = document.getElementById('torch-btn');
 const soundBtn = document.getElementById('sound-btn');
 const reloadBtn = document.getElementById('reload-btn');
 const gearBtn = document.getElementById('gear-btn');
+const menuBtn = document.getElementById('menu-btn');
 const printBtn = document.getElementById('print-btn');
 const nextBtn = document.getElementById('next-btn');
 const camDropdown = document.getElementById('cam-dropdown');
@@ -646,10 +677,53 @@ gearBtn.addEventListener('click', (e) => {
 camDropdown.addEventListener('click', (e) => e.stopPropagation());
 document.addEventListener('click', () => camDropdown.classList.remove('open'));
 
+// ---- Menü-Toggle: Schüler- ↔ Warteschlangen-Ansicht ----
+// Der Schüler bleibt dabei verbunden (im Hintergrund); nur die Ansicht wird
+// umgeschaltet. Erst das Aufrufen eines anderen Schülers („Aufrufen"-Button /
+// „Nächster") trennt den alten — das ist das bestehende `call`/`next`-Verhalten.
+// Statuszeile zeigt im Peek den Hintergrund-Schüler. Scans werden im Peek
+// ignoriert (s. onScanSuccess), damit kein Buch für den abgelenkten Helfer
+// gebucht/staged wird.
+function setMenuTitle() {
+  menuBtn.title = peeking ? 'Schüler anzeigen' : 'Warteschlange anzeigen';
+}
+setMenuTitle();
+
+function openPeek() {
+  peeking = true;
+  setMenuTitle();
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'peek_queue' }));
+  // Queue sofort aus letzter bekannter Liste rendern; Antwort/Updates ziehen sie nach.
+  renderPeekStatus();
+  renderQueue();
+}
+
+function closePeek() {
+  peeking = false;
+  setMenuTitle();
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'peek_close' }));
+  // Bücherliste des Hintergrund-Schülers wiederherstellen.
+  renderBooks(currentBooks);
+  setReadyStatus();
+}
+
+menuBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (peeking) { closePeek(); return; }
+  // Nur sinnvoll, wenn ein Schüler zugewiesen ist — sonst ist die Queue eh
+  // sichtbar (Idle). Im Lade-Zustand (loadingStudent) ebenfalls nicht umschalten.
+  if (!studentActive || loadingStudent) return;
+  openPeek();
+});
+
 function onScanSuccess(value) {
   // Worker noch nicht bereit (Schüler gerade zugewiesen, open_student läuft) —
   // Scan ignorieren, nicht senden (wie beim ausgemusterten-Buch-Block).
   if (workerPending) return;
+  // Peek (Menü): Warteschlange sichtbar, Helfer schaut nicht auf die Bücher —
+  // Scan ignorieren, damit kein Buch für den Hintergrund-Schüler gebucht/staged
+  // wird und die Queue-Ansicht nicht überschrieben wird.
+  if (peeking) return;
   // Freigabe-Dialog noch offen → Helfer entscheidet gerade; Scan nicht erneut
   // feuern (kein Doppelt-Beep, kein Überschreiben des gehaltenen Werts).
   if (lendConfirmModal.classList.contains('show')) return;
