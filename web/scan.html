@@ -56,6 +56,9 @@
       grid-template-areas: "top" "status";
       grid-template-rows: auto auto;
       row-gap: 7px; column-gap: 7px;
+      /* Positionsanker für die Steuer-Elemente, die beim Menü-Übergang per
+         position:absolute an alter Stelle ausfaden (s. animateMenu). */
+      position: relative;
     }
     .top-bar { grid-area: top; display: flex; gap: 7px; align-items: flex-start; }
     .status-bar { grid-area: status; }
@@ -116,7 +119,7 @@
       width: 52px; height: 52px; border: none; border-radius: 8px;
       background: var(--surface-2); color: var(--fg); font-size: 1.4rem;
       cursor: pointer; align-items: center; justify-content: center;
-      opacity: 0; transition: opacity .25s ease, background .2s;
+      opacity: 0; transition: opacity .35s cubic-bezier(.22,.61,.36,1), background .2s;
     }
     .app.menu-open .search-btn { opacity: 1; }
     .search-btn:hover { background: var(--surface-3); }

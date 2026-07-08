@@ -295,6 +295,21 @@ Zielbild + Phasen: `docs/PLAN.md` bzw. Plan in dieser Session.
       `tests/test_queue_flow.py` +2 (`end_student`/`assign_student_to_helper`
       resetten `peeking`); Suite **133 grün**; `node --check` OK. Live am Gerät
       offen (read-only, kein Enter — Niklas+Lukas-Freigabe).
+      - **Animations-Sync (2026-07-09):** Beim Öffnen/Schließen faden die
+        ausgeblendeten Steuer-Elemente (gear/reader/right-col/print/next) und die
+        Lupe (#search-btn) jetzt synchron mit der Statuszeilen-FLIP-Bewegung
+        aus/ein — alles `.35s cubic-bezier(.22,.61,.36,1)`, beide Richtungen.
+        `flipAnimate` → `animateMenu(open)`: Steuer-Elemente werden per
+        `position:absolute` an alter Stelle festgepinnt (aus dem Fluss → Grid
+        kollabiert weiter) und per `opacity` gefadet; Lupe öffnet per CSS-Opacity,
+        schließt per Pin. `print`/`next` (in `.status-bar`, das der FLIP per
+        `transform` versieht) werden für den Übergang ins nicht-transformierte
+        `.top-section` umgehängt — sonst reiten sie auf dem Transform und machen
+        dessen diskreten x-Sprung (full-width→Mittel-Spalte) mit. Generation-Guard
+        + Reset fangen schnelles Toggeln ab. Headless verifiziert (Playwright):
+        kein JS-Fehler, Layout-Kollaps real (Statuszeile 125→7 px), print/next
+        nach Zyklus wieder in `.status-bar` in Reihenfolge, keine Inline-Reste.
+        Live am Gerät offen.
 
 ### Neu 2026-07-07 (Helferclient: Ausleih-Freigabe-Dialog bei Unstimmigkeit)
 

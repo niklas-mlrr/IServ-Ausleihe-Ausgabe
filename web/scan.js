@@ -394,9 +394,12 @@ const camDropdown = document.getElementById('cam-dropdown');
 const readerEl = document.getElementById('reader');
 const searchBtn = document.getElementById('search-btn');
 const appEl = document.querySelector('.app');
+const topSectionEl = document.querySelector('.top-section');
 const statusbarEl = document.querySelector('.status-bar');
+const statusInnerEl = document.getElementById('status');
 const nameRowEl = document.querySelector('.name-row');
 const bookWrapEl = document.querySelector('.book-table-wrap');
+const rightColEl = document.querySelector('.right-col');
 const bookAlertModal = document.getElementById('book-alert-modal');
 const bookAlertTitleEl = document.getElementById('book-alert-title');
 const bookAlertTextEl = document.getElementById('book-alert-text');
@@ -696,15 +699,87 @@ setMenuTitle();
 
 // ---- Menü-Modus: Steuerleiste kollabieren, Statuszeile + Inhalt darunter
 // fahren animiert nach oben (bzw. beim Schließen wieder zurück). Die Bewegung
-// läuft als FLIP: Position vor dem Klassen-Toggle messen, Klasse umschalten,
-// dann die Differenz als inverse transform anwenden und nach 0 transitionen.
-// So animiert auch der Wechsel des CSS-Grid (.top-section von zwei Zeilen auf
-// eine), der selbst nicht transitionierbar ist. ----
+// der Statuszeile/Name/Bücher läuft als FLIP: Position vor dem Klassen-Toggle
+// messen, Klasse umschalten, dann die Differenz als inverse transform anwenden
+// und nach 0 transitionen. So animiert auch der Wechsel des CSS-Grid
+// (.top-section von zwei Zeilen auf eine), der selbst nicht transitionierbar ist.
+//
+// Die Steuer-Elemente, die im Menü-Modus per display:none verschwinden
+// (gear-btn, reader, right-col, print, next), können nicht gefadet werden, solange
+// sie display:none sind. Sie werden darum für die Dauer des Übergangs per
+// position:absolute an ihrer alten Stelle gehalten (aus dem Fluss → Grid
+// kollabiert weiter) und mit opacity synchron zur FLIP-Bewegung (.35s) ausge-
+// blendet. Beim Schließen kehren sie in den Fluss zurück und faden entsprechend
+// ein. Die Lupe (#search-btn) faded beim Öffnen per CSS opacity ein (.35s) und
+// beim Schließen analog per position:absolute aus. Alles auf derselben Kurve
+// (.35s cubic-bezier(.22,.61,.36,1)) → Statuszeilen-Bewegung und Ein/Ausblenden
+// der Elemente bewegen sich synchron.
+//
+// Sonderfall print/next: sie liegen in .status-bar, die der FLIP mit transform
+// versieht. Ein transform-Vorfahr wird zum containing block für absolute
+// Nachfahren — print/next würden auf der Statuszeilen-Bewegung reiten und dabei
+// deren diskreten x-Sprung mitmachen (Statuszeile: full-width x=0 → Mittel-Spalte
+// x=52). Sie werden darum für den Übergang ins .top-section (nicht transformiert,
+// positioniert) umgehängt und dort an alter Stelle festgepinnt. ----
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-function flipAnimate(open) {
+const MENU_MS = reduceMotion ? 1 : 350;
+const MENU_EASE = 'cubic-bezier(.22,.61,.36,1)';
+// Steuer-Elemente, die im Menü-Modus verschwinden (Menü-Button + #status + Lupe bleiben sichtbar).
+const menuHideEls = [gearBtn, readerEl, rightColEl, printBtn, nextBtn];
+// Inline-Props, die animateMenu temporär setzt → für Cleanup/Abbbruch zurücksetzen.
+const MENU_INLINE_PROPS = ['position','left','top','width','height','margin','boxSizing',
+  'display','flexDirection','flexWrap','alignItems','justifyContent','gap',
+  'opacity','transition','transform'];
+let menuAnimGen = 0;   // schützt vor Cleanup-Kollisionen bei schnellem Toggeln
+
+function clearMenuInline(el) {
+  MENU_INLINE_PROPS.forEach(p => { el.style[p] = ''; });
+}
+
+// Layout-relevanten Computed-Style snapshoten, damit ein per position:absolute
+// aus dem Fluss genommenes Element seine innere Anordnung behält (z. B. right-col
+// bleibt flex-direction:column, statt auf Row zurückzufallen).
+const LAYOUT_PROPS = ['display','flexDirection','flexWrap','alignItems','justifyContent','gap'];
+function snapshotLayout(el) {
+  const cs = getComputedStyle(el);
+  return Object.fromEntries(LAYOUT_PROPS.map(p => [p, cs[p]]));
+}
+function applyLayout(el, snap) {
+  for (const [k, v] of Object.entries(snap)) el.style[k] = v;
+}
+
+// Element an seiner ersten Position (rect, viewport-Koordinaten) per
+// position:absolute festpinnen. refRect ist der Positions-Anker (gemessen, bevor
+// das Grid umstrukturiert wird) — das Element sitzt exakt dort, wo es im Fluss
+// war. applyLayout stellt display + Flex-Verhalten wieder her und überschreibt
+// damit das CSS display:none, damit das Element während des Fades rendert.
+function pinAbsoluteAt(el, rect, refRect, snap) {
+  el.style.position = 'absolute';
+  el.style.left = (rect.left - refRect.left) + 'px';
+  el.style.top  = (rect.top  - refRect.top ) + 'px';
+  el.style.width  = rect.width + 'px';
+  el.style.height = rect.height + 'px';
+  el.style.margin = '0';
+  el.style.boxSizing = 'border-box';
+  applyLayout(el, snap);
+}
+
+// Positions-Anker für ein auszublendendes Element: print/next werden nach
+// .top-section umgehängt → dort hin pinnen. Alle anderen an ihren aktuellen
+// offsetParent (gear-wrap bzw. .top-section), der nicht transformiert ist.
+function menuRefFor(el) {
+  return (el === printBtn || el === nextBtn) ? topSectionEl : (el.offsetParent || topSectionEl);
+}
+
+// print/next in ihre Heimat (.status-bar) zurückbringen, falls ein früherer
+// Übergang sie umgehängt hatte. Reihenfolge: print | #status | next.
+function restorePrintNext() {
+  if (printBtn.parentElement !== statusbarEl) statusbarEl.insertBefore(printBtn, statusInnerEl);
+  if (nextBtn.parentElement  !== statusbarEl) statusbarEl.appendChild(nextBtn);
+}
+
+function flipTargetsToPosition(firsts) {
   const targets = [statusbarEl, nameRowEl, bookWrapEl];
-  const firsts = targets.map(t => t.getBoundingClientRect());
-  appEl.classList.toggle('menu-open', open);
   targets.forEach((t, i) => {
     const last = t.getBoundingClientRect();
     const dy = firsts[i].top - last.top;
@@ -713,12 +788,83 @@ function flipAnimate(open) {
     t.style.transform = `translateY(${dy}px)`;
     // reflow erzwingen, damit die Start-Transform greift, bevor wir nach 0 gehen.
     t.offsetWidth;
-    t.style.transition = reduceMotion ? 'transform .01ms' : 'transform .35s cubic-bezier(.22,.61,.36,1)';
+    t.style.transition = reduceMotion ? 'transform .01ms' : `transform ${MENU_MS}ms ${MENU_EASE}`;
     t.style.transform = '';
     t.addEventListener('transitionend', () => {
       t.style.transition = ''; t.style.transform = '';
     }, { once: true });
   });
+}
+
+function animateMenu(open) {
+  // Jegliche noch laufende Menü-Animation abbrechen — schnelles Toggeln darf
+  // keine halb gesetzten Inline-Styles hinterlassen. print/next in Heimat bringen.
+  menuAnimGen++;
+  menuHideEls.forEach(clearMenuInline);
+  clearMenuInline(searchBtn);
+  [statusbarEl, nameRowEl, bookWrapEl].forEach(clearMenuInline);
+  restorePrintNext();
+
+  const firsts = [statusbarEl, nameRowEl, bookWrapEl].map(t => t.getBoundingClientRect());
+
+  if (open) {
+    // Steuer-Elemente: Position + Anker + inneres Layout schon im Fluss messen.
+    const hide = menuHideEls.map(el => {
+      const ref = menuRefFor(el);
+      return { el, rect: el.getBoundingClientRect(), refRect: ref.getBoundingClientRect(),
+               snap: snapshotLayout(el), reparent: (el === printBtn || el === nextBtn) };
+    });
+    appEl.classList.add('menu-open');
+    flipTargetsToPosition(firsts);
+    // Steuer-Elemente an alter Stelle festpinnen und synchron ausfaden. Das
+    // inline-display überschreibt das CSS display:none, damit sie rendern;
+    // position:absolute nimmt sie aus dem Fluss, sodass das Grid kollabiert.
+    hide.forEach(({ el, rect, refRect, snap, reparent }) => {
+      if (reparent) topSectionEl.appendChild(el);   // aus .status-bar heraus
+      pinAbsoluteAt(el, rect, refRect, snap);
+      el.style.opacity = '1';
+      el.style.transition = 'none';
+      el.offsetWidth;
+      el.style.transition = reduceMotion ? 'opacity .01ms' : `opacity ${MENU_MS}ms ${MENU_EASE}`;
+      el.style.opacity = '0';
+    });
+    // Lupe: faded per CSS (opacity 0→1, .35s) ein, sobald menu-open sie auf
+    // display:flex + opacity:1 setzt — kein JS nötig.
+    const gen = menuAnimGen;
+    setTimeout(() => { if (gen === menuAnimGen) menuHideEls.forEach(clearMenuInline); }, MENU_MS + 40);
+  } else {
+    // Schließen: Steuer-Elemente vorab unsichtbar machen (sind noch display:none
+    // via CSS), damit sie beim Entfernen von menu-open nicht aufblitzen.
+    menuHideEls.forEach(el => { el.style.opacity = '0'; el.style.transition = 'none'; });
+    // Lupe an aktueller Stelle festpinnen (verliert beim Schließen ihre Grid-
+    // Area) und ausfaden.
+    const searchRect = searchBtn.getBoundingClientRect();
+    const searchRefRect = topSectionEl.getBoundingClientRect();
+    const searchSnap = snapshotLayout(searchBtn);
+    appEl.classList.remove('menu-open');
+    flipTargetsToPosition(firsts);
+    // Steuer-Elemente sind nun zurück im Fluss (display:flex via CSS, menu-open
+    // weg), aber per Inline opacity:0 → von 0→1 synchron einfaden.
+    menuHideEls.forEach(el => {
+      el.offsetWidth;
+      el.style.transition = reduceMotion ? 'opacity .01ms' : `opacity ${MENU_MS}ms ${MENU_EASE}`;
+      el.style.opacity = '1';
+    });
+    // Lupe ausfaden (bleibt an alter Stelle stehen, da .top-section nicht
+    // transformiert wird → sie reitet nicht auf der FLIP-Bewegung).
+    pinAbsoluteAt(searchBtn, searchRect, searchRefRect, searchSnap);
+    searchBtn.style.opacity = '1';
+    searchBtn.style.transition = 'none';
+    searchBtn.offsetWidth;
+    searchBtn.style.transition = reduceMotion ? 'opacity .01ms' : `opacity ${MENU_MS}ms ${MENU_EASE}`;
+    searchBtn.style.opacity = '0';
+    const gen = menuAnimGen;
+    setTimeout(() => {
+      if (gen !== menuAnimGen) return;
+      menuHideEls.forEach(clearMenuInline);
+      clearMenuInline(searchBtn);
+    }, MENU_MS + 40);
+  }
 }
 
 function openPeek() {
@@ -728,9 +874,9 @@ function openPeek() {
   // Queue sofort aus letzter bekannter Liste rendern; Antwort/Updates ziehen sie nach.
   renderPeekStatus();
   renderQueue();
-  // Zuletzt FLIP: Erst hier messen, damit #status- und Queue-Inhalt bereits
+  // Zuletzt animieren: Erst hier messen, damit #status- und Queue-Inhalt bereits
   // final sind und die Ziel-Position stimmt.
-  flipAnimate(true);
+  animateMenu(true);
 }
 
 function closePeek() {
@@ -740,7 +886,7 @@ function closePeek() {
   // Bücherliste des Hintergrund-Schülers wiederherstellen.
   renderBooks(currentBooks);
   setReadyStatus();
-  flipAnimate(false);
+  animateMenu(false);
 }
 
 menuBtn.addEventListener('click', (e) => {
