@@ -17,6 +17,16 @@ def _make_slip(class_code: str = "12Slw") -> bytes:
     return doc.tobytes()
 
 
+def _make_left_school_slip() -> bytes:
+    """Wie der 5.-Jahrgang-Leihschein: Wertzeile ist der Platzhalter
+    „- Schule verlassen -" (fett) statt „Klasse <code>"."""
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 45.7), "Jahrgang / Klasse", fontname="helv", fontsize=8)
+    page.insert_text((72, 56), "- Schule verlassen -", fontname="hebo", fontsize=12)
+    return doc.tobytes()
+
+
 def _words(pdf_bytes: bytes) -> list[str]:
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     return [w[4] for w in doc[0].get_text("words")]
@@ -43,6 +53,27 @@ def test_override_strips_leading_klasse_prefix():
         words = _words(override_class_on_slip(_make_slip("12Mk"), value))
         assert words.count("Klasse") == 2, f"{value!r} -> {words}"
         assert "13" in words and "Klasse 13" not in words
+
+
+def test_override_replaces_left_school_placeholder():
+    # 5. Jahrgang: „- Schule verlassen -" wird durch die echte Klasse ersetzt,
+    # inklusive „Klasse "-Präfix (das im Platzhalter fehlt), Label bleibt.
+    out = override_class_on_slip(_make_left_school_slip(), "5a")
+    words = _words(out)
+    assert "5a" in words
+    assert "Jahrgang" in words
+    text = fitz.open(stream=out, filetype="pdf")[0].get_text().replace("\n", " ")
+    assert "Klasse 5a" in text
+    # Der Platzhalter ist optisch verdeckt (neuer Wert liegt oben drauf).
+    assert "5a" in words
+
+
+def test_override_left_school_strips_leading_klasse_prefix():
+    # Auch beim 5.-Jahrgang-Platzhalter darf kein doppeltes „Klasse Klasse 5a"
+    # entstehen, wenn der Systemwert schon „Klasse 5a" ist.
+    words = _words(override_class_on_slip(_make_left_school_slip(), "Klasse 5a"))
+    assert words.count("Klasse") == 2  # Label + neu gesetzte Wertzeile
+    assert "5a" in words
 
 
 def test_override_empty_form_is_noop():

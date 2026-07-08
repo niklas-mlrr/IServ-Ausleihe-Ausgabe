@@ -10,6 +10,10 @@ Der Wert nach „Klasse " stammt aus IServ und ist dort teils falsch hinterlegt.
 read-only geholten PDF-Bytes) den Code hinter „Klasse " mit der echten Klasse
 aus dem Serverstate — kein Schreibzugriff auf IServ (CLAUDE.md / PLAN §6).
 
+Sonderfall 5. Jahrgang: Dort steht in der Wertzeile statt „Klasse <code>" der
+Platzhalter „- Schule verlassen -" (die Schüler waren im Bezugsjahr noch nicht
+an der Schule). Auch dieser wird durch die echte, aktuelle Klasse ersetzt.
+
 Technik: den fetten Wert-Span finden, den alten Code mit einem weißen Rechteck
 verdecken (metrik-genau begrenzt, damit die Label-Zeile darüber unberührt
 bleibt) und die echte Klasse in derselben Schrift/Größe neu setzen. Der alte
@@ -34,6 +38,13 @@ _LEADING_KLASSE = re.compile(r"^\s*Klasse\b[\s:]*", re.IGNORECASE)
 
 # Fetter Wert beginnt mit diesem Präfix; danach folgt der zu ersetzende Code.
 _PREFIX = "Klasse "
+
+# Sonderfall 5. Jahrgang: Diese Schüler waren im Vorjahr (auf das sich der
+# IServ-Leihschein bezieht) noch nicht an der Schule und damit in keiner Klasse.
+# IServ druckt an der Stelle der Klassen-Wertzeile deshalb „- Schule verlassen -"
+# statt „Klasse <code>". Auch das wird durch die echte, aktuelle Klasse ersetzt
+# (dann als komplettes „Klasse <form>", da das „Klasse "-Präfix hier fehlt).
+_LEFT_SCHOOL = re.compile(r"schule\s+verlassen", re.IGNORECASE)
 # Kappenhöhe von Helvetica-Bold als Anteil der Schriftgröße. Bewusst NICHT die
 # volle Font-Ascender-Metrik (die ist ~1.07 und ragt bis in die Label-Zeile
 # darüber) — die Ober-/Unterkante der Abdeckung wird so eng um den Wert gelegt,
@@ -72,27 +83,36 @@ def override_class_on_slip(pdf_bytes: bytes, form: str) -> bytes:
                         continue
                     span = spans[0]
                     text = span["text"]
-                    if (
-                        "Bold" not in span["font"]
-                        or not text.startswith(_PREFIX)
-                        or "Jahrgang" in text
-                    ):
+                    if "Bold" not in span["font"] or "Jahrgang" in text:
+                        continue
+                    # Zwei Wertzeilen-Formen: „Klasse <code>" (Normalfall) und
+                    # „- Schule verlassen -" (5. Jahrgang, kein Klasse-Präfix).
+                    if text.startswith(_PREFIX):
+                        # Nur den Code hinter „Klasse " ersetzen — das Präfix
+                        # bleibt stehen, der Neusatz beginnt dahinter.
+                        prefix = _PREFIX
+                        new_text = form
+                    elif _LEFT_SCHOOL.search(text):
+                        # Kein Präfix vorhanden → komplette „Klasse <form>" setzen.
+                        prefix = ""
+                        new_text = _PREFIX + form
+                    else:
                         continue
                     x0, baseline = span["origin"]
                     size = span["size"]
-                    code_x = x0 + font.text_length(_PREFIX, size)
+                    code_x = x0 + font.text_length(prefix, size)
                     top = baseline - _CAP * size - 0.2
                     bottom = baseline + _DESC * size
                     right = max(
-                        span["bbox"][2], code_x + font.text_length(form, size)
+                        span["bbox"][2], code_x + font.text_length(new_text, size)
                     ) + 2
-                    # Alten Code verdecken (weiß) und echte Klasse neu setzen.
+                    # Alten Wert verdecken (weiß) und echte Klasse neu setzen.
                     page.draw_rect(
                         fitz.Rect(code_x - 0.5, top, right, bottom),
                         color=None, fill=(1, 1, 1),
                     )
                     page.insert_text(
-                        (code_x, baseline), form,
+                        (code_x, baseline), new_text,
                         fontname="hebo", fontsize=size, color=0,
                     )
                     changed += 1
