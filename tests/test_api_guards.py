@@ -138,6 +138,29 @@ def test_add_test_students_idempotent(ctx):
 
 
 # ---------------------------------------------------------------------------
+# open-test-config: dedizierter Tab, sofort befüllt, Wieder-Öffnen reaktiviert
+# ---------------------------------------------------------------------------
+
+def test_open_test_config_populates_and_reuses(ctx):
+    state, _, _ = ctx
+    first = run(api.open_test_config(session_id="sid"))
+    assert first["count"] == len(api.TEST_STUDENTS)
+    ctx_id = first["context_id"]
+    context = state.contexts[ctx_id]
+    assert context.form == api.TEST_CONFIG_FORM
+    assert not context.implicit
+    assert len(context.queue) == len(api.TEST_STUDENTS)
+
+    # Zweiter Aufruf (z. B. erneutes "+" -> "Test Config öffnen") reaktiviert
+    # denselben Kontext statt eine zweite Queue anzulegen.
+    second = run(api.open_test_config(session_id="sid"))
+    assert second["context_id"] == ctx_id
+    assert second["reused"] is True
+    assert len(state.contexts) == 1
+    assert state.active_context_id == ctx_id
+
+
+# ---------------------------------------------------------------------------
 # skip / finish: Validierung
 # ---------------------------------------------------------------------------
 

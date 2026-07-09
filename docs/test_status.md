@@ -28,6 +28,61 @@
 
 ## Offen / zu testen
 
+### Neu 2026-07-09 (Host: „Test Config" als eigener Tab statt Sub-Reiter)
+
+Der „Test Config"-Sub-Reiter im „Schüler hinzufügen"-Bereich jedes Klassen-Tabs
+entfällt; stattdessen bietet das „+"-Menü (`panel-new`) neben „Neue Klasse
+öffnen" jetzt eine zweite Karte „Test Config öffnen". Klick öffnet einen
+eigenen, dedizierten Tab (Pseudo-Klasse `Test Config`, kein echter IServ-Code,
+kein Katalog-Abruf) und befüllt ihn **sofort** mit den festen Testschülern.
+Erneutes Öffnen (weiterer Klick, oder Reload) reaktiviert denselben Kontext
+statt eine zweite Queue anzulegen (Dedup über `ctx.form`, analog
+`/api/open-class`). „Schüler hinzufügen" in normalen Klassen-Tabs bleibt
+unverändert bei „Einzelne Schüler" (jetzt ohne Sub-Tab-Leiste, da nur noch ein
+Inhalt).
+
+- Backend: neue Route `POST /api/open-test-config` (`server/routes/api.py`,
+  Konstante `TEST_CONFIG_FORM = "Test Config"`); nutzt weiterhin
+  `TEST_STUDENTS`/`_load_test_students()`, aber ohne IServ-Roundtrip.
+  Bestehende Route `POST /api/add-test-students` bleibt unverändert (weiter
+  nutzbar, um Testschüler in **jeden** offenen Kontext nachzuziehen).
+- Frontend (`web/host.html`): `panel-new` hat zweite Karte + `openTestConfig()`
+  (spiegelt `openClass()`); `buildClassPanel()` ohne Sub-Tab-Leiste mehr, tote
+  Funktionen `ctxAddTestStudents`/`ctxSwitchSubTab` + Dispatch-Cases entfernt.
+- [x] **Unit-Test**: `tests/test_api_guards.py::test_open_test_config_populates_and_reuses`
+      — erster Aufruf befüllt mit allen `TEST_STUDENTS`, zweiter Aufruf
+      reaktiviert denselben Kontext (`reused: True`, kein zweiter Eintrag in
+      `state.contexts`). Suite grün (148 passed).
+- [x] **JS-Syntax**: `node --check` auf den extrahierten `<script>`-Block → OK.
+- [ ] **Am Gerät** (manuell): „+" → „Test Config öffnen" klicken, Tab erscheint
+      mit 3 Testschülern in der Queue; erneutes Öffnen wechselt nur den Fokus
+      (keine doppelte Queue); normaler Klassen-Tab zeigt „Schüler hinzufügen"
+      weiterhin korrekt ohne Reiter-Leiste.
+
+### Neu 2026-07-09 (Scanner: Hinweis-Modal für JEDEN nicht-verbuchbaren Scan)
+
+Bisher öffneten nur `book_deleted`/`not_in_stock`/`series_already_lent` ein
+Hinweis-Modal; alle anderen nicht-OK Scans liefen nur als Statuszeilen-Text.
+Jetzt öffnet **jeder** nicht-OK Scan ein Fenster (gleicher Modal-Baukasten).
+Rein client-seitig (`web/scan.js` + `web/student.html`); Server-Pfad
+(`evaluate_scan_for_booking`, `process_scan`, `book_alert`-Broadcast) und
+IServ/DB unangetastet (read-only, kein Write, kein neues GET). Commit `eba6071`.
+
+- Schüler-Client: `book_deleted` (ausgemustert, **mit und ohne**
+  `loaned_to`-Ersatzanspruch) + `not_in_stock` (an andere Person verliehen)
+  bleiben **Host-geschlossen** (blockierend, kein Schließen-Button,
+  `book_alert_open`); alle übrigen nicht-OK Status (`series_already_lent`,
+  `not_enrolled`, `unknown_book`, `not_ready`, `error`) schließt der Schüler
+  **selbst** (Button / nächster Scan) und scannt weiter.
+- Helfer-Client: **jedes** nicht-OK Modal am Gerät schließbar.
+- [x] **Syntax**: `node --check web/scan.js` OK; extrahierter
+  `<script>`-Block aus `web/student.html` OK.
+- [ ] **Am Gerät** (manuell, read-only): pro Status einmal den Scan treiben
+  und Modal-Öffnen + Schließen-Verhalten prüfen — Schüler: dismissible
+  Status schließen sich per Button **und** beim Folge-Scan (Weiter-Scannen);
+  blocking Status (`book_deleted` mit/ohne Ersatzanspruch, `not_in_stock`)
+  nur via Host-Freigabe. Helfer: alle Status am Gerät schließbar.
+
 ### Neu 2026-07-09 (Host: Tabs & Einstellungen global — Server-State statt localStorage)
 
 Offene Klassen-Reiter und Einstellungen sind jetzt auf jedem angemeldeten Host-
@@ -183,6 +238,12 @@ Zielbild + Phasen: `docs/PLAN.md` bzw. Plan in dieser Session.
       `sessions`/`state` importieren sauber.
 
 ### Neu 2026-06-17 (Host: Reiter „Test Config")
+
+> **Überholt (2026-07-09):** Der Sub-Reiter „Test Config" innerhalb eines
+> Klassen-Tabs wurde entfernt und durch einen eigenen Top-Level-Tab ersetzt —
+> siehe „Neu 2026-07-09 (Host: „Test Config" als eigener Tab statt Sub-Reiter)"
+> oben. `TEST_STUDENTS`/`add-test-students` (IDs, Idempotenz-Test) bleiben
+> unverändert gültig.
 
 - [ ] **Reiter „Test Config"** (`host.html`): Auswahl des Reiters fügt die festen
       Testschüler automatisch an die Queue an (`switchTab('test')` →

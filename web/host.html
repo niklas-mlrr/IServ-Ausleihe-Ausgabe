@@ -512,6 +512,13 @@
       </div>
       <p class="hint">Öffnet einen neuen Reiter für die gewählte Klasse — eigene Queue und eigenes Now-Serving. Mehrere Klassen lassen sich parallel bedienen.</p>
     </div>
+    <div class="card">
+      <h2>Test Config öffnen</h2>
+      <div class="row">
+        <button id="open-test-config-btn" class="secondary">Öffnen</button>
+      </div>
+      <p class="hint">Öffnet einen eigenen Reiter, sofort befüllt mit den festen Testschülern <strong>Niklas Müller</strong>, <strong>Lukas Podleschny</strong> und <strong>Lucas Stolpe</strong> — kein echter Klassen-Code, kein IServ-Katalog-Abruf.</p>
+    </div>
   </div>
 
   <!-- Klassen-Panels (pro Kontext dynamisch erzeugt) -->
@@ -851,26 +858,14 @@
         <details class="setup-col" open>
           <summary>Schüler hinzufügen</summary>
           <div class="card">
-            <div class="tabs">
-              <button class="tab active" data-action="ctx-tab" data-ctx-tab="student" data-ctx-id="${id}">Einzelne Schüler</button>
-              <button class="tab" data-action="ctx-tab" data-ctx-tab="test" data-ctx-id="${id}">Test Config</button>
+            <div class="row" style="margin-bottom:8px">
+              <select class="ctx-single-class" data-ctx-id="${id}">${classSelectOptions()}</select>
             </div>
-            <div data-ctx-panel="student">
-              <div class="row" style="margin-bottom:8px">
-                <select class="ctx-single-class" data-ctx-id="${id}">${classSelectOptions()}</select>
-              </div>
-              <div class="row">
-                <select class="ctx-single-student" data-ctx-id="${id}" disabled><option value="">-- erst Klasse wählen --</option></select>
-                <button class="success ctx-add-student" data-action="ctx-add-student" data-ctx-id="${id}" disabled>+ Hinzufügen</button>
-              </div>
-              <p class="hint">Hängt einzelne Schüler an <strong>${form}</strong> an — auch klassenübergreifend.</p>
+            <div class="row">
+              <select class="ctx-single-student" data-ctx-id="${id}" disabled><option value="">-- erst Klasse wählen --</option></select>
+              <button class="success ctx-add-student" data-action="ctx-add-student" data-ctx-id="${id}" disabled>+ Hinzufügen</button>
             </div>
-            <div data-ctx-panel="test" style="display:none">
-              <div class="row">
-                <button class="success ctx-add-test" data-action="ctx-add-test" data-ctx-id="${id}">Testschüler hinzufügen</button>
-              </div>
-              <p class="hint">Hängt die Testschüler <strong>Niklas Müller</strong>, <strong>Lukas Podleschny</strong> und <strong>Lucas Stolpe</strong> an <strong>${form}</strong> an.</p>
-            </div>
+            <p class="hint">Hängt einzelne Schüler an <strong>${form}</strong> an — auch klassenübergreifend.</p>
           </div>
         </details>
         <div class="col">
@@ -919,6 +914,17 @@
     // rekonziliert diese Vorausnahme — global bleibt der Server der Truth.
     if (!tabOrder.includes(id)) tabOrder.push(id);
     showMsg(`${d.count} Schüler geladen — ${form}`);
+    switchTab(id);
+  }
+
+  async function openTestConfig() {
+    showMsg('Öffne Test Config…');
+    const r = await fetch('/api/open-test-config', { method: 'POST' });
+    const d = await r.json();
+    if (!r.ok) { showMsg(d.detail?.msg || d.detail || 'Fehler'); return; }
+    const id = d.context_id;
+    if (!tabOrder.includes(id)) tabOrder.push(id);
+    showMsg(`Test Config geöffnet — ${d.count} Testschüler`);
     switchTab(id);
   }
 
@@ -1034,21 +1040,6 @@
     } else {
       showMsg(d.detail || 'Konnte nicht hinzufügen');
     }
-  }
-
-  async function ctxAddTestStudents(id) {
-    const r = await fetch('/api/add-test-students', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ context_id: id }) });
-    const d = await r.json().catch(() => ({}));
-    if (r.ok) showMsg(`${d.added} Testschüler hinzugefügt (${d.count} in Queue)`);
-    else showMsg(d.detail || 'Konnte Testschüler nicht hinzufügen');
-  }
-
-  function ctxSwitchSubTab(id, name) {
-    const panel = document.getElementById('panel-ctx-' + id);
-    if (!panel) return;
-    panel.querySelectorAll('[data-ctx-tab]').forEach(t => t.classList.toggle('active', t.dataset.ctxTab === name));
-    panel.querySelector('[data-ctx-panel="student"]').style.display = name === 'student' ? '' : 'none';
-    panel.querySelector('[data-ctx-panel="test"]').style.display = name === 'test' ? '' : 'none';
   }
 
   // ---- Queue-Steuerung (pro Klassen-Tab) ----
@@ -2065,6 +2056,7 @@
     if (tab) switchTab(tab.dataset.tab);
   });
   document.getElementById('open-class-btn').addEventListener('click', () => openClass());
+  document.getElementById('open-test-config-btn').addEventListener('click', () => openTestConfig());
   document.getElementById('mb-open-btn').addEventListener('click', openModusB);
   document.getElementById('mb-close-btn').addEventListener('click', closeModusB);
   document.getElementById('mb-display-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') authorizeDisplay(); });
@@ -2100,8 +2092,6 @@
       case 'ctx-clear': ctxClearQueue(id); break;
       case 'ctx-disconnect-all': ctxDisconnectAll(id); break;
       case 'ctx-add-student': ctxAddSingleStudent(id); break;
-      case 'ctx-add-test': ctxAddTestStudents(id); break;
-      case 'ctx-tab': ctxSwitchSubTab(id, el.dataset.ctxTab); break;
     }
   }
   document.getElementById('class-panels').addEventListener('click', handleDelegatedAction);

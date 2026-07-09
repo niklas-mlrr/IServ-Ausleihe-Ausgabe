@@ -634,6 +634,46 @@ def _load_test_students() -> list[dict]:
 
 TEST_STUDENTS = _load_test_students()
 
+# Pseudo-Klassen-Name für den dedizierten "Test Config"-Tab (kein echter IServ-
+# Klassencode, daher kollisionsfrei mit `/api/open-class`-Dedup über `c.form`).
+TEST_CONFIG_FORM = "Test Config"
+
+
+@router.post("/api/open-test-config")
+async def open_test_config(session_id: str | None = Cookie(default=None)) -> dict:
+    """Dedizierten "Test Config"-Tab öffnen (kein IServ-Roundtrip, kein echter
+    Klassen-Katalog) und sofort mit den festen Testschülern befüllen. Erneutes
+    Öffnen aktiviert den bestehenden Tab wieder (keine zweite Queue), analog zu
+    `/api/open-class`."""
+    _require_host(session_id)
+    state = get_state()
+    hub = get_hub()
+
+    existing = next(
+        (c for c in state.contexts.values() if not c.implicit and c.form == TEST_CONFIG_FORM),
+        None,
+    )
+    if existing is not None:
+        state.set_active_context(existing.id)
+        await hub.broadcast_host(state.state_snapshot())
+        return {"ok": True, "context_id": existing.id, "count": len(existing.queue), "reused": True}
+
+    from ..state import QueueStudent
+    ctx = state.open_context(TEST_CONFIG_FORM)
+    for s in TEST_STUDENTS:
+        if state.find_student(s["student_id"]):
+            continue
+        ctx.queue.append(
+            QueueStudent(
+                student_id=s["student_id"],
+                lastname=s["lastname"],
+                firstname=s["firstname"],
+                form=s["form"],
+            )
+        )
+    await hub.broadcast_host(state.state_snapshot())
+    return {"ok": True, "context_id": ctx.id, "count": len(ctx.queue)}
+
 
 @router.post("/api/add-test-students")
 async def add_test_students(body: dict | None = None, session_id: str | None = Cookie(default=None)) -> dict:

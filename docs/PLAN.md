@@ -115,7 +115,7 @@ Sicherheitsanforderungen (aus Klärung 2026-06-12, „keine Sicherheitslücken")
 
 | # | Frage | Vorschlag / nächster Schritt |
 |---|-------|------------------------------|
-| O1 | Modus A: Wie kommt ein Schüler auf ein bestimmtes Helfer-Handy? | **Umgesetzt (2026-06-17):** Helfer tippt den „Weiter"-Button (⏭) im Scanner → WS `{type:"next"}` → `sessions.advance_helper`: schließt den aktuellen Schüler ab (`end_student`, **kein** Browser-Submit) und vergibt den nächsten Pending aus der Queue. Host kann weiterhin via „Nächster Schüler" zuweisen. **Ergänzt (2026-07-08):** Das Hamburger-Menü (≡) im Helferclient schaltet per View-Toggle auf die Warteschlangen-Ansicht, **ohne** den Schüler zu trennen — er bleibt im Hintergrund verbunden, die Statuszeile zeigt ihn. `WS {type:"peek_queue"}/"peek_close"}` setzen ein transient `helper.peeking`-Flag, über das der Helfer Live-`queue_update`s erhält (wie unzugewiesene). Scans werden im Peek ignoriert. **Aufrufen** eines anderen Schülers aus der Peek-Ansicht (`call` mit vorhandenem Schüler) legt den alten Schüler als **'pending'** zurück in die Warteschlange (noch nicht bearbeitet, `session_state="revoked"`, Worker zu) — nicht als 'done'. Der „Weiter"-Button (`next`/`advance_helper`) hingegen schließt den alten als 'done' ab. **Ergänzt (2026-07-09):** Im Peek zeigt das Menü jetzt **Reiter für alle offenen Host-Klassen** (horizontal scrollbar, eigene Klasse vorausgewählt) mit je der Warteschlange dieser Klasse + „Aufrufen"-Button; der Hintergrund-Schüler steht **nur in der Statuszeile** (`.name-row` verborgen). Aufrufen aus einer **fremden** Klasse rebindet den Helfer an diese Klasse (`rebind_helper_to_context`, danach zieht „Nächster" aus der neuen Klasse) statt abzuweisen. Daten via `contexts_update` (`state.real_contexts_summary`, pro Helfer mit `own_context_id`). Lupe bleibt unverhalten zusätzlich. **Ergänzt (2026-07-09, Commit `9b11c75`):** Der aktive Reiter ist „nach unten offen" (Host-Stil: Basis-Linie + 3-seitiger Rahmen ohne Unterkante → geht in die Queue über), und bei jedem Öffnen des Menüs wird die eigene Klasse (re-)selektiert (manuelle Reiter-Wahl bleibt nur bis zum Schließen). Tests: 147 grün; Live am Gerät offen (`docs/test_status.md`). **Ergänzt (2026-07-09, Commit `9d5f413`):** Das Menü ist nun auch **ohne zugewiesenen Schüler** (Idle) nutzbar — es klappt dort lediglich die Kamera-Zeile ein (Fokus auf die ohnehin sichtbare Warteschlange), `queue-view` bleibt an (`keepQueueView`-Flag an `animateMenu`), **kein** Server-Roundtrip (`peek_queue`/`peek_close` entfallen, kein `helper.peeking`). Die Lupe funktioniert im Idle-Menü ebenso (`search_call` serverseitig auch ohne aktuellen Schüler). Rein client-seitig (`idleMenuOpen`-Flag in `web/scan.js`); das Burger-Icon morphet synchron mit dem Menü-FLIP zu einem Linkspfeil (←). |
+| O1 | Modus A: Wie kommt ein Schüler auf ein bestimmtes Helfer-Handy? | **Umgesetzt (2026-06-17):** Helfer tippt den „Weiter"-Button (⏭) im Scanner → WS `{type:"next"}` → `sessions.advance_helper`: schließt den aktuellen Schüler ab (`end_student`, **kein** Browser-Submit) und vergibt den nächsten Pending aus der Queue. Host kann weiterhin via „Nächster Schüler" zuweisen. **Ergänzt (2026-07-08):** Das Hamburger-Menü (≡) im Helferclient schaltet per View-Toggle auf die Warteschlangen-Ansicht, **ohne** den Schüler zu trennen — er bleibt im Hintergrund verbunden, die Statuszeile zeigt ihn. `WS {type:"peek_queue"}/"peek_close"}` setzen ein transient `helper.peeking`-Flag, über das der Helfer Live-`queue_update`s erhält (wie unzugewiesene). Scans werden im Peek ignoriert. **Aufrufen** eines anderen Schülers aus der Peek-Ansicht (`call` mit vorhandenem Schüler) legt den alten Schüler als **'pending'** zurück in die Warteschlange (noch nicht bearbeitet, `session_state="revoked"`, Worker zu) — nicht als 'done'. Der „Weiter"-Button (`next`/`advance_helper`) hingegen schließt den alten als 'done' ab. **Ergänzt (2026-07-09):** Im Peek zeigt das Menü jetzt **Reiter für alle offenen Host-Klassen** (horizontal scrollbar, eigene Klasse vorausgewählt) mit je der Warteschlange dieser Klasse + „Aufrufen"-Button; der Hintergrund-Schüler steht **nur in der Statuszeile** (`.name-row` verborgen). Aufrufen aus einer **fremden** Klasse rebindet den Helfer an diese Klasse (`rebind_helper_to_context`, danach zieht „Nächster" aus der neuen Klasse) statt abzuweisen. Daten via `contexts_update` (`state.real_contexts_summary`, pro Helfer mit `own_context_id`). Lupe bleibt unverhalten zusätzlich. **Ergänzt (2026-07-09, Commit `9b11c75`):** Der aktive Reiter ist „nach unten offen" (Host-Stil: Basis-Linie + 3-seitiger Rahmen ohne Unterkante → geht in die Queue über), und bei jedem Öffnen des Menüs wird die eigene Klasse (re-)selektiert (manuelle Reiter-Wahl bleibt nur bis zum Schließen). Tests: 147 grün; Live am Gerät offen (`docs/test_status.md`). **Ergänzt (2026-07-09, Commit `9d5f413`):** Das Menü ist nun auch **ohne zugewiesenen Schüler** (Idle) nutzbar — es klappt dort lediglich die Kamera-Zeile ein (Fokus auf die ohnehin sichtbare Warteschlange), `queue-view` bleibt an (`keepQueueView`-Flag an `animateMenu`), **kein** Server-Roundtrip (`peek_queue`/`peek_close` entfallen, kein `helper.peeking`). Die Lupe funktioniert im Idle-Menü ebenso (`search_call` serverseitig auch ohne aktuellen Schüler). Rein client-seitig (`idleMenuOpen`-Flag in `web/scan.js`); das Burger-Icon morphet synchron mit dem Menü-FLIP zu einem Linkspfeil (←). **Ergänzt (2026-07-09):** Ist keine Klasse offen, steht „Keine Klasse offen" nur an Stelle der Klassen-Reiter (`renderQueueTabs` in `web/scan.js`), nicht noch einmal darunter in der eigentlichen Warteschlange (`renderQueue` lässt die Liste leer, statt den Text zu wiederholen). |
 | O2 | Erlaubt IServ mehrere parallele Sessions desselben Accounts? | **Geklärt (Spike B, 2026-06-12):** Ja — 3/3 parallele unabhängige Logins + 3/3 Cookie-Sharing-Contexts, keine Invalidierung. Context-Pool mit unabhängigen Contexts. |
 | O3 | Exaktes Verhalten der offiziellen Counter-Seite (DOM, Fehlerfälle, Schüler-Wechsel) | Spike A erkundet das mit Test-Account + ausgemustertem Buch. |
 | O4 | Welcher Drucker (USB am Laptop? Netzwerk? Treiberlage unter Windows)? | **Teil-adressiert (2026-06-15):** Druck-Service gebaut (`server/printing.py`, Backends `file`/`lp`/`sumatra`/`win-default`/`auto`), read-only PDF-Abruf via `get_loan_slip_pdf`. Echter Silent-Print am Zielgerät (= Spike C) noch offen → `docs/test_status.md`, `docs/deployment.md`. |
@@ -729,6 +729,41 @@ Tests: `tests/test_booking_precheck.py` +4 (`test_not_in_stock_carries_loaned_to
 `test_process_scan_loaned_to_for_helper`,
 `test_process_scan_hides_loan_from_student`), Suite 96 grün. Commits `15bf5f1`,
 `<follow-up>`.
+
+**Update (2026-07-09) — Hinweis-Modal für JEDEN nicht-verbuchbaren Scan
+(beide Clients).** Bisher öffnete nur `book_deleted`/`not_in_stock`/
+`series_already_lent` ein Hinweis-Modal; alle anderen nicht-OK Auswertungen
+(`not_enrolled` = „nicht bestellt", `unknown_book` = „unbekannt",
+`not_ready` = „Buchliste noch nicht geladen", `error` = Lookup/Client-Fehler)
+liefen nur als Text in der Statuszeile mit. Jetzt öffnet **jeder** nicht-OK
+Scan ein Fenster (gleicher Modal-Baukasten wie die bestehenden Alerts):
+
+- **Schüler-Client (Modus B, `web/student.html`):** die drei
+  sicherheitskritischen Fälle bleiben **Host-geschlossen** (blockierend, kein
+  Schließen-Button, serverseitig `book_alert_open` blockiert weitere Scans,
+  nur der Betreuer gibt per `book_alert_clear` frei) — `book_deleted`
+  (ausgemustert, mit **und** ohne Ersatzanspruch, d. h. `loaned_to` spielt
+  keine Rolle für die Schließ-Logik) **und** `not_in_stock` (an andere Person
+  verliehen). **Alle übrigen nicht-OK Status** (`series_already_lent`,
+  `not_enrolled`, `unknown_book`, `not_ready`, `error`) schließt der Schüler
+  **selbst** (Schließen-Button **oder** nächster Scan) und scannt weiter —
+  der bestehende close-on-next-scan-Pfad greift für jeden dismissiblen
+  Hinweis. Neue Hilfs-Sets `OK_STATUSES_STUDENT` (`staged`/`booked`) und
+  `BLOCKING_STATUSES_STUDENT` (`book_deleted`/`not_in_stock`); `dismissible =
+  !ok && !blocking`.
+- **Helfer-Client (Modus A, `web/scan.js`):** **jedes** nicht-OK Modal ist am
+  Gerät schließbar (Button / Klick außerhalb / Escape / nächster Scan);
+  `dismissBookAlert` beim nächsten Scan räumt ggfls. die Host-Meldung auf
+  (`clear_book_alert`), bei Status ohne Host-Broadcast (alle neuen + die
+  Selbst-Leihe) ist das Clear ein No-op. `OK_STATUSES` statt der alten
+  `ALERT_STATUSES`-Menge.
+
+Beide Clients: `ALERT_META` um Titel/Farbe für die neuen Status ergänzt
+(orange = Hinweis: `not_enrolled`/`not_ready`/`series_already_lent`; rot =
+Fehler: `unknown_book`/`error`). Rein client-seitig — Server-Pfad
+(`evaluate_scan_for_booking`, `process_scan`, `book_alert`-Broadcast) und
+IServ/DB unangetastet (read-only, kein GET mehr als bisher, kein Write).
+`node --check` OK; manuelle Geräte-Verifikation offen. Commit `eba6071`.
 
 **Bugfix (2026-07-07) — „Reihe an dich ausgeliehen" greift bei ausgeblendeten
 Reihen UND nach Buchung in derselben Session:** zwei Lücken im Erkennen
