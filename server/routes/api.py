@@ -752,6 +752,12 @@ async def set_slip_default(body: dict, session_id: str | None = Cookie(default=N
     state = get_state()
     state.slip_second_page_default = bool(body.get("second_page"))
     await get_hub().broadcast_settings(state)
+    # Auch an alle Hosts syncen — `slip_second_page_default` ist eine globale
+    # Einstellung (Quelle der Wahrheit = Serverstate), soll also auf jedem
+    # angemeldeten Host-Rechner synchron einschalten. Konsistent zu den
+    # anderen Dev-Toggles (save-pdf-locally/fix-class-on-slip), die ebenfalls
+    # broadcast_host feuern. Rein In-Memory, kein DB-/IServ-Zugriff.
+    await get_hub().broadcast_host(state.state_snapshot())
     return {"ok": True, "slip_second_page_default": state.slip_second_page_default}
 
 
