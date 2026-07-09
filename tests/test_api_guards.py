@@ -15,8 +15,36 @@ from __future__ import annotations
 import pytest
 
 import server.routes.api as api
+import server.routes.auth as auth_routes
+import server.routes.booklists as booklists_routes
+import server.routes.classes as classes_routes
+import server.routes.helpers as helpers_routes
+import server.routes.modus_b as modus_b_routes
+import server.routes.queue as queue_routes
+import server.routes.settings as settings_routes
+import server.routes.slips as slips_routes
 from server.config import Config
+from server.routes import _deps as deps_routes
 from server.state import AppState
+
+# Nach dem Welle-4-Split (routes/api.py → themenweise Module) sind get_state/
+# get_config/get_hub in JEDEM Endpoint-Modul ein eigener from-Import. Der frühere
+# Einzel-Patch auf `api.get_*` erreicht die Endpunkte daher nicht mehr — sie
+# lösen die Namen im Namespace IHRES Moduls auf. Deshalb patchen wir alle
+# Route-Module (inkl. `_deps`, wo `require_host`/`_base_url` sitzen). Ein
+# vergessenes Modul fällt LAUT auf (403/echter Singleton statt Fixture-State),
+# nicht still — kein Risiko eines scheinbar grünen Tests.
+_ROUTE_MODULES = [
+    deps_routes,
+    auth_routes,
+    classes_routes,
+    booklists_routes,
+    helpers_routes,
+    queue_routes,
+    slips_routes,
+    modus_b_routes,
+    settings_routes,
+]
 
 # ---------------------------------------------------------------------------
 # Fixtures: frische Singletons pro Test (Host-Login bereits gültig)
@@ -49,9 +77,13 @@ def ctx(monkeypatch):
     state.add_host_session("sid")
     cfg = _make_config()
     hub = _FakeHub()
-    monkeypatch.setattr(api, "get_state", lambda: state)
-    monkeypatch.setattr(api, "get_config", lambda: cfg)
-    monkeypatch.setattr(api, "get_hub", lambda: hub)
+    for mod in _ROUTE_MODULES:
+        if hasattr(mod, "get_state"):
+            monkeypatch.setattr(mod, "get_state", lambda: state)
+        if hasattr(mod, "get_config"):
+            monkeypatch.setattr(mod, "get_config", lambda: cfg)
+        if hasattr(mod, "get_hub"):
+            monkeypatch.setattr(mod, "get_hub", lambda: hub)
     return state, cfg, hub
 
 
