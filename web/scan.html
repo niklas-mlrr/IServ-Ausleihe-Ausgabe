@@ -110,6 +110,29 @@
     button:disabled { opacity: .5; cursor: not-allowed; }
     #gear-btn, #menu-btn { font-size: 1.5rem; }
     .right-col button { font-size: 1.4rem; }
+    /* Menü-Button-Icon: drei Balken (Burger), die beim Öffnen zu einem
+       Linkspfeil morphen. Oberer + unterer Balken drehen + verschieben sich
+       zur Pfeilspitze (Vertex links), der mittlere bleibt als Schaft. Die
+       Transform-Transition läuft auf derselben Kurve (.35s cubic-bezier) wie
+       das Menü-FLIP in animateMenu — .app.menu-open wird dort synchron mit
+       der FLIP-Klasse gesetzt, also bewegen sich Icon und Ansicht gemeinsam.
+       Schaft/Spitze treffen sich am linken Ende (x=4) → „←". */
+    .menu-icon {
+      display: inline-block; position: relative;
+      width: 1em; height: 1em; vertical-align: -0.125em;
+    }
+    .menu-icon .bar {
+      position: absolute; left: 4px; width: 16px; height: 2px;
+      background: currentColor; border-radius: 1px;
+      transform-origin: center;
+      transition: transform .35s cubic-bezier(.22,.61,.36,1);
+    }
+    .menu-icon .bar1 { top: 5px; }   /* Mittelachse y=6  */
+    .menu-icon .bar2 { top: 11px; }  /* Mittelachse y=12 (Schaft) */
+    .menu-icon .bar3 { top: 17px; }  /* Mittelachse y=18 */
+    .app.menu-open .menu-icon .bar1 { transform: translate(-4px, 2px) rotate(-45deg) scaleX(.7071); }
+    .app.menu-open .menu-icon .bar3 { transform: translate(-4px, -2px) rotate(45deg) scaleX(.7071); }
+    /* bar2 (Schaft) bleibt untransformiert */
     .torch-on { background: #4caf50 !important; }
     .sound-on { background: #4caf50 !important; }
     /* Lupen-Button (Menü-Modus): quadratisch wie die rechten Steuer-Buttons,
@@ -171,9 +194,11 @@
     #queue-header { display: none; margin: 12px 2px 2px; }
     .app.queue-view .name-row { display: none; }
     .app.queue-view #queue-header { display: block; }
+    /* „Warteschlange"-Überschrift: gleiche Schrift-Eigenschaften wie der
+       Schülername (.s-name) im geladenen Zustand — gleiche Größe/Gewicht,
+       keine Kapitälchen/Sperrung/Transparenz. */
     .qh-title {
-      font-size: .78rem; font-weight: 600; text-transform: uppercase;
-      letter-spacing: .05em; opacity: .6; margin-bottom: 6px;
+      font-size: 1.5rem; font-weight: 700; line-height: 1.2; margin-bottom: 8px;
     }
     /* Klassen-Reiter: horizontal scrollbar, falls sie zu breit werden. Der
        aktive Reiter ist „nach unten offen" (wie im Host): Basis-Linie unter
@@ -234,6 +259,7 @@
     /* Bewegungsreduktion respektieren: FLIP-Transition praktisch sofort. */
     @media (prefers-reduced-motion: reduce) {
       .book-row { transition: transform .01ms !important; }
+      .menu-icon .bar { transition: transform .01ms !important; }
     }
 
     /* ---- Druck-Dialog (Modal) ---- */
@@ -299,7 +325,7 @@
   <div class="top-section">
     <div class="top-bar">
       <div class="gear-wrap">
-        <button id="menu-btn" title="Menü"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></svg></button>
+        <button id="menu-btn" title="Menü"><span class="menu-icon"><span class="bar bar1"></span><span class="bar bar2"></span><span class="bar bar3"></span></span></button>
         <button id="gear-btn" title="Einstellungen / Kamera"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
         <div class="cam-dropdown" id="cam-dropdown">
           <select id="camera-select"><option>Kameras laden…</option></select>

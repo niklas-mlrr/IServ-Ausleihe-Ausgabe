@@ -13,6 +13,8 @@ let loadingStudent = false;        // Schüler wird geladen (next/call gesendet,
                                   //  student_info steht noch aus) — Queue verbergen
 let waitingMsg = 'Warte auf Schüler-Zuweisung';
 let peeking = false;                // Menü-Toggle: Warteschlangen-Ansicht bei
+let idleMenuOpen = false;           // Menü geöffnet OHNE Schüler (Idle): Kamera-
+                                  //  zeile eingeklappt, Queue bleibt sichtbar.
 // ---- Klassen-Reiter (Helfer-Menü): alle im Host offenen Klassen ----
 // `contextsData` kommt vom Server (`contexts_update`): je Klasse id, form und
 // ihre wartenden Schüler. `selectedCtxId` = gewählter Tab; `ownContextId` =
@@ -297,6 +299,8 @@ function handleServerMessage(msg) {
     studentActive = true;
     loadingStudent = false;  // Schüler geladen — Bücherliste ersetzt die Queue
     peeking = false;          // (neuer) Schüler geladen → keine Queue-Ansicht
+    idleMenuOpen = false;     // Schüler geladen → Idle-Menü hinfällig (gelöscht
+                             //  bereits beim loading, hier nur defensiv)
     setMenuTitle();
     syncQueueView();
     const s = msg.student;
@@ -366,6 +370,10 @@ function handleServerMessage(msg) {
     // `call`/`next` aus dem Peek lassen das Menü weiter offen (bestehendes
     // Verhalten) — nur der Such-Pfad schließt gezielt.
     if (searchSubmitted) { searchSubmitted = false; closeSearchAndMenu(); }
+    // Wurde der Schüler aus dem Idle-Menü heraus aufgerufen (Queue-„Aufrufen",
+    // ohne Such-Pfad), das Menü ebenfalls schließen — zurück zur Scanner-Ansicht.
+    // (Der Such-Pfad hat idleMenuOpen oben bereits zurückgesetzt.)
+    if (idleMenuOpen) { idleMenuOpen = false; setMenuTitle(); animateMenu(false); }
   } else if (msg.type === 'scan_result') {
     if (pendingScans > 0) pendingScans--;
     // Erfolgreicher Scan → Buch in der Liste als „erledigt" markieren:
@@ -814,7 +822,11 @@ document.addEventListener('click', () => camDropdown.classList.remove('open'));
 // ignoriert (s. onScanSuccess), damit kein Buch für den abgelenkten Helfer
 // gebucht/staged wird.
 function setMenuTitle() {
-  menuBtn.title = peeking ? 'Schüler anzeigen' : 'Warteschlange anzeigen';
+  // Geöffnet: Peek → zurück zum Hintergrund-Schüler; Idle-Menü → Kamera wieder
+  // einblenden. Geschlossen: Menü öffnet die Warteschlangen-Fokus-Ansicht.
+  if (peeking) menuBtn.title = 'Schüler anzeigen';
+  else if (idleMenuOpen) menuBtn.title = 'Scanner anzeigen';
+  else menuBtn.title = 'Warteschlange anzeigen';
 }
 setMenuTitle();
 
@@ -917,7 +929,7 @@ function flipTargetsToPosition(firsts) {
   });
 }
 
-function animateMenu(open) {
+function animateMenu(open, keepQueueView = false) {
   // Jegliche noch laufende Menü-Animation abbrechen — schnelles Toggeln darf
   // keine halb gesetzten Inline-Styles hinterlassen. print/next in Heimat bringen.
   menuAnimGen++;
@@ -936,7 +948,7 @@ function animateMenu(open) {
                snap: snapshotLayout(el), reparent: (el === printBtn || el === nextBtn) };
     });
     appEl.classList.add('menu-open');
-    appEl.classList.add('queue-view');
+    if (!keepQueueView) appEl.classList.add('queue-view');
     flipTargetsToPosition(firsts);
     // Steuer-Elemente an alter Stelle festpinnen und synchron ausfaden. Das
     // inline-display überschreibt das CSS display:none, damit sie rendern;
@@ -964,7 +976,7 @@ function animateMenu(open) {
     const searchRefRect = topSectionEl.getBoundingClientRect();
     const searchSnap = snapshotLayout(searchBtn);
     appEl.classList.remove('menu-open');
-    appEl.classList.remove('queue-view');
+    if (!keepQueueView) appEl.classList.remove('queue-view');
     flipTargetsToPosition(firsts);
     // Steuer-Elemente sind nun zurück im Fluss (display:flex via CSS, menu-open
     // weg), aber per Inline opacity:0 → von 0→1 synchron einfaden.
@@ -1023,13 +1035,45 @@ function closePeek() {
   animateMenu(false);
 }
 
+// ---- Idle-Menü: Menü-Button auch ohne zugewiesenen Schüler nutzen ----
+// Im Idle ist die Warteschlange ohnehin sichtbar (syncQueueView hält queue-view
+// an). Das Menü klappt hier lediglich die Kamera-Zeile ein (Fokus auf die
+// Queue) und fährt sie wieder aus — kein Hintergrund-Schüler, kein Server-
+// Roundtrip (peek_queue/peek_close entfallen). queue-view bleibt dabei an
+// (keepQueueView beim animateMenu), die Queue steht durchgehend. Die Lupe ist
+// hier ebenfalls nutzbar: gezielt einen beliebigen IServ-Schüler aufrufen
+// (search_call funktioniert serverseitig auch ohne aktuellen Schüler).
+function openIdleMenu() {
+  idleMenuOpen = true;
+  resetSearchPanel();
+  setMenuTitle();
+  // Queue + Tabs aus letztem Stand rendern; Live-Updates (contexts_update)
+  // kommen wie immer ungefragt für Idle-Helfer mit.
+  renderWaitingStatus();
+  renderQueueTabs();
+  renderQueue();
+  // queue-view bleibt an → Kamera-Zeile kollabiert nur via menu-open.
+  animateMenu(true, true);
+}
+
+function closeIdleMenu() {
+  idleMenuOpen = false;
+  resetSearchPanel();
+  setMenuTitle();
+  animateMenu(false, true);
+  // Status zurück auf Idle-Warteschlangengröße (Kamera wieder eingeblendet).
+  renderWaitingStatus();
+}
+
 menuBtn.addEventListener('click', (e) => {
   e.stopPropagation();
   if (peeking) { closePeek(); return; }
-  // Nur sinnvoll, wenn ein Schüler zugewiesen ist — sonst ist die Queue eh
-  // sichtbar (Idle). Im Lade-Zustand (loadingStudent) ebenfalls nicht umschalten.
-  if (!studentActive || loadingStudent) return;
-  openPeek();
+  if (idleMenuOpen) { closeIdleMenu(); return; }
+  // Im Lade-Zustand nicht umschalten (Schüler steht kurz bevor). Sonst:
+  // Schüler aktiv → Peek (Hintergrund); ohne Schüler → Idle-Menü.
+  if (loadingStudent) return;
+  if (studentActive) openPeek();
+  else openIdleMenu();
 });
 
 // ---- Lupen-Suche (Peek-Modus): Schnellsprung zu beliebigem Schüler ----
@@ -1094,6 +1138,7 @@ function animateSearchPanel(open) {
 // es die FLIP-Messung des Menü-Schließens).
 function closeSearchAndMenu() {
   searchOpen = false;
+  idleMenuOpen = false;   // ggf. offenes Idle-Menü mit schließen (Such-Pfad)
   searchPanel.classList.remove('open');
   searchPanel.style.maxHeight = '';
   searchPanel.style.transition = '';
@@ -1209,7 +1254,7 @@ function submitSearchStudent() {
 
 searchBtn.addEventListener('click', (e) => {
   e.stopPropagation();
-  if (!peeking) return;          // Lupe nur im Peek-Modus
+  if (!peeking && !idleMenuOpen) return;   // Lupe nur im Menü-Modus (Peek o. Idle)
   if (searchOpen) closeSearch(); else openSearch();
 });
 
