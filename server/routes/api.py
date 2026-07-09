@@ -9,7 +9,8 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Cookie, HTTPException, Request, Response
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
+from pydantic import BaseModel
 
 from ..book_order import normalize_book_order
 from ..booklist_store import save as save_booklist_state
@@ -32,6 +33,12 @@ from ..state import HelperSession, QueueStudent, get_state
 from ..tls import primary_lan_ip
 
 log = logging.getLogger(__name__)
+
+# `router` trägt die öffentlichen Routen (login, logout, das per-QR erreichbare
+# student/join) — bewusst OHNE Host-Auth. `host_router` trägt alle ~39 Host-
+# authentifizierten Endpunkte über eine einzige `dependencies=[Depends(...)]`
+# statt der vorher an jedem Endpoint wiederholten `_require_host(session_id)`.
+# `require_host` wird am Ende in `router` eingehängt (siehe Dateiende).
 router = APIRouter()
 
 
@@ -39,11 +46,163 @@ router = APIRouter()
 # Auth helpers
 # ---------------------------------------------------------------------------
 
-def _require_host(session_id: str | None = Cookie(default=None)) -> str:
+def require_host(session_id: str | None = Cookie(default=None)) -> str:
     state = get_state()
     if not state.is_host_session_valid(session_id, get_config().host_session_ttl_s):
         raise HTTPException(403, "Nicht eingeloggt")
     return session_id
+
+
+# Alle Host-authentifizierten Endpunkte hängen an diesem Router — die
+# Dependency läuft für JEDEN seiner Endpunkte VOR dem Funktionskörper (FastAPI
+# löst Router-`dependencies` immer vor dem Endpoint auf), ersetzt also 1:1 das
+# frühere manuelle `_require_host(session_id)` als erste Zeile jeder Funktion.
+# (Empirisch geprüft: FastAPI wertet Router-`dependencies` VOR der Body-
+# Validierung aus — ein fehlgeschlagener `require_host` liefert 403, selbst
+# wenn der Body zugleich ungültig/leer ist. Die Gate-Reihenfolge bei
+# `/api/commit-book` bleibt damit erhalten, siehe dort.)
+host_router = APIRouter(dependencies=[Depends(require_host)])
+
+
+# ---------------------------------------------------------------------------
+# Request-Models
+# ---------------------------------------------------------------------------
+#
+# 400 vs. 422: Wo ein fehlendes/falsch getyptes Feld bisher eine von Hand
+# geschriebene 400-Antwort auslöste, geben wir jetzt bewusst zwei Fälle
+# unterschiedlich zurück:
+#   - Feld FEHLT ganz (Client schickt den Key nicht) → Feld bleibt im Model
+#     optional mit Default, die alte manuelle 400-Prüfung im Funktionsrumpf
+#     bleibt erhalten (Fehlermeldungstext unverändert).
+#   - Feld ist VORHANDEN, aber vom falschen Typ (z. B. "student_id": "x") →
+#     das war vorher ein manueller int()-Versuch mit 400; jetzt lässt Pydantic
+#     das Request schon bei der Validierung mit 422 abbrechen. Kein Client
+#     (web/host.js, web/scan.js, web/student.html — geprüft per grep) wertet
+#     den Statuscode 400 aus, daher ist das eine bewusst akzeptierte
+#     Verschärfung (ehrlicherer Statuscode), keine Verhaltensänderung, auf die
+#     sich ein Client verlassen hätte.
+# Ausnahme: die drei Buchungs-Gates in commit_book (Host-Auth/allow_booking/
+# confirm) — dort MUSS die Reihenfolge/der Statuscode exakt erhalten bleiben
+# (CLAUDE.md, PLAN §6). `confirm` bleibt deshalb bewusst `bool = False` (kein
+# Pflichtfeld), die 400-Prüfung bleibt im Funktionsrumpf NACH den anderen
+# beiden Gates.
+
+class StudentRef(BaseModel):
+    """Gemeinsames Body-Model für alle Endpunkte, die nur eine `student_id`
+    brauchen (skip/disconnect/finish/clear-book-alert/…). Bewusst
+    `int | None = None` statt Pflichtfeld: ein komplett fehlendes Feld liefert
+    weiterhin die alte 400-Meldung ("student_id fehlt") aus dem
+    Funktionsrumpf; nur ein falscher Werttyp lässt Pydantic vorab mit 422
+    abbrechen (siehe Abschnittskommentar oben)."""
+    student_id: int | None = None
+
+
+class LoginRequest(BaseModel):
+    password: str = ""
+
+
+class SelectSchoolyearRequest(BaseModel):
+    schoolyear: str | None = None
+    force: bool = False
+
+
+class OpenClassRequest(BaseModel):
+    form: str = ""
+
+
+class CloseClassRequest(BaseModel):
+    context_id: str = ""
+
+
+class ContextIdBody(BaseModel):
+    """`context_id` optional, auch der ganze Body optional (kein Body im
+    Request → Default-Instanz, `context_id=None` → aktiver Kontext, Kompat zu
+    vorher `body: dict | None = None`)."""
+    context_id: str | None = None
+
+
+# Modul-Level-Singleton als Body-Default (statt `= ContextIdBody()` direkt im
+# Funktionskopf — ruff/B008 verbietet Funktionsaufrufe in Argument-Defaults;
+# die Instanz ist unveränderlich/wird nie mutiert, ein Singleton ist unbedenklich).
+_EMPTY_CONTEXT_BODY = ContextIdBody()
+
+
+class BooklistOrderRequest(BaseModel):
+    grade: int | None = None
+    order: list[str] | None = None
+
+
+class BooklistHiddenRequest(BaseModel):
+    grade: int | None = None
+    hidden: list[str] | None = None
+
+
+class AddStudentRequest(BaseModel):
+    student_id: int | None = None
+    lastname: str = ""
+    firstname: str = ""
+    form: str = ""
+    context_id: str | None = None
+
+
+class BoolToggleRequest(BaseModel):
+    """Body für `/api/force-tailscale-ip` — bleibt bewusst ein eigener
+    Endpoint (siehe `_BOOL_SETTINGS`-Kommentar weiter unten), daher ein
+    eigenes (wenn auch identisch aussehendes) Model statt `SettingsToggleRequest`."""
+    enabled: bool = False
+
+
+class SettingsToggleRequest(BaseModel):
+    """Body für `POST /api/settings/{key}` (Whitelist `_BOOL_SETTINGS`). Beide
+    Feldnamen optional, da die drei zusammengefassten Toggles historisch
+    unterschiedliche Feldnamen im JSON-Body haben (`enabled` vs. `second_page`)
+    — `web/host.js` bleibt bewusst unverändert, nur die URL wandert auf
+    `/api/settings/<key>`. Welches Feld tatsächlich gelesen wird, bestimmt
+    `_BOOL_SETTINGS[key]`."""
+    enabled: bool | None = None
+    second_page: bool | None = None
+
+
+class PrinterRequest(BaseModel):
+    printer: str = ""
+
+
+class AddHelperRequest(BaseModel):
+    name: str = "Helfer"
+    context_id: str | None = None
+
+
+class SetHelperClassRequest(BaseModel):
+    context_id: str | None = None
+
+
+class NextStudentRequest(BaseModel):
+    helper_token: str = ""
+
+
+class PrintLoanSlipRequest(BaseModel):
+    student_id: int | None = None
+    second_page: bool = False
+
+
+class CommitBookRequest(BaseModel):
+    student_id: int | None = None
+    confirm: bool = False
+    barcode: str = ""
+
+
+class DisplayAuthorizeRequest(BaseModel):
+    registration_code: str = ""
+
+
+class StudentJoinRequest(BaseModel):
+    join_secret: str = ""
+
+
+class StudentPairRequest(BaseModel):
+    pairing_code: str = ""
+    student_id: int | None = None
+    override_payment: bool = False
 
 
 # Erfolgreich erkannte LAN-IP cachen — ändert sich im Betrieb praktisch nicht
@@ -98,7 +257,7 @@ def _base_url(request: Request) -> str:
 # ---------------------------------------------------------------------------
 
 @router.post("/api/login")
-async def login(body: dict, response: Response, request: Request = None) -> dict:
+async def login(body: LoginRequest, response: Response, request: Request = None) -> dict:
     cfg = get_config()
     # Login-Rate-Limit (pro-IP) — Brute-Force-Anläufe auf das Host-Passwort
     # drosseln. `request` hat bewusst KEINE Union-Annotation (Request | None):
@@ -114,7 +273,7 @@ async def login(body: dict, response: Response, request: Request = None) -> dict
             raise HTTPException(429, "Zu viele Login-Versuche — bitte kurz warten")
     # Konstantzeit-Vergleich — kein Short-Circuit-Timing-Leak wie bei `!=`.
     # compare_digest verlangt gleichartige Typen; None/non-str über str() abgesichert.
-    if not secrets.compare_digest(str(body.get("password") or ""), str(cfg.host_password or "")):
+    if not secrets.compare_digest(str(body.password or ""), str(cfg.host_password or "")):
         raise HTTPException(403, "Falsches Passwort")
     sid = str(uuid.uuid4())
     get_state().add_host_session(sid)
@@ -135,10 +294,9 @@ async def logout(response: Response, session_id: str | None = Cookie(default=Non
 # Schuljahr
 # ---------------------------------------------------------------------------
 
-@router.get("/api/schoolyears")
-async def get_schoolyears(session_id: str | None = Cookie(default=None)) -> dict:
+@host_router.get("/api/schoolyears")
+async def get_schoolyears() -> dict:
     """Auswählbare Schuljahre + aktuell gewähltes (None = aktuelles Jahr)."""
-    _require_host(session_id)
     state = get_state()
     try:
         years = await state.iserv.get_schoolyears()
@@ -148,17 +306,16 @@ async def get_schoolyears(session_id: str | None = Cookie(default=None)) -> dict
     return {"schoolyears": years, "selected": state.selected_schoolyear}
 
 
-@router.post("/api/select-schoolyear")
-async def select_schoolyear(body: dict, session_id: str | None = Cookie(default=None)) -> dict:
+@host_router.post("/api/select-schoolyear")
+async def select_schoolyear(body: SelectSchoolyearRequest) -> dict:
     """Schuljahr wählen. Setzt die Queue/Klasse zurück, da Klassen jahresspezifisch sind.
 
     `schoolyear=null` (oder leer) → aktuelles Schuljahr.
     """
-    _require_host(session_id)
     state = get_state()
     hub = get_hub()
 
-    raw = body.get("schoolyear")
+    raw = body.schoolyear
     schoolyear = str(raw).strip() if raw else None
 
     # Guard: laufende Sessions würden durch den Wechsel verwaist. Über ALLE
@@ -167,7 +324,7 @@ async def select_schoolyear(body: dict, session_id: str | None = Cookie(default=
     # Schuljahreswechsel risse ihn ohne Warnung ab.
     active_q = state.active_students()
     live_b = [s for s in state.student_sessions.values() if s.state in ("pending_pairing", "paired")]
-    if (active_q or live_b) and not body.get("force"):
+    if (active_q or live_b) and not body.force:
         raise HTTPException(409, detail={
             "reason": "active_sessions",
             "msg": f"{len(active_q)} aktive Schüler / {len(live_b)} Live-Session(s) — "
@@ -201,9 +358,8 @@ async def select_schoolyear(body: dict, session_id: str | None = Cookie(default=
 # Klassen
 # ---------------------------------------------------------------------------
 
-@router.get("/api/classes")
-async def get_classes(session_id: str | None = Cookie(default=None)) -> dict:
-    _require_host(session_id)
+@host_router.get("/api/classes")
+async def get_classes() -> dict:
     state = get_state()
     try:
         classes = await state.iserv.get_class_names(state.selected_schoolyear)
@@ -221,14 +377,13 @@ async def get_classes(session_id: str | None = Cookie(default=None)) -> dict:
 # Klassen-Kontexte (Multi-Tab) — öffnen / schließen / aktivieren
 # ---------------------------------------------------------------------------
 
-@router.post("/api/open-class")
-async def open_class(body: dict, session_id: str | None = Cookie(default=None)) -> dict:
+@host_router.post("/api/open-class")
+async def open_class(body: OpenClassRequest) -> dict:
     """Neuen Klassen-Kontext öffnen (Klassen-Tab am Host). Lädt die Schüler der
     Klasse in eine frische, separate Queue und aktiviert den Kontext. Mehrere
     Klassen können parallel offen sein (je ein Tab). Doppel-Öffnen derselben
     Klasse aktiviert den bestehenden Kontext wieder (keine zweite Queue)."""
-    _require_host(session_id)
-    form = str(body.get("form", "")).strip()
+    form = body.form.strip()
     if not form:
         raise HTTPException(400, "form fehlt")
     state = get_state()
@@ -261,15 +416,14 @@ async def open_class(body: dict, session_id: str | None = Cookie(default=None)) 
     return {"ok": True, "context_id": ctx.id, "count": len(ctx.queue)}
 
 
-@router.post("/api/close-class")
-async def close_class(body: dict, session_id: str | None = Cookie(default=None)) -> dict:
+@host_router.post("/api/close-class")
+async def close_class(body: CloseClassRequest) -> dict:
     """Klassen-Kontext schließen (Tab × am Host). Beendet laufende Sessions der
     Schüler dieses Kontexts, löst Helfer-Bindungen an diesen Kontext und entfernt
     den Kontext. Read-only bzgl. IServ — keine Buchung, nur In-Memory-Teardown."""
-    _require_host(session_id)
     state = get_state()
     hub = get_hub()
-    context_id = str(body.get("context_id") or "").strip()
+    context_id = body.context_id.strip()
     ctx = state.contexts.get(context_id)
     if ctx is None:
         raise HTTPException(404, "Kontext unbekannt")
@@ -294,26 +448,22 @@ async def close_class(body: dict, session_id: str | None = Cookie(default=None))
     return {"ok": True, "context_id": context_id}
 
 
-@router.post("/api/set-active-context")
-async def set_active_context(body: dict, session_id: str | None = Cookie(default=None)) -> dict:
+@host_router.post("/api/set-active-context")
+async def set_active_context(body: ContextIdBody) -> dict:
     """Aktiven Klassen-Kontext setzen (welcher Tab am Host fokussiert ist).
     `context_id=null` → kein aktiver Kontext (Host-Tab ohne Klasse)."""
-    _require_host(session_id)
     state = get_state()
-    context_id = body.get("context_id")
-    if context_id is not None:
-        context_id = str(context_id)
-        if context_id not in state.contexts:
-            raise HTTPException(404, "Kontext unbekannt")
+    context_id = body.context_id
+    if context_id is not None and context_id not in state.contexts:
+        raise HTTPException(404, "Kontext unbekannt")
     state.set_active_context(context_id)
     await get_hub().broadcast_host(state.state_snapshot())
     return {"ok": True, "active_context_id": state.active_context_id}
 
 
-@router.get("/api/students-for-class")
-async def students_for_class(form: str, session_id: str | None = Cookie(default=None)) -> dict:
+@host_router.get("/api/students-for-class")
+async def students_for_class(form: str) -> dict:
     """Schülerliste einer Klasse für die Einzel-Auswahl (ohne die Queue anzufassen)."""
-    _require_host(session_id)
     form = form.strip()
     if not form:
         raise HTTPException(400, "form fehlt")
@@ -371,11 +521,10 @@ async def _ensure_class_catalog(state, context_id: str | None = None) -> None:
         ctx.book_order = catalog_isbns
 
 
-@router.get("/api/booklists")
-async def list_booklists(session_id: str | None = Cookie(default=None)) -> dict:
+@host_router.get("/api/booklists")
+async def list_booklists() -> dict:
     """Alle Bücherlisten (Jahrgänge) des gewählten Schuljahrs — für die Reiter im
     Einstellungen-Dialog. Read-only (ein GET gegen IServ), kein DB-Write."""
-    _require_host(session_id)
     state = get_state()
     try:
         booklists = await state.iserv.get_booklists_overview(state.selected_schoolyear)
@@ -385,13 +534,12 @@ async def list_booklists(session_id: str | None = Cookie(default=None)) -> dict:
     return {"schoolyear": state.selected_schoolyear, "booklists": booklists}
 
 
-@router.get("/api/booklist-order")
+@host_router.get("/api/booklist-order")
 async def get_booklist_order(
-    grade: int, session_id: str | None = Cookie(default=None)
+    grade: int
 ) -> dict:
     """Ausleihbare Bücher eines Jahrgangs + aktuelle (ggf. vorkonfigurierte)
     Reihenfolge. Read-only, kein DB-Write."""
-    _require_host(session_id)
     state = get_state()
     try:
         catalog = await state.iserv.get_booklist_catalog_by_grade(
@@ -407,10 +555,8 @@ async def get_booklist_order(
     return {"grade": grade, "catalog": catalog, "order": order, "hidden": hidden}
 
 
-@router.post("/api/booklist-order")
-async def set_booklist_order(
-    body: dict, session_id: str | None = Cookie(default=None)
-) -> dict:
+@host_router.post("/api/booklist-order")
+async def set_booklist_order(body: BooklistOrderRequest) -> dict:
     """Jahrgangsweite Bücher-Reihenfolge (aus dem Einstellungen-Dialog) speichern.
 
     Reiner In-Memory-State (kein DB-/IServ-Write). `broadcast_settings()` schickt
@@ -422,11 +568,10 @@ async def set_booklist_order(
     Jahrgang, wird dessen `book_order` + der Host selbst (`broadcast_host`) live
     nachgezogen, damit ein Reload des Hosts konsistent bleibt.
     """
-    _require_host(session_id)
     state = get_state()
-    grade = body.get("grade")
-    requested = body.get("order")
-    if not isinstance(grade, int) or not isinstance(requested, list):
+    grade = body.grade
+    requested = body.order
+    if grade is None or requested is None:
         raise HTTPException(400, "grade (int) und order (Liste) erforderlich")
     try:
         catalog = await state.iserv.get_booklist_catalog_by_grade(
@@ -455,10 +600,8 @@ async def set_booklist_order(
     return {"ok": True, "grade": grade, "order": order}
 
 
-@router.post("/api/booklist-hidden")
-async def set_booklist_hidden(
-    body: dict, session_id: str | None = Cookie(default=None)
-) -> dict:
+@host_router.post("/api/booklist-hidden")
+async def set_booklist_hidden(body: BooklistHiddenRequest) -> dict:
     """Ausgeblendete Buchreihen eines Jahrgangs (Einstellungen-Dialog, „Ausblenden"-
     Button je Buch) setzen.
 
@@ -468,11 +611,10 @@ async def set_booklist_hidden(
     als „vorgemerkt" (`apply_hidden_books` in `sessions.py`/`routes/ws.py`) und
     sind damit auch nicht mehr buchbar (`evaluate_scan_for_booking` sieht die
     ISBN nicht mehr in `vormerk_isbns`)."""
-    _require_host(session_id)
     state = get_state()
-    grade = body.get("grade")
-    requested = body.get("hidden")
-    if not isinstance(grade, int) or not isinstance(requested, list):
+    grade = body.grade
+    requested = body.hidden
+    if grade is None or requested is None:
         raise HTTPException(400, "grade (int) und hidden (Liste) erforderlich")
     try:
         catalog = await state.iserv.get_booklist_catalog_by_grade(
@@ -490,8 +632,8 @@ async def set_booklist_hidden(
     return {"ok": True, "grade": grade, "hidden": sorted(hidden)}
 
 
-@router.post("/api/add-student")
-async def add_student_to_queue(body: dict, session_id: str | None = Cookie(default=None)) -> dict:
+@host_router.post("/api/add-student")
+async def add_student_to_queue(body: AddStudentRequest) -> dict:
     """Einen einzelnen Schüler an die Queue eines Klassen-Kontexts anhängen
     (klassenübergreifend). `context_id` optional — fehlt er, wird der aktive
     Kontext genutzt (bei Einzel-Schüler-Reiter im Klassen-Tab gesetzt); ohne
@@ -501,21 +643,19 @@ async def add_student_to_queue(body: dict, session_id: str | None = Cookie(defau
     Im Gegensatz zu `/api/open-class` wird die Queue NICHT ersetzt und es
     werden keine laufenden Sessions angefasst.
     """
-    _require_host(session_id)
     state = get_state()
     hub = get_hub()
 
-    try:
-        student_id = int(body.get("student_id"))
-    except (TypeError, ValueError):
-        raise HTTPException(400, "student_id fehlt/ungültig") from None
-    lastname = str(body.get("lastname", "")).strip()
-    firstname = str(body.get("firstname", "")).strip()
-    form = str(body.get("form", "")).strip()
+    if body.student_id is None:
+        raise HTTPException(400, "student_id fehlt/ungültig")
+    student_id = body.student_id
+    lastname = body.lastname.strip()
+    firstname = body.firstname.strip()
+    form = body.form.strip()
     if not lastname and not firstname:
         raise HTTPException(400, "Name fehlt")
 
-    context_id = str(body.get("context_id") or "").strip() or None
+    context_id = str(body.context_id or "").strip() or None
     if context_id is not None and context_id not in state.contexts:
         raise HTTPException(404, "Kontext unbekannt")
 
@@ -577,13 +717,12 @@ TEST_STUDENTS = _load_test_students()
 TEST_CONFIG_FORM = "Test Config"
 
 
-@router.post("/api/open-test-config")
-async def open_test_config(session_id: str | None = Cookie(default=None)) -> dict:
+@host_router.post("/api/open-test-config")
+async def open_test_config() -> dict:
     """Dedizierten "Test Config"-Tab öffnen (kein IServ-Roundtrip, kein echter
     Klassen-Katalog) und sofort mit den festen Testschülern befüllen. Erneutes
     Öffnen aktiviert den bestehenden Tab wieder (keine zweite Queue), analog zu
     `/api/open-class`."""
-    _require_host(session_id)
     state = get_state()
     hub = get_hub()
 
@@ -609,15 +748,14 @@ async def open_test_config(session_id: str | None = Cookie(default=None)) -> dic
 # State
 # ---------------------------------------------------------------------------
 
-@router.get("/api/state")
-async def get_state_endpoint(session_id: str | None = Cookie(default=None)) -> dict:
-    _require_host(session_id)
+@host_router.get("/api/state")
+async def get_state_endpoint() -> dict:
     return get_state().state_snapshot()
 
 
-@router.post("/api/force-tailscale-ip")
+@host_router.post("/api/force-tailscale-ip")
 async def set_force_tailscale_ip(
-    body: dict, request: Request, session_id: str | None = Cookie(default=None)
+    body: BoolToggleRequest, request: Request
 ) -> dict:
     """Header-Toggle „Tailscale-IP": Auto-Auswahl (LAN-first) ↔ erzwungene Tailscale-IP.
 
@@ -626,9 +764,8 @@ async def set_force_tailscale_ip(
     bei `/modus-b/open` eingefrorenen Schüler-Join-QR bauen wir hier neu, wenn
     die Ausgabe gerade offen ist.
     """
-    _require_host(session_id)
     state = get_state()
-    state.force_tailscale_ip = bool(body.get("enabled"))
+    state.force_tailscale_ip = body.enabled
 
     if state.modus_b_open and state.modus_b_join_secret:
         state.modus_b_join_url = (
@@ -641,64 +778,54 @@ async def set_force_tailscale_ip(
     return {"ok": True, "force_tailscale_ip": state.force_tailscale_ip}
 
 
-@router.post("/api/save-pdf-locally")
-async def set_save_pdf_locally(
-    body: dict, session_id: str | None = Cookie(default=None)
-) -> dict:
-    """Entwickler-Toggle „PDF lokal speichern": beim Drucken das `file`-Backend
-    erzwingen (Leihschein wird gespeichert statt gedruckt) — unabhängig von
-    PRINT_BACKEND. Rein lokal, kein IServ-/DB-Zugriff.
+# Whitelist für POST /api/settings/{key} — bündelt die drei strukturell
+# gleichen Bool-Toggles (setzen genau ein Attribut im Serverstate, broadcasten
+# an alle Hosts). `force-tailscale-ip` (baut zusätzlich den Modus-B-QR neu,
+# braucht `Request`) und `printer` (String-Wert, andere Semantik: leer =
+# .env-Default) bleiben bewusst eigenständige Endpunkte — reinquetschen würde
+# den gemeinsamen Rumpf nur mit Sonderfällen vollstopfen, ohne echte
+# Duplikation zu sparen (siehe Welle-3-Bericht).
+# key -> (state-Attribut, Body-Feldname auf `SettingsToggleRequest`)
+_BOOL_SETTINGS: dict[str, tuple[str, str]] = {
+    "save-pdf-locally": ("save_pdf_locally", "enabled"),
+    "fix-class-on-slip": ("fix_class_on_slip", "enabled"),
+    "slip-default": ("slip_second_page_default", "second_page"),
+}
+
+
+@host_router.post("/api/settings/{key}")
+async def set_bool_setting(key: str, body: SettingsToggleRequest) -> dict:
+    """Einfache Bool-Entwickler-/Host-Toggles gegen eine Whitelist
+    (`_BOOL_SETTINGS`) gebündelt — ersetzt die vormals separaten Endpunkte
+    `/api/save-pdf-locally` (Entwickler-Toggle „PDF lokal speichern"),
+    `/api/fix-class-on-slip` (experimenteller Entwickler-Toggle „Klasse auf
+    Leihschein korrigieren") und `/api/slip-default` (Host-Toggle „Schüler-
+    Leihschein" als Druck-Dialog-Default für die Helfer). Alle drei: rein
+    In-Memory, kein IServ-/DB-Zugriff.
     """
-    _require_host(session_id)
+    entry = _BOOL_SETTINGS.get(key)
+    if entry is None:
+        raise HTTPException(404, f"Unbekannte Einstellung: {key}")
+    attr, field = entry
+    value = bool(getattr(body, field))
     state = get_state()
-    state.save_pdf_locally = bool(body.get("enabled"))
-    await get_hub().broadcast_host(state.state_snapshot())
-    return {"ok": True, "save_pdf_locally": state.save_pdf_locally}
+    setattr(state, attr, value)
+    hub = get_hub()
+    if key == "slip-default":
+        # `slip_second_page_default` ist zusätzlich für die Helfer relevant
+        # (Druck-Dialog-Vorauswahl) — anders als die beiden reinen
+        # Entwickler-Toggles auch an sie broadcasten.
+        await hub.broadcast_settings(state)
+    await hub.broadcast_host(state.state_snapshot())
+    return {"ok": True, attr: value}
 
 
-@router.post("/api/fix-class-on-slip")
-async def set_fix_class_on_slip(
-    body: dict, session_id: str | None = Cookie(default=None)
-) -> dict:
-    """Experimenteller Entwickler-Toggle „Klasse auf Leihschein korrigieren":
-    ersetzt beim Drucken den (teils falschen) Klassen-Code auf dem IServ-
-    Leihschein durch die echte Klasse des Schülers. Rein lokale PDF-Bearbeitung,
-    kein IServ-/DB-Write.
-    """
-    _require_host(session_id)
-    state = get_state()
-    state.fix_class_on_slip = bool(body.get("enabled"))
-    await get_hub().broadcast_host(state.state_snapshot())
-    return {"ok": True, "fix_class_on_slip": state.fix_class_on_slip}
-
-
-@router.post("/api/slip-default")
-async def set_slip_default(body: dict, session_id: str | None = Cookie(default=None)) -> dict:
-    """Host-Toggle „Schüler-Leihschein" (2. Seite) als Default für die Helfer.
-
-    Rein clientseitig-organisatorisch: setzt nur die Vorauswahl im Druck-Dialog
-    des Helferclients. Kein IServ-/DB-Zugriff.
-    """
-    _require_host(session_id)
-    state = get_state()
-    state.slip_second_page_default = bool(body.get("second_page"))
-    await get_hub().broadcast_settings(state)
-    # Auch an alle Hosts syncen — `slip_second_page_default` ist eine globale
-    # Einstellung (Quelle der Wahrheit = Serverstate), soll also auf jedem
-    # angemeldeten Host-Rechner synchron einschalten. Konsistent zu den
-    # anderen Dev-Toggles (save-pdf-locally/fix-class-on-slip), die ebenfalls
-    # broadcast_host feuern. Rein In-Memory, kein DB-/IServ-Zugriff.
-    await get_hub().broadcast_host(state.state_snapshot())
-    return {"ok": True, "slip_second_page_default": state.slip_second_page_default}
-
-
-@router.get("/api/printers")
-async def get_printers(session_id: str | None = Cookie(default=None)) -> dict:
+@host_router.get("/api/printers")
+async def get_printers() -> dict:
     """Dem Host-Gerät bekannte Drucker für die Auswahl im Einstellungen-Dialog.
 
     Rein lesend (lpstat/Get-Printer, lokales System — kein IServ-/DB-Zugriff).
     """
-    _require_host(session_id)
     from ..printing import list_printers
 
     cfg = get_config()
@@ -709,16 +836,15 @@ async def get_printers(session_id: str | None = Cookie(default=None)) -> dict:
     return info
 
 
-@router.post("/api/printer")
-async def set_printer(body: dict, session_id: str | None = Cookie(default=None)) -> dict:
+@host_router.post("/api/printer")
+async def set_printer(body: PrinterRequest) -> dict:
     """Einstellungen-Dialog: Leihschein-Drucker wählen.
 
     Setzt nur den In-Memory-Override im Serverstate (leer = zurück auf
     .env/Systemstandard) — kein IServ-/DB-Zugriff, nichts wird persistiert.
     """
-    _require_host(session_id)
     state = get_state()
-    name = str(body.get("printer") or "").strip()
+    name = body.printer.strip()
     state.printer_name_override = name or None
     await get_hub().broadcast_host(state.state_snapshot())
     return {"ok": True, "printer": state.printer_name_override}
@@ -728,16 +854,15 @@ async def set_printer(body: dict, session_id: str | None = Cookie(default=None))
 # Helfer verwalten
 # ---------------------------------------------------------------------------
 
-@router.post("/api/add-helper")
-async def add_helper(body: dict, request: Request, session_id: str | None = Cookie(default=None)) -> dict:
-    _require_host(session_id)
-    name = body.get("name", "Helfer").strip() or "Helfer"
+@host_router.post("/api/add-helper")
+async def add_helper(body: AddHelperRequest, request: Request) -> dict:
+    name = body.name.strip() or "Helfer"
     token = str(uuid.uuid4()).replace("-", "")[:16]
     state = get_state()
     # Optionale Bindung an einen Klassen-Kontext (Helfer bedient genau diese
     # Klasse; „Nächster" zieht aus ihrer Queue). Ohne context_id später per
     # /api/helper/{token}/class setzbar.
-    context_id = str(body.get("context_id") or "").strip() or None
+    context_id = str(body.context_id or "").strip() or None
     if context_id is not None and context_id not in state.contexts:
         raise HTTPException(404, "Kontext unbekannt")
     state.helper_sessions[token] = HelperSession(token=token, name=name, context_id=context_id)
@@ -748,28 +873,24 @@ async def add_helper(body: dict, request: Request, session_id: str | None = Cook
     return {"ok": True, "token": token, "url": url, "qr": qr_data_url}
 
 
-@router.post("/api/helper/{token}/class")
-async def set_helper_class(token: str, body: dict, session_id: str | None = Cookie(default=None)) -> dict:
+@host_router.post("/api/helper/{token}/class")
+async def set_helper_class(token: str, body: SetHelperClassRequest) -> dict:
     """Helfer an einen Klassen-Kontext binden (`context_id`) oder lösen
     (`context_id=null`). Rein transient — kein IServ-/DB-Zugriff."""
-    _require_host(session_id)
     state = get_state()
     helper = state.helper_sessions.get(token)
     if not helper:
         raise HTTPException(404, "Unbekannter Token")
-    context_id = body.get("context_id")
-    if context_id is not None:
-        context_id = str(context_id)
-        if context_id not in state.contexts:
-            raise HTTPException(404, "Kontext unbekannt")
+    context_id = body.context_id
+    if context_id is not None and context_id not in state.contexts:
+        raise HTTPException(404, "Kontext unbekannt")
     helper.context_id = context_id
     await get_hub().broadcast_host(state.state_snapshot())
     return {"ok": True, "context_id": helper.context_id}
 
 
-@router.delete("/api/helper/{token}")
-async def remove_helper(token: str, session_id: str | None = Cookie(default=None)) -> dict:
-    _require_host(session_id)
+@host_router.delete("/api/helper/{token}")
+async def remove_helper(token: str) -> dict:
     state = get_state()
     hub = get_hub()
     helper = state.helper_sessions.get(token)
@@ -817,10 +938,9 @@ async def remove_helper(token: str, session_id: str | None = Cookie(default=None
 # Schüler-Queue-Steuerung
 # ---------------------------------------------------------------------------
 
-@router.post("/api/next-student")
-async def next_student(body: dict, session_id: str | None = Cookie(default=None)) -> dict:
-    _require_host(session_id)
-    helper_token = body.get("helper_token", "").strip()
+@host_router.post("/api/next-student")
+async def next_student(body: NextStudentRequest) -> dict:
+    helper_token = body.helper_token.strip()
     state = get_state()
     hub = get_hub()
 
@@ -844,16 +964,11 @@ async def next_student(body: dict, session_id: str | None = Cookie(default=None)
             "name": f"{student.lastname}, {student.firstname}"}
 
 
-@router.post("/api/skip")
-async def skip_student(body: dict, session_id: str | None = Cookie(default=None)) -> dict:
-    _require_host(session_id)
-    student_id = body.get("student_id")
-    if student_id is None:
+@host_router.post("/api/skip")
+async def skip_student(body: StudentRef) -> dict:
+    if body.student_id is None:
         raise HTTPException(400, "student_id fehlt")
-    try:
-        student_id = int(student_id)
-    except (TypeError, ValueError):
-        raise HTTPException(400, "student_id ungültig") from None
+    student_id = body.student_id
     state = get_state()
     hub = get_hub()
 
@@ -868,22 +983,17 @@ async def skip_student(body: dict, session_id: str | None = Cookie(default=None)
     return {"ok": True}
 
 
-@router.post("/api/disconnect")
-async def disconnect_student(body: dict, session_id: str | None = Cookie(default=None)) -> dict:
+@host_router.post("/api/disconnect")
+async def disconnect_student(body: StudentRef) -> dict:
     """Schüler von Helfer/Schüler-Session trennen und auf 'Wartend' zurücksetzen.
 
     Anders als /api/skip wird der Schüler NICHT übersprungen, sondern bleibt als
     `pending` in der Queue (kann erneut zugeordnet werden). Für `pending`-Schüler
     ohne Verbindung ist es ein harmloser No-op.
     """
-    _require_host(session_id)
-    student_id = body.get("student_id")
-    if student_id is None:
+    if body.student_id is None:
         raise HTTPException(400, "student_id fehlt")
-    try:
-        student_id = int(student_id)
-    except (TypeError, ValueError):
-        raise HTTPException(400, "student_id ungültig") from None
+    student_id = body.student_id
     state = get_state()
     hub = get_hub()
     student = state.find_student(student_id)
@@ -895,15 +1005,14 @@ async def disconnect_student(body: dict, session_id: str | None = Cookie(default
     return {"ok": True}
 
 
-@router.post("/api/disconnect-all")
-async def disconnect_all(body: dict | None = None, session_id: str | None = Cookie(default=None)) -> dict:
+@host_router.post("/api/disconnect-all")
+async def disconnect_all(body: ContextIdBody = _EMPTY_CONTEXT_BODY) -> dict:
     """Alle aktiven Verbindungen (Modus A + B) eines Klassen-Kontexts trennen,
     Schüler zurück auf 'Wartend'. `context_id` optional im Body — fehlt er,
     aktiver Kontext (Kompat)."""
-    _require_host(session_id)
     state = get_state()
     hub = get_hub()
-    context_id = _context_id_from_body(body)
+    context_id = (body.context_id or "").strip() or None
     ctx = state.ctx_or_active(context_id)
     if ctx is None:
         return {"ok": True, "count": 0}
@@ -917,13 +1026,8 @@ async def disconnect_all(body: dict | None = None, session_id: str | None = Cook
     return {"ok": True, "count": len(active_ids)}
 
 
-def _context_id_from_body(body: dict | None) -> str | None:
-    cid = str((body or {}).get("context_id") or "").strip()
-    return cid or None
-
-
-@router.post("/api/reset-queue")
-async def reset_queue(body: dict | None = None, session_id: str | None = Cookie(default=None)) -> dict:
+@host_router.post("/api/reset-queue")
+async def reset_queue(body: ContextIdBody = _EMPTY_CONTEXT_BODY) -> dict:
     """Queue-Status eines Klassen-Kontexts zurücksetzen: ALLE Schüler auf 'pending'.
 
     Trennt aktive Verbindungen (wie disconnect) und setzt zusätzlich
@@ -931,10 +1035,9 @@ async def reset_queue(body: dict | None = None, session_id: str | None = Cookie(
     Queue (kein Neuladen der Klasse). `context_id` optional — fehlt er, aktiver
     Kontext (Kompat).
     """
-    _require_host(session_id)
     state = get_state()
     hub = get_hub()
-    context_id = _context_id_from_body(body)
+    context_id = (body.context_id or "").strip() or None
     ctx = state.ctx_or_active(context_id)
     if ctx is None:
         return {"ok": True, "count": 0}
@@ -948,8 +1051,8 @@ async def reset_queue(body: dict | None = None, session_id: str | None = Cookie(
     return {"ok": True, "count": len(changed)}
 
 
-@router.post("/api/clear-queue")
-async def clear_queue(body: dict | None = None, session_id: str | None = Cookie(default=None)) -> dict:
+@host_router.post("/api/clear-queue")
+async def clear_queue(body: ContextIdBody = _EMPTY_CONTEXT_BODY) -> dict:
     """Queue eines Klassen-Kontexts komplett LEEREN: alle Schüler entfernen.
 
     Anders als `/api/reset-queue` (setzt nur den Status zurück) wird die Queue
@@ -958,10 +1061,9 @@ async def clear_queue(body: dict | None = None, session_id: str | None = Cookie(
     bestehen — nur seine Queue wird leer. `context_id` optional — fehlt er,
     aktiver Kontext (Kompat).
     """
-    _require_host(session_id)
     state = get_state()
     hub = get_hub()
-    context_id = _context_id_from_body(body)
+    context_id = (body.context_id or "").strip() or None
     ctx = state.ctx_or_active(context_id)
     if ctx is None:
         return {"ok": True, "count": 0}
@@ -983,16 +1085,11 @@ async def clear_queue(body: dict | None = None, session_id: str | None = Cookie(
     return {"ok": True, "count": count}
 
 
-@router.post("/api/finish")
-async def finish_student(body: dict, session_id: str | None = Cookie(default=None)) -> dict:
-    _require_host(session_id)
-    student_id = body.get("student_id")
-    if student_id is None:
+@host_router.post("/api/finish")
+async def finish_student(body: StudentRef) -> dict:
+    if body.student_id is None:
         raise HTTPException(400, "student_id fehlt")
-    try:
-        student_id = int(student_id)
-    except (TypeError, ValueError):
-        raise HTTPException(400, "student_id ungültig") from None
+    student_id = body.student_id
     state = get_state()
     hub = get_hub()
 
@@ -1004,21 +1101,16 @@ async def finish_student(body: dict, session_id: str | None = Cookie(default=Non
     return {"ok": True}
 
 
-@router.post("/api/clear-book-alert")
-async def clear_book_alert(body: dict, session_id: str | None = Cookie(default=None)) -> dict:
+@host_router.post("/api/clear-book-alert")
+async def clear_book_alert(body: StudentRef) -> dict:
     """Blockierendes Ausgemustert-Hinweis-Modal am Schüler-Client (Modus B)
     freigeben — der Client selbst hat dafür bewusst keinen Schließen-Button
     (Freigabe nur durch den Host). Wird das Buch am Helfer-Scanner (Modus A)
     gemeldet, gibt es keine Client-Session dazu — dann räumt dieser Call nur
     das Host-Kästchen auf."""
-    _require_host(session_id)
-    student_id = body.get("student_id")
-    if student_id is None:
+    if body.student_id is None:
         raise HTTPException(400, "student_id fehlt")
-    try:
-        student_id = int(student_id)
-    except (TypeError, ValueError):
-        raise HTTPException(400, "student_id ungültig") from None
+    student_id = body.student_id
 
     state = get_state()
     session = state.find_session_by_student(student_id)
@@ -1039,25 +1131,19 @@ async def clear_book_alert(body: dict, session_id: str | None = Cookie(default=N
 # Leihschein-Druck (read-only PDF-Abruf + lokaler Druck)
 # ---------------------------------------------------------------------------
 
-@router.post("/api/print-loan-slip")
-async def print_loan_slip(body: dict, session_id: str | None = Cookie(default=None)) -> dict:
+@host_router.post("/api/print-loan-slip")
+async def print_loan_slip(body: PrintLoanSlipRequest) -> dict:
     """Leihschein eines Schülers holen (read-only) und lokal drucken.
 
     Kein Schreibzugriff auf IServ — `get_loan_slip_pdf` ist ein reiner GET, das
     Drucken passiert am Laptop/Macbook (siehe server/printing.py).
     """
-    _require_host(session_id)
-    student_id = body.get("student_id")
-    if student_id is None:
+    if body.student_id is None:
         raise HTTPException(400, "student_id fehlt")
-    try:
-        student_id = int(student_id)
-    except (TypeError, ValueError):
-        raise HTTPException(400, "student_id ungültig") from None
+    student_id = body.student_id
     # Seite 1 wird immer gedruckt; Seite 2 (Schüler-Leihschein) nur, wenn der
     # Host-Toggle gesetzt ist.
-    second_page = bool(body.get("second_page"))
-    pages = None if second_page else "1"
+    pages = None if body.second_page else "1"
 
     from ..sessions import print_loan_slip_for
 
@@ -1084,33 +1170,39 @@ def _last_scan_for(state, student_id: int) -> str:
     return ""
 
 
-@router.post("/api/commit-book")
-async def commit_book(body: dict, session_id: str | None = Cookie(default=None)) -> dict:
+@host_router.post("/api/commit-book")
+async def commit_book(body: CommitBookRequest) -> dict:
     """Einen Barcode tatsächlich BUCHEN (Enter auf der IServ-Counter-Seite).
 
     Dreifach gesperrt: Host-Auth + `confirm:true` + Server-Flag
     `allow_booking`. Default `ALLOW_BOOKING=false` → gesperrt; `handle_commit`
     berührt den Worker dann gar nicht erst. Nur für den freigegebenen
     Buchungstest (Niklas + Lukas, CLAUDE.md / PLAN §6).
+
+    `confirm` ist im Model bewusst `bool = False` (KEIN Pflichtfeld) — ein
+    Pflichtfeld würde bei fehlendem/falschem `confirm` schon während der
+    Pydantic-Validierung mit 422 abbrechen, BEVOR Gate 1 (`allow_booking`)
+    geprüft wird. Das würde die geforderte Reihenfolge "403 vor 400"
+    (CLAUDE.md / PLAN §6) verletzen. Mit Default bleibt die Validierung immer
+    erfolgreich; die eigentliche confirm-Prüfung (Gate 3) bleibt unten im
+    Funktionsrumpf, NACH Gate 1.
     """
-    _require_host(session_id)              # Gate 2: Host-Bestätigung
+    # Gate 2 (Host-Auth) läuft bereits vorab als Dependency (require_host auf
+    # host_router) — FastAPI löst Dependencies immer vor dem Funktionskörper
+    # auf, die Reihenfolge Gate2 -> Gate1 -> Gate3 bleibt damit erhalten.
     cfg = get_config()
     if not cfg.allow_booking:                   # Gate 1: Server-Flag
         raise HTTPException(403, "Buchung gesperrt (ALLOW_BOOKING=false)")
-    if not bool(body.get("confirm")):           # Gate 3: bewusster Extra-Schritt
+    if not body.confirm:                        # Gate 3: bewusster Extra-Schritt
         raise HTTPException(400, "confirm:true erforderlich")
 
-    student_id = body.get("student_id")
-    if student_id is None:
+    if body.student_id is None:
         raise HTTPException(400, "student_id fehlt")
-    try:
-        student_id = int(student_id)
-    except (TypeError, ValueError):
-        raise HTTPException(400, "student_id ungültig") from None
+    student_id = body.student_id
 
     state = get_state()
     hub = get_hub()
-    barcode = str(body.get("barcode", "")).strip() or _last_scan_for(state, student_id)
+    barcode = body.barcode.strip() or _last_scan_for(state, student_id)
     if not barcode:
         raise HTTPException(400, "Kein Barcode (weder übergeben noch gestaged)")
 
@@ -1125,10 +1217,9 @@ async def commit_book(body: dict, session_id: str | None = Cookie(default=None))
 # Modus B — Live-Ausgabe
 # ---------------------------------------------------------------------------
 
-@router.post("/api/modus-b/open")
-async def modus_b_open(request: Request, session_id: str | None = Cookie(default=None)) -> dict:
+@host_router.post("/api/modus-b/open")
+async def modus_b_open(request: Request) -> dict:
     """Live-Ausgabe öffnen: allgemeines Join-Secret + QR erzeugen und an iPads pushen."""
-    _require_host(session_id)
     state = get_state()
     state.modus_b_open = True
     # Frisches Join-Secret bei jedem Öffnen → alte Screenshots/QRs aus einer
@@ -1143,14 +1234,13 @@ async def modus_b_open(request: Request, session_id: str | None = Cookie(default
     return {"ok": True, "join_url": state.modus_b_join_url, "qr": state.modus_b_join_qr}
 
 
-@router.post("/api/modus-b/close")
-async def modus_b_close(session_id: str | None = Cookie(default=None)) -> dict:
+@host_router.post("/api/modus-b/close")
+async def modus_b_close() -> dict:
     """Live-Ausgabe schließen: Join-Secret entwerten, offene pending-Sessions revoken.
 
     Bereits gepairte (aktive) Sessions laufen weiter, bis sie regulär abgeschlossen
     werden.
     """
-    _require_host(session_id)
     state = get_state()
     hub = get_hub()
     state.modus_b_open = False
@@ -1167,10 +1257,9 @@ async def modus_b_close(session_id: str | None = Cookie(default=None)) -> dict:
     return {"ok": True}
 
 
-@router.get("/api/modus-b/qr")
-async def modus_b_qr(session_id: str | None = Cookie(default=None)) -> dict:
+@host_router.get("/api/modus-b/qr")
+async def modus_b_qr() -> dict:
     """QR/URL für den Host nachladen (z. B. nach Reconnect)."""
-    _require_host(session_id)
     state = get_state()
     return {
         "open": state.modus_b_open,
@@ -1179,24 +1268,22 @@ async def modus_b_qr(session_id: str | None = Cookie(default=None)) -> dict:
     }
 
 
-@router.get("/api/display/qr")
-async def display_qr(request: Request, session_id: str | None = Cookie(default=None)) -> dict:
+@host_router.get("/api/display/qr")
+async def display_qr(request: Request) -> dict:
     """QR, mit dem ein iPad die QR-Display-Seite (`/qr-display`) öffnet.
 
     Anders als der Schüler-Join-QR (`modus_b_join_qr`) zeigt dieser QR nur auf
     die statische Display-Seite — keine Schülerdaten, kein Join-Secret. Die
     LAN-IP-Korrektur aus `_base_url` macht den QR für das iPad erreichbar.
     """
-    _require_host(session_id)
     url = f"{_base_url(request)}/qr-display"
     return {"url": url, "qr": make_qr_data_url(url)}
 
 
-@router.post("/api/display/authorize")
-async def display_authorize(body: dict, session_id: str | None = Cookie(default=None)) -> dict:
+@host_router.post("/api/display/authorize")
+async def display_authorize(body: DisplayAuthorizeRequest) -> dict:
     """iPad-Display per Registrierungscode autorisieren (Registrierung am Host)."""
-    _require_host(session_id)
-    code = str(body.get("registration_code", "")).strip().upper()
+    code = body.registration_code.strip().upper()
     if not code:
         raise HTTPException(400, "registration_code fehlt")
     state = get_state()
@@ -1213,7 +1300,7 @@ async def display_authorize(body: dict, session_id: str | None = Cookie(default=
 
 
 @router.post("/api/student/join")
-async def student_join(body: dict, request: Request) -> dict:
+async def student_join(body: StudentJoinRequest, request: Request) -> dict:
     """Öffentlich (per allgemeinem QR erreichbar): neue Schüler-Session anlegen.
 
     Verlangt das aktuelle Join-Secret aus dem QR. Liefert den langen
@@ -1229,7 +1316,7 @@ async def student_join(body: dict, request: Request) -> dict:
         raise HTTPException(429, "Zu viele Anfragen — bitte kurz warten")
 
     state = get_state()
-    secret = str(body.get("join_secret", "")).strip()
+    secret = body.join_secret.strip()
     if not state.modus_b_open or not state.modus_b_join_secret:
         raise HTTPException(403, "Live-Ausgabe ist geschlossen")
     # Konstantzeit-Vergleich — kein Short-Circuit-Timing-Leak wie bei `!=`.
@@ -1245,22 +1332,17 @@ async def student_join(body: dict, request: Request) -> dict:
     return {"session_token": session.session_token, "pairing_code": session.pairing_code}
 
 
-@router.post("/api/student/pair")
-async def student_pair(body: dict, session_id: str | None = Cookie(default=None)) -> dict:
+@host_router.post("/api/student/pair")
+async def student_pair(body: StudentPairRequest) -> dict:
     """Host ordnet einen 4-stelligen Code einem Schüler zu (Doppel-Bestätigung)."""
-    _require_host(session_id)
     state = get_state()
     hub = get_hub()
 
-    code = str(body.get("pairing_code", "")).strip()
-    student_id = body.get("student_id")
-    override = bool(body.get("override_payment", False))
+    code = body.pairing_code.strip()
+    student_id = body.student_id
+    override = body.override_payment
     if not code or student_id is None:
         raise HTTPException(400, "pairing_code und student_id erforderlich")
-    try:
-        student_id = int(student_id)
-    except (TypeError, ValueError):
-        raise HTTPException(400, "student_id ungültig") from None
 
     session = state.find_session_by_code(code)
     if not session:
@@ -1336,3 +1418,8 @@ async def student_pair(body: dict, session_id: str | None = Cookie(default=None)
 
 
 # Modus-A-Schülerladen liegt jetzt zentral in sessions.load_and_push_helper_student.
+
+# Host-authentifizierte Routen an den öffentlichen Router hängen (siehe
+# host_router-Definition oben) — nach außen unverändert, `router` bleibt der
+# einzige Export für app.py.
+router.include_router(host_router)

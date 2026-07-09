@@ -1,16 +1,18 @@
 """Unit-Tests für die HTTP-Endpunkt-Logik (server/routes/api.py).
 
-Ruft die Endpunkt-Coroutinen direkt auf (kein laufender Server, kein httpx) —
-gleiche Linie wie test_booking_gate. Geprüft werden Auth-Guard, Validierung,
-Idempotenz und das Buchungs-Gate auf HTTP-Ebene; IServ/Worker bleiben außen vor.
+Läuft über einen echten HTTP-Client (`starlette.testclient.TestClient`, Fixture
+`client` aus `conftest.py`) gegen `create_app()` — OHNE den Lifespan zu starten
+(der würde einen echten Playwright-Worker gegen die IServ-PRODUKTION einloggen).
+Anders als ein direkter Python-Aufruf der Endpoint-Coroutinen durchläuft das den
+ECHTEN ASGI-Request-Pfad inkl. `Depends`/`Cookie`-Injection — insbesondere die
+Auth-Guards werden dadurch tatsächlich geprüft, nicht nur scheinbar. Geprüft
+werden Auth-Guard, Validierung, Idempotenz und das Buchungs-Gate auf HTTP-Ebene;
+IServ/Worker bleiben außen vor (State/Config/Hub werden gemockt).
 """
 
 from __future__ import annotations
 
-import asyncio
-
 import pytest
-from fastapi import HTTPException, Response
 
 import server.routes.api as api
 from server.config import Config
@@ -22,6 +24,9 @@ from server.state import AppState
 
 class _FakeHub:
     async def broadcast_host(self, snapshot) -> None:
+        pass
+
+    async def broadcast_settings(self, *a, **kw) -> None:
         pass
 
 
@@ -50,45 +55,42 @@ def ctx(monkeypatch):
     return state, cfg, hub
 
 
-def run(coro):
-    return asyncio.run(coro)
-
-
 # ---------------------------------------------------------------------------
-# Auth-Guard (_require_host)
+# Auth-Guard (_require_host) — über echtes HTTP, damit die Depends/Cookie-
+# Injection tatsächlich greift statt nur bei direktem Funktionsaufruf simuliert
+# zu werden.
 # ---------------------------------------------------------------------------
 
-def test_require_host_rejects_missing_cookie(ctx):
-    with pytest.raises(HTTPException) as ei:
-        run(api.get_state_endpoint(session_id=None))
-    assert ei.value.status_code == 403
+def test_require_host_rejects_missing_cookie(client, ctx):
+    r = client.get("/api/state")
+    assert r.status_code == 403
 
 
-def test_require_host_rejects_unknown_session(ctx):
-    with pytest.raises(HTTPException) as ei:
-        run(api.get_state_endpoint(session_id="bogus"))
-    assert ei.value.status_code == 403
+def test_require_host_rejects_unknown_session(client, ctx):
+    r = client.get("/api/state", cookies={"session_id": "bogus"})
+    assert r.status_code == 403
 
 
-def test_require_host_accepts_valid_session(ctx):
-    res = run(api.get_state_endpoint(session_id="sid"))
-    assert res["type"] == "state"
+def test_require_host_accepts_valid_session(client, ctx):
+    r = client.get("/api/state", cookies={"session_id": "sid"})
+    assert r.status_code == 200
+    assert r.json()["type"] == "state"
 
 
 # ---------------------------------------------------------------------------
 # Login
 # ---------------------------------------------------------------------------
 
-def test_login_wrong_password(ctx):
-    with pytest.raises(HTTPException) as ei:
-        run(api.login({"password": "nope"}, Response(), request=None))
-    assert ei.value.status_code == 403
+def test_login_wrong_password(client, ctx):
+    r = client.post("/api/login", json={"password": "nope"})
+    assert r.status_code == 403
 
 
-def test_login_correct_password_sets_session(ctx):
+def test_login_correct_password_sets_session(client, ctx):
     state, _, _ = ctx
-    res = run(api.login({"password": "secret"}, Response(), request=None))
-    assert res == {"ok": True}
+    r = client.post("/api/login", json={"password": "secret"})
+    assert r.status_code == 200
+    assert r.json() == {"ok": True}
     # Genau eine neue Host-Session zusätzlich zur fixture-'sid'.
     assert len(state.host_sessions) == 2
 
@@ -97,42 +99,56 @@ def test_login_correct_password_sets_session(ctx):
 # add-student: Validierung & Duplikat-Schutz
 # ---------------------------------------------------------------------------
 
-def test_add_student_invalid_id(ctx):
-    with pytest.raises(HTTPException) as ei:
-        run(api.add_student_to_queue({"student_id": "x", "lastname": "M"}, session_id="sid"))
-    assert ei.value.status_code == 400
+def test_add_student_invalid_id(client, ctx):
+    """`student_id` ist jetzt ein Pydantic-Feld (`int | None`) — ein Wert vom
+    falschen Typ (hier ein nicht-numerischer String) lässt die Body-Validierung
+    bereits vor dem Funktionsrumpf mit 422 abbrechen, statt wie vorher im
+    Rumpf per manuellem `int()`-Versuch 400 zu liefern. Kein Client wertet den
+    Statuscode aus (siehe Welle-3-Bericht) — bewusst akzeptierte Verschärfung."""
+    r = client.post(
+        "/api/add-student",
+        json={"student_id": "x", "lastname": "M"},
+        cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 422
 
 
-def test_add_student_missing_name(ctx):
-    with pytest.raises(HTTPException) as ei:
-        run(api.add_student_to_queue({"student_id": 1}, session_id="sid"))
-    assert ei.value.status_code == 400
+def test_add_student_missing_name(client, ctx):
+    r = client.post(
+        "/api/add-student", json={"student_id": 1}, cookies={"session_id": "sid"}
+    )
+    assert r.status_code == 400
 
 
-def test_add_student_without_open_context_rejected(ctx):
+def test_add_student_without_open_context_rejected(client, ctx):
     """Ohne offenen Klassen-Tab (kein aktiver Kontext) schlägt der Request mit
     400 fehl — kein stiller Geister-Kontext mehr (implizite Kontexte wurden
     entfernt)."""
-    with pytest.raises(HTTPException) as ei:
-        run(api.add_student_to_queue(
-            {"student_id": 1, "lastname": "Müller", "firstname": "N", "form": "10a"},
-            session_id="sid",
-        ))
-    assert ei.value.status_code == 400
+    r = client.post(
+        "/api/add-student",
+        json={"student_id": 1, "lastname": "Müller", "firstname": "N", "form": "10a"},
+        cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 400
 
 
-def test_add_student_success_then_duplicate(ctx):
+def test_add_student_success_then_duplicate(client, ctx):
     state, _, _ = ctx
     state.open_context("10a")
-    res = run(api.add_student_to_queue(
-        {"student_id": 1, "lastname": "Müller", "firstname": "N", "form": "10a"},
-        session_id="sid",
-    ))
-    assert res == {"ok": True, "count": 1}
+    r = client.post(
+        "/api/add-student",
+        json={"student_id": 1, "lastname": "Müller", "firstname": "N", "form": "10a"},
+        cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "count": 1}
     assert state.active_context.form == "10a"   # erste Klasse übernommen
-    with pytest.raises(HTTPException) as ei:
-        run(api.add_student_to_queue({"student_id": 1, "lastname": "Müller"}, session_id="sid"))
-    assert ei.value.status_code == 409
+    r2 = client.post(
+        "/api/add-student",
+        json={"student_id": 1, "lastname": "Müller"},
+        cookies={"session_id": "sid"},
+    )
+    assert r2.status_code == 409
 
 
 # ---------------------------------------------------------------------------
@@ -141,7 +157,7 @@ def test_add_student_success_then_duplicate(ctx):
 # nicht doppelt eingefügt (state.find_student-Check in open_test_config).
 # ---------------------------------------------------------------------------
 
-def test_open_test_config_idempotent_when_student_already_queued(ctx):
+def test_open_test_config_idempotent_when_student_already_queued(client, ctx):
     state, _, _ = ctx
     # Einen der Testschüler bereits in einer anderen Klasse einreihen, bevor
     # der Test-Config-Tab geöffnet wird — open_test_config muss ihn dann
@@ -159,7 +175,7 @@ def test_open_test_config_idempotent_when_student_already_queued(ctx):
         )
     )
 
-    first = run(api.open_test_config(session_id="sid"))
+    first = client.post("/api/open-test-config", cookies={"session_id": "sid"}).json()
     ctx_id = first["context_id"]
     context = state.contexts[ctx_id]
     # Alle Testschüler außer dem bereits eingereihten landen im Test-Config-Tab.
@@ -167,7 +183,7 @@ def test_open_test_config_idempotent_when_student_already_queued(ctx):
     assert other["student_id"] not in {s.student_id for s in context.queue}
 
     # Erneutes Öffnen (bestehender Tab) fügt nichts doppelt hinzu.
-    second = run(api.open_test_config(session_id="sid"))
+    second = client.post("/api/open-test-config", cookies={"session_id": "sid"}).json()
     assert second["context_id"] == ctx_id
     assert second["reused"] is True
     assert len(state.contexts[ctx_id].queue) == len(api.TEST_STUDENTS) - 1
@@ -177,9 +193,9 @@ def test_open_test_config_idempotent_when_student_already_queued(ctx):
 # open-test-config: dedizierter Tab, sofort befüllt, Wieder-Öffnen reaktiviert
 # ---------------------------------------------------------------------------
 
-def test_open_test_config_populates_and_reuses(ctx):
+def test_open_test_config_populates_and_reuses(client, ctx):
     state, _, _ = ctx
-    first = run(api.open_test_config(session_id="sid"))
+    first = client.post("/api/open-test-config", cookies={"session_id": "sid"}).json()
     assert first["count"] == len(api.TEST_STUDENTS)
     ctx_id = first["context_id"]
     context = state.contexts[ctx_id]
@@ -188,7 +204,7 @@ def test_open_test_config_populates_and_reuses(ctx):
 
     # Zweiter Aufruf (z. B. erneutes "+" -> "Test Config öffnen") reaktiviert
     # denselben Kontext statt eine zweite Queue anzulegen.
-    second = run(api.open_test_config(session_id="sid"))
+    second = client.post("/api/open-test-config", cookies={"session_id": "sid"}).json()
     assert second["context_id"] == ctx_id
     assert second["reused"] is True
     assert len(state.contexts) == 1
@@ -201,7 +217,7 @@ def test_open_test_config_populates_and_reuses(ctx):
 # Kontext).
 # ---------------------------------------------------------------------------
 
-def test_select_schoolyear_blocks_on_active_student_in_inactive_context(ctx):
+def test_select_schoolyear_blocks_on_active_student_in_inactive_context(client, ctx):
     from server.state import QueueStudent
 
     state, _, _ = ctx
@@ -213,18 +229,24 @@ def test_select_schoolyear_blocks_on_active_student_in_inactive_context(ctx):
     active_ctx = state.open_context("Klasse B")  # wird zum aktiven Kontext
     assert state.active_context_id == active_ctx.id
 
-    with pytest.raises(HTTPException) as ei:
-        run(api.select_schoolyear({"schoolyear": "2026/2027"}, session_id="sid"))
-    assert ei.value.status_code == 409
-    assert ei.value.detail["reason"] == "active_sessions"
+    r = client.post(
+        "/api/select-schoolyear",
+        json={"schoolyear": "2026/2027"},
+        cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 409
+    assert r.json()["detail"]["reason"] == "active_sessions"
     # Kontexte bleiben unangetastet, solange der Guard blockiert.
     assert state.contexts
 
     # Mit force=True darf der Wechsel trotzdem durch.
-    res = run(api.select_schoolyear(
-        {"schoolyear": "2026/2027", "force": True}, session_id="sid"
-    ))
-    assert res == {"ok": True, "selected": "2026/2027"}
+    r2 = client.post(
+        "/api/select-schoolyear",
+        json={"schoolyear": "2026/2027", "force": True},
+        cookies={"session_id": "sid"},
+    )
+    assert r2.status_code == 200
+    assert r2.json() == {"ok": True, "selected": "2026/2027"}
     assert state.contexts == {}
 
 
@@ -232,43 +254,67 @@ def test_select_schoolyear_blocks_on_active_student_in_inactive_context(ctx):
 # skip / finish: Validierung
 # ---------------------------------------------------------------------------
 
-def test_skip_missing_student_id(ctx):
-    with pytest.raises(HTTPException) as ei:
-        run(api.skip_student({}, session_id="sid"))
-    assert ei.value.status_code == 400
+def test_skip_missing_student_id(client, ctx):
+    r = client.post("/api/skip", json={}, cookies={"session_id": "sid"})
+    assert r.status_code == 400
 
 
-def test_skip_unknown_student(ctx):
-    with pytest.raises(HTTPException) as ei:
-        run(api.skip_student({"student_id": 999}, session_id="sid"))
-    assert ei.value.status_code == 404
+def test_skip_unknown_student(client, ctx):
+    r = client.post("/api/skip", json={"student_id": 999}, cookies={"session_id": "sid"})
+    assert r.status_code == 404
 
 
-def test_finish_unknown_student(ctx):
-    with pytest.raises(HTTPException) as ei:
-        run(api.finish_student({"student_id": 999}, session_id="sid"))
-    assert ei.value.status_code == 404
+def test_finish_unknown_student(client, ctx):
+    r = client.post("/api/finish", json={"student_id": 999}, cookies={"session_id": "sid"})
+    assert r.status_code == 404
 
 
 # ---------------------------------------------------------------------------
 # Buchungs-Gate auf HTTP-Ebene (V10 testet nur handle_commit direkt)
 # ---------------------------------------------------------------------------
 
-def test_commit_book_blocked_when_flag_off(ctx):
+def test_commit_book_blocked_when_flag_off(client, ctx):
     """Gate 1 (Server-Flag) greift vor confirm/Barcode — Default false."""
-    with pytest.raises(HTTPException) as ei:
-        run(api.commit_book({"student_id": 1, "confirm": True, "barcode": "B1"}, session_id="sid"))
-    assert ei.value.status_code == 403
+    r = client.post(
+        "/api/commit-book",
+        json={"student_id": 1, "confirm": True, "barcode": "B1"},
+        cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 403
 
 
-def test_commit_book_requires_auth(ctx):
-    with pytest.raises(HTTPException) as ei:
-        run(api.commit_book({"student_id": 1, "confirm": True}, session_id=None))
-    assert ei.value.status_code == 403
+def test_commit_book_requires_auth(client, ctx):
+    r = client.post("/api/commit-book", json={"student_id": 1, "confirm": True})
+    assert r.status_code == 403
+
+
+def test_commit_book_flag_off_wins_even_with_missing_confirm(client, ctx):
+    """Gate-Reihenfolge Gate1 (403, Server-Flag) -> Gate3 (400, confirm) bleibt
+    erhalten, obwohl `confirm` jetzt ein Pydantic-Feld ist: ein komplett
+    fehlendes `confirm` darf NICHT vorab mit 422 abbrechen (das würde Gate 1
+    umgehen) — `confirm` hat deshalb bewusst `bool = False` als Default."""
+    r = client.post(
+        "/api/commit-book", json={"student_id": 1}, cookies={"session_id": "sid"}
+    )
+    assert r.status_code == 403
+    assert "ALLOW_BOOKING" in r.json()["detail"]
+
+
+def test_commit_book_requires_confirm_when_flag_on(client, ctx, monkeypatch):
+    """Mit `allow_booking=true` (Gate 1 offen) muss ein fehlendes `confirm`
+    weiterhin 400 liefern (Gate 3), nicht 422 — die Validierung darf nicht vor
+    die manuelle Prüfung im Funktionsrumpf rutschen."""
+    state, cfg, _ = ctx
+    cfg.allow_booking = True
+    r = client.post(
+        "/api/commit-book", json={"student_id": 1}, cookies={"session_id": "sid"}
+    )
+    assert r.status_code == 400
+    assert "confirm" in r.json()["detail"]
 
 
 # ---------------------------------------------------------------------------
-# Pure Helfer
+# Pure Helfer (keine Endpoints — direkter Aufruf bleibt hier angemessen)
 # ---------------------------------------------------------------------------
 
 def test_last_scan_for_prefers_session(ctx):
@@ -306,3 +352,55 @@ def test_base_url_rewrites_localhost(ctx, monkeypatch):
     cfg.host_ip = "10.0.0.9"   # expliziter Override → deterministisch
     url = api._base_url(_FakeRequest("localhost"))
     assert url == f"https://10.0.0.9:{cfg.port}"
+
+
+# ---------------------------------------------------------------------------
+# POST /api/settings/{key} — Welle-3-Zusammenfassung der drei Bool-Toggles
+# (save-pdf-locally/fix-class-on-slip/slip-default). Prüft die Whitelist, die
+# 404 für unbekannte Keys, und dass jeder Key sein eigenes Body-Feld liest
+# (enabled vs. second_page) und unter dem ursprünglichen State-Attributnamen
+# antwortet (Kompat zu den früheren Einzel-Endpunkten).
+# ---------------------------------------------------------------------------
+
+def test_settings_unknown_key_404(client, ctx):
+    r = client.post(
+        "/api/settings/does-not-exist", json={"enabled": True}, cookies={"session_id": "sid"}
+    )
+    assert r.status_code == 404
+
+
+def test_settings_save_pdf_locally(client, ctx):
+    state, _, _ = ctx
+    r = client.post(
+        "/api/settings/save-pdf-locally", json={"enabled": True}, cookies={"session_id": "sid"}
+    )
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "save_pdf_locally": True}
+    assert state.save_pdf_locally is True
+
+
+def test_settings_fix_class_on_slip(client, ctx):
+    state, _, _ = ctx
+    r = client.post(
+        "/api/settings/fix-class-on-slip", json={"enabled": True}, cookies={"session_id": "sid"}
+    )
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "fix_class_on_slip": True}
+    assert state.fix_class_on_slip is True
+
+
+def test_settings_slip_default_reads_second_page_field(client, ctx):
+    """slip-default liest bewusst `second_page`, nicht `enabled` (historisch
+    anderer Feldname im Client-Body, siehe SettingsToggleRequest-Docstring)."""
+    state, _, _ = ctx
+    r = client.post(
+        "/api/settings/slip-default", json={"second_page": True}, cookies={"session_id": "sid"}
+    )
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "slip_second_page_default": True}
+    assert state.slip_second_page_default is True
+
+
+def test_settings_requires_auth(client, ctx):
+    r = client.post("/api/settings/save-pdf-locally", json={"enabled": True})
+    assert r.status_code == 403

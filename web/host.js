@@ -855,7 +855,7 @@
   // Server-Push beim Ändern im Einstellungen-Dialog. Toast kommt vom Aufrufer.
   async function pushSavePdfLocally(enabled) {
     try {
-      await fetch('/api/save-pdf-locally', {
+      await fetch('/api/settings/save-pdf-locally', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ enabled }),
       });
@@ -867,7 +867,7 @@
   // Server-State als globale Quelle, hier der stille Server-Push im Dialog.
   async function pushFixClassOnSlip(enabled) {
     try {
-      await fetch('/api/fix-class-on-slip', {
+      await fetch('/api/settings/fix-class-on-slip', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ enabled }),
       });
@@ -1111,7 +1111,7 @@
   const _slipCb = document.getElementById('slip-second-page');
   async function pushSlipDefault(checked) {
     try {
-      await fetch('/api/slip-default', {
+      await fetch('/api/settings/slip-default', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ second_page: checked }),
       });
