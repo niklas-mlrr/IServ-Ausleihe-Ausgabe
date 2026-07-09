@@ -28,6 +28,34 @@
 
 ## Offen / zu testen
 
+### Neu 2026-07-09 (Host: Tabs & Einstellungen global — Server-State statt localStorage)
+
+Offene Klassen-Reiter und Einstellungen sind jetzt auf jedem angemeldeten Host-
+Rechner sichtbar/synchron. Quelle der Wahrheit = der bereits globale In-Memory-
+Serverstate (`state_snapshot` + `broadcast_host`), nicht mehr pro-Browser
+`localStorage`. `web/host.html`: `tabOrder` in `applyState` aus `state.contexts`
+abgeleitet; `activeTab` rein pro Bediener (In-Memory, nicht persistiert — *Menge*
+offen global, *Fokus* pro Browser); Dev-Toggles (PDF-lokal, Klasse-korrigieren,
+Schüler-Leihschein) aus `state` spiegeln statt localStorage; Login pusht nicht
+mehr lokal → Server. `server/routes/api.py`: `/api/slip-default` broadcastet
+zusätzlich `broadcast_host`. **Theme (Auto/Hell/Dunkel) bleibt bewusst pro
+Browser in localStorage.** Keine IServ-/DB-Writes; nur App-eigene In-Memory-
+Endpunkte. Commit `0e39cd5`.
+
+- [x] **Unit-Suite**: `uv run pytest` **145 grün** (keine Logik auf Server-
+      Modellebene geändert; `state_snapshot` unverändert; 1-Zeilen-Broadcast-
+      Zusatz in `/api/slip-default` wird von keiner Bestands-Assertion getroffen).
+- [x] **localStorage-Check**: `grep localStorage web/host.html` → nur noch
+      `theme` (cycleTheme/applyTheme).
+- [ ] **Am Gerät — zwei Browser/Profile gegen denselben Server** (manuell,
+      read-only): A öffnet Klasse „5a" → Reiter erscheint bei B ohne Reload;
+      A schließt „5a" → Reiter verschwindet bei B; A aktiviert/deaktiviert in
+      Einstellungen „PDF lokal speichern" / „Klasse korrigieren" / „Schüler-
+      Leihschein" → Haken bei B erscheint/verschwindet; Theme umschalten auf A
+      → B ändert sein Theme **nicht** (bleibt lokal); B Seite neu laden →
+      offene Klassen weiterhin sichtbar, eigener Tab-Fokus fällt auf Host
+      (nicht auf A's Fokus).
+
 ### Neu 2026-07-09 (Scanner: Lupen-Suche — Schnellsprung zu beliebigem Schüler)
 
 Peek-Modus (`scan.js`): die **Lupe** öffnet ein Such-Panel unter der Statuszeile
