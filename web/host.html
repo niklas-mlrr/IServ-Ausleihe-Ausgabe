@@ -396,8 +396,10 @@
     #print-dialog .modal-actions button, #settings-dialog .modal-actions button { width: 100%; padding: 12px; font-size: .95rem; }
     #print-dialog .modal-actions .primary, #settings-dialog .modal-actions .primary { background: #2e7d32; color: #fff; border: none; }
     #print-dialog .modal-actions .primary:hover, #settings-dialog .modal-actions .primary:hover { background: #357a38; }
-    #print-dialog .modal-actions .ghost, #settings-dialog .modal-actions .ghost { background: transparent; border: 1px solid #c0392b; color: #c0392b; display: block; text-align: center; opacity: 1; }
-    #print-dialog .modal-actions .ghost:hover, #settings-dialog .modal-actions .ghost:hover { background: rgba(192,57,43,.1); opacity: 1; }
+    #print-dialog .modal-actions .ghost { background: transparent; border: 1px solid #c0392b; color: #c0392b; display: block; text-align: center; opacity: 1; }
+    #print-dialog .modal-actions .ghost:hover { background: rgba(192,57,43,.1); opacity: 1; }
+    #settings-dialog .modal-actions .ghost { background: var(--surface-3); border: 1px solid transparent; color: var(--text); display: block; text-align: center; opacity: 1; }
+    #settings-dialog .modal-actions .ghost:hover { background: var(--surface-2); opacity: 1; }
     .modal-check { display: flex; align-items: center; gap: 10px; font-size: .95rem; cursor: pointer; user-select: none; }
     /* native Checkbox erzwingen — globale input{}-Regel (background/border/padding) zurücksetzen */
     .modal-check input { width: 18px; height: 18px; flex: none; cursor: pointer; margin: 0; padding: 0; background: none; border: none; appearance: auto; -webkit-appearance: auto; }
@@ -416,13 +418,20 @@
     #settings-dialog .settings-booklists { display: flex; flex-direction: column; gap: 6px; }
     #settings-dialog .settings-bl-label { font-weight: 600; }
     #settings-dialog #bl-tabs { flex-wrap: wrap; border-bottom: none; margin-bottom: 6px; }
-    #settings-dialog #bl-list { max-height: 46vh; overflow-y: auto; margin-top: 0; }
+    #settings-dialog #bl-list { margin-top: 0; }
     /* Abschnitts-Überschrift im Dialog (z. B. „Entwicklung") mit Trennlinie */
     #settings-dialog .settings-section { font-size: .8rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); border-top: 1px solid var(--border); padding-top: 12px; margin-top: 4px; }
     #settings-dialog .settings-hint { font-size: .8rem; color: var(--text-muted); margin-top: -6px; }
     /* Reiter für die Einstellungs-Abschnitte (Drucker / Bücherliste / Entwicklung) */
     #settings-dialog #settings-tabs { margin-bottom: 0; }
     #settings-dialog .settings-tab-panel { display: none; flex-direction: column; gap: 14px; }
+    /* Speichern/Abbrechen bleiben beim Scrollen sichtbar (z. B. bei langer Bücherliste) */
+    #settings-dialog .modal-actions {
+      position: sticky; bottom: -20px; z-index: 5;
+      background: var(--surface);
+      margin: 4px -20px -20px; padding: 14px 20px 20px;
+      border-top: 1px solid var(--border);
+    }
     #settings-dialog .settings-tab-panel.active { display: flex; }
   </style>
 </head>
