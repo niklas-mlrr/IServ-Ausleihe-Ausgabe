@@ -161,8 +161,11 @@ async def select_schoolyear(body: dict, session_id: str | None = Cookie(default=
     raw = body.get("schoolyear")
     schoolyear = str(raw).strip() if raw else None
 
-    # Guard: laufende Sessions würden durch den Wechsel verwaist.
-    active_q = [s for s in state.queue if s.status == "active"]
+    # Guard: laufende Sessions würden durch den Wechsel verwaist. Über ALLE
+    # Kontexte prüfen (nicht nur den aktiven Tab) — ein aktiver Schüler in
+    # einem nicht-fokussierten Klassen-Tab würde sonst übersehen und der
+    # Schuljahreswechsel risse ihn ohne Warnung ab.
+    active_q = state.active_students()
     live_b = [s for s in state.student_sessions.values() if s.state in ("pending_pairing", "paired")]
     if (active_q or live_b) and not body.get("force"):
         raise HTTPException(409, detail={
@@ -214,61 +217,6 @@ async def get_classes(session_id: str | None = Cookie(default=None)) -> dict:
 # Queue-Aufbau
 # ---------------------------------------------------------------------------
 
-@router.post("/api/select-class")
-async def select_class(body: dict, session_id: str | None = Cookie(default=None)) -> dict:
-    _require_host(session_id)
-    form = body.get("form", "").strip()
-    if not form:
-        raise HTTPException(400, "form fehlt")
-    state = get_state()
-    hub = get_hub()
-
-    # Guard: laufende Sessions würden durch den Klassenwechsel verwaist.
-    active_q = [s for s in state.queue if s.status == "active"]
-    live_b = [s for s in state.student_sessions.values() if s.state in ("pending_pairing", "paired")]
-    if (active_q or live_b) and not body.get("force"):
-        raise HTTPException(409, detail={
-            "reason": "active_sessions",
-            "msg": f"{len(active_q)} aktive Schüler / {len(live_b)} Live-Session(s) — "
-                   "Klassenwechsel bricht sie ab.",
-        })
-
-    try:
-        students = await state.iserv.get_students_for_form(form, state.selected_schoolyear)
-    except Exception as e:
-        log.exception("Schüler konnten nicht geladen werden")
-        raise HTTPException(502, f"IServ-Fehler: {e}") from e
-
-    # Vor dem Ersetzen der Queue sauber aufräumen (keine verwaisten Sessions).
-    for sess in list(state.student_sessions.values()):
-        if sess.state in ("pending_pairing", "paired"):
-            await invalidate_session(state, sess, "revoked", reason="klassenwechsel")
-    for helper in state.helper_sessions.values():
-        helper.student_id = None
-
-    from ..state import QueueStudent
-    state.active_form = form
-    state.reset_class_book_order()  # neue Klasse → Reihenfolge/Katalog neu aufbauen
-    state.queue = [
-        QueueStudent(
-            student_id=s["student_id"],
-            lastname=s["lastname"],
-            firstname=s["firstname"],
-            form=form,
-        )
-        for s in students
-    ]
-    # Katalog + Bücher-Reihenfolge sofort aufbauen (übernimmt eine im
-    # Einstellungen-Dialog vorkonfigurierte Reihenfolge automatisch für den
-    # Scanner) — Fehler hier sind nicht fatal, die Klasse bleibt trotzdem geladen.
-    try:
-        await _ensure_class_catalog(state)
-    except Exception:
-        log.exception("Klassen-Bücherkatalog konnte beim Klassenwechsel nicht vorgebaut werden")
-    await hub.broadcast_host(state.state_snapshot())
-    return {"ok": True, "count": len(state.queue)}
-
-
 # ---------------------------------------------------------------------------
 # Klassen-Kontexte (Multi-Tab) — öffnen / schließen / aktivieren
 # ---------------------------------------------------------------------------
@@ -287,7 +235,7 @@ async def open_class(body: dict, session_id: str | None = Cookie(default=None)) 
     hub = get_hub()
 
     existing = next(
-        (c for c in state.contexts.values() if not c.implicit and c.form == form), None
+        (c for c in state.contexts.values() if c.form == form), None
     )
     if existing is not None:
         state.set_active_context(existing.id)
@@ -411,7 +359,7 @@ async def _ensure_class_catalog(state, context_id: str | None = None) -> None:
     Einstellungen-Dialog vorkonfiguriert), sonst mit der Default-Reihenfolge
     (subject/title) initialisiert. `context_id=None` → aktiver Kontext (Kompat,
     z. B. über /api/select-class)."""
-    ctx = state._ctx_or_active(context_id)
+    ctx = state.ctx_or_active(context_id)
     if ctx is None or not ctx.form:
         return
     if ctx.class_catalog_form == ctx.form and ctx.class_catalog:
@@ -479,10 +427,9 @@ async def set_booklist_order(
     passende Reihenfolge (per Jahrgang ermittelt über `get_book_order_for_form`)
     — funktioniert daher auch bei klassenübergreifenden Warteschlangen mit
     Schülern aus verschiedenen Jahrgängen (z. B. „Test Config"), nicht nur bei
-    einer komplett geladenen Klasse. Gehört die aktuell geladene Klasse zu diesem
-    Jahrgang, wird zusätzlich `state.book_order` + der Host selbst
-    (`broadcast_host`) live nachgezogen, damit ein Reload des Hosts konsistent
-    bleibt.
+    einer komplett geladenen Klasse. Gehört ein offener Klassen-Kontext zu diesem
+    Jahrgang, wird dessen `book_order` + der Host selbst (`broadcast_host`) live
+    nachgezogen, damit ein Reload des Hosts konsistent bleibt.
     """
     _require_host(session_id)
     state = get_state()
@@ -556,7 +503,9 @@ async def set_booklist_hidden(
 async def add_student_to_queue(body: dict, session_id: str | None = Cookie(default=None)) -> dict:
     """Einen einzelnen Schüler an die Queue eines Klassen-Kontexts anhängen
     (klassenübergreifend). `context_id` optional — fehlt er, wird der aktive
-    Kontext genutzt (Kompat; bei Einzel-Schüler-Reiter im Klassen-Tab gesetzt).
+    Kontext genutzt (bei Einzel-Schüler-Reiter im Klassen-Tab gesetzt); ohne
+    aktiven Kontext (kein Klassen-Tab offen) schlägt der Request mit 400 fehl,
+    statt still einen Geister-Kontext anzulegen.
 
     Im Gegensatz zu `/api/open-class` wird die Queue NICHT ersetzt und es
     werden keine laufenden Sessions angefasst.
@@ -583,9 +532,9 @@ async def add_student_to_queue(body: dict, session_id: str | None = Cookie(defau
         raise HTTPException(409, "Schüler bereits in der Queue")
 
     from ..state import QueueStudent
-    target_ctx = state._ctx_or_active(context_id)
+    target_ctx = state.ctx_or_active(context_id)
     if target_ctx is None:
-        target_ctx = state.ensure_active_context()
+        raise HTTPException(400, "Kein Klassen-Tab geöffnet")
     target_ctx.queue.append(
         QueueStudent(student_id=student_id, lastname=lastname, firstname=firstname, form=form)
     )
@@ -649,7 +598,7 @@ async def open_test_config(session_id: str | None = Cookie(default=None)) -> dic
     hub = get_hub()
 
     existing = next(
-        (c for c in state.contexts.values() if not c.implicit and c.form == TEST_CONFIG_FORM),
+        (c for c in state.contexts.values() if c.form == TEST_CONFIG_FORM),
         None,
     )
     if existing is not None:
@@ -672,45 +621,6 @@ async def open_test_config(session_id: str | None = Cookie(default=None)) -> dic
         )
     await hub.broadcast_host(state.state_snapshot())
     return {"ok": True, "context_id": ctx.id, "count": len(ctx.queue)}
-
-
-@router.post("/api/add-test-students")
-async def add_test_students(body: dict | None = None, session_id: str | None = Cookie(default=None)) -> dict:
-    """Die fest definierten Testschüler an die Queue eines Klassen-Kontexts anhängen
-    (ohne IServ-Abfrage). `context_id` optional im Body — fehlt er, aktiver Kontext."""
-    _require_host(session_id)
-    state = get_state()
-    hub = get_hub()
-
-    context_id = None
-    if body:
-        context_id = str(body.get("context_id") or "").strip() or None
-    if context_id is not None and context_id not in state.contexts:
-        raise HTTPException(404, "Kontext unbekannt")
-
-    target_ctx = state._ctx_or_active(context_id)
-    if target_ctx is None:
-        target_ctx = state.ensure_active_context()
-
-    from ..state import QueueStudent
-    added = 0
-    for s in TEST_STUDENTS:
-        if state.find_student(s["student_id"]):
-            continue
-        target_ctx.queue.append(
-            QueueStudent(
-                student_id=s["student_id"],
-                lastname=s["lastname"],
-                firstname=s["firstname"],
-                form=s["form"],
-            )
-        )
-        if not target_ctx.form:
-            target_ctx.form = s["form"] or ""
-        added += 1
-
-    await hub.broadcast_host(state.state_snapshot())
-    return {"ok": True, "added": added, "count": len(target_ctx.queue)}
 
 
 # ---------------------------------------------------------------------------
@@ -1012,7 +922,7 @@ async def disconnect_all(body: dict | None = None, session_id: str | None = Cook
     state = get_state()
     hub = get_hub()
     context_id = _context_id_from_body(body)
-    ctx = state._ctx_or_active(context_id)
+    ctx = state.ctx_or_active(context_id)
     if ctx is None:
         return {"ok": True, "count": 0}
     active_ids = [s.student_id for s in ctx.queue if s.status == "active"]
@@ -1043,7 +953,7 @@ async def reset_queue(body: dict | None = None, session_id: str | None = Cookie(
     state = get_state()
     hub = get_hub()
     context_id = _context_id_from_body(body)
-    ctx = state._ctx_or_active(context_id)
+    ctx = state.ctx_or_active(context_id)
     if ctx is None:
         return {"ok": True, "count": 0}
     changed = [s.student_id for s in ctx.queue if s.status != "pending"]
@@ -1070,7 +980,7 @@ async def clear_queue(body: dict | None = None, session_id: str | None = Cookie(
     state = get_state()
     hub = get_hub()
     context_id = _context_id_from_body(body)
-    ctx = state._ctx_or_active(context_id)
+    ctx = state.ctx_or_active(context_id)
     if ctx is None:
         return {"ok": True, "count": 0}
     count = len(ctx.queue)

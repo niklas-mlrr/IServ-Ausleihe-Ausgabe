@@ -151,13 +151,14 @@ def test_normalize_empty_request_yields_catalog_order():
 
 def test_reset_clears_order_and_catalog():
     st = AppState()
-    st.book_order = ["A", "B"]
-    st.class_catalog = [{"isbn": "A"}]
-    st.class_catalog_form = "9a"
-    st.class_catalog_grade = 9
+    ctx = st.open_context("9a")
+    ctx.book_order = ["A", "B"]
+    ctx.class_catalog = [{"isbn": "A"}]
+    ctx.class_catalog_form = "9a"
+    ctx.class_catalog_grade = 9
     st.reset_class_book_order()
-    assert st.book_order == [] and st.class_catalog == [] and st.class_catalog_form is None
-    assert st.class_catalog_grade is None
+    assert ctx.book_order == [] and ctx.class_catalog == [] and ctx.class_catalog_form is None
+    assert ctx.class_catalog_grade is None
 
 
 def test_reset_class_order_keeps_booklist_orders():
@@ -178,7 +179,8 @@ def test_reset_booklist_orders_clears_all_grades():
 
 def test_snapshot_includes_book_order():
     st = AppState()
-    st.book_order = ["A", "B"]
+    ctx = st.open_context("9a")
+    ctx.book_order = ["A", "B"]
     assert st.state_snapshot()["book_order"] == ["A", "B"]
 
 

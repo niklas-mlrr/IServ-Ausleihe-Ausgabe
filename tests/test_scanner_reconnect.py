@@ -54,7 +54,8 @@ def _state_with_iserv() -> AppState:
 
 def _add_active_student(st: AppState, sid: int) -> QueueStudent:
     s = QueueStudent(student_id=sid, lastname=f"N{sid}", firstname="V", form="10a", status="active")
-    st.queue.append(s)
+    ctx = st.active_context or st.open_context("10a")
+    ctx.queue.append(s)
     return s
 
 

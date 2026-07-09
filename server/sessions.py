@@ -359,7 +359,8 @@ def _student_form(state: AppState, student_id: int) -> str | None:
     s = state.find_student(student_id)
     if s and s.form:
         return s.form
-    return state.active_form
+    ctx = state.active_context
+    return ctx.form if ctx and ctx.form else None
 
 
 async def print_loan_slip_for(

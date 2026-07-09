@@ -30,8 +30,9 @@ class _FakeWS:
 
 def _state_with_queue(pending: int = 0) -> AppState:
     s = AppState()
+    ctx = s.open_context("10a")
     for i in range(pending):
-        s.queue.append(
+        ctx.queue.append(
             QueueStudent(student_id=i, lastname=f"L{i}", firstname=f"F{i}", form="10a")
         )
     return s

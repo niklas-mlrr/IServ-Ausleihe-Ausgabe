@@ -110,11 +110,13 @@ class Hub:
         Der Host-Default „Schüler-Leihschein" (2. Seite) für den Druck-Dialog und
         die Bücher-Reihenfolge für die Scanner-Liste. Die Reihenfolge wird **pro
         Helfer** anhand des Jahrgangs seines aktuell zugewiesenen Schülers
-        ermittelt (`get_book_order_for_form`) — nicht die eine globale
-        `state.book_order` für alle. Nötig für klassenübergreifende
-        Warteschlangen (einzeln hinzugefügte Schüler, „Test Config") mit
-        Schülern aus verschiedenen Jahrgängen; Helfer ohne zugewiesenen Schüler
-        bekommen den Fallback `state.book_order`."""
+        ermittelt (`get_book_order_for_form`) — nicht eine globale Reihenfolge
+        für alle. Nötig für klassenübergreifende Warteschlangen (einzeln
+        hinzugefügte Schüler, „Test Config") mit Schülern aus verschiedenen
+        Jahrgängen; Helfer ohne zugewiesenen Schüler bekommen die Reihenfolge
+        ihres Klassen-Kontexts (`[]`, wenn sie keinem zugewiesen sind — kein
+        stiller Rückfall auf eine zufällig aktive fremde Klasse, s.
+        `AppState.book_order_of`)."""
         s = state or get_state()
         for helper in list(s.helper_sessions.values()):
             if helper.ws is None:
@@ -123,10 +125,7 @@ class Hub:
             if student:
                 book_order = await get_book_order_for_form(s, student.form)
             else:
-                # Kein zugewiesener Schüler → Reihenfolge des Helfer-Kontexts
-                # (Klasse, an die er gebunden ist), sonst aktive-Kontext-Fallback.
-                ctx = s.contexts.get(helper.context_id) if helper.context_id else None
-                book_order = ctx.book_order if ctx else s.book_order
+                book_order = s.book_order_of(helper.context_id)
             msg = {
                 "type": "settings",
                 "slip_second_page": s.slip_second_page_default,

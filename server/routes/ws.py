@@ -135,12 +135,13 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
             pass
 
     # Schüler bereits zugewiesen? Info sofort schicken. Die Reihenfolge wird
-    # anhand des Jahrgangs *dieses* Schülers ermittelt (nicht der einen globalen
-    # `state.book_order`) — sonst würde die direkt danach folgende `settings`-
+    # anhand des Jahrgangs *dieses* Schülers ermittelt (nicht einer globalen
+    # Kontext-Reihenfolge) — sonst würde die direkt danach folgende `settings`-
     # Nachricht sie bei klassenübergreifenden Warteschlangen wieder überschreiben.
-    # Fallback (ohne Schüler): Reihenfolge des Helfer-Kontexts, sonst aktiv.
-    _hctx = state.contexts.get(helper.context_id) if helper.context_id else None
-    book_order = _hctx.book_order if _hctx else state.book_order
+    # Fallback (ohne Schüler): Reihenfolge des Helfer-Kontexts — `[]`, wenn der
+    # Helfer keiner Klasse zugewiesen ist (kein stiller Rückfall auf eine
+    # zufällig aktive fremde Klasse, s. `AppState.book_order_of`).
+    book_order = state.book_order_of(helper.context_id)
     if helper.student_id is not None and state.iserv is not None:
         student = state.find_student(helper.student_id)
         # Form: aus dem QueueStudent, falls vorhanden (call/next); sonst aus

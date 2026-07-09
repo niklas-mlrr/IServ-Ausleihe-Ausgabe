@@ -166,9 +166,7 @@ class ClassContext:
     Jeder Kontext hat eine eigene Queue + eigenen Bücher-Katalog / eigene
     Reihenfolge. Helfer werden an einen Kontext gebunden (`HelperSession.
     context_id`); Modus B, Schuljahr und jahrgangsweite Reihenfolgen bleiben
-    global. `implicit=True` markiert einen Übergangs-Kontext, der nur durch
-    den Kompat-Zugriff (s. AppState) entstanden ist — er wird aus dem Snapshot
-    ausgeblendet und beim ersten echten `open_context` aufgeräumt.
+    global.
     """
 
     id: str
@@ -178,15 +176,13 @@ class ClassContext:
     class_catalog: list[dict] = field(default_factory=list)
     class_catalog_form: str | None = None
     class_catalog_grade: int | None = None
-    implicit: bool = False
 
 
 class AppState:
     def __init__(self) -> None:
         # --- Klassen-Kontexte (Multi-Tab) ---
         # id -> Kontext. Der aktive Kontext (`active_context_id`) ist der gerade
-        # am Host fokussierte Klassen-Tab; er ist die Quelle für die Kompat-
-        # Felder `queue`/`active_form`/`book_order`/`class_catalog*` weiter unten.
+        # am Host fokussierte Klassen-Tab.
         self.contexts: dict[str, ClassContext] = {}
         self.active_context_id: str | None = None
         # Gewähltes Schuljahr (ID wie '2025/2026'); None = aktuelles Schuljahr.
@@ -263,35 +259,13 @@ class AppState:
             return None
         return self.contexts.get(self.active_context_id)
 
-    def _ctx_or_active(self, context_id: str | None) -> ClassContext | None:
+    def ctx_or_active(self, context_id: str | None) -> ClassContext | None:
         if context_id is not None:
             return self.contexts.get(context_id)
         return self.active_context
 
-    def ensure_active_context(self) -> ClassContext:
-        """Aktiven Kontext liefern; falls keiner existiert, einen impliziten
-        anlegen (Kompat-Pfad, s. Kompat-Properties). Implizite Kontexte sind
-        Übergangs-Speicher für Code, der noch nicht auf explizite Kontexte
-        umgestellt ist (z. B. Unit-Tests, die `state.queue.append` nutzen); sie
-        werden aus dem Snapshot ausgeblendet und beim ersten echten `open_context`
-        aufgeräumt."""
-        ctx = self.active_context
-        if ctx is not None:
-            return ctx
-        ctx = ClassContext(id=uuid.uuid4().hex[:12], form="", implicit=True)
-        self.contexts[ctx.id] = ctx
-        self.active_context_id = ctx.id
-        return ctx
-
     def open_context(self, form: str) -> ClassContext:
-        """Neuen echten Klassen-Kontext öffnen und aktivieren. Einen noch
-        leeren impliziten Übergangs-Kontext aufräumen (nicht mehr nötig)."""
-        # Impliziten Kontext aufräumen, falls er noch leer/unbenutzt ist.
-        for cid, c in list(self.contexts.items()):
-            if c.implicit and not c.queue and not c.book_order and not c.class_catalog:
-                self.contexts.pop(cid, None)
-                if self.active_context_id == cid:
-                    self.active_context_id = None
+        """Neuen Klassen-Kontext öffnen und aktivieren."""
         ctx = ClassContext(id=uuid.uuid4().hex[:12], form=form)
         self.contexts[ctx.id] = ctx
         self.active_context_id = ctx.id
@@ -299,16 +273,13 @@ class AppState:
 
     def close_context(self, context_id: str) -> ClassContext | None:
         """Kontext entfernen; falls er aktiv war, auf einen verbleibenden
-        echten Kontext umschalten (oder None). Gibt den entfernten Kontext
-        zurück bzw. None, falls er nicht existierte."""
+        Kontext umschalten (oder None). Gibt den entfernten Kontext zurück
+        bzw. None, falls er nicht existierte."""
         ctx = self.contexts.pop(context_id, None)
         if ctx is None:
             return None
         if self.active_context_id == context_id:
-            real = next(
-                (c for c in self.contexts.values() if not c.implicit),
-                None,
-            )
+            real = next(iter(self.contexts.values()), None)
             self.active_context_id = real.id if real else None
         return ctx
 
@@ -316,75 +287,24 @@ class AppState:
         if context_id is None or context_id in self.contexts:
             self.active_context_id = context_id
 
-    # -----------------------------------------------------------------
-    # Kompat-Properties: `queue`/`active_form`/`book_order`/`class_catalog*`
-    # delegieren auf den aktiven Kontext. Bestehender Single-Context-Code
-    # (sessions/hub/ws/api) und Unit-Tests greifen weiterhin über `state.queue`
-    # etc. zu; Multi-Kontext-Endpoints nutzen die expliziten Kontext-Methoden
-    # (next_pending(context_id), queue_as_list(context_id), …). Übergangs-
-    # Schim (Strangler-Pattern) — entfernt, sobald alle Stellen kontextbewusst
-    # sind.
-    # -----------------------------------------------------------------
-
-    @property
-    def queue(self) -> list[QueueStudent]:
-        return self.ensure_active_context().queue
-
-    @queue.setter
-    def queue(self, value: list[QueueStudent]) -> None:
-        self.ensure_active_context().queue = value
-
-    @property
-    def active_form(self) -> str | None:
-        ctx = self.active_context
-        return ctx.form if ctx and ctx.form else None
-
-    @active_form.setter
-    def active_form(self, value: str | None) -> None:
-        self.ensure_active_context().form = value or ""
-
-    @property
-    def book_order(self) -> list[str]:
-        ctx = self.active_context
-        return ctx.book_order if ctx else []
-
-    @book_order.setter
-    def book_order(self, value: list[str]) -> None:
-        self.ensure_active_context().book_order = value
-
-    @property
-    def class_catalog(self) -> list[dict]:
-        ctx = self.active_context
-        return ctx.class_catalog if ctx else []
-
-    @class_catalog.setter
-    def class_catalog(self, value: list[dict]) -> None:
-        self.ensure_active_context().class_catalog = value
-
-    @property
-    def class_catalog_form(self) -> str | None:
-        ctx = self.active_context
-        return ctx.class_catalog_form if ctx else None
-
-    @class_catalog_form.setter
-    def class_catalog_form(self, value: str | None) -> None:
-        self.ensure_active_context().class_catalog_form = value
-
-    @property
-    def class_catalog_grade(self) -> int | None:
-        ctx = self.active_context
-        return ctx.class_catalog_grade if ctx else None
-
-    @class_catalog_grade.setter
-    def class_catalog_grade(self, value: int | None) -> None:
-        self.ensure_active_context().class_catalog_grade = value
+    def book_order_of(self, context_id: str | None) -> list[str]:
+        """Bücher-Reihenfolge eines EXPLIZITEN Kontexts — `[]`, wenn der Kontext
+        unbekannt oder `None` ist. Fällt bewusst NICHT still auf den aktiven Tab
+        zurück (das war der Kompat-Property-Bug: ein Helfer ohne Klassen-
+        Bindung bekam so die Reihenfolge einer zufällig aktiven fremden Klasse
+        angezeigt). Aufrufer ohne Kontext (z. B. ein Helfer, dessen `context_id`
+        `None` ist) bekommen konsequent eine leere Liste statt einer falschen."""
+        if context_id is None:
+            return []
+        ctx = self.contexts.get(context_id)
+        return ctx.book_order if ctx is not None else []
 
     def reset_class_book_order(self, context_id: str | None = None) -> None:
         """Aktive Klassen-Reihenfolge + Katalog eines Kontexts leeren (Klassen-
         wechsel/Tab schließen/Queue leeren). Die jahrgangsweiten Reihenfolgen
         (`book_orders_by_grade`) bleiben bestehen — sie gelten schuljahrweit.
         `context_id=None` → aktiver Kontext (Kompat)."""
-        ctx = self._ctx_or_active(context_id)
+        ctx = self.ctx_or_active(context_id)
         if ctx is None:
             return
         ctx.book_order = []
@@ -404,6 +324,13 @@ class AppState:
     # -----------------------------------------------------------------
     # Kontextbewusste Lookups
     # -----------------------------------------------------------------
+
+    def active_students(self) -> list[QueueStudent]:
+        """Alle Schüler mit Status 'active' über ALLE Kontexte (analog
+        `find_student`) — für Guards, die vor einem Kontext-Reset (Schuljahres-
+        wechsel) prüfen müssen, ob irgendwo eine laufende Session hängt, nicht
+        nur im gerade aktiven Klassen-Tab."""
+        return [s for ctx in self.contexts.values() for s in ctx.queue if s.status == "active"]
 
     def find_student(self, student_id: int) -> QueueStudent | None:
         """Schüler über ALLE Kontexte suchen (student_id ist schulweit eindeutig,
@@ -426,13 +353,13 @@ class AppState:
     def next_pending(self, context_id: str | None = None) -> QueueStudent | None:
         """Nächsten wartenden Schüler eines Kontexts. `context_id=None` →
         aktiver Kontext (Kompat, z. B. Helfer ohne Klassen-Bindung)."""
-        ctx = self._ctx_or_active(context_id)
+        ctx = self.ctx_or_active(context_id)
         if ctx is None:
             return None
         return next((s for s in ctx.queue if s.status == "pending"), None)
 
     def pending_count(self, context_id: str | None = None) -> int:
-        ctx = self._ctx_or_active(context_id)
+        ctx = self.ctx_or_active(context_id)
         if ctx is None:
             return 0
         return sum(1 for s in ctx.queue if s.status == "pending")
@@ -440,24 +367,24 @@ class AppState:
     def pending_queue_as_list(self, context_id: str | None = None) -> list[dict]:
         """Nur die wartenden Schüler eines Kontexts — für die Warteschlangen-
         Anzeige im Helferclient, solange dieser keinen Schüler zugewiesen hat."""
-        ctx = self._ctx_or_active(context_id)
+        ctx = self.ctx_or_active(context_id)
         if ctx is None:
             return []
         return [s.as_dict() for s in ctx.queue if s.status == "pending"]
 
     def queue_as_list(self, context_id: str | None = None) -> list[dict]:
-        ctx = self._ctx_or_active(context_id)
+        ctx = self.ctx_or_active(context_id)
         if ctx is None:
             return []
         return [s.as_dict() for s in ctx.queue]
 
     def real_contexts_summary(self) -> list[dict]:
-        """Alle echten (nicht-impliziten) Klassen-Kontexte für den Helferclient:
-        je Kontext id, form und die wartenden Schüler (pending) — die Daten für
-        die Klassen-Reiter im Helfer-Menü (Warteschlange je Tab mit „Aufrufen").
-        Einfügereihenfolge der ``dict`` bleibt erhalten = Reihenfolge wie im
-        Host. Wartende (nicht active/done/skipped), weil nur diese aufrufbar
-        sind — analog ``pending_queue_as_list``."""
+        """Alle offenen Klassen-Kontexte für den Helferclient: je Kontext id,
+        form und die wartenden Schüler (pending) — die Daten für die Klassen-
+        Reiter im Helfer-Menü (Warteschlange je Tab mit „Aufrufen"). Einfüge-
+        reihenfolge der ``dict`` bleibt erhalten = Reihenfolge wie im Host.
+        Wartende (nicht active/done/skipped), weil nur diese aufrufbar sind —
+        analog ``pending_queue_as_list``."""
         return [
             {
                 "id": c.id,
@@ -465,7 +392,6 @@ class AppState:
                 "queue": [s.as_dict() for s in c.queue if s.status == "pending"],
             }
             for c in self.contexts.values()
-            if not c.implicit
         ]
 
     def helpers_as_dict(self) -> dict:
@@ -479,7 +405,6 @@ class AppState:
             else {"total": 0, "available": 0, "in_use": 0}
         )
         ctx = self.active_context
-        # Kontexte für den Host: nur echte (keine impliziten Übergangs-Kontexte).
         contexts = {
             c.id: {
                 "id": c.id,
@@ -487,12 +412,11 @@ class AppState:
                 "queue": [s.as_dict() for s in c.queue],
             }
             for c in self.contexts.values()
-            if not c.implicit
         }
         return {
             "type": "state",
-            # Kompat-Flat-Felder (alle aus dem aktiven Kontext) — bestehender
-            # Host-Code liest weiter `state.queue`/`state.active_form` etc.
+            # Flat-Felder (aus dem aktiven Kontext) — der Host-Client liest sie
+            # direkt vom Snapshot (kein State-seitiges Kompat-Feld mehr nötig).
             "active_form": ctx.form if ctx and ctx.form else None,
             "active_context_id": self.active_context_id,
             "contexts": contexts,
