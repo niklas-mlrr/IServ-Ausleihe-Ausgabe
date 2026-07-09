@@ -244,9 +244,11 @@ function renderBooks(books, animate = false) {
 function renderQueue() {
   const list = currentQueue();
   if (!list.length) {
-    bookRowsEl.innerHTML = contextsData.length
-      ? '<div class="book-empty">Warteschlange leer</div>'
-      : '<div class="book-empty">Keine Klasse offen</div>';
+    // Keine Klasse offen: der Hinweis steht bereits an Stelle der Klassen-Reiter
+    // (renderQueueTabs); darunter in der eigentlichen Warteschlange bleibt die
+    // Liste leer, statt den Text zu wiederholen.
+    if (!contextsData.length) { bookRowsEl.innerHTML = ''; return; }
+    bookRowsEl.innerHTML = '<div class="book-empty">Warteschlange leer</div>';
     return;
   }
   bookRowsEl.innerHTML = list.map(s => {
@@ -385,9 +387,14 @@ function handleServerMessage(msg) {
       renderBooks(currentBooks, true);     // FLIP: Zeilen an neue Position fahren
     }
     drainScanWaiters();
-    // Ausgemustert / verliehen-an-andere / verliehen-an-sich-selbst → Statuszeile
-    // deutlich rot, Prüfung greift server-seitig noch vor der Anmeldeprüfung.
-    const isAlert = ALERT_STATUSES.has(msg.status);
+    // Jeder nicht-verbuchbare Scan (alles außer staged/booked) → Statuszeile
+    // deutlich + Hinweis-Modal am Gerät. Der Helfer schließt es selbst
+    // (Button/Klick-außerhalb/Escape/nächster Scan). Bei ausgemustert /
+    // verliehen-an-andere räumt dismissBookAlert zusätzlich die Host-Meldung
+    // auf (server: clear_book_alert); bei den reinen Hinweisen (nicht
+    // bestellt, unbekannt, noch nicht geladen, Prüf-Fehler, an sich selbst
+    // verliehen) war der Host nie informiert → Clear ist dort ein No-op.
+    const isAlert = !OK_STATUSES.has(msg.status);
     statusEl.classList.toggle('status-book-deleted', isAlert);
     statusEl.textContent = `${escapeHtml(msg.barcode)} — ${escapeHtml(msg.msg || msg.status)}`;
     if (isAlert) showBookAlertModal(msg);
@@ -595,12 +602,20 @@ nextModal.addEventListener('click', (e) => { if (e.target === nextModal) closeNe
 // Button zusätzlich die Host-Meldung auf (server: clear_book_alert); bei
 // „an sich selbst verliehen" wird der Host gar nicht informiert → das Clear
 // ist dort ein No-op. ----
-const ALERT_STATUSES = new Set(['book_deleted', 'not_in_stock', 'series_already_lent']);
+// Status, die den Scan nicht verbuchen (kein staged/booked) → Hinweis-Modal
+// am Gerät. Der Helfer schließt JEDES dieser Modal selbst (Button / Klick
+// außerhalb / Escape / nächster Scan); clear_book_alert räumt ggfls. die
+// Host-Meldung auf (No-op für Status ohne Host-Broadcast).
+const OK_STATUSES = new Set(['staged', 'booked']);
 // status → {title, color} für das Hinweis-Modal.
 const ALERT_META = {
   book_deleted:        { title: 'Ausgemustertes Buch gescannt',  color: '#f44336' },
   not_in_stock:        { title: 'Buch noch verliehen',           color: '#f44336' },
   series_already_lent: { title: 'Buch bereits an dich verliehen', color: '#e69500' },
+  not_enrolled:        { title: 'Buch nicht bestellt',           color: '#e69500' },
+  unknown_book:        { title: 'Buch unbekannt',                color: '#f44336' },
+  not_ready:           { title: 'Buchliste noch nicht geladen',   color: '#e69500' },
+  error:               { title: 'Fehler bei der Prüfung',         color: '#f44336' },
 };
 function showBookAlertModal(msg) {
   const meta = ALERT_META[msg.status] || { title: 'Buch-Hinweis', color: '#f44336' };

@@ -334,15 +334,18 @@
       } else if (msg.type === 'scan_result') {
         const statusTextEl = document.getElementById('status-text');
         statusTextEl.textContent = `${escapeHtml(msg.barcode)} — ${escapeHtml(msg.msg || msg.status)}`;
-        // Ausgemustert / verliehen-an-andere → Statuszeile rot + blockierendes
-        // Hinweis-Modal (kein eigener Schließen-Button). Solange offen, ignoriert
-        // der Server weitere Scans (s. `session.book_alert_open`) — nur der Host
-        // kann per Button freigeben (`book_alert_clear`).
-        // „An sich selbst verliehen" (series_already_lent) → nur Hinweis, nicht
-        // blockierend; der Schüler schließt ihn selbst per Button/nächster Scan.
-        const blocking = msg.status === 'book_deleted' || msg.status === 'not_in_stock';
-        const dismissible = msg.status === 'series_already_lent';
-        statusTextEl.classList.toggle('status-book-deleted', blocking || dismissible);
+        // Jeder nicht-verbuchbare Scan → Hinweis-Modal (wie bisher bei
+        // ausgemustert / verliehen / an-sich-selbst, jetzt auch für „nicht
+        // bestellt", „unbekannt", „noch nicht geladen", Prüf-Fehler).
+        // Host-geschlossen (blocking): ausgemustert (mit/ohne Ersatzanspruch)
+        // + an andere Person verliehen → kein Schließen-Button, serverseitig
+        // blockiert `book_alert_open` weitere Scans, nur der Betreuer gibt per
+        // `book_alert_clear` frei. Alle anderen nicht-OK Meldungen schließt der
+        // Schüler selbst (Button / nächster Scan) und scannt weiter.
+        const ok = OK_STATUSES_STUDENT.has(msg.status);
+        const blocking = BLOCKING_STATUSES_STUDENT.has(msg.status);
+        const dismissible = !ok && !blocking;
+        statusTextEl.classList.toggle('status-book-deleted', !ok);
         if (blocking) { bookAlertOpen = true; showBookAlertModal(msg, false); }
         else if (dismissible) { showBookAlertModal(msg, true); }
         // Erfolgreicher Scan → Buch als „erledigt" markieren (sinkt nach unten).
@@ -377,7 +380,17 @@
       book_deleted:        { title: 'Ausgemustertes Buch gescannt',   color: '#f44336' },
       not_in_stock:        { title: 'Buch noch verliehen',            color: '#f44336' },
       series_already_lent: { title: 'Buch bereits an dich verliehen', color: '#e69500' },
+      not_enrolled:        { title: 'Buch nicht bestellt',            color: '#e69500' },
+      unknown_book:        { title: 'Buch unbekannt',                 color: '#f44336' },
+      not_ready:           { title: 'Buchliste noch nicht geladen',   color: '#e69500' },
+      error:               { title: 'Fehler bei der Prüfung',         color: '#f44336' },
     };
+    // Status, die NICHT verbucht werden können und die der Schüler selbst
+    // schließen darf (alle nicht-OK Status außer den Host-geschlossenen).
+    const OK_STATUSES_STUDENT = new Set(['staged', 'booked']);
+    // Host-geschlossen: ausgemustert (mit/ohne Ersatzanspruch) + an andere
+    // Person verliehen → blockierendes Modal, nur der Betreuer gibt frei.
+    const BLOCKING_STATUSES_STUDENT = new Set(['book_deleted', 'not_in_stock']);
     function showBookAlertModal(msg, dismissible) {
       const meta = ALERT_META_STUDENT[msg.status] || { title: 'Buch-Hinweis', color: '#f44336' };
       bookAlertTitleEl.textContent = meta.title;
