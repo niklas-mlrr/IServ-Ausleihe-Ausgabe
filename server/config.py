@@ -63,7 +63,7 @@ def load_config(env_file: Path | None = None) -> Config:
         try:
             return int(raw)
         except (TypeError, ValueError):
-            raise SystemExit(f"Fehler: {name} muss eine Zahl sein (war '{raw}')")
+            raise SystemExit(f"Fehler: {name} muss eine Zahl sein (war '{raw}')") from None
 
     _config = Config(
         iserv_domain=req("ISERV_DOMAIN"),

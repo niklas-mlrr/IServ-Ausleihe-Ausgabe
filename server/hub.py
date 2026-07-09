@@ -1,14 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import weakref
 
-from fastapi import WebSocket
-
 from .book_order import get_book_order_for_form
-from .state import AppState, HelperSession, get_state
+from .state import AppState, get_state
 
 log = logging.getLogger(__name__)
 
@@ -25,7 +22,7 @@ class Hub:
         # zugrunde liegenden ASGI-Sends interleaven oder in falscher
         # Reihenfolge beim Client ankommen. `WeakKeyDictionary`, damit Locks
         # toter Verbindungen nicht dauerhaft im Speicher bleiben.
-        self._ws_locks: "weakref.WeakKeyDictionary[object, asyncio.Lock]" = weakref.WeakKeyDictionary()
+        self._ws_locks: weakref.WeakKeyDictionary[object, asyncio.Lock] = weakref.WeakKeyDictionary()
 
     def _lock_for(self, ws: object) -> asyncio.Lock:
         lock = self._ws_locks.get(ws)

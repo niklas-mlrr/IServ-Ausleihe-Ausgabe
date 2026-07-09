@@ -232,13 +232,12 @@ async def print_pdf(
     out_dir = Path(output_dir)
 
     # `pages` validieren (z. B. "1" oder "1-2"); None bedeutet „alle Seiten".
-    if pages is not None:
-        if not re.fullmatch(r"\d+(?:-\d+)?", pages):
-            return {
-                "ok": False,
-                "backend": resolved,
-                "detail": f"ungültiger Seitenbereich: {pages!r} (erwartet z. B. '1' oder '1-2')",
-            }
+    if pages is not None and not re.fullmatch(r"\d+(?:-\d+)?", pages):
+        return {
+            "ok": False,
+            "backend": resolved,
+            "detail": f"ungültiger Seitenbereich: {pages!r} (erwartet z. B. '1' oder '1-2')",
+        }
 
     # `file`: nur speichern, nichts drucken.
     if resolved == "file":

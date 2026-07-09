@@ -92,6 +92,7 @@ def test_print_loan_slip_save_pdf_locally_pushes_download(tmp_path, monkeypatch)
     """`save_pdf_locally` druckt nicht, sondern pusht das PDF an alle verbundenen
     Host-Browser zum Download (auch wenn PRINT_BACKEND auf `lp` zeigt)."""
     import base64
+
     from server import sessions
 
     class FakeIServ:

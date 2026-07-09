@@ -162,8 +162,8 @@ def _cert_expired_or_expiring(cert_path: Path, *, within_days: int = 30) -> bool
     try:
         expiry = cert.not_valid_after_utc
     except AttributeError:
-        expiry = cert.not_valid_after.replace(tzinfo=dt.timezone.utc)
-    now = dt.datetime.now(dt.timezone.utc)
+        expiry = cert.not_valid_after.replace(tzinfo=dt.UTC)
+    now = dt.datetime.now(dt.UTC)
     return expiry <= now + dt.timedelta(days=within_days)
 
 
@@ -193,7 +193,7 @@ def generate_selfsigned_cert(cert_path: Path, key_path: Path, cn: str = "localho
         san.append(x509.DNSName(cn))  # z. B. die IServ-Domain als zusätzlicher Name
 
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn)])
-    now = dt.datetime.now(dt.timezone.utc)
+    now = dt.datetime.now(dt.UTC)
     cert = (
         x509.CertificateBuilder()
         .subject_name(name)

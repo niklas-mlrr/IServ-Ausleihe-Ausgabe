@@ -9,7 +9,7 @@ import asyncio
 
 import pytest
 
-from automation.worker import WorkerPool, StudentSession
+from automation.worker import StudentSession, WorkerPool
 
 
 def test_stats_empty_pool():

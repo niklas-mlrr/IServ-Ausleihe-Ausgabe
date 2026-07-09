@@ -15,7 +15,6 @@ from server.routes.api import normalize_book_order
 from server.sessions import apply_hidden_books
 from server.state import AppState
 
-
 # ---------------------------------------------------------------------------
 # get_class_book_catalog — mit gefälschter Jahrgangs-Bücherliste
 # ---------------------------------------------------------------------------

@@ -23,13 +23,13 @@ from __future__ import annotations
 
 import argparse
 import os
-import re
 import sys
 from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
-from playwright.sync_api import Page, TimeoutError as PlaywrightTimeout, sync_playwright
+from playwright.sync_api import Page, sync_playwright
+from playwright.sync_api import TimeoutError as PlaywrightTimeout
 
 OUT_DIR = Path(__file__).parent / "out"
 

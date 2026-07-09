@@ -16,7 +16,6 @@ import server.routes.api as api
 from server.config import Config
 from server.state import AppState
 
-
 # ---------------------------------------------------------------------------
 # Fixtures: frische Singletons pro Test (Host-Login bereits gültig)
 # ---------------------------------------------------------------------------

@@ -196,9 +196,9 @@ class AppState:
         # session_id -> letzter Zugriff (für gleitendes TTL, siehe Methoden unten).
         self.host_sessions: dict[str, datetime] = {}
         self.host_ws_connections: list[object] = []
-        self.worker_pool: "WorkerPool | None" = None
-        self.iserv: "IsServClient | None" = None
-        self.student_worker_sessions: dict[int, "StudentSession"] = {}  # student_id -> Session
+        self.worker_pool: WorkerPool | None = None
+        self.iserv: IsServClient | None = None
+        self.student_worker_sessions: dict[int, StudentSession] = {}  # student_id -> Session
         # --- Modus B (Live-Ausgabe) ---
         self.modus_b_open: bool = False
         # Neu bei jedem Öffnen der Ausgabe erzeugt; rotiert NICHT mehr pro

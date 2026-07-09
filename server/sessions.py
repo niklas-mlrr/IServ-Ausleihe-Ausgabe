@@ -460,9 +460,6 @@ async def _download_slip_to_host(
     Beschränkt das PDF auf denselben Seitenbereich, der sonst gedruckt würde,
     und schickt es base64-kodiert über die Host-WebSocket. Gibt die Anzahl der
     erreichten Host-Browser zurück (0 = keiner verbunden)."""
-    import base64
-    from datetime import datetime
-
     from .loan_slip import select_pages
 
     pdf = await asyncio.to_thread(select_pages, pdf, pages)
@@ -474,7 +471,6 @@ async def _download_slip_to_host(
         "size": len(pdf),
         "data_b64": base64.b64encode(pdf).decode("ascii"),
     }
-    from .hub import get_hub
 
     return await get_hub().send_all_hosts(msg, state)
 

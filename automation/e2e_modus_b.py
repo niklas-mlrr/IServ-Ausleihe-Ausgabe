@@ -72,7 +72,7 @@ async def main():
         await dpage.wait_for_selector("#view-register.show", timeout=10_000)
         reg_code = (await dpage.inner_text("#reg-code")).strip()
         assert len(reg_code) == 4, f"Reg-Code unerwartet: {reg_code}"
-        log(f"OK  Display zeigt Registrierungscode")
+        log("OK  Display zeigt Registrierungscode")
         r = await page.evaluate(
             """async (code) => {
                 const r = await fetch('/api/display/authorize', {method:'POST',
@@ -95,7 +95,7 @@ async def main():
         pair_code = (await spage.inner_text("#pair-code")).strip()
         token = await spage.evaluate("() => sessionStorage.getItem('mb_token')")
         assert token and len(token) > 20, "session_token fehlt/zu kurz"
-        log(f"OK  Schueler-Session: 4-stelliger Code angezeigt, langer Token gesetzt")
+        log("OK  Schueler-Session: 4-stelliger Code angezeigt, langer Token gesetzt")
 
         # Host sieht offenen Code (ohne Schuelerdaten)
         await page.wait_for_function(
@@ -128,7 +128,7 @@ async def main():
 
         # 6. Schueler-Handy: Worker laedt Kartei (read-only) -> Bestellliste + Scanner
         await spage.wait_for_selector("#view-active.show", timeout=60_000)
-        sname = await spage.inner_text("#s-name")
+        await spage.inner_text("#s-name")
         nbooks = await spage.eval_on_selector_all("#book-items .book", "els => els.length")
         log(f"OK  Schueler-UI aktiv (Bestellliste: {nbooks} Eintraege)")
         active = await page.eval_on_selector_all(

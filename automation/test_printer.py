@@ -15,11 +15,12 @@ from __future__ import annotations
 
 import asyncio
 import io
+import os
 import subprocess
 import sys
 import tempfile
-import os
 from pathlib import Path
+
 
 # Test-PDF mit Pillow erzeugen (Pillow ist via qrcode[pil] verfügbar).
 def _make_test_pdf() -> bytes:
@@ -133,7 +134,7 @@ async def _test_sumatra(pdf_path: Path, printer_name: str | None) -> bool:
     rc = proc.returncode or 0
     output = (out or b"").decode(errors="replace").strip()
     if rc == 0:
-        print(f"  OK (rc=0) — Druckjob an Warteschlange übergeben.")
+        print("  OK (rc=0) — Druckjob an Warteschlange übergeben.")
         return True
     else:
         print(f"  FEHLER rc={rc}: {output}")
@@ -193,19 +194,18 @@ async def main() -> None:
 
     known_printers = list_printers()
 
-    if printer_name:
-        if known_printers and printer_name not in known_printers:
-            # Partielle Übereinstimmung suchen (case-insensitive)
-            needle = printer_name.lower()
-            suggestions = [n for n in known_printers if needle in n.lower() or n.lower() in needle]
-            print(f"\n[WARNUNG] Druckername {printer_name!r} nicht in der Liste gefunden!")
-            if suggestions:
-                print(f"  Meintest du: {suggestions[0]!r}  ?")
-                print(f"  -> Skript mit diesem Namen erneut aufrufen:")
-                print(f'     uv run python automation/test_printer.py "{suggestions[0]}"')
-            else:
-                print(f"  Bitte exakten Namen aus der Tabelle oben verwenden.")
-            print()
+    if printer_name and known_printers and printer_name not in known_printers:
+        # Partielle Übereinstimmung suchen (case-insensitive)
+        needle = printer_name.lower()
+        suggestions = [n for n in known_printers if needle in n.lower() or n.lower() in needle]
+        print(f"\n[WARNUNG] Druckername {printer_name!r} nicht in der Liste gefunden!")
+        if suggestions:
+            print(f"  Meintest du: {suggestions[0]!r}  ?")
+            print("  -> Skript mit diesem Namen erneut aufrufen:")
+            print(f'     uv run python automation/test_printer.py "{suggestions[0]}"')
+        else:
+            print("  Bitte exakten Namen aus der Tabelle oben verwenden.")
+        print()
 
     print("\n--- Test-PDF erzeugen ---")
     pdf_bytes = _make_test_pdf()

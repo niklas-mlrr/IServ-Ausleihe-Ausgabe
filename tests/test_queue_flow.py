@@ -14,7 +14,6 @@ import pytest
 import server.sessions as sessions
 from server.state import AppState, HelperSession, QueueStudent
 
-
 # ---------------------------------------------------------------------------
 # Test-Doubles (keine echten WS/Worker/Hub)
 # ---------------------------------------------------------------------------

@@ -19,7 +19,8 @@ import asyncio
 import logging
 import time
 
-from playwright.async_api import Page, TimeoutError as PlaywrightTimeout, async_playwright
+from playwright.async_api import Page, async_playwright
+from playwright.async_api import TimeoutError as PlaywrightTimeout
 
 log = logging.getLogger(__name__)
 
@@ -421,7 +422,7 @@ class WorkerPool:
         # (Pool schrumpft dauerhaft). Daher: bei Fehlern Context zurückgeben.
         try:
             page = await context.new_page()
-        except BaseException as e:  # noqa: BLE001 — inkl. CancelledError
+        except BaseException:  # noqa: BLE001 — inkl. CancelledError
             async with self._cond:
                 self._contexts.append(context)
                 self._cond.notify_all()
@@ -487,8 +488,8 @@ class WorkerPool:
                         self._cond.wait_for(lambda: bool(self._contexts)),
                         timeout=wait_timeout,
                     )
-                except asyncio.TimeoutError:
-                    raise RuntimeError("Kein freier Worker-Context verfügbar")
+                except TimeoutError:
+                    raise RuntimeError("Kein freier Worker-Context verfügbar") from None
             context = self._contexts.pop(0)
 
         # new_page() kann bei transienten Playwright-Transportfehlern werfen.
@@ -496,7 +497,7 @@ class WorkerPool:
         # (Pool schrumpft dauerhaft). Daher: bei Fehlern Context zurückgeben.
         try:
             page = await context.new_page()
-        except BaseException as e:  # noqa: BLE001 — inkl. CancelledError!
+        except BaseException:  # noqa: BLE001 — inkl. CancelledError!
             async with self._cond:
                 self._contexts.append(context)
                 self._cond.notify_all()

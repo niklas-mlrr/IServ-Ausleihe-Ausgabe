@@ -6,6 +6,9 @@ import threading
 from datetime import date, datetime
 from urllib.parse import quote
 
+from ausleihe import AusleiheClient
+from ausleihe.exceptions import NotFoundError
+
 log = logging.getLogger(__name__)
 
 # Default-Schuljahr neu bestimmen, wenn der Cache älter als das ist. Fängt den
@@ -17,9 +20,6 @@ log = logging.getLogger(__name__)
 # und der upcoming-Fall häufiger auftritt als ein exakt zum TTL-Stichtag laufendes
 # Jahr, das gerade endet.
 _DEFAULT_SY_TTL_S = 6 * 3600
-
-from ausleihe import AusleiheClient
-from ausleihe.exceptions import NotFoundError
 
 
 def _enc(sy: str) -> str:

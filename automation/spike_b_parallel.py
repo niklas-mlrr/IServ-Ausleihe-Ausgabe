@@ -20,7 +20,8 @@ from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
-from playwright.async_api import Page, TimeoutError as PlaywrightTimeout, async_playwright
+from playwright.async_api import Page, async_playwright
+from playwright.async_api import TimeoutError as PlaywrightTimeout
 
 OUT_DIR = Path(__file__).parent / "out" / "spike_b"
 

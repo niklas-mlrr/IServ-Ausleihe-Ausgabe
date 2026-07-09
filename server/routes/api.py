@@ -11,20 +11,19 @@ from pathlib import Path
 
 from fastapi import APIRouter, Cookie, HTTPException, Request, Response
 
-from ..book_order import get_book_order_for_form, normalize_book_order
+from ..book_order import normalize_book_order
 from ..booklist_store import save as save_booklist_state
 from ..config import get_config
 from ..hub import get_hub
 from ..ratelimit import join_limiter, login_limiter
 from ..sessions import (
-    broadcast_displays,
     assign_student_to_helper,
+    broadcast_displays,
     create_student_session,
     end_student,
     gen_join_secret,
     handle_commit,
     invalidate_session,
-    load_and_push_helper_student,
     load_and_push_paired_student,
     make_qr_data_url,
     send_display_update,
@@ -145,7 +144,7 @@ async def get_schoolyears(session_id: str | None = Cookie(default=None)) -> dict
         years = await state.iserv.get_schoolyears()
     except Exception as e:
         log.exception("Schuljahre konnten nicht geladen werden")
-        raise HTTPException(502, f"IServ-Fehler: {e}")
+        raise HTTPException(502, f"IServ-Fehler: {e}") from e
     return {"schoolyears": years, "selected": state.selected_schoolyear}
 
 
@@ -207,7 +206,7 @@ async def get_classes(session_id: str | None = Cookie(default=None)) -> dict:
         classes = await state.iserv.get_class_names(state.selected_schoolyear)
     except Exception as e:
         log.exception("IServ-Klassen konnten nicht geladen werden")
-        raise HTTPException(502, f"IServ-Fehler: {e}")
+        raise HTTPException(502, f"IServ-Fehler: {e}") from e
     return {"classes": classes}
 
 
@@ -238,7 +237,7 @@ async def select_class(body: dict, session_id: str | None = Cookie(default=None)
         students = await state.iserv.get_students_for_form(form, state.selected_schoolyear)
     except Exception as e:
         log.exception("Schüler konnten nicht geladen werden")
-        raise HTTPException(502, f"IServ-Fehler: {e}")
+        raise HTTPException(502, f"IServ-Fehler: {e}") from e
 
     # Vor dem Ersetzen der Queue sauber aufräumen (keine verwaisten Sessions).
     for sess in list(state.student_sessions.values()):
@@ -299,7 +298,7 @@ async def open_class(body: dict, session_id: str | None = Cookie(default=None)) 
         students = await state.iserv.get_students_for_form(form, state.selected_schoolyear)
     except Exception as e:
         log.exception("Schüler konnten nicht geladen werden")
-        raise HTTPException(502, f"IServ-Fehler: {e}")
+        raise HTTPException(502, f"IServ-Fehler: {e}") from e
 
     from ..state import QueueStudent
     ctx = state.open_context(form)
@@ -384,7 +383,7 @@ async def students_for_class(form: str, session_id: str | None = Cookie(default=
         students = await state.iserv.get_students_for_form(form, state.selected_schoolyear)
     except Exception as e:
         log.exception("Schüler konnten nicht geladen werden")
-        raise HTTPException(502, f"IServ-Fehler: {e}")
+        raise HTTPException(502, f"IServ-Fehler: {e}") from e
     return {"students": students}
 
 
@@ -443,7 +442,7 @@ async def list_booklists(session_id: str | None = Cookie(default=None)) -> dict:
         booklists = await state.iserv.get_booklists_overview(state.selected_schoolyear)
     except Exception as e:
         log.exception("Bücherlisten konnten nicht geladen werden")
-        raise HTTPException(502, f"IServ-Fehler: {e}")
+        raise HTTPException(502, f"IServ-Fehler: {e}") from e
     return {"schoolyear": state.selected_schoolyear, "booklists": booklists}
 
 
@@ -461,7 +460,7 @@ async def get_booklist_order(
         )
     except Exception as e:
         log.exception("Jahrgangs-Bücherliste konnte nicht geladen werden")
-        raise HTTPException(502, f"IServ-Fehler: {e}")
+        raise HTTPException(502, f"IServ-Fehler: {e}") from e
     catalog_isbns = [b["isbn"] for b in catalog]
     stored = state.book_orders_by_grade.get(grade)
     order = normalize_book_order(catalog_isbns, stored) if stored else catalog_isbns
@@ -497,7 +496,7 @@ async def set_booklist_order(
         )
     except Exception as e:
         log.exception("Jahrgangs-Bücherliste konnte nicht geladen werden")
-        raise HTTPException(502, f"IServ-Fehler: {e}")
+        raise HTTPException(502, f"IServ-Fehler: {e}") from e
     catalog_isbns = [b["isbn"] for b in catalog]
     order = normalize_book_order(catalog_isbns, requested)
     state.book_orders_by_grade[grade] = order
@@ -543,7 +542,7 @@ async def set_booklist_hidden(
         )
     except Exception as e:
         log.exception("Jahrgangs-Bücherliste konnte nicht geladen werden")
-        raise HTTPException(502, f"IServ-Fehler: {e}")
+        raise HTTPException(502, f"IServ-Fehler: {e}") from e
     catalog_isbns = {b["isbn"] for b in catalog}
     hidden = {isbn for isbn in requested if isinstance(isbn, str) and isbn in catalog_isbns}
     state.hidden_isbns_by_grade[grade] = hidden
@@ -569,7 +568,7 @@ async def add_student_to_queue(body: dict, session_id: str | None = Cookie(defau
     try:
         student_id = int(body.get("student_id"))
     except (TypeError, ValueError):
-        raise HTTPException(400, "student_id fehlt/ungültig")
+        raise HTTPException(400, "student_id fehlt/ungültig") from None
     lastname = str(body.get("lastname", "")).strip()
     firstname = str(body.get("firstname", "")).strip()
     form = str(body.get("form", "")).strip()
@@ -962,7 +961,7 @@ async def skip_student(body: dict, session_id: str | None = Cookie(default=None)
     try:
         student_id = int(student_id)
     except (TypeError, ValueError):
-        raise HTTPException(400, "student_id ungültig")
+        raise HTTPException(400, "student_id ungültig") from None
     state = get_state()
     hub = get_hub()
 
@@ -992,7 +991,7 @@ async def disconnect_student(body: dict, session_id: str | None = Cookie(default
     try:
         student_id = int(student_id)
     except (TypeError, ValueError):
-        raise HTTPException(400, "student_id ungültig")
+        raise HTTPException(400, "student_id ungültig") from None
     state = get_state()
     hub = get_hub()
     student = state.find_student(student_id)
@@ -1101,7 +1100,7 @@ async def finish_student(body: dict, session_id: str | None = Cookie(default=Non
     try:
         student_id = int(student_id)
     except (TypeError, ValueError):
-        raise HTTPException(400, "student_id ungültig")
+        raise HTTPException(400, "student_id ungültig") from None
     state = get_state()
     hub = get_hub()
 
@@ -1127,7 +1126,7 @@ async def clear_book_alert(body: dict, session_id: str | None = Cookie(default=N
     try:
         student_id = int(student_id)
     except (TypeError, ValueError):
-        raise HTTPException(400, "student_id ungültig")
+        raise HTTPException(400, "student_id ungültig") from None
 
     state = get_state()
     session = state.find_session_by_student(student_id)
@@ -1162,7 +1161,7 @@ async def print_loan_slip(body: dict, session_id: str | None = Cookie(default=No
     try:
         student_id = int(student_id)
     except (TypeError, ValueError):
-        raise HTTPException(400, "student_id ungültig")
+        raise HTTPException(400, "student_id ungültig") from None
     # Seite 1 wird immer gedruckt; Seite 2 (Schüler-Leihschein) nur, wenn der
     # Host-Toggle gesetzt ist.
     second_page = bool(body.get("second_page"))
@@ -1175,7 +1174,7 @@ async def print_loan_slip(body: dict, session_id: str | None = Cookie(default=No
         return await print_loan_slip_for(state, student_id, pages=pages)
     except Exception as e:
         log.exception("Leihschein-Druck für %s fehlgeschlagen", student_id)
-        raise HTTPException(502, f"Leihschein-Druck fehlgeschlagen: {e}")
+        raise HTTPException(502, f"Leihschein-Druck fehlgeschlagen: {e}") from e
 
 
 # ---------------------------------------------------------------------------
@@ -1215,7 +1214,7 @@ async def commit_book(body: dict, session_id: str | None = Cookie(default=None))
     try:
         student_id = int(student_id)
     except (TypeError, ValueError):
-        raise HTTPException(400, "student_id ungültig")
+        raise HTTPException(400, "student_id ungültig") from None
 
     state = get_state()
     hub = get_hub()
@@ -1349,7 +1348,7 @@ async def student_join(body: dict, request: Request) -> dict:
         session = create_student_session(state)
     except RuntimeError:
         # Pairing-Code-Raum (4-stellig) erschöpft — sehr viele gleichzeitig Wartende.
-        raise HTTPException(503, "Zu viele gleichzeitige Wartende — bitte gleich erneut scannen")
+        raise HTTPException(503, "Zu viele gleichzeitige Wartende — bitte gleich erneut scannen") from None
     await get_hub().broadcast_host(state.state_snapshot())
     return {"session_token": session.session_token, "pairing_code": session.pairing_code}
 
@@ -1369,7 +1368,7 @@ async def student_pair(body: dict, session_id: str | None = Cookie(default=None)
     try:
         student_id = int(student_id)
     except (TypeError, ValueError):
-        raise HTTPException(400, "student_id ungültig")
+        raise HTTPException(400, "student_id ungültig") from None
 
     session = state.find_session_by_code(code)
     if not session:
@@ -1387,7 +1386,7 @@ async def student_pair(body: dict, session_id: str | None = Cookie(default=None)
         info = await state.iserv.get_student_info(student_id, state.selected_schoolyear)
     except Exception as e:
         log.exception("Schülerinfo (Pairing) für %d fehlgeschlagen", student_id)
-        raise HTTPException(502, f"IServ-Fehler: {e}")
+        raise HTTPException(502, f"IServ-Fehler: {e}") from e
 
     # Re-Check nach dem await (TOCTOU): während des IServ-Calls könnte eine
     # parallele Anfrage denselben Code/Schüler gebunden oder die Session

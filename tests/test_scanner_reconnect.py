@@ -16,8 +16,6 @@ import asyncio
 import server.routes.ws as ws_module
 from automation.worker import StudentSession
 from server.state import AppState, HelperSession, QueueStudent
-import server.sessions as sessions
-
 
 # ---------------------------------------------------------------------------
 # Test-Doubles
