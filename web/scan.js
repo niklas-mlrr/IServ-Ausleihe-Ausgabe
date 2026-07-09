@@ -994,6 +994,12 @@ function openPeek() {
   peeking = true;
   resetSearchPanel();   // frisch starten — kein offenes Panel aus altem Peek
   setMenuTitle();
+  // Bei jedem Öffnen die eigene Klasse (re-)selektieren — der man zugeordnet
+  // ist. ensureSelectedCtx() zieht ownContextId (falls offen), sonst erste
+  // offene Klasse. Das folgende peek_queue liefert ein frisches contexts_update;
+  // dessen ensureSelectedCtx() behält die nun gesetzte eigene Auswahl bei.
+  selectedCtxId = null;
+  ensureSelectedCtx();
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'peek_queue' }));
   // Queue + Tabs sofort aus letzter bekannter Liste rendern; Antwort/Updates
   // (peek_queue liefert contexts_update) ziehen sie nach.
