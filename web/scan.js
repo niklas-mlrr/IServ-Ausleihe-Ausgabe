@@ -4,7 +4,7 @@ const sNameEl = document.getElementById('s-name');
 const sFormEl = document.getElementById('s-form');
 const sPayEl = document.getElementById('s-pay');
 const bookRowsEl = document.getElementById('book-rows');
-let ws, reconnectDelay = 2000;
+let ws;
 let studentActive = false;          // ist gerade ein Schüler zugewiesen?
 let workerPending = false;          // Schüler zugewiesen, aber Worker noch nicht bereit
 let queueSize = null;               // zuletzt gemeldete Warteschlangengröße
@@ -146,18 +146,9 @@ function setReadyStatus() {
   else renderWaitingStatus();
 }
 
-// IServ-Strings nie ungefiltert per innerHTML einsetzen.
-function escapeHtml(v) {
-  return String(v ?? '').replace(/[&<>"']/g, c =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
+// escapeHtml, isBookDone: siehe common.js (vor scan.js eingebunden).
 
 const token = new URLSearchParams(location.search).get('token');
-
-// „Erledigt" = bereits ausgeliehen (IServ) ODER in dieser Session gescannt.
-function isBookDone(b) {
-  return b.status === 'ausgeliehen' || !!(b.isbn && scannedIsbns.has(b.isbn));
-}
 
 function renderBooks(books, animate = false) {
   if (!books || !books.length) {
@@ -193,7 +184,7 @@ function renderBooks(books, animate = false) {
   const ordered = books
     .map((b, i) => [b, i])
     .sort((a, b) => {
-      const da = isBookDone(a[0]) ? 1 : 0, db = isBookDone(b[0]) ? 1 : 0;
+      const da = isBookDone(a[0], scannedIsbns) ? 1 : 0, db = isBookDone(b[0], scannedIsbns) ? 1 : 0;
       if (da !== db) return da - db;                       // erledigte nach unten
       if (da === 1) {                                      // beide erledigt → nach Rang
         const diff = doneRank(b[0]) - doneRank(a[0]);      // absteigend (jüngstes oben)
@@ -205,7 +196,7 @@ function renderBooks(books, animate = false) {
       return a[1] - b[1];
     });
   bookRowsEl.innerHTML = ordered.map(([b, idx]) => {
-    const done = isBookDone(b);
+    const done = isBookDone(b, scannedIsbns);
     const icon = done
       ? '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>'
       : '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
@@ -498,15 +489,16 @@ function connect() {
     dotEl.className = 'dot err';
     return;
   }
-  ws = new WebSocket(`wss://${location.host}/ws/scanner/${token}`);
-  ws.onopen  = () => { dotEl.className = 'dot ok'; setReadyStatus(); reconnectDelay = 2000; };
-  ws.onclose = () => {
-    dotEl.className = 'dot err'; statusEl.textContent = 'Getrennt — neu verbinden…';
-    setTimeout(connect, reconnectDelay);
-    reconnectDelay = Math.min(Math.round(reconnectDelay * 1.6), 30000);  // Backoff, Cap 30 s
-  };
-  ws.onerror = () => { dotEl.className = 'dot err'; statusEl.textContent = 'Verbindungsfehler'; };
-  ws.onmessage = e => { try { handleServerMessage(JSON.parse(e.data)); } catch (_) {} };
+  connectWebSocket(() => `wss://${location.host}/ws/scanner/${token}`, {
+    onSocket: (s) => { ws = s; },
+    onOpen: () => { dotEl.className = 'dot ok'; setReadyStatus(); },
+    onClose: (e, reconnect) => {
+      dotEl.className = 'dot err'; statusEl.textContent = 'Getrennt — neu verbinden…';
+      reconnect();
+    },
+    onError: () => { dotEl.className = 'dot err'; statusEl.textContent = 'Verbindungsfehler'; },
+    onMessage: e => { try { handleServerMessage(JSON.parse(e.data)); } catch (_) {} },
+  });
 }
 connect();
 
@@ -785,36 +777,15 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-let audioCtx = null, audioBuffer = null;
-
-async function initAudio() {
-  if (audioBuffer) return;
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  // Silent buffer to unlock iOS AudioContext during user gesture
-  const silence = audioCtx.createBuffer(1, 1, audioCtx.sampleRate);
-  const silSrc = audioCtx.createBufferSource();
-  silSrc.buffer = silence; silSrc.connect(audioCtx.destination); silSrc.start(0);
-  await audioCtx.resume();
-  const response = await fetch('/beep.mp3');
-  const arrayBuf = await response.arrayBuffer();
-  audioBuffer = await audioCtx.decodeAudioData(arrayBuf);
-}
-
-function playBeep() {
-  if (!audioCtx || !audioBuffer) return;
-  const src = audioCtx.createBufferSource();
-  src.buffer = audioBuffer;
-  src.connect(audioCtx.destination);
-  src.start(0);
-}
+// initAudio/playBeep: siehe common.js (Beeper).
 
 soundBtn.addEventListener('click', async () => {
   soundEnabled = !soundEnabled;
   if (soundEnabled) {
     soundBtn.innerHTML = ICON_VOLUME_ON;
     soundBtn.classList.add('sound-on');
-    await initAudio();
-    playBeep();
+    await Beeper.initAudio();
+    Beeper.playBeep();
   } else {
     soundBtn.innerHTML = ICON_VOLUME_OFF;
     soundBtn.classList.remove('sound-on');
@@ -1308,7 +1279,7 @@ function onScanSuccess(value) {
   // Nächster Scan → evtl. offenes Hinweis-Modal bewusst schließen (auch Host
   // aufräumen); war keins offen, ist dismissBookAlert ein No-op.
   dismissBookAlert();
-  if (soundEnabled) playBeep();
+  if (soundEnabled) Beeper.playBeep();
   lastValue = value; cooldown = true;
   setTimeout(() => { cooldown = false; lastValue = ''; }, 2000);
   // Unstimmigkeit (Nachweis fehlt / Rechnung offen) und noch nicht freigegeben:

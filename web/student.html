@@ -6,6 +6,7 @@
   <title>Bücherausgabe</title>
   <link rel="icon" type="image/png" href="/favicon.png">
   <script src="/html5-qrcode.min.js"></script>
+  <script src="/common.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     /* Dark als Default; Light greift, wenn Browser/System es vorgeben
@@ -250,15 +251,11 @@
     function show(name) {
       for (const k in views) views[k].classList.toggle('show', k === name);
     }
-    // IServ-Strings (Buchtitel etc.) nie ungefiltert per innerHTML einsetzen.
-    function escapeHtml(v) {
-      return String(v ?? '').replace(/[&<>"']/g, c =>
-        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-    }
+    // escapeHtml, isBookDone, initAudio/playBeep (Beeper): siehe common.js.
 
     const joinSecret = new URLSearchParams(location.search).get('j');
     let token = sessionStorage.getItem('mb_token');
-    let ws = null, finished = false, scannerStarted = false, reconnectDelay = 2000;
+    let ws = null, finished = false, scannerStarted = false;
     let workerPending = false;         // Schüler zugewiesen, aber Worker noch nicht bereit
     let currentBooks = [];              // Buchliste des Schülers
     const scannedIsbns = new Set();     // in dieser Session gescannte ISBNs
@@ -295,24 +292,29 @@
       }
     }
 
+    // Reconnect-Sonderfall (nicht wegabstrahierbar, s. common.js-Kommentar zu
+    // connectWebSocket): Close-Code 4006 = entwerteter Token → Re-Join statt
+    // normalem Reconnect; `finished` (regulär abgeschlossen) → gar nicht
+    // reconnecten. Beides bleibt hier als eigener onClose-Handler.
     function connect() {
-      ws = new WebSocket(`wss://${location.host}/ws/student/${token}`);
-      ws.onopen = () => { document.getElementById('dot').className = 'dot ok'; reconnectDelay = 2000; };
-      ws.onmessage = e => { let m; try { m = JSON.parse(e.data); } catch (_) { return; } handleServerMessage(m); };
-      ws.onerror = () => { document.getElementById('dot').className = 'dot err'; };
-      ws.onclose = async (e) => {
-        document.getElementById('dot').className = 'dot err';
-        if (finished) return;                       // regulär abgeschlossen
-        if (e.code === 4006) {                       // Token ungültig/entwertet
-          clearToken();
-          if (joinSecret) { if (await join()) connect(); }
-          else show('done');
-          return;
-        }
-        document.getElementById('status-text').textContent = 'Getrennt — neu verbinden…';
-        setTimeout(connect, reconnectDelay);         // Netzproblem → erneut (mit Backoff)
-        reconnectDelay = Math.min(Math.round(reconnectDelay * 1.6), 30000);  // Cap 30 s
-      };
+      const wsHandle = connectWebSocket(() => `wss://${location.host}/ws/student/${token}`, {
+        onSocket: (s) => { ws = s; },
+        onOpen: () => { document.getElementById('dot').className = 'dot ok'; },
+        onMessage: e => { let m; try { m = JSON.parse(e.data); } catch (_) { return; } handleServerMessage(m); },
+        onError: () => { document.getElementById('dot').className = 'dot err'; },
+        onClose: async (e, reconnect) => {
+          document.getElementById('dot').className = 'dot err';
+          if (finished) return;                       // regulär abgeschlossen
+          if (e.code === 4006) {                       // Token ungültig/entwertet
+            clearToken();
+            if (joinSecret) { if (await join()) reconnect(0); }
+            else show('done');
+            return;
+          }
+          document.getElementById('status-text').textContent = 'Getrennt — neu verbinden…';
+          reconnect();                                 // Netzproblem → erneut (mit Backoff)
+        },
+      });
     }
 
     function handleServerMessage(msg) {
@@ -451,10 +453,6 @@
       document.getElementById('status-text').textContent = 'Wird geladen…';
     }
 
-    function isBookDone(b) {
-      return b.status === 'ausgeliehen' || !!(b.isbn && scannedIsbns.has(b.isbn));
-    }
-
     function renderBooks(books, animate = false) {
       const rows = document.getElementById('book-rows');
       if (!books || !books.length) {
@@ -488,7 +486,7 @@
       const ordered = books
         .map((b, i) => [b, i])
         .sort((a, b) => {
-          const da = isBookDone(a[0]) ? 1 : 0, db = isBookDone(b[0]) ? 1 : 0;
+          const da = isBookDone(a[0], scannedIsbns) ? 1 : 0, db = isBookDone(b[0], scannedIsbns) ? 1 : 0;
           if (da !== db) return da - db;
           if (da === 1) {
             const diff = doneRank(b[0]) - doneRank(a[0]);
@@ -500,7 +498,7 @@
           return a[1] - b[1];
         });
       rows.innerHTML = ordered.map(([b, idx]) => {
-        const done = isBookDone(b);
+        const done = isBookDone(b, scannedIsbns);
         const icon = done
           ? '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>'
           : '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
@@ -547,33 +545,18 @@
     const gearBtn = document.getElementById('gear-btn');
     const camDropdown = document.getElementById('cam-dropdown');
     const readerEl = document.getElementById('reader');
-    let scanFlashTimeout = null, audioCtx = null, audioBuffer = null;
+    let scanFlashTimeout = null;
 
     // Zahnrad: Kamera-Dropdown auf/zu
     gearBtn.addEventListener('click', (e) => { e.stopPropagation(); camDropdown.classList.toggle('open'); });
     camDropdown.addEventListener('click', (e) => e.stopPropagation());
     document.addEventListener('click', () => camDropdown.classList.remove('open'));
 
-    async function initAudio() {
-      if (audioBuffer) return;
-      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      const silence = audioCtx.createBuffer(1, 1, audioCtx.sampleRate);
-      const silSrc = audioCtx.createBufferSource();
-      silSrc.buffer = silence; silSrc.connect(audioCtx.destination); silSrc.start(0);
-      await audioCtx.resume();
-      const resp = await fetch('/beep.mp3');
-      audioBuffer = await audioCtx.decodeAudioData(await resp.arrayBuffer());
-    }
-    function playBeep() {
-      if (!audioCtx || !audioBuffer) return;
-      const src = audioCtx.createBufferSource();
-      src.buffer = audioBuffer; src.connect(audioCtx.destination); src.start(0);
-    }
     soundBtn.addEventListener('click', async () => {
       soundEnabled = !soundEnabled;
       soundBtn.innerHTML = soundEnabled ? ICON_VOLUME_ON : ICON_VOLUME_OFF;
       soundBtn.classList.toggle('sound-on', soundEnabled);
-      if (soundEnabled) { await initAudio(); playBeep(); }
+      if (soundEnabled) { await Beeper.initAudio(); Beeper.playBeep(); }
     });
 
     function onScanSuccess(value) {
@@ -587,7 +570,7 @@
       // Dismissibler Hinweis („an sich selbst verliehen") offen → beim nächsten
       // Scan selbst schließen (nicht-blockierend, kein Host-Bezug).
       if (bookAlertModalEl.classList.contains('show')) closeBookAlertModal();
-      if (soundEnabled) playBeep();
+      if (soundEnabled) Beeper.playBeep();
       lastValue = value; cooldown = true;
       setTimeout(() => { cooldown = false; lastValue = ''; }, 2000);
       if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'scan', value }));
