@@ -577,7 +577,7 @@
     <div class="settings-row settings-booklists" id="settings-booklists">
       <span class="settings-bl-label">Bücherlisten ordnen</span>
       <p class="hint">Reihenfolge der ausleihbaren Bücher je Jahrgang für die Scanner-Anzeige.
-        Reiter wählen, per Drag &amp; Drop sortieren, mit 👁 ausblenden — mit „Speichern" übernehmen.
+        Reiter wählen, per Drag &amp; Drop sortieren, über das Augen-Symbol ausblenden — mit „Speichern" übernehmen.
         Ausgeblendete Reihen gelten beim Ausleihen nicht mehr als vorgemerkt.</p>
       <div class="tabs" id="bl-tabs"></div>
       <div id="bl-list" class="book-order-list"></div>
@@ -1894,6 +1894,9 @@
     renderBooklistList();
   }
 
+  const ICON_EYE = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z"/><circle cx="12" cy="12" r="3"/></svg>';
+  const ICON_EYE_OFF = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 11 7 11 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.53 13.53 0 0 0 1 12s4 7 11 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+
   function renderBooklistList() {
     const list = document.getElementById('bl-list');
     const data = blData[blActiveGrade];
@@ -1910,7 +1913,7 @@
         + `<span class="bo-num">${i + 1}</span>`
         + `<span class="bo-fach">${escapeHtml(b.subject || '')}</span>`
         + `<span class="bo-title">${escapeHtml(b.title || isbn)}</span>`
-        + `<button type="button" class="bo-hide-btn" title="${hidden ? 'Wieder einblenden' : 'Ausblenden'}" aria-label="${hidden ? 'Wieder einblenden' : 'Ausblenden'}">${hidden ? '🚫' : '👁'}</button></div>`;
+        + `<button type="button" class="bo-hide-btn" title="${hidden ? 'Wieder einblenden' : 'Ausblenden'}" aria-label="${hidden ? 'Wieder einblenden' : 'Ausblenden'}">${hidden ? ICON_EYE_OFF : ICON_EYE}</button></div>`;
     }).join('');
     list.querySelectorAll('.bo-row').forEach(row => {
       row.addEventListener('dragstart', onBlDragStart);
