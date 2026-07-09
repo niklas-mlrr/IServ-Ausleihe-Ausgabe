@@ -103,8 +103,10 @@ Commit `8bf6c08`.
       `contexts_update`-Broadcast, +1 in `tests/test_queue_flow.py` Rebind).
 - [x] **JS-Syntax/Imports**: `node --check web/scan.js` OK; Server-Imports OK.
 - [ ] **Am Gerät** (manuell, read-only): Host öffnet zwei Klassen-Tabs, Helfer
-      verbinden; Menü öffnen → Reiter für beide Klassen, eigene vorausgewählt,
+      verbinden; Menü öffnen → Reiter für beide Klassen, eigene (re-)selektiert,
       eigene Queue mit Aufrufen-Buttons; fremden Reiter wählen → dessen Queue;
+      Menü schließen+erneut öffnen → wieder eigene Klasse selektiert; aktiver
+      Reiter „nach unten offen" (verbindet optisch mit der Queue darunter);
       Aufrufen eines fremden Schülers → Schüler geladen, Helfer an fremde Klasse
       gebunden (Host-Helfer-Tabelle zeigt neue Klasse); im Peek Hintergrund-Schüler
       **nur** in Statuszeile (`.name-row` verborgen); viele Klassen → Reiter
