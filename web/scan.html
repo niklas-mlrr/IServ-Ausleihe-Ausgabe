@@ -247,6 +247,11 @@
       background: var(--surface-2); color: var(--fg); border: 1px solid var(--border);
       cursor: pointer;
     }
+    /* Gleicher Abstand nach oben (zur Statuszeile) wie zwischen den Dropdowns
+       und wie der Menü/Status/Lupe-Spaltenabstand (7px). Als margin-top am
+       ERSTEN Dropdown, nicht am Panel: so ist er Teil von scrollHeight, wird
+       mit max-height ein/aus animiert und im eingeklappten Zustand abgeschnitten. */
+    #search-class { margin-top: 7px; }
     .search-select:hover { background: var(--surface-3); }
     .search-select:disabled { opacity: .5; cursor: not-allowed; }
   </style>
