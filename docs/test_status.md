@@ -112,6 +112,31 @@ Commit `8bf6c08`.
       **nur** in Statuszeile (`.name-row` verborgen); viele Klassen → Reiter
       horizontal scrollbar; Lupe weiterhin verfügbar.
 
+### Neu 2026-07-09 (Helfer-Menü: Menü-Button im Idle nutzbar)
+
+Das Hamburger-Menü ist jetzt auch **ohne zugewiesenen Schüler** (Idle)
+funktionsfähig. Es klappt im Idle lediglich die Kamera-Zeile ein (Fokus auf die
+ohnehin sichtbare Warteschlange) und fährt sie wieder aus — **kein
+Server-Roundtrip** (`peek_queue`/`peek_close` entfallen), `queue-view` bleibt
+durchgehend an (`keepQueueView`-Flag an `animateMenu`). Die Lupe ist im
+Idle-Menü ebenfalls nutzbar (`search_call` funktioniert serverseitig auch ohne
+aktuellen Schüler). Rein client-seitig; keine neuen WS-Typen, kein
+Server-/DB-/IServ-Zugriff. Commit `9d5f413`.
+
+- [x] **JS-Syntax/Imports**: `node --check web/scan.js` OK; keine Server-Änderung.
+- [ ] **Am Gerät** (manuell, read-only): Helfer ohne Schüler → Menü-Button
+      klappt Kamera-Zeile ein, Queue bleibt sichtbar; Titel „Scanner anzeigen";
+      erneut tippen → Kamera wieder eingeblendet; Lupe öffnet Suche, Aufruf
+      eines IServ-Schülers lädt ihn (serverseitig `search_call` ohne aktuellen
+      Schüler); Schüler wird geladen → Idle-Menü hinfällig, Peek-Verhalten ab
+      dann wie gehabt; Burger-Icon morphet synchron mit dem Menü-FLIP zu ←.
+- [x] **Menü-Icon-Animation**: drei Balken → Linkspfeil (←) beim Öffnen, auf
+      derselben `.35s cubic-bezier`-Kurve wie der Menü-FLIP; `prefers-reduced-
+      motion` respektiert (.01ms). CSS-only, kein JS.
+- [x] **Warteschlangen-Überschrift**: `qh-title` übernimmt Schrift des
+      Schülernamens (`.s-name`: 1.5rem/700/line-height 1.2) — keine
+      Kapitälchen/Sperrung/Transparenz mehr.
+
 ### Neu 2026-07-08 (Host-Überarbeitung: Settings + Tab-System)
 
 Multi-Kontext-Refactor des Hosts (`web/host.html`) + Backend
