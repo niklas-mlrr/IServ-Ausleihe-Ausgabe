@@ -87,6 +87,29 @@ async def handle_scan(state: AppState, student_id: int, barcode: str) -> dict:
         return {"status": "error", "msg": str(e)}
 
 
+async def hydrate_student_info(state: AppState, info: dict, form: str, target) -> dict:
+    """Reiner Hydrations-Teil, gemeinsam für alle vier Lade-/Reconnect-Pfade
+    (Modus A: `load_and_push_helper_student`, `ws_scanner`-Reconnect; Modus B:
+    `load_and_push_paired_student`, `ws_student`-Reconnect).
+
+    Setzt `info["form"]`/`info["book_order"]`, filtert ausgeblendete Reihen aus
+    `info["books"]` und füllt die drei ISBN-Mengen (`expected_isbns`,
+    `vormerk_isbns`, `lent_isbns`) auf `target` (HelperSession oder
+    StudentSessionB — beide tragen diese drei Attribute). Das Laden von `info`
+    selbst (`get_student_info`) und die Fehlerbehandlung bleiben beim jeweiligen
+    Aufrufer — die vier Stellen unterscheiden sich darin (bereits geladenes
+    `info` vs. eigener Fetch, unterschiedliche Error-Payloads/Sends).
+
+    Gibt `info` zurück, damit der Aufrufer `info["book_order"]` weiterverwenden
+    kann (z. B. für die `settings`-Nachricht im Scanner-Reconnect)."""
+    info["form"] = form
+    info["book_order"] = await get_book_order_for_form(state, form)
+    apply_hidden_books(info, await get_hidden_isbns_for_form(state, form))
+    target.expected_isbns = expected_isbns_from_info(info)
+    target.vormerk_isbns, target.lent_isbns = booking_isbn_sets_from_info(info)
+    return info
+
+
 def apply_hidden_books(info: dict, hidden_isbns: set[str]) -> None:
     """Ausgeblendete Buchreihen (Einstellungen-Dialog) aus `info["books"]"`
     entfernen, bevor sie als vorgemerkt/erwartet gilt (2026-07-05). Muss vor
@@ -572,6 +595,55 @@ async def invalidate_session(
     log.info("Modus-B-Session %s → %s (%s)", token_handle, new_state, reason)
 
 
+async def _detach_helper(state: AppState, hub, helper, helper_notify: dict | None) -> None:
+    """Helfer von seinem (gerade beendeten) Schüler lösen — gemeinsame Logik für
+    beide Zweige von `end_student` (echter Queue-Schüler über
+    `student.assigned_helper` bzw. transienter Lupe-Schüler über
+    `find_helper_for_student`). Der Aufrufer stellt sicher, dass `helper`
+    tatsächlich (noch) diesem Schüler zugeordnet ist.
+
+    In-flight Lade-Task abbrechen, damit ein noch laufendes open_student seinen
+    Worker-Context zurückgibt (BaseException-Handler in worker.py). Sonst leakt
+    der Context, weil er erst nach open_student in student_worker_sessions
+    registriert wird und pop() unten Nichts fände — Pool läuft unter schnellem
+    „Weiter"-Klicken leer.
+
+    WICHTIG (Reihenfolge nicht verändern): student_id wird VOR dem Await auf
+    None gesetzt, damit der Stale-Guard in load_and_push_helper_student (der
+    helper.student_id gegen den ursprünglich zugewiesenen student_id prüft) den
+    nach open_student noch synchronen set_worker_session-Aufruf überspringt und
+    den Context selbst schließt. Der Await selbst ist sicher (kein Lock
+    gehalten) — der Task wartet nur auf open_student (BaseException-Handler
+    fängt Cancel) oder ist schon darüber hinaus und läuft via Stale-Guard leer.
+    """
+    if helper.load_task is not None and not helper.load_task.done():
+        helper.load_task.cancel()
+    helper.student_id = None
+    helper.student_form = None
+    helper.expected_isbns = set()
+    helper.vormerk_isbns = set()
+    helper.lent_isbns = set()
+    helper.peeking = False  # Schüler weg → Queue-Ansicht hinfällig
+    if helper.load_task is not None and not helper.load_task.done():
+        with contextlib.suppress(asyncio.CancelledError):
+            await helper.load_task
+    helper.load_task = None
+    # Scanner sonst ohne jede Rückmeldung mit dem alten (getrennten) Schüler
+    # stehen — der Helfer sieht dann weder Trennung noch neuen Wartezustand
+    # ("Alle Verbindungen trennen" wirkte sonst nur am Host). Default: Idle-
+    # `waiting` (Queue anzeigen). Beim Advance übergibt der Aufrufer
+    # `{"type":"loading"}` → Client verbirgt die Queue, während der nächste
+    # Schüler geladen wird. Die Queue des Helfer-Kontexts (Klasse, an die er
+    # gebunden ist) — sonst würde ein Helfer einer anderen Klasse die falsche
+    # Warteschlange sehen.
+    await hub.send_scanner(helper.token, helper_notify or {
+        "type": "waiting",
+        "msg": "Warte auf Schüler-Zuweisung",
+        "queue_size": state.pending_count(helper.context_id),
+        "queue": state.pending_queue_as_list(helper.context_id),
+    })
+
+
 async def end_student(
     state: AppState,
     hub,
@@ -605,47 +677,7 @@ async def end_student(
         student.assigned_helper = None
         if old_helper and old_helper in state.helper_sessions:
             h = state.helper_sessions[old_helper]
-            # In-flight Lade-Task abbrechen, damit ein noch laufendes
-            # open_student seinen Worker-Context zurückgibt (BaseException-
-            # Handler in worker.py). Sonst leakt der Context, weil er erst
-            # nach open_student in student_worker_sessions registriert wird
-            # und pop() unten Nothing fände — Pool läuft unter schnellem
-            # „Weiter"-Klicken leer.
-            #
-            # WICHTIG: student_id wird VOR dem Await auf None gesetzt, damit
-            # der Stale-Guard in load_and_push_helper_student (der
-            # helper.student_id gegen den ursprünglich zugewiesenen student_id
-            # prüft) den nach open_student noch synchronen set_worker_session-
-            # Aufruf überspringt und den Context selbst schließt. Der Await
-            # selbst ist sicher (kein Lock gehalten) — der Task wartet nur auf
-            # open_student (BaseException-Handler fängt Cancel) oder ist schon
-            # darüber hinaus und läuft via Stale-Guard leer.
-            if h.load_task is not None and not h.load_task.done():
-                h.load_task.cancel()
-            h.student_id = None
-            h.student_form = None
-            h.expected_isbns = set()
-            h.vormerk_isbns = set()
-            h.lent_isbns = set()
-            h.peeking = False  # Schüler weg → Queue-Ansicht hinfällig
-            if h.load_task is not None and not h.load_task.done():
-                with contextlib.suppress(asyncio.CancelledError):
-                    await h.load_task
-            h.load_task = None
-            # Scanner sonst ohne jede Rückmeldung mit dem alten (getrennten)
-            # Schüler stehen — der Helfer sieht dann weder Trennung noch neuen
-            # Wartezustand ("Alle Verbindungen trennen" wirkte sonst nur am Host).
-            # Default: Idle-`waiting` (Queue anzeigen). Beim Advance übergibt der
-            # Aufrufer `{"type":"loading"}` → Client verbirgt die Queue, während
-            # der nächste Schüler geladen wird. Die Queue des Helfer-Kontexts
-            # (Klasse, an die er gebunden ist) — sonst würde ein Helfer einer
-            # anderen Klasse die falsche Warteschlange sehen.
-            await hub.send_scanner(old_helper, helper_notify or {
-                "type": "waiting",
-                "msg": "Warte auf Schüler-Zuweisung",
-                "queue_size": state.pending_count(h.context_id),
-                "queue": state.pending_queue_as_list(h.context_id),
-            })
+            await _detach_helper(state, hub, h, helper_notify)
     else:
         # Transienter Such-Schüler (Helfer-Lupe): bewusst NICHT in eine Queue
         # eingetragen („Schnellsprung" zu beliebigem IServ-Schüler), aber ein
@@ -655,24 +687,7 @@ async def end_student(
         # Gleiche Aufräumung wie oben, nur Helfer via find_helper_for_student.
         helper = state.find_helper_for_student(student_id)
         if helper is not None and helper.student_id == student_id:
-            if helper.load_task is not None and not helper.load_task.done():
-                helper.load_task.cancel()
-            helper.student_id = None
-            helper.student_form = None
-            helper.expected_isbns = set()
-            helper.vormerk_isbns = set()
-            helper.lent_isbns = set()
-            helper.peeking = False  # Schüler weg → Queue-Ansicht hinfällig
-            if helper.load_task is not None and not helper.load_task.done():
-                with contextlib.suppress(asyncio.CancelledError):
-                    await helper.load_task
-            helper.load_task = None
-            await hub.send_scanner(helper.token, helper_notify or {
-                "type": "waiting",
-                "msg": "Warte auf Schüler-Zuweisung",
-                "queue_size": state.pending_count(helper.context_id),
-                "queue": state.pending_queue_as_list(helper.context_id),
-            })
+            await _detach_helper(state, hub, helper, helper_notify)
 
     session = state.find_session_by_student(student_id)
     if session:
@@ -702,11 +717,7 @@ async def load_and_push_helper_student(state: AppState, hub, student, helper) ->
         await hub.send_scanner(helper.token, {"type": "error", "msg": f"IServ-Fehler: {e}"})
         return
 
-    info["form"] = getattr(student, "form", "")
-    info["book_order"] = await get_book_order_for_form(state, info["form"])
-    apply_hidden_books(info, await get_hidden_isbns_for_form(state, info["form"]))
-    helper.expected_isbns = expected_isbns_from_info(info)
-    helper.vormerk_isbns, helper.lent_isbns = booking_isbn_sets_from_info(info)
+    info = await hydrate_student_info(state, info, getattr(student, "form", ""), helper)
     # Modus A: Bücherliste sofort sichtbar. `worker_ready` (ohne Bücher) folgt,
     # sobald der Worker buchungsbereit ist — bis dahin zeigt der Helferclient
     # „Warten…" und ignoriert Scans (clientseitig).
@@ -846,11 +857,7 @@ async def load_and_push_paired_student(
     # poppen. Ohne Stale-Gard registriert der Task danach den Context für einen
     # student_id, der schon nicht mehr zur Session gehört → Worker-Orphan.
     paired_student_id = student.student_id
-    info["form"] = getattr(student, "form", "")
-    info["book_order"] = await get_book_order_for_form(state, info["form"])
-    apply_hidden_books(info, await get_hidden_isbns_for_form(state, info["form"]))
-    session.expected_isbns = expected_isbns_from_info(info)
-    session.vormerk_isbns, session.lent_isbns = booking_isbn_sets_from_info(info)
+    info = await hydrate_student_info(state, info, getattr(student, "form", ""), session)
     # Bücher erst mit `worker_ready` senden — Identität (inkl. book_order) sofort.
     books = info.get("books", [])
     if session.ws is not None:

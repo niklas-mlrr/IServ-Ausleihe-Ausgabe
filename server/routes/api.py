@@ -28,7 +28,7 @@ from ..sessions import (
     make_qr_data_url,
     send_display_update,
 )
-from ..state import HelperSession, get_state
+from ..state import HelperSession, QueueStudent, get_state
 from ..tls import primary_lan_ip
 
 log = logging.getLogger(__name__)
@@ -248,17 +248,8 @@ async def open_class(body: dict, session_id: str | None = Cookie(default=None)) 
         log.exception("Schüler konnten nicht geladen werden")
         raise HTTPException(502, f"IServ-Fehler: {e}") from e
 
-    from ..state import QueueStudent
     ctx = state.open_context(form)
-    ctx.queue = [
-        QueueStudent(
-            student_id=s["student_id"],
-            lastname=s["lastname"],
-            firstname=s["firstname"],
-            form=form,
-        )
-        for s in students
-    ]
+    ctx.queue = [QueueStudent.from_iserv(s, form=form) for s in students]
     # Katalog + Bücher-Reihenfolge sofort aufbauen (übernimmt eine im
     # Einstellungen-Dialog vorkonfigurierte Reihenfolge automatisch für den
     # Scanner) — Fehler hier sind nicht fatal, die Klasse bleibt trotzdem geladen.
@@ -531,7 +522,6 @@ async def add_student_to_queue(body: dict, session_id: str | None = Cookie(defau
     if state.find_student(student_id):
         raise HTTPException(409, "Schüler bereits in der Queue")
 
-    from ..state import QueueStudent
     target_ctx = state.ctx_or_active(context_id)
     if target_ctx is None:
         raise HTTPException(400, "Kein Klassen-Tab geöffnet")
@@ -606,19 +596,11 @@ async def open_test_config(session_id: str | None = Cookie(default=None)) -> dic
         await hub.broadcast_host(state.state_snapshot())
         return {"ok": True, "context_id": existing.id, "count": len(existing.queue), "reused": True}
 
-    from ..state import QueueStudent
     ctx = state.open_context(TEST_CONFIG_FORM)
     for s in TEST_STUDENTS:
         if state.find_student(s["student_id"]):
             continue
-        ctx.queue.append(
-            QueueStudent(
-                student_id=s["student_id"],
-                lastname=s["lastname"],
-                firstname=s["firstname"],
-                form=s["form"],
-            )
-        )
+        ctx.queue.append(QueueStudent.from_iserv(s, form=s["form"]))
     await hub.broadcast_host(state.state_snapshot())
     return {"ok": True, "context_id": ctx.id, "count": len(ctx.queue)}
 

@@ -9,16 +9,13 @@ from datetime import datetime
 
 from fastapi import APIRouter, Cookie, WebSocket, WebSocketDisconnect
 
-from ..book_order import get_book_order_for_form, get_hidden_isbns_for_form
 from ..hub import get_hub
 from ..sessions import (
     advance_helper,
-    apply_hidden_books,
     assign_student_to_helper,
-    booking_isbn_sets_from_info,
     end_student,
-    expected_isbns_from_info,
     gen_registration_code,
+    hydrate_student_info,
     print_loan_slip_for,
     process_scan,
     rebind_helper_to_context,
@@ -152,12 +149,8 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
         form = student.form if student is not None else (helper.student_form or "")
         try:
             info = await state.iserv.get_student_info(helper.student_id, state.selected_schoolyear)
-            info["form"] = form
-            book_order = await get_book_order_for_form(state, form)
-            info["book_order"] = book_order
-            apply_hidden_books(info, await get_hidden_isbns_for_form(state, form))
-            helper.expected_isbns = expected_isbns_from_info(info)
-            helper.vormerk_isbns, helper.lent_isbns = booking_isbn_sets_from_info(info)
+            info = await hydrate_student_info(state, info, form, helper)
+            book_order = info["book_order"]
             helper.last_scan = None  # Worker-Page wird ggf. neu geladen → Feld leer
             # Modus A: Bücherliste sofort. Sends über das Hub-Lock
             # (send_websocket), damit sie nicht mit den Sends des In-Flight-
@@ -567,11 +560,7 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
         try:
             info = await state.iserv.get_student_info(session.student_id, state.selected_schoolyear)
             qs = state.find_student(session.student_id)
-            info["form"] = qs.form if qs else ""
-            info["book_order"] = await get_book_order_for_form(state, info["form"])
-            apply_hidden_books(info, await get_hidden_isbns_for_form(state, info["form"]))
-            session.expected_isbns = expected_isbns_from_info(info)
-            session.vormerk_isbns, session.lent_isbns = booking_isbn_sets_from_info(info)
+            info = await hydrate_student_info(state, info, qs.form if qs else "", session)
             books = info.get("books", [])
             await websocket.send_json({
                 "type": "student_info",

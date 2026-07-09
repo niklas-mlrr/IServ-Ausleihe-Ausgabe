@@ -39,6 +39,19 @@ class QueueStudent:
             "assigned_helper": self.assigned_helper,
         }
 
+    @classmethod
+    def from_iserv(cls, d: dict, *, form: str) -> QueueStudent:
+        """Aus einem IServ-Schüler-Dict (`student_id`/`lastname`/`firstname`)
+        bauen — `form` immer explizit übergeben, da sie je nach Aufrufer entweder
+        die Klasse des Kontexts (`open_class`) oder eine pro Schüler hinterlegte
+        Form (`open_test_config`) ist, nie aus `d` selbst übernommen wird."""
+        return cls(
+            student_id=d["student_id"],
+            lastname=d["lastname"],
+            firstname=d["firstname"],
+            form=form,
+        )
+
 
 @dataclass
 class HelperSession:
