@@ -21,6 +21,7 @@ from ..sessions import (
     gen_registration_code,
     print_loan_slip_for,
     process_scan,
+    rebind_helper_to_context,
     send_display_update,
 )
 from ..state import DisplaySession, QueueStudent, get_state
@@ -205,6 +206,14 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
         "book_order": book_order,
     })
 
+    # Kontext-Übersicht (alle offenen Klassen + eigene Klasse) schicken, damit
+    # ein Idle-Helfer sofort die Klassen-Reiter der Warteschlangen-Ansicht hat.
+    await hub.send_websocket(websocket, {
+        "type": "contexts_update",
+        "contexts": state.real_contexts_summary(),
+        "own_context_id": helper.context_id,
+    })
+
     await hub.broadcast_host(state.state_snapshot())
 
     try:
@@ -247,15 +256,14 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                     # aufgerufen) — statt auf den nächsten Broadcast zu warten.
                     await hub.broadcast_queue_size(state)
                     continue
-                # Helfer an eine Klasse gebunden → darf nur Schüler seines
-                # Kontexts aufrufen (andernfalls klassenübergreifender Zugriff).
-                if helper.context_id is not None and target_pair[0].id != helper.context_id:
-                    await websocket.send_json({
-                        "type": "error",
-                        "msg": "Schüler nicht in deiner Klasse",
-                    })
-                    await hub.broadcast_queue_size(state)
-                    continue
+                # Aufrufen aus einer fremden Klasse (anderer Klassen-Tab im
+                # Helfer-Menü) ist erlaubt: der Helfer wird dabei an die Klasse
+                # des aufgerufenen Schülers gebunden (helper.context_id), sodass
+                # „Nächster" danach aus dieser Klasse zieht (Workflow „ich
+                # bediene jetzt diese Klasse"). `(aktive)`-Helfer (context_id
+                # None) werden beim ersten Aufruf ebenfalls gebunden.
+                if target_pair[0].id != helper.context_id:
+                    rebind_helper_to_context(helper, target_pair[0].id)
                 if helper.student_id is not None:
                     # Aufrufen aus der Peek-Ansicht (Menü): der alte Schüler wird
                     # NICHT abgeschlossen, sondern als 'pending' zurück in die
@@ -367,6 +375,17 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                     "type": "queue_update",
                     "queue_size": state.pending_count(helper.context_id),
                     "queue": state.pending_queue_as_list(helper.context_id),
+                })
+                # Frische Kontext-Übersicht (alle offenen Klassen + eigene) für
+                # die Klassen-Reiter — ein Helfer mit aktivem Schüler bekommt
+                # sonst keine Live-contexts_update (broadcast_queue_size erreicht
+                # ihn nur, weil hier gerade peeking=True gesetzt wurde; das eigene
+                # peek_queue sendet sie aber bewusst sofort, ohne auf den nächsten
+                # Broadcast zu warten).
+                await hub.send_scanner(token, {
+                    "type": "contexts_update",
+                    "contexts": state.real_contexts_summary(),
+                    "own_context_id": helper.context_id,
                 })
                 continue
 

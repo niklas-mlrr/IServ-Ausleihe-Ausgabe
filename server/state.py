@@ -445,6 +445,23 @@ class AppState:
             return []
         return [s.as_dict() for s in ctx.queue]
 
+    def real_contexts_summary(self) -> list[dict]:
+        """Alle echten (nicht-impliziten) Klassen-Kontexte für den Helferclient:
+        je Kontext id, form und die wartenden Schüler (pending) — die Daten für
+        die Klassen-Reiter im Helfer-Menü (Warteschlange je Tab mit „Aufrufen").
+        Einfügereihenfolge der ``dict`` bleibt erhalten = Reihenfolge wie im
+        Host. Wartende (nicht active/done/skipped), weil nur diese aufrufbar
+        sind — analog ``pending_queue_as_list``."""
+        return [
+            {
+                "id": c.id,
+                "form": c.form,
+                "queue": [s.as_dict() for s in c.queue if s.status == "pending"],
+            }
+            for c in self.contexts.values()
+            if not c.implicit
+        ]
+
     def helpers_as_dict(self) -> dict:
         return {t: h.as_dict() for t, h in self.helper_sessions.items()}
 

@@ -86,6 +86,30 @@ def test_broadcast_queue_size_reaches_assigned_helper_while_peeking() -> None:
     assert assigned.sent == []
 
 
+def test_broadcast_queue_size_sends_contexts_update_with_open_classes() -> None:
+    """Helfer-Menü: broadcast_queue_size schickt zusätzlich ``contexts_update``
+    mit allen offenen (nicht-impliziten) Klassen + je ihren wartenden Schülern
+    und der eigenen Klasse (``own_context_id``) — die Daten für die Klassen-
+    Reiter. Nicht-wartende (active/done) zählen nicht zur Tab-Queue."""
+    s = AppState()
+    ctx_a = s.open_context("10a")
+    ctx_b = s.open_context("10b")
+    ctx_a.queue.append(QueueStudent(student_id=1, lastname="A", firstname="a", form="10a"))
+    ctx_b.queue.append(QueueStudent(student_id=2, lastname="B", firstname="b", form="10b", status="active"))
+    helper = HelperSession(token="t1", name="A", ws=_FakeWS(), context_id=ctx_a.id)
+    s.helper_sessions["t1"] = helper
+
+    asyncio.run(Hub().broadcast_queue_size(s))
+
+    upd = next(m for m in helper.ws.sent if m.get("type") == "contexts_update")
+    summary = {(c["id"], c["form"], len(c["queue"])) for c in upd["contexts"]}
+    assert (ctx_a.id, "10a", 1) in summary   # 1 wartend
+    assert (ctx_b.id, "10b", 0) in summary   # active zählt nicht als wartend
+    assert upd["own_context_id"] == ctx_a.id
+    # queue_update wird weiterhin geliefert (Kompatibilität).
+    assert any(m.get("type") == "queue_update" for m in helper.ws.sent)
+
+
 def test_broadcast_queue_size_clears_dead_scanner_ws() -> None:
     s = _state_with_queue(pending=1)
     helper = HelperSession(token="t", name="A", ws=_FakeWS(broken=True))

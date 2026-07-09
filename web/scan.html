@@ -163,6 +163,40 @@
     .s-pay .unpaid { color: #e69500; }
     .s-pay .wait   { color: #888; }
 
+    /* ---- Queue-Ansicht (Menü/Peek + Idle): „Warteschlange" + Klassen-Reiter.
+       #queue-slot fasst Name-row (Schüler-Ansicht) und Queue-Header (Queue-
+       Ansicht) zusammen; nur einer ist sichtbar (toggle per .app.queue-view).
+       So bleibt der FLIP-Ankerpunkt (Slot) stabil, während der Inhalt wechselt. */
+    #queue-slot { position: relative; }
+    #queue-header { display: none; margin: 12px 2px 8px; }
+    .app.queue-view .name-row { display: none; }
+    .app.queue-view #queue-header { display: block; }
+    .qh-title {
+      font-size: .78rem; font-weight: 600; text-transform: uppercase;
+      letter-spacing: .05em; opacity: .6; margin-bottom: 6px;
+    }
+    /* Klassen-Reiter: horizontal scrollbar, falls sie zu breit werden. */
+    .queue-tabs {
+      display: flex; gap: 6px; overflow-x: auto; scroll-behavior: smooth;
+      scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch;
+      padding-bottom: 4px;
+    }
+    .queue-tabs::-webkit-scrollbar { height: 4px; }
+    .queue-tabs::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 2px; }
+    .qtab {
+      flex: 0 0 auto; scroll-snap-align: start;
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 8px 14px; border-radius: 8px; font-size: .9rem; font-weight: 600;
+      background: var(--surface-2); color: var(--fg); border: 1px solid transparent;
+      cursor: pointer; transition: background .2s, border-color .2s; white-space: nowrap;
+    }
+    .qtab:hover { background: var(--surface-3); }
+    .qtab.active { background: var(--surface-3); border-color: var(--border); }
+    .qcount {
+      font-size: .75rem; background: var(--info-bg, #0a3d6b); color: var(--info, #5ac8fa);
+      padding: 1px 7px; border-radius: 10px; font-weight: 600;
+    }
+
     /* ---- Bücher-Tabelle (einziger Scroll-Bereich) ---- */
     .book-table-wrap { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
     .book-row {
@@ -295,11 +329,22 @@
       <select id="search-student" class="search-select" disabled><option>Zuerst Klasse wählen</option></select>
     </div>
 
-    <div class="name-row">
-      <div class="s-name" id="s-name"></div>
-      <div class="s-meta">
-        <div class="s-form" id="s-form"></div>
-        <div class="s-pay" id="s-pay"></div>
+    <div id="queue-slot">
+      <div class="name-row">
+        <div class="s-name" id="s-name"></div>
+        <div class="s-meta">
+          <div class="s-form" id="s-form"></div>
+          <div class="s-pay" id="s-pay"></div>
+        </div>
+      </div>
+
+      <!-- Queue-Ansicht (Menü/Peek + Idle): Überschrift „Warteschlange" +
+           Klassen-Reiter aller im Host offenen Klassen. Bei Überlauf
+           horizontal scrollbar. Wird per .app.queue-view eingeblendet
+           (Name-row dann ausgeblendet); Auswahl zeigt darunter die Queue. -->
+      <div id="queue-header">
+        <div class="qh-title">Warteschlange</div>
+        <div id="queue-tabs" class="queue-tabs"></div>
       </div>
     </div>
 

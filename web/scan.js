@@ -8,11 +8,20 @@ let ws, reconnectDelay = 2000;
 let studentActive = false;          // ist gerade ein Schüler zugewiesen?
 let workerPending = false;          // Schüler zugewiesen, aber Worker noch nicht bereit
 let queueSize = null;               // zuletzt gemeldete Warteschlangengröße
-let queueList = [];                // wartende Schüler (für die Queue-Anzeige)
+let queueList = [];                // wartende Schüler (Fallback, eigene Klasse)
 let loadingStudent = false;        // Schüler wird geladen (next/call gesendet,
                                   //  student_info steht noch aus) — Queue verbergen
 let waitingMsg = 'Warte auf Schüler-Zuweisung';
 let peeking = false;                // Menü-Toggle: Warteschlangen-Ansicht bei
+// ---- Klassen-Reiter (Helfer-Menü): alle im Host offenen Klassen ----
+// `contextsData` kommt vom Server (`contexts_update`): je Klasse id, form und
+// ihre wartenden Schüler. `selectedCtxId` = gewählter Tab; `ownContextId` =
+// Klasse, an die dieser Helfer gebunden (Vorauswahl beim Öffnen). Ist nichts
+// geladen, fällt currentQueue() auf die eigene Klasse zurück (queueList).
+let contextsData = [];
+let selectedCtxId = null;
+let ownContextId = null;
+let queueView = false;             // .app.queue-view gesetzt? (Peek oder Idle)
                                   //  verbundenem Hintergrund-Schüler (kein Trennen)
 // ---- Lupen-Suche (Peek-Modus): Schnellsprung zu beliebigem Schüler ----
 // Klassen + Schüler pro Klasse kommen vom Server (IServ, read-only) und werden
@@ -69,8 +78,9 @@ function waitForScans(timeoutMs = 3000) {
 }
 
 function renderWaitingStatus() {
-  statusEl.textContent = (typeof queueSize === 'number')
-    ? `Warteschlange: ${queueSize}`
+  const n = currentQueueSize();
+  statusEl.textContent = (n > 0 || contextsData.length || queueSize != null)
+    ? `Warteschlange: ${n}`
     : waitingMsg;
 }
 
@@ -82,9 +92,46 @@ function renderPeekStatus() {
   const name = sNameEl.textContent.trim();
   const form = sFormEl.textContent.trim();
   const who = name ? `${name}${form ? ` (${form})` : ''} im Hintergrund` : 'Schüler im Hintergrund';
-  statusEl.textContent = (typeof queueSize === 'number')
-    ? `${who} — Warteschlange: ${queueSize}`
-    : who;
+  statusEl.textContent = `${who} — Warteschlange: ${currentQueueSize()}`;
+}
+
+// Aktuell gewählte Klassen-Queue: aus den Klassen-Reitern (contextsData) oder
+// Fallback auf die eigene Klasse (queueList, falls noch keine Kontext-Übersicht
+// vom Server vorliegt). currentQueueSize() ist die Anzahl der wartenden Schüler
+// des gewählten Tabs — für die Statuszeile und die Queue-Anzeige.
+function currentQueue() {
+  if (contextsData.length) {
+    const c = contextsData.find(x => x.id === selectedCtxId) || contextsData[0];
+    return (c && Array.isArray(c.queue)) ? c.queue : [];
+  }
+  return Array.isArray(queueList) ? queueList : [];
+}
+function currentQueueSize() {
+  return currentQueue().length;
+}
+
+// Vorauswahl des aktiven Tabs sichern: eigene Klasse (ownContextId) falls offen,
+// sonst erste offene Klasse. Nur setzen, wenn noch keiner gewählt oder der
+// gewählte nicht mehr existiert (Klasse zwischenzeitlich geschlossen).
+function ensureSelectedCtx() {
+  const ids = contextsData.map(c => c.id);
+  if (selectedCtxId && ids.includes(selectedCtxId)) return;
+  selectedCtxId = (ownContextId && ids.includes(ownContextId))
+    ? ownContextId
+    : (ids[0] || null);
+}
+
+// Queue-Ansicht (Name-row verborgen, Queue-Header mit Klassen-Reitern sichtbar)
+// gilt im Peek (Hintergrund-Schüler) und im Idle (kein Schüler). Während ein
+// Schüler geladen wird (loadingStudent), ist sie aus — dann steht „wird geladen"
+// im Buchbereich. syncQueueView leitet sie aus dem Helfer-Zustand ab; der Menü-
+// Übergang (animateMenu) toggelt .queue-view bewusst selbst synchron zum FLIP.
+function setQueueView(on) {
+  queueView = on;
+  appEl.classList.toggle('queue-view', on);
+}
+function syncQueueView() {
+  setQueueView(peeking || (!studentActive && !loadingStudent));
 }
 
 // Ruhezustand der Statuszeile: solange kein Schüler geladen ist (und keiner
@@ -190,11 +237,14 @@ function renderBooks(books, animate = false) {
 // Zeilenform wie die Bücherliste, aber ohne Farbgebung (kein vorgemerkt/-
 // ausgeliehen-Tint) und mit „Aufrufen"-Button pro Zeile statt des Status-Icons.
 // Klick ruft genau diesen Schüler gezielt auf (WS `call`) — read-only gegen
-// IServ/DB; nur die lokale Helfer-Zuweisung wird gesetzt.
+// IServ/DB; nur die lokale Helfer-Zuweisung wird gesetzt. Bei Aufruf aus einer
+// fremden Klasse bindet der Server den Helfer an diese Klasse (s. server/ws.py).
 function renderQueue() {
-  const list = Array.isArray(queueList) ? queueList : [];
+  const list = currentQueue();
   if (!list.length) {
-    bookRowsEl.innerHTML = '<div class="book-empty">Warteschlange leer</div>';
+    bookRowsEl.innerHTML = contextsData.length
+      ? '<div class="book-empty">Warteschlange leer</div>'
+      : '<div class="book-empty">Keine Klasse offen</div>';
     return;
   }
   bookRowsEl.innerHTML = list.map(s => {
@@ -206,6 +256,24 @@ function renderQueue() {
       + `<div class="b-call"><button class="call-btn">Aufrufen</button></div></div>`;
   }).join('');
 }
+
+// Klassen-Reiter aufbauen: ein Tab je offener Host-Klasse (contextsData), mit
+// der Anzahl wartender Schüler als Badge. Aktiver Tab = selectedCtxId. Leer =
+// Hinweis, dass keine Klasse offen ist.
+function renderQueueTabs() {
+  if (!contextsData.length) {
+    queueTabsEl.innerHTML = '<span class="book-empty" style="padding:4px 0">Keine Klasse offen</span>';
+    return;
+  }
+  queueTabsEl.innerHTML = contextsData.map(c => {
+    const n = (c.queue && c.queue.length) || 0;
+    const badge = n ? ` <span class="qcount">${n}</span>` : '';
+    return `<button class="qtab${c.id === selectedCtxId ? ' active' : ''}" data-ctx="${escapeHtml(c.id)}">${escapeHtml(c.form || 'Klasse')}${badge}</button>`;
+  }).join('');
+}
+
+// Tab-Klick → Auswahl setzen, Queue + Status-Count aktualisieren. (Listener
+// wird nach der queueTabsEl-Deklaration weiter unten angemeldet.)
 
 // Aufrufen-Button in der Queue-Anzeige: gezielten Schüler anfordern.
 bookRowsEl.addEventListener('click', (e) => {
@@ -230,6 +298,7 @@ function handleServerMessage(msg) {
     loadingStudent = false;  // Schüler geladen — Bücherliste ersetzt die Queue
     peeking = false;          // (neuer) Schüler geladen → keine Queue-Ansicht
     setMenuTitle();
+    syncQueueView();
     const s = msg.student;
     currentStudent = s;          // Flags für den Freigabe-Dialog (s. unten)
     lendingApproved = false;     // neuer Schüler → Freigabe zurücksetzen
@@ -278,6 +347,7 @@ function handleServerMessage(msg) {
     loadingStudent = true;
     peeking = false;          // Schülerwechsel beendet den Peek
     setMenuTitle();
+    syncQueueView();
     sNameEl.textContent = '';
     sFormEl.textContent = '';
     sPayEl.innerHTML = '';
@@ -336,6 +406,7 @@ function handleServerMessage(msg) {
     loadingStudent = false;  // kein Schüler (mehr) geladen — Queue anzeigen
     peeking = false;          // kein Schüler → Peek hinfällig
     setMenuTitle();
+    syncQueueView();
     sNameEl.textContent = '';
     sFormEl.textContent = '';
     sPayEl.innerHTML = '';
@@ -354,6 +425,7 @@ function handleServerMessage(msg) {
     if (Array.isArray(msg.queue)) queueList = msg.queue;
     if (msg.msg) waitingMsg = msg.msg;
     renderWaitingStatus();
+    renderQueueTabs();
     renderQueue();
   } else if (msg.type === 'queue_update') {
     if (typeof msg.queue_size === 'number') queueSize = msg.queue_size;
@@ -361,7 +433,19 @@ function handleServerMessage(msg) {
     // Peek (Menü): Queue anzeigen, obwohl ein Schüler zugewiesen ist — dieser
     // bleibt im Hintergrund verbunden. Sonst nur anzeigen, wenn weder ein
     // Schüler geladen ist noch gerade einer geladen wird (next/call gesendet,
-    // student_info steht aus).
+    // student_info steht aus). Die Klassen-Reiter selbst kommen via
+    // `contexts_update`; hier nur die (Fallback-)Queue und der Count.
+    if (peeking) { renderPeekStatus(); if (!contextsData.length) renderQueue(); }
+    else if (!studentActive && !loadingStudent) { renderWaitingStatus(); if (!contextsData.length) renderQueue(); }
+  } else if (msg.type === 'contexts_update') {
+    // Alle im Host offenen Klassen + je ihre wartenden Schüler. Quelle für die
+    // Klassen-Reiter im Helfer-Menü. own_context_id = Klasse, an die dieser
+    // Helfer gebunden (Vorauswahl beim Öffnen). Live auf allen Zustandsänderungen
+    // (open/close-class, Aufrufe, Abschlüsse) via broadcast_queue_size.
+    contextsData = Array.isArray(msg.contexts) ? msg.contexts : [];
+    ownContextId = msg.own_context_id || null;
+    ensureSelectedCtx();
+    renderQueueTabs();
     if (peeking) { renderPeekStatus(); renderQueue(); }
     else if (!studentActive && !loadingStudent) { renderWaitingStatus(); renderQueue(); }
   } else if (msg.type === 'search_classes') {
@@ -433,6 +517,8 @@ const topSectionEl = document.querySelector('.top-section');
 const statusbarEl = document.querySelector('.status-bar');
 const statusInnerEl = document.getElementById('status');
 const nameRowEl = document.querySelector('.name-row');
+const queueSlotEl = document.getElementById('queue-slot');
+const queueTabsEl = document.getElementById('queue-tabs');
 const bookWrapEl = document.querySelector('.book-table-wrap');
 const rightColEl = document.querySelector('.right-col');
 const bookAlertModal = document.getElementById('book-alert-modal');
@@ -814,7 +900,7 @@ function restorePrintNext() {
 }
 
 function flipTargetsToPosition(firsts) {
-  const targets = [statusbarEl, nameRowEl, bookWrapEl];
+  const targets = [statusbarEl, queueSlotEl, bookWrapEl];
   targets.forEach((t, i) => {
     const last = t.getBoundingClientRect();
     const dy = firsts[i].top - last.top;
@@ -837,10 +923,10 @@ function animateMenu(open) {
   menuAnimGen++;
   menuHideEls.forEach(clearMenuInline);
   clearMenuInline(searchBtn);
-  [statusbarEl, nameRowEl, bookWrapEl].forEach(clearMenuInline);
+  [statusbarEl, queueSlotEl, bookWrapEl].forEach(clearMenuInline);
   restorePrintNext();
 
-  const firsts = [statusbarEl, nameRowEl, bookWrapEl].map(t => t.getBoundingClientRect());
+  const firsts = [statusbarEl, queueSlotEl, bookWrapEl].map(t => t.getBoundingClientRect());
 
   if (open) {
     // Steuer-Elemente: Position + Anker + inneres Layout schon im Fluss messen.
@@ -850,6 +936,7 @@ function animateMenu(open) {
                snap: snapshotLayout(el), reparent: (el === printBtn || el === nextBtn) };
     });
     appEl.classList.add('menu-open');
+    appEl.classList.add('queue-view');
     flipTargetsToPosition(firsts);
     // Steuer-Elemente an alter Stelle festpinnen und synchron ausfaden. Das
     // inline-display überschreibt das CSS display:none, damit sie rendern;
@@ -877,6 +964,7 @@ function animateMenu(open) {
     const searchRefRect = topSectionEl.getBoundingClientRect();
     const searchSnap = snapshotLayout(searchBtn);
     appEl.classList.remove('menu-open');
+    appEl.classList.remove('queue-view');
     flipTargetsToPosition(firsts);
     // Steuer-Elemente sind nun zurück im Fluss (display:flex via CSS, menu-open
     // weg), aber per Inline opacity:0 → von 0→1 synchron einfaden.
@@ -907,11 +995,14 @@ function openPeek() {
   resetSearchPanel();   // frisch starten — kein offenes Panel aus altem Peek
   setMenuTitle();
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'peek_queue' }));
-  // Queue sofort aus letzter bekannter Liste rendern; Antwort/Updates ziehen sie nach.
+  // Queue + Tabs sofort aus letzter bekannter Liste rendern; Antwort/Updates
+  // (peek_queue liefert contexts_update) ziehen sie nach.
   renderPeekStatus();
+  renderQueueTabs();
   renderQueue();
   // Zuletzt animieren: Erst hier messen, damit #status- und Queue-Inhalt bereits
-  // final sind und die Ziel-Position stimmt.
+  // final sind und die Ziel-Position stimmt. animateMenu toggelt .queue-view
+  // synchron zum FLIP (Name-row → Queue-Header im Slot).
   animateMenu(true);
 }
 
@@ -946,7 +1037,7 @@ menuBtn.addEventListener('click', (e) => {
 // Statuszeile stehen bleibt und nur name-row + book-table-wrap nach unten
 // fahren (das Panel schiebt sich dazwischen).
 function flipSearchTargets(firsts) {
-  const targets = [nameRowEl, bookWrapEl];
+  const targets = [queueSlotEl, bookWrapEl];
   targets.forEach((t, i) => {
     const last = t.getBoundingClientRect();
     const dy = firsts[i].top - last.top;
@@ -963,7 +1054,7 @@ function flipSearchTargets(firsts) {
 }
 
 function animateSearchPanel(open) {
-  const firsts = [nameRowEl, bookWrapEl].map(t => t.getBoundingClientRect());
+  const firsts = [queueSlotEl, bookWrapEl].map(t => t.getBoundingClientRect());
   if (open) {
     // Natürliche Höhe messen (scrollHeight liefert sie auch bei max-height:0),
     // dann von 0 auf diese Höhe transitionieren — die Warteliste darunter per
@@ -1125,6 +1216,16 @@ searchClassSel.addEventListener('change', () => {
 searchStudentSel.addEventListener('change', submitSearchStudent);
 // Klicks im Panel nicht ins Dokument durchblasen (cam-dropdown-Schließlogik).
 searchPanel.addEventListener('click', (e) => e.stopPropagation());
+
+// Klassen-Reiter-Klick: gewählten Tab setzen, Queue + Status-Count aktualisieren.
+queueTabsEl.addEventListener('click', (e) => {
+  const tab = e.target.closest('.qtab');
+  if (!tab) return;
+  selectedCtxId = tab.dataset.ctx;
+  renderQueueTabs();
+  renderQueue();
+  if (peeking) renderPeekStatus(); else renderWaitingStatus();
+});
 
 function onScanSuccess(value) {
   // Worker noch nicht bereit (Schüler gerade zugewiesen, open_student läuft) —

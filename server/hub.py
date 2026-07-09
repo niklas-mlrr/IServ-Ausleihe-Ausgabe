@@ -81,17 +81,30 @@ class Hub:
 
     async def broadcast_queue_size(self, state: AppState | None = None) -> None:
         s = state or get_state()
+        # Kontext-Übersicht einmal pro Broadcast bauen (alle offenen Klassen +
+        # je ihre wartenden Schüler) — identisch für alle Helfer, nur die
+        # ``own_context_id`` (Vorauswahl der eigenen Klasse) ist pro Helfer.
+        contexts = s.real_contexts_summary()
         for helper in list(s.helper_sessions.values()):
             # Unzugewiesene Helfer ODER zugewiesene im „Menü"-Peek (Queue-Ansicht
             # bei verbundenem Hintergrund-Schüler) erhalten die Live-Queue —
             # jeweils die ihres Klassen-Kontexts (helper.context_id), sonst die
-            # des aktiven Kontexts (Kompat-Fallback).
+            # des aktiven Kontexts (Kompat-Fallback). Zusätzlich die
+            # ``contexts_update`` mit allen offenen Klassen für die Klassen-
+            # Reiter im Helfer-Menü.
             if (helper.student_id is None or helper.peeking) and helper.ws is not None:
                 qsize = s.pending_count(helper.context_id)
                 queue = s.pending_queue_as_list(helper.context_id)
                 if not await self._safe_send(
                     helper.ws, {"type": "queue_update", "queue_size": qsize, "queue": queue}
                 ):
+                    helper.ws = None
+                    continue
+                if not await self._safe_send(helper.ws, {
+                    "type": "contexts_update",
+                    "contexts": contexts,
+                    "own_context_id": helper.context_id,
+                }):
                     helper.ws = None
 
     async def broadcast_settings(self, state: AppState | None = None) -> None:

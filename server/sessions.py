@@ -790,6 +790,17 @@ async def assign_next_pending_to_helper(state: AppState, hub, helper) -> dict:
     return await assign_student_to_helper(state, hub, helper, student)
 
 
+def rebind_helper_to_context(helper, context_id: str | None) -> None:
+    """Helfer an eine Klasse binden — genutzt beim „Aufrufen" aus einem fremden
+    Klassen-Tab im Helfer-Menü: ``helper.context_id`` wird auf die Klasse des
+    aufgerufenen Schülers gesetzt, sodass „Nächster" danach aus dieser Klasse
+    zieht (Workflow „ich bediene jetzt diese Klasse"). Ein bisheriger
+    `(aktive)`-Helfer (``context_id`` None) wird so beim ersten Aufruf ebenfalls
+    an eine konkrete Klasse gebunden. Rein transient — kein IServ-/DB-Zustand.
+    """
+    helper.context_id = context_id
+
+
 async def assign_student_to_helper(state: AppState, hub, helper, student) -> dict:
     """Gezielten (wartenden) Schüler diesem Helfer zuweisen.
 

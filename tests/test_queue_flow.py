@@ -309,6 +309,30 @@ def test_assign_student_to_helper_assigns_specific_student():
     assert any(m["type"] == "loading" for m in msgs)
 
 
+def test_rebind_helper_to_context_switches_assigned_class():
+    """Aufrufen aus einer fremden Klasse (anderer Klassen-Tab im Helfer-Menü):
+    der Helfer wird an die Klasse des aufgerufenen Schülers gebunden. Danach
+    zieht „Nächster" (``next_pending(helper.context_id)``) aus der neuen Klasse.
+    Auch ein bisher ungebundener `(aktive)`-Helfer lässt sich so binden."""
+    st = AppState()
+    ctx_a = st.open_context("10a")
+    ctx_b = st.open_context("10b")
+    ctx_a.queue.append(QueueStudent(student_id=1, lastname="A", firstname="a", form="10a"))
+    ctx_b.queue.append(QueueStudent(student_id=9, lastname="B", firstname="b", form="10b"))
+    helper = HelperSession(token="h1", name="Helfer", context_id=ctx_a.id)
+
+    sessions.rebind_helper_to_context(helper, ctx_b.id)
+
+    assert helper.context_id == ctx_b.id
+    nxt = st.next_pending(helper.context_id)
+    assert nxt is not None and nxt.student_id == 9   # aus 10b (neue Klasse)
+
+    # Ungebundener Helfer (context_id None) wird ebenfalls bindbar.
+    unbound = HelperSession(token="h2", name="X")
+    sessions.rebind_helper_to_context(unbound, ctx_a.id)
+    assert unbound.context_id == ctx_a.id
+
+
 def test_assign_student_to_helper_resets_peeking():
     """Menü-Peek: eine neue Schülerzuweisung beendet die Queue-Ansicht —
     `helper.peeking` muss False sein, sonst driften Live-Queues in die
