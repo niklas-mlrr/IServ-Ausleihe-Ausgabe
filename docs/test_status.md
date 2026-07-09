@@ -28,6 +28,31 @@
 
 ## Offen / zu testen
 
+### Neu 2026-07-09 (Scanner: Lupen-Suche — Schnellsprung zu beliebigem Schüler)
+
+Peek-Modus (`scan.js`): die **Lupe** öffnet ein Such-Panel unter der Statuszeile
+— Warteliste fährt per FLIP nach unten, zwei Dropdowns blenden synchron ein
+(oben Klasse, unten Schüler der gewählten Klasse). Schüler wählen → `search_call`
+lädt ihn (ersetzt den Hintergrund-Schüler). Letzte Klasse wird beim erneuten
+Öffnen vorausgewählt (`localStorage`), änderbar. **Read-only** (nur IServ-GETs).
+
+- [x] **Backend**: neue WS-Nachrichten `search_classes`/`search_students`
+      (IServ `get_class_names`/`get_students_for_form`, schuljahrbezogen im
+      `state.class_names_cache`/`form_students_cache` gecacht, geleert im
+      Schuljahreswechsel) + `search_call` (transienter `QueueStudent`, **nicht**
+      in einer Queue, laden via `assign_student_to_helper`). `end_student`
+      aufräumt auch nicht-gequeuete Schüler (neuer `else`-Zweig via
+      `find_helper_for_student`). **Unit-Suite grün** (145 passed; +2 Tests in
+      `tests/test_queue_flow.py`: transienter `end_student` + transienter
+      `assign_student_to_helper`).
+- [x] **JS-Syntax/Imports**: `node --check web/scan.js` OK; Server-Imports OK.
+- [ ] **Am Gerät** (manuell, read-only): Peek öffnen → Lupe → Panel + FLIP;
+      Klassen-Liste = alle des Schuljahrs; Schüler-Dropdown pro Klasse;
+      Vorauswahl der letzten Klasse beim erneuten Öffnen; Schüler laden →
+      Peek endet, Scanner-Ansicht kehrt zurück; danach „Nächster"/Trennen
+      räumt den transienten Schüler sauber auf (kein Worker-Leak, Helfer frei).
+      *Gegen Produktion nur nach Freigabe; keine Buchung.*
+
 ### Neu 2026-07-08 (Host-Überarbeitung: Settings + Tab-System)
 
 Multi-Kontext-Refactor des Hosts (`web/host.html`) + Backend

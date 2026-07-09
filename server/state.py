@@ -239,6 +239,12 @@ class AppState:
         # Schüler-Zuweisung; wird wie `book_orders_by_grade` erst beim
         # Schuljahreswechsel geleert.
         self.form_catalog_cache: dict[str, tuple[int | None, list[str]]] = {}
+        # Caches für die Helfer-Lupensuche (read-only IServ-GETs, schuljahr-
+        # bezogen): Klassennamen + Schüler pro Klasse. Sparen IServ-Roundtrips
+        # beim wiederholten Öffnen der Suche. Werden wie die anderen Caches
+        # beim Schuljahreswechsel geleert. Keys: schoolyear bzw. "schoolyear|form".
+        self.class_names_cache: dict[str, list[str]] = {}
+        self.form_students_cache: dict[str, list[dict]] = {}
 
     # -----------------------------------------------------------------
     # Kontext-Verwaltung
@@ -386,6 +392,8 @@ class AppState:
         self.book_orders_by_grade = {}
         self.hidden_isbns_by_grade = {}
         self.form_catalog_cache = {}
+        self.class_names_cache = {}
+        self.form_students_cache = {}
 
     # -----------------------------------------------------------------
     # Kontextbewusste Lookups

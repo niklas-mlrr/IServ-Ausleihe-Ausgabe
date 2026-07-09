@@ -337,6 +337,60 @@ def test_pending_queue_as_list_returns_only_pending():
 
 
 # ---------------------------------------------------------------------------
+# Lupe-Suche: transiente (nicht in der Queue stehende) Schüler
+# ---------------------------------------------------------------------------
+
+def test_end_student_transient_search_student_cleans_helper():
+    """Lupe-Suche lädt beliebige IServ-Schüler, die NICHT in einer Queue stehen.
+    end_student muss auch solche transienten Schüler beim Helfer aufräumen —
+    sonst bliebe `helper.student_id` stale und ein laufender Worker leakte."""
+    st = _state_with_iserv()
+    hub = _FakeHub()
+    helper = HelperSession(token="h1", name="Helfer", student_id=77, peeking=True)
+    st.helper_sessions["h1"] = helper
+    # Bewusst KEIN _add_student → 77 steht in keiner Queue (Schnellsprung).
+    worker = _FakeWorker()
+    st.student_worker_sessions[77] = worker
+
+    asyncio.run(end_student_call(st, hub, 77, "done", "completed"))
+
+    assert helper.student_id is None            # Helfer freigegeben (sonst stale)
+    assert helper.peeking is False
+    assert helper.expected_isbns == set()        # ISBN-Sets auch am transienten Pfad leer
+    assert 77 not in st.student_worker_sessions   # Worker freigegeben
+    assert worker.closed is True
+    # Helfer wurde benachrichtigt (Default waiting), nicht im Dunkeln gelassen.
+    assert hub.scanner_msgs and hub.scanner_msgs[0][0] == "h1"
+
+
+def test_assign_transient_search_student_loads_without_queue():
+    """search_call legt einen transienten QueueStudent an (nicht in einer Queue)
+    und lädt ihn via assign_student_to_helper wie einen normalen Schüler:
+    helper.student_id gesetzt, loading/student_info/worker_ready geschickt."""
+    st = _state_with_iserv()
+    hub = _FakeHub()
+    helper = HelperSession(token="h1", name="Helfer", peeking=True)
+    st.helper_sessions["h1"] = helper
+    # Transienter Schüler — bewusst NICHT in eine Queue eingetragen.
+    student = QueueStudent(
+        student_id=88, lastname="Test", firstname="S", form="10a",
+        status="pending", assigned_helper=None,
+    )
+
+    asyncio.run(_assign_and_drain(st, hub, helper, student))
+
+    assert helper.student_id == 88
+    assert helper.peeking is False               # neuer Schüler beendet den Peek
+    assert student.status == "active"
+    assert student.assigned_helper == "h1"
+    # Lade-Pipeline hat den Helfer versorgt (kein worker_pool → worker_ready direkt).
+    types = [m["type"] for _, m in hub.scanner_msgs]
+    assert "loading" in types and "student_info" in types and "worker_ready" in types
+    # Der Student taucht in KEINER Kontext-Queue (Schnellsprung, nicht eingetragen).
+    assert st.find_student(88) is None
+
+
+# ---------------------------------------------------------------------------
 # invalidate_session — idempotent & hart
 # ---------------------------------------------------------------------------
 

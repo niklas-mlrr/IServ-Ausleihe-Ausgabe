@@ -230,6 +230,25 @@
     .modal-actions .primary:hover { background: #357a38; }
     .modal-actions .ghost { background: transparent; border: 1px solid #c0392b; color: #c0392b; }
     .modal-actions .ghost:hover { background: rgba(192,57,43,.1); }
+
+    /* ---- Lupen-Suche (Peek-Modus): Panel unter der Statuszeile ----
+       Zwei Dropdowns (Klasse + Schüler). Standard eingeklappt (max-height:0,
+       opacity:0); per JS wird max-height auf die natürliche Höhe gesetzt und
+       die Warteliste darunter per FLIP nach unten gefahren — synchron zur
+       opacity/einblend-Transition (.35s, gleiche Kurve wie das Menü). */
+    #search-panel {
+      display: flex; flex-direction: column; gap: 7px;
+      max-height: 0; opacity: 0; overflow: hidden;
+      transition: max-height .35s cubic-bezier(.22,.61,.36,1), opacity .35s cubic-bezier(.22,.61,.36,1);
+    }
+    #search-panel.open { opacity: 1; }
+    .search-select {
+      width: 100%; padding: 11px 12px; font-size: 1rem; border-radius: 8px;
+      background: var(--surface-2); color: var(--fg); border: 1px solid var(--border);
+      cursor: pointer;
+    }
+    .search-select:hover { background: var(--surface-3); }
+    .search-select:disabled { opacity: .5; cursor: not-allowed; }
   </style>
 </head>
 <body>
@@ -261,6 +280,15 @@
          (Kreis + Strich) im Stil der anderen Line-Icons. Funktion folgt. -->
     <button id="search-btn" class="search-btn" type="button" title="Lupe"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>
   </div>
+
+    <!-- Lupen-Suche (nur im Peek-Modus per Lupe geöffnet): zwei Dropdowns
+         unter der Statuszeile — oben Klasse, unten Schüler der gewählten
+         Klasse. Die Warteliste fährt beim Öffnen nach unten (FLIP), die
+         Dropdowns blenden synchron ein. -->
+    <div id="search-panel">
+      <select id="search-class" class="search-select" disabled><option>Klassen laden …</option></select>
+      <select id="search-student" class="search-select" disabled><option>Zuerst Klasse wählen</option></select>
+    </div>
 
     <div class="name-row">
       <div class="s-name" id="s-name"></div>

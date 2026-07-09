@@ -14,6 +14,17 @@ let loadingStudent = false;        // Schüler wird geladen (next/call gesendet,
 let waitingMsg = 'Warte auf Schüler-Zuweisung';
 let peeking = false;                // Menü-Toggle: Warteschlangen-Ansicht bei
                                   //  verbundenem Hintergrund-Schüler (kein Trennen)
+// ---- Lupen-Suche (Peek-Modus): Schnellsprung zu beliebigem Schüler ----
+// Klassen + Schüler pro Klasse kommen vom Server (IServ, read-only) und werden
+// clientseitig für die Session gecacht. `searchOpen` = Panel ausgeklappt;
+// `searchSubmitted` markiert eine laufende search_call-Antwort (lädt der neue
+// Schüler, schließt das Panel + Menü bewusst — `call`/`next` lassen das Menü
+// sonst offen). Letzte Klasse in localStorage für die Vorauswahl beim Öffnen.
+let searchOpen = false;
+let searchSubmitted = false;
+let searchClassCache = null;                 // string[] aller Klassen des Schuljahrs
+const searchStudentsCache = new Map();        // form -> Schüler-Array (IServ)
+const SEARCH_LASTCLASS_KEY = 'ausleihe-search-lastclass';
 
 // ---- Druck-Dialog / Buch-Status ----
 let currentBooks = [];              // Buchliste des aktuellen Schülers
@@ -280,6 +291,11 @@ function handleServerMessage(msg) {
     heldScanValue = null;
     closeLendModal();
     statusEl.textContent = 'Warten…';
+    // Ursprung Lupe-Suche: Panel + Menü bewusst schließen (zurück zur
+    // Scanner-Ansicht), damit der geladene Schüler sofort scannbar ist.
+    // `call`/`next` aus dem Peek lassen das Menü weiter offen (bestehendes
+    // Verhalten) — nur der Such-Pfad schließt gezielt.
+    if (searchSubmitted) { searchSubmitted = false; closeSearchAndMenu(); }
   } else if (msg.type === 'scan_result') {
     if (pendingScans > 0) pendingScans--;
     // Erfolgreicher Scan → Buch in der Liste als „erledigt" markieren:
@@ -348,8 +364,24 @@ function handleServerMessage(msg) {
     // student_info steht aus).
     if (peeking) { renderPeekStatus(); renderQueue(); }
     else if (!studentActive && !loadingStudent) { renderWaitingStatus(); renderQueue(); }
+  } else if (msg.type === 'search_classes') {
+    // Lupen-Suche: alle Klassen des Schuljahrs (IServ). Session-Cache füllen
+    // und Dropdown aufbauen — letzte Klasse vorwählen (localStorage), sonst
+    // erste. Sofort Schüler der gewählten Klasse nachladen.
+    searchClassCache = Array.isArray(msg.classes) ? msg.classes : [];
+    renderSearchClasses();
+  } else if (msg.type === 'search_students') {
+    // Lupen-Suche: alle Schüler einer Klasse (IServ). Session-Cache füllen
+    // und Dropdown aufbauen, falls die Klasse aktuell gewählt ist.
+    const list = Array.isArray(msg.students) ? msg.students : [];
+    searchStudentsCache.set(msg.form, list);
+    if (searchOpen && searchClassSel.value === msg.form) renderSearchStudents(msg.form, list);
   } else if (msg.type === 'error') {
     loadingStudent = false;  // Laden gescheitert → Queue wieder freigeben
+    // Lupe-Suche gescheitert (z. B. ungültige ID/IServ-Fehler): kein `loading`
+    // gekommen → Menü/Panel offen lassen zum erneuten Versuch, Flag aber
+    // zurücksetzen, damit ein späteres fremdes `loading` sie nicht doch schließt.
+    searchSubmitted = false;
     statusEl.textContent = 'Fehler: ' + (msg.msg || '');
     dotEl.className = 'dot err';
     heldScanValue = null;
@@ -393,6 +425,9 @@ const nextBtn = document.getElementById('next-btn');
 const camDropdown = document.getElementById('cam-dropdown');
 const readerEl = document.getElementById('reader');
 const searchBtn = document.getElementById('search-btn');
+const searchPanel = document.getElementById('search-panel');
+const searchClassSel = document.getElementById('search-class');
+const searchStudentSel = document.getElementById('search-student');
 const appEl = document.querySelector('.app');
 const topSectionEl = document.querySelector('.top-section');
 const statusbarEl = document.querySelector('.status-bar');
@@ -869,6 +904,7 @@ function animateMenu(open) {
 
 function openPeek() {
   peeking = true;
+  resetSearchPanel();   // frisch starten — kein offenes Panel aus altem Peek
   setMenuTitle();
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'peek_queue' }));
   // Queue sofort aus letzter bekannter Liste rendern; Antwort/Updates ziehen sie nach.
@@ -881,6 +917,7 @@ function openPeek() {
 
 function closePeek() {
   peeking = false;
+  resetSearchPanel();   // ggf. offenes Such-Panel einklappen, bevor das Menü schließt
   setMenuTitle();
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'peek_close' }));
   // Bücherliste des Hintergrund-Schülers wiederherstellen.
@@ -898,12 +935,196 @@ menuBtn.addEventListener('click', (e) => {
   openPeek();
 });
 
-// Lupen-Button (nur im Menü-Modus sichtbar). Funktion folgt später —
-// vorerst ein No-op-Stub, der das Event schluckt (kein Default, kein Bubbling).
+// ---- Lupen-Suche (Peek-Modus): Schnellsprung zu beliebigem Schüler ----
+// Lupe klicken → Warteliste fährt nach unten (FLIP), zwei Dropdowns blenden
+// synchron ein: oben Klasse (alle des Schuljahrs), unten Schüler der gewählten
+// Klasse. Schüler wählen → wird geladen (search_call, ersetzt den Hintergrund-
+// Schüler). Letzte Klasse wird beim erneuten Öffnen vorausgewählt (localStorage),
+// bleibt aber änderbar. Alles read-only (IServ-GETs über den Server).
+
+// FLIP für die Panel-Bewegung: gleiche Technik wie animateMenu, nur dass die
+// Statuszeile stehen bleibt und nur name-row + book-table-wrap nach unten
+// fahren (das Panel schiebt sich dazwischen).
+function flipSearchTargets(firsts) {
+  const targets = [nameRowEl, bookWrapEl];
+  targets.forEach((t, i) => {
+    const last = t.getBoundingClientRect();
+    const dy = firsts[i].top - last.top;
+    if (!dy) return;
+    t.style.transition = 'none';
+    t.style.transform = `translateY(${dy}px)`;
+    t.offsetWidth;
+    t.style.transition = reduceMotion ? 'transform .01ms' : `transform ${MENU_MS}ms ${MENU_EASE}`;
+    t.style.transform = '';
+    t.addEventListener('transitionend', () => {
+      t.style.transition = ''; t.style.transform = '';
+    }, { once: true });
+  });
+}
+
+function animateSearchPanel(open) {
+  const firsts = [nameRowEl, bookWrapEl].map(t => t.getBoundingClientRect());
+  if (open) {
+    // Natürliche Höhe messen (scrollHeight liefert sie auch bei max-height:0),
+    // dann von 0 auf diese Höhe transitionieren — die Warteliste darunter per
+    // FLIP synchron nach unten fahren.
+    const h = searchPanel.scrollHeight;
+    searchPanel.classList.add('open');
+    searchPanel.style.transition =
+      `max-height ${MENU_MS}ms ${MENU_EASE}, opacity ${MENU_MS}ms ${MENU_EASE}`;
+    searchPanel.style.maxHeight = h + 'px';
+    flipSearchTargets(firsts);
+    const onEnd = (e) => {
+      if (e.propertyName !== 'max-height') return;   // erst wenn die Höhe fertig
+      searchPanel.style.maxHeight = 'none';   // danach frei wachsen
+      searchPanel.removeEventListener('transitionend', onEnd);
+    };
+    searchPanel.addEventListener('transitionend', onEnd);
+  } else {
+    searchPanel.style.maxHeight = searchPanel.scrollHeight + 'px';
+    searchPanel.offsetWidth;   // Reflow: Start-Height greift, bevor zu 0
+    searchPanel.style.transition =
+      `max-height ${MENU_MS}ms ${MENU_EASE}, opacity ${MENU_MS}ms ${MENU_EASE}`;
+    searchPanel.style.maxHeight = '0px';
+    searchPanel.classList.remove('open');
+    flipSearchTargets(firsts);
+  }
+}
+
+// Panel + Menü schließen (ohne Animation am Panel) — beim Such-Laden, damit der
+// neue Schüler im Scanner-Layout scannbar ist. animateMenu(false) übernimmt
+// die Rückkehr der Steuer-Elemente; das Panel muss vorher weg (sonst verfälscht
+// es die FLIP-Messung des Menü-Schließens).
+function closeSearchAndMenu() {
+  searchOpen = false;
+  searchPanel.classList.remove('open');
+  searchPanel.style.maxHeight = '';
+  searchPanel.style.transition = '';
+  animateMenu(false);
+}
+
+// Such-Panel sofort (ohne Animation) zurücksetzen — beim Peek-Öffnen/Schließen,
+// damit kein eingeklapptes/offenes Panel aus einem früheren Peek stehen bleibt.
+function resetSearchPanel() {
+  searchOpen = false;
+  searchSubmitted = false;
+  searchPanel.classList.remove('open');
+  searchPanel.style.maxHeight = '';
+  searchPanel.style.transition = '';
+}
+
+// Klassen-Dropdown aufbauen: letzte gewählte Klasse (localStorage) vorwählen,
+// falls vorhanden, sonst erste. Sofort Schüler der gewählten Klasse laden.
+function renderSearchClasses() {
+  const classes = searchClassCache || [];
+  if (!classes.length) {
+    searchClassSel.disabled = true;
+    searchClassSel.innerHTML = '<option>Keine Klassen gefunden</option>';
+    searchStudentSel.disabled = true;
+    searchStudentSel.innerHTML = '<option>—</option>';
+    return;
+  }
+  searchClassSel.disabled = false;
+  const last = localStorage.getItem(SEARCH_LASTCLASS_KEY);
+  const preselect = (last && classes.includes(last)) ? last : classes[0];
+  searchClassSel.innerHTML = classes.map(c =>
+    `<option value="${escapeHtml(c)}"${c === preselect ? ' selected' : ''}>${escapeHtml(c)}</option>`).join('');
+  loadSearchStudents(preselect);
+}
+
+// Schüler-Dropdown für eine Klasse aufbauen (aus Cache oder Server-Anfrage).
+function renderSearchStudents(form, list) {
+  if (!form) {
+    searchStudentSel.disabled = true;
+    searchStudentSel.innerHTML = '<option>Zuerst Klasse wählen</option>';
+    return;
+  }
+  const students = list != null ? list : (searchStudentsCache.get(form) || null);
+  if (students == null) {
+    searchStudentSel.disabled = true;
+    searchStudentSel.innerHTML = '<option>Schüler laden …</option>';
+    return;
+  }
+  if (!students.length) {
+    searchStudentSel.disabled = true;
+    searchStudentSel.innerHTML = '<option>Keine Schüler</option>';
+    return;
+  }
+  searchStudentSel.disabled = false;
+  searchStudentSel.innerHTML =
+    '<option value="" disabled selected>— Schüler wählen —</option>'
+    + students.map(s => {
+      const name = `${s.lastname}, ${s.firstname}`;
+      const data = `data-id="${escapeHtml(String(s.student_id))}" data-form="${escapeHtml(form)}" data-last="${escapeHtml(s.lastname)}" data-first="${escapeHtml(s.firstname)}"`;
+      return `<option value="${escapeHtml(String(s.student_id))}" ${data}>${escapeHtml(name)}</option>`;
+    }).join('');
+}
+
+function loadSearchStudents(form) {
+  if (!form) { renderSearchStudents(''); return; }
+  const cached = searchStudentsCache.get(form);
+  if (cached != null) { renderSearchStudents(form, cached); return; }
+  renderSearchStudents(form, null);   // „Schüler laden …"
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'search_students', form }));
+  }
+}
+
+function openSearch() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  searchOpen = true;
+  // Klassen laden, falls noch nicht gecacht; sonst direkt rendern.
+  if (searchClassCache == null) {
+    searchClassSel.disabled = true;
+    searchClassSel.innerHTML = '<option>Klassen laden …</option>';
+    searchStudentSel.disabled = true;
+    searchStudentSel.innerHTML = '<option>—</option>';
+    ws.send(JSON.stringify({ type: 'search_classes' }));
+  } else {
+    renderSearchClasses();
+  }
+  animateSearchPanel(true);
+}
+
+function closeSearch() {
+  searchOpen = false;
+  animateSearchPanel(false);
+}
+
+// Schüler ausgewählt → laden (search_call). Panel + Menü schließen bewusst
+// erst, wenn der Server `loading` schickt (s. handleServerMessage), damit bei
+// einem Fehler die Suche offen bleibt zum erneuten Versuch.
+function submitSearchStudent() {
+  const opt = searchStudentSel.selectedOptions[0];
+  const sid = opt && opt.value;
+  if (!sid) return;
+  const form = opt && opt.dataset.form;
+  const lastname = opt && opt.dataset.last;
+  const firstname = opt && opt.dataset.first;
+  if (!form) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  searchSubmitted = true;
+  ws.send(JSON.stringify({
+    type: 'search_call', student_id: Number(sid),
+    form, lastname: lastname || '', firstname: firstname || '',
+  }));
+}
+
 searchBtn.addEventListener('click', (e) => {
   e.stopPropagation();
-  // TODO: Funktion des Lupen-Buttons — folgt.
+  if (!peeking) return;          // Lupe nur im Peek-Modus
+  if (searchOpen) closeSearch(); else openSearch();
 });
+
+searchClassSel.addEventListener('change', () => {
+  const form = searchClassSel.value;
+  if (form) localStorage.setItem(SEARCH_LASTCLASS_KEY, form);
+  loadSearchStudents(form);
+});
+
+searchStudentSel.addEventListener('change', submitSearchStudent);
+// Klicks im Panel nicht ins Dokument durchblasen (cam-dropdown-Schließlogik).
+searchPanel.addEventListener('click', (e) => e.stopPropagation());
 
 function onScanSuccess(value) {
   // Worker noch nicht bereit (Schüler gerade zugewiesen, open_student läuft) —

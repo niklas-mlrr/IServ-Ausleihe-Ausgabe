@@ -23,7 +23,7 @@ from ..sessions import (
     process_scan,
     send_display_update,
 )
-from ..state import DisplaySession, get_state
+from ..state import DisplaySession, QueueStudent, get_state
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -270,6 +270,88 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                         helper_notify={"type": "loading"},  # Queue verbergen — neuer wird geladen
                     )
                 await assign_student_to_helper(state, hub, helper, target)
+                continue
+
+            if mtype == "search_classes":
+                # Helfer-Lupe: Liste aller Klassen des gewählten Schuljahrs
+                # (IServ, read-only). Schuljahrbezogen gecached, damit wieder-
+                # holtes Öffnen der Suche keine IServ-Roundtrips auslöst.
+                if state.iserv is None:
+                    await websocket.send_json({"type": "search_classes", "classes": []})
+                    continue
+                sy = state.selected_schoolyear
+                cached = state.class_names_cache.get(sy)
+                if cached is None:
+                    try:
+                        cached = await state.iserv.get_class_names(sy)
+                    except Exception as e:  # noqa: BLE001
+                        log.warning("search_classes fehlgeschlagen: %s", e)
+                        await websocket.send_json(
+                            {"type": "error", "msg": f"Klassen konnten nicht geladen werden: {e}"}
+                        )
+                        continue
+                    state.class_names_cache[sy] = cached
+                await websocket.send_json({"type": "search_classes", "classes": cached})
+                continue
+
+            if mtype == "search_students":
+                # Helfer-Lupe: alle Schüler einer Klasse (IServ, read-only),
+                # schuljahrbezogen gecached (Key "schoolyear|form").
+                form = str(raw.get("form") or "").strip()
+                if state.iserv is None:
+                    await websocket.send_json(
+                        {"type": "search_students", "form": form, "students": []}
+                    )
+                    continue
+                sy = state.selected_schoolyear
+                key = f"{sy}|{form}"
+                cached = state.form_students_cache.get(key)
+                if cached is None:
+                    try:
+                        cached = await state.iserv.get_students_for_form(form, sy)
+                    except Exception as e:  # noqa: BLE001
+                        log.warning("search_students fehlgeschlagen: %s", e)
+                        await websocket.send_json(
+                            {"type": "error", "msg": f"Schüler konnten nicht geladen werden: {e}"}
+                        )
+                        continue
+                    state.form_students_cache[key] = cached
+                await websocket.send_json(
+                    {"type": "search_students", "form": form, "students": cached}
+                )
+                continue
+
+            if mtype == "search_call":
+                # Helfer-Lupe: gezielt einen beliebigen IServ-Schüler laden
+                # (Schnellsprung — der Schüler muss NICHT in der Warteschlange
+                # stehen). Aktuellen Schüler wie beim Peek-`call` auf 'pending'
+                # zurückgeben, dann einen transienten QueueStudent (bewusst NICHT
+                # in eine Queue eingetragen) via assign_student_to_helper laden.
+                # Read-only: IServ/DB werden nur gelesen (get_student_info),
+                # kein Write.
+                sid = raw.get("student_id")
+                form = str(raw.get("form") or "").strip()
+                lastname = str(raw.get("lastname") or "").strip()
+                firstname = str(raw.get("firstname") or "").strip()
+                if sid is None or not form:
+                    await websocket.send_json({"type": "error", "msg": "Schüler/Klasse fehlt"})
+                    continue
+                try:
+                    sid = int(sid)
+                except (TypeError, ValueError):
+                    await websocket.send_json({"type": "error", "msg": "Ungültige Schüler-ID"})
+                    continue
+                if helper.student_id is not None:
+                    await end_student(
+                        state, hub, helper.student_id,
+                        queue_status="pending", session_state="revoked",
+                        helper_notify={"type": "loading"},  # Queue verbergen — neuer wird geladen
+                    )
+                student = QueueStudent(
+                    student_id=sid, lastname=lastname, firstname=firstname,
+                    form=form, status="active", assigned_helper=helper.token,
+                )
+                await assign_student_to_helper(state, hub, helper, student)
                 continue
 
             if mtype == "peek_queue":

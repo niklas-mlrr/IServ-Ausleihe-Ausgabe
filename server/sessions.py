@@ -648,6 +648,32 @@ async def end_student(
                 "queue_size": state.pending_count(h.context_id),
                 "queue": state.pending_queue_as_list(h.context_id),
             })
+    else:
+        # Transienter Such-Schüler (Helfer-Lupe): bewusst NICHT in eine Queue
+        # eingetragen („Schnellsprung" zu beliebigem IServ-Schüler), aber ein
+        # Helfer kann ihn trotzdem zugewiesen haben. `find_student` findet ihn
+        # nicht → ohne diesen Zweig bliebe `helper.student_id` stale und ein
+        # noch laufendes `open_student` (load_task) leakte den Worker-Context.
+        # Gleiche Aufräumung wie oben, nur Helfer via find_helper_for_student.
+        helper = state.find_helper_for_student(student_id)
+        if helper is not None and helper.student_id == student_id:
+            if helper.load_task is not None and not helper.load_task.done():
+                helper.load_task.cancel()
+            helper.student_id = None
+            helper.expected_isbns = set()
+            helper.vormerk_isbns = set()
+            helper.lent_isbns = set()
+            helper.peeking = False  # Schüler weg → Queue-Ansicht hinfällig
+            if helper.load_task is not None and not helper.load_task.done():
+                with contextlib.suppress(asyncio.CancelledError):
+                    await helper.load_task
+            helper.load_task = None
+            await hub.send_scanner(helper.token, helper_notify or {
+                "type": "waiting",
+                "msg": "Warte auf Schüler-Zuweisung",
+                "queue_size": state.pending_count(helper.context_id),
+                "queue": state.pending_queue_as_list(helper.context_id),
+            })
 
     session = state.find_session_by_student(student_id)
     if session:
