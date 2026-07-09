@@ -189,7 +189,7 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                 pass
             else:
                 # Degraded-Modus (kein worker_pool) oder Worker nie
-                # bereit: wie bisher sofort `worker_ready` senden.
+                # bereit: sofort `worker_ready` senden.
                 await hub.send_websocket(websocket, {"type": "worker_ready"})
         except Exception as e:
             await hub.send_websocket(websocket, {"type": "error", "msg": str(e)})
@@ -446,7 +446,7 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
 
             # Scan verarbeiten: Buchungs-Vorabprüfung (im Lager? bestellt? Reihe
             # noch nicht ausgeliehen?) → buchen (Enter) oder — Gate aus — stagen.
-            # Nicht erfüllt → Feld wird NICHT berührt (Freigabe 2026-07-02).
+            # Nicht erfüllt → Feld wird NICHT berührt.
             result = await process_scan(
                 state, student_id, helper.vormerk_isbns, helper.lent_isbns, barcode,
                 source="helper",

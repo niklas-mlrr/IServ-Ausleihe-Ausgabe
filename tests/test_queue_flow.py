@@ -56,9 +56,8 @@ def _state_with_iserv() -> AppState:
 def _add_student(st: AppState, sid: int, status: str = "pending") -> QueueStudent:
     s = QueueStudent(student_id=sid, lastname=f"N{sid}", firstname="V", form="10a", status=status)
     # Der Test-Kontext wird beim ersten Aufruf angelegt und aktiviert; spätere
-    # Aufrufe im selben Test hängen an dieselbe Queue an (kein Kompat-Schim
-    # mehr — Tests, die einen ZWEITEN Kontext brauchen, rufen `open_context`
-    # explizit selbst).
+    # Aufrufe im selben Test hängen an dieselbe Queue an. Tests, die einen
+    # ZWEITEN Kontext brauchen, rufen `open_context` explizit selbst.
     ctx = st.active_context or st.open_context("10a")
     ctx.queue.append(s)
     return s
@@ -166,7 +165,7 @@ def test_end_student_releases_worker_without_session():
 
 
 # ---------------------------------------------------------------------------
-# end_student — In-flight Lade-Task abbrechen (Leak-Fix 2026-07-05)
+# end_student — In-flight Lade-Task abbrechen (Leak-Fix)
 # ---------------------------------------------------------------------------
 
 class _FakeTask:

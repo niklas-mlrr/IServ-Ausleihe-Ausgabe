@@ -22,9 +22,8 @@ class SlidingWindowLimiter:
     def hit(self, key: str) -> bool:
         """Treffer registrieren. True = erlaubt, False = drosseln (Limit erreicht)."""
         now = time.monotonic()
-        # .get() statt defaultdict-Zugriff — sonst legt jeder Lookup einen leeren
-        # Bucket an, der nie wieder verschwindet (das alte `if not dq: pop +
-        # neu-fetch` war ein No-op: pop dann sofort defaultdict-re-add).
+        # .get() statt defaultdict-Zugriff: ein `self._hits[key]` würde bei jedem
+        # Lookup einen leeren Bucket anlegen, der nie wieder verschwindet.
         dq = self._hits.get(key)
         if dq is None:
             dq = deque()

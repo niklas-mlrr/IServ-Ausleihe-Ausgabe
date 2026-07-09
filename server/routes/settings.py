@@ -54,7 +54,7 @@ async def set_force_tailscale_ip(
 # braucht `Request`) und `printer` (String-Wert, andere Semantik: leer =
 # .env-Default) bleiben bewusst eigenständige Endpunkte — reinquetschen würde
 # den gemeinsamen Rumpf nur mit Sonderfällen vollstopfen, ohne echte
-# Duplikation zu sparen (siehe Welle-3-Bericht).
+# Duplikation zu sparen.
 # key -> (state-Attribut, Body-Feldname auf `SettingsToggleRequest`)
 _BOOL_SETTINGS: dict[str, tuple[str, str]] = {
     "save-pdf-locally": ("save_pdf_locally", "enabled"),
@@ -66,12 +66,11 @@ _BOOL_SETTINGS: dict[str, tuple[str, str]] = {
 @host_router.post("/api/settings/{key}")
 async def set_bool_setting(key: str, body: SettingsToggleRequest) -> dict:
     """Einfache Bool-Entwickler-/Host-Toggles gegen eine Whitelist
-    (`_BOOL_SETTINGS`) gebündelt — ersetzt die vormals separaten Endpunkte
-    `/api/save-pdf-locally` (Entwickler-Toggle „PDF lokal speichern"),
-    `/api/fix-class-on-slip` (experimenteller Entwickler-Toggle „Klasse auf
-    Leihschein korrigieren") und `/api/slip-default` (Host-Toggle „Schüler-
-    Leihschein" als Druck-Dialog-Default für die Helfer). Alle drei: rein
-    In-Memory, kein IServ-/DB-Zugriff.
+    (`_BOOL_SETTINGS`) gebündelt: `save-pdf-locally` (Entwickler-Toggle „PDF
+    lokal speichern"), `fix-class-on-slip` (experimenteller Entwickler-Toggle
+    „Klasse auf Leihschein korrigieren") und `slip-default` (Host-Toggle
+    „Schüler-Leihschein" als Druck-Dialog-Default für die Helfer). Alle drei:
+    rein In-Memory, kein IServ-/DB-Zugriff.
     """
     entry = _BOOL_SETTINGS.get(key)
     if entry is None:

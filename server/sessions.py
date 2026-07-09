@@ -112,7 +112,7 @@ async def hydrate_student_info(state: AppState, info: dict, form: str, target) -
 
 def apply_hidden_books(info: dict, hidden_isbns: set[str]) -> None:
     """Ausgeblendete Buchreihen (Einstellungen-Dialog) aus `info["books"]"`
-    entfernen, bevor sie als vorgemerkt/erwartet gilt (2026-07-05). Muss vor
+    entfernen, bevor sie als vorgemerkt/erwartet gilt. Muss vor
     `expected_isbns_from_info`/`booking_isbn_sets_from_info` laufen, sonst
     tauchen ausgeblendete Reihen weiter als vorgemerkt bzw. buchbar auf."""
     if not hidden_isbns:
@@ -128,7 +128,7 @@ def expected_isbns_from_info(info: dict) -> set[str]:
 
 def booking_isbn_sets_from_info(info: dict) -> tuple[set[str], set[str]]:
     """Zerlegt die Buchliste in (vorgemerkt, ausgeliehen) — für die Buchungs-
-    Vorabprüfung (Freigabe 2026-07-02).
+    Vorabprüfung.
 
     `vorgemerkt` = bestellt UND von der Reihe ist noch KEIN Buch auf den Schüler
     ausgeliehen (genau die buchbaren ISBNs — `get_student_info` setzt den Status
@@ -168,8 +168,8 @@ async def evaluate_scan_for_booking(
 ) -> dict:
     """Buchungs-Vorabprüfung (read-only) VOR jedem Eintippen ins Feld.
 
-    Freigabe 2026-07-02: Gebucht (Enter) wird nur, wenn ALLE Bedingungen erfüllt
-    sind — sonst wird der Barcode gar nicht erst ins Feld gefüllt.
+    Gebucht (Enter) wird nur, wenn ALLE Bedingungen erfüllt sind — sonst wird
+    der Barcode gar nicht erst ins Feld gefüllt.
 
       1. Buch im Lager: `available and not distributed and not deleted`.
       2. Schüler hat das Buch bestellt UND von der Reihe ist noch keins auf ihn
@@ -242,9 +242,8 @@ async def evaluate_scan_for_booking(
             "title": title,
         }
 
-    # Bedingung 1: Buch im Lager — VOR der Bestell-Prüfung, damit ein
-    # verliehenes Buch immer als solches angezeigt wird, auch wenn der Schüler
-    # es gar nicht bestellt hat (früher kam hier „Nicht bestellt" durch).
+    # Lager-Prüfung vor der Bestell-Prüfung: ein verliehenes Buch soll als
+    # solches gemeldet werden, auch wenn der Schüler es nicht bestellt hat.
     if book["distributed"] or not book["available"]:
         # Buch aktuell an jemand anders verliehen. Den Namen des Ausleihers
         # (read-only aus /books/:code, siehe get_book_by_code) halten wir
@@ -288,7 +287,7 @@ async def process_scan(
     """Vollständige Scan-Verarbeitung, gemeinsam für Scanner (Modus A) und
     Schüler (Modus B). Returnt das scan_result-Payload (ohne `type`/`barcode`).
 
-    Ablauf (Freigabe 2026-07-02):
+    Ablauf:
       1. Buchungs-Vorabprüfung (read-only). Nicht erfüllt → Feld wird NICHT
          berührt, Grund zurückmelden.
       2. Erfüllt UND `ALLOW_BOOKING=true` → tatsächlich buchen (Enter).

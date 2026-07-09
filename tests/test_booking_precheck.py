@@ -1,4 +1,4 @@
-"""Buchungs-Vorabprüfung (Freigabe 2026-07-02).
+"""Buchungs-Vorabprüfung.
 
 Gebucht (Enter) wird nur, wenn ALLE Bedingungen erfüllt sind:
   1. Buch im Lager (available and not distributed and not deleted),
@@ -148,8 +148,8 @@ def test_reject_not_enrolled():
 
 def test_reject_not_in_stock_before_not_enrolled():
     # Verliehen (distributed) UND nicht bestellt → „nicht im Lager" geht VOR
-    # „nicht bestellt" (früher kam hier not_enrolled durch). Lager-Prüfung
-    # zuerst, damit ein verliehenes Buch immer als solches angezeigt wird.
+    # „nicht bestellt". Lager-Prüfung zuerst, damit ein verliehenes Buch immer
+    # als solches angezeigt wird.
     res = _eval(_State(_FakeIserv(_book(isbn="978-9", distributed=True))), {"978-1"}, set())
     assert res["ok"] is False and res["status"] == "not_in_stock"
     assert "verliehen" in res["msg"]

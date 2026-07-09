@@ -1,9 +1,9 @@
 """Aggregator der API-Router-Schicht.
 
-Diese Datei enthält seit Welle 3 (Aufgabe 4) KEINE Endpunkte mehr — sie wurden
-in themenweise Module aufgeteilt (`auth`, `classes`, `booklists`, `helpers`,
-`queue`, `slips`, `modus_b`, `settings`), die gemeinsamen Bausteine liegen in
-`_deps`. Dieses Modul bleibt als stabiler Einstiegspunkt bestehen:
+Diese Datei enthält KEINE Endpunkte — sie sind in themenweise Module
+aufgeteilt (`auth`, `classes`, `booklists`, `helpers`, `queue`, `slips`,
+`modus_b`, `settings`), die gemeinsamen Bausteine liegen in `_deps`. Dieses
+Modul bleibt als stabiler Einstiegspunkt bestehen:
 
 - `server/app.py` importiert weiterhin `from .routes.api import router`,
 - die Tests importieren `server.routes.api` (bzw. Symbole daraus).
@@ -34,7 +34,7 @@ from ._deps import (  # re-export für app.py / Tests
     router,
 )
 
-# Re-Exports, auf die die Tests direkt zugreifen (attribut-stabil zu vor dem Split).
+# Re-Exports, auf die die Tests direkt zugreifen.
 from .classes import TEST_CONFIG_FORM, TEST_STUDENTS, _load_test_students  # noqa: F401
 from .slips import _last_scan_for  # noqa: F401
 

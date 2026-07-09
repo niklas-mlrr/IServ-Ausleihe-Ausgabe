@@ -27,13 +27,12 @@ from server.config import Config
 from server.routes import _deps as deps_routes
 from server.state import AppState
 
-# Nach dem Welle-4-Split (routes/api.py → themenweise Module) sind get_state/
-# get_config/get_hub in JEDEM Endpoint-Modul ein eigener from-Import. Der frühere
-# Einzel-Patch auf `api.get_*` erreicht die Endpunkte daher nicht mehr — sie
-# lösen die Namen im Namespace IHRES Moduls auf. Deshalb patchen wir alle
-# Route-Module (inkl. `_deps`, wo `require_host`/`_base_url` sitzen). Ein
-# vergessenes Modul fällt LAUT auf (403/echter Singleton statt Fixture-State),
-# nicht still — kein Risiko eines scheinbar grünen Tests.
+# Jedes Endpoint-Modul importiert get_state/get_config/get_hub selbst (eigener
+# from-Import) und löst die Namen im Namespace IHRES Moduls auf — ein Patch nur
+# an zentraler Stelle würde die Endpunkte daher nicht erreichen. Deshalb
+# patchen wir alle Route-Module (inkl. `_deps`, wo `require_host`/`_base_url`
+# sitzen). Ein vergessenes Modul fällt LAUT auf (403/echter Singleton statt
+# Fixture-State), nicht still — kein Risiko eines scheinbar grünen Tests.
 _ROUTE_MODULES = [
     deps_routes,
     auth_routes,
@@ -135,11 +134,10 @@ def test_login_correct_password_sets_session(client, ctx):
 # ---------------------------------------------------------------------------
 
 def test_add_student_invalid_id(client, ctx):
-    """`student_id` ist jetzt ein Pydantic-Feld (`int | None`) — ein Wert vom
+    """`student_id` ist ein Pydantic-Feld (`int | None`) — ein Wert vom
     falschen Typ (hier ein nicht-numerischer String) lässt die Body-Validierung
-    bereits vor dem Funktionsrumpf mit 422 abbrechen, statt wie vorher im
-    Rumpf per manuellem `int()`-Versuch 400 zu liefern. Kein Client wertet den
-    Statuscode aus (siehe Welle-3-Bericht) — bewusst akzeptierte Verschärfung."""
+    bereits vor dem Funktionsrumpf mit 422 abbrechen. Kein Client wertet den
+    Statuscode aus — bewusst akzeptierte Verschärfung."""
     r = client.post(
         "/api/add-student",
         json={"student_id": "x", "lastname": "M"},
@@ -390,11 +388,11 @@ def test_base_url_rewrites_localhost(ctx, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# POST /api/settings/{key} — Welle-3-Zusammenfassung der drei Bool-Toggles
+# POST /api/settings/{key} — gebündelter Endpoint für die drei Bool-Toggles
 # (save-pdf-locally/fix-class-on-slip/slip-default). Prüft die Whitelist, die
 # 404 für unbekannte Keys, und dass jeder Key sein eigenes Body-Feld liest
-# (enabled vs. second_page) und unter dem ursprünglichen State-Attributnamen
-# antwortet (Kompat zu den früheren Einzel-Endpunkten).
+# (enabled vs. second_page) und unter dem jeweiligen State-Attributnamen
+# antwortet.
 # ---------------------------------------------------------------------------
 
 def test_settings_unknown_key_404(client, ctx):

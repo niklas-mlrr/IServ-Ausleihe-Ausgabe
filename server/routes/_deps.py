@@ -25,7 +25,7 @@ from ..tls import primary_lan_ip
 # `router` trägt die öffentlichen Routen (login, logout, das per-QR erreichbare
 # student/join) — bewusst OHNE Host-Auth. `host_router` trägt alle ~39 Host-
 # authentifizierten Endpunkte über eine einzige `dependencies=[Depends(...)]`
-# statt der vorher an jedem Endpoint wiederholten `_require_host(session_id)`.
+# statt einer je Endpoint wiederholten Auth-Prüfung.
 # `require_host` wird in routes/api.py in `router` eingehängt.
 router = APIRouter()
 
@@ -43,8 +43,7 @@ def require_host(session_id: str | None = Cookie(default=None)) -> str:
 
 # Alle Host-authentifizierten Endpunkte hängen an diesem Router — die
 # Dependency läuft für JEDEN seiner Endpunkte VOR dem Funktionskörper (FastAPI
-# löst Router-`dependencies` immer vor dem Endpoint auf), ersetzt also 1:1 das
-# frühere manuelle `_require_host(session_id)` als erste Zeile jeder Funktion.
+# löst Router-`dependencies` immer vor dem Endpoint auf).
 # (Empirisch geprüft: FastAPI wertet Router-`dependencies` VOR der Body-
 # Validierung aus — ein fehlgeschlagener `require_host` liefert 403, selbst
 # wenn der Body zugleich ungültig/leer ist. Die Gate-Reihenfolge bei
@@ -56,17 +55,14 @@ host_router = APIRouter(dependencies=[Depends(require_host)])
 # Request-Models
 # ---------------------------------------------------------------------------
 #
-# 400 vs. 422: Wo ein fehlendes/falsch getyptes Feld bisher eine von Hand
-# geschriebene 400-Antwort auslöste, geben wir jetzt bewusst zwei Fälle
-# unterschiedlich zurück:
+# 400 vs. 422: ein fehlendes/falsch getyptes Feld liefert bewusst zwei
+# unterschiedliche Statuscodes:
 #   - Feld FEHLT ganz (Client schickt den Key nicht) → Feld bleibt im Model
-#     optional mit Default, die alte manuelle 400-Prüfung im Funktionsrumpf
-#     bleibt erhalten (Fehlermeldungstext unverändert).
+#     optional mit Default, eine manuelle 400-Prüfung im Funktionsrumpf greift.
 #   - Feld ist VORHANDEN, aber vom falschen Typ (z. B. "student_id": "x") →
-#     das war vorher ein manueller int()-Versuch mit 400; jetzt lässt Pydantic
-#     das Request schon bei der Validierung mit 422 abbrechen. Kein Client
-#     (web/host.js, web/scan.js, web/student.html — geprüft per grep) wertet
-#     den Statuscode 400 aus, daher ist das eine bewusst akzeptierte
+#     Pydantic bricht das Request schon bei der Validierung mit 422 ab. Kein
+#     Client (web/host.js, web/scan.js, web/student.html — geprüft per grep)
+#     wertet den Statuscode 400 aus, daher ist das eine bewusst akzeptierte
 #     Verschärfung (ehrlicherer Statuscode), keine Verhaltensänderung, auf die
 #     sich ein Client verlassen hätte.
 # Ausnahme: die drei Buchungs-Gates in commit_book (Host-Auth/allow_booking/
@@ -79,9 +75,9 @@ class StudentRef(BaseModel):
     """Gemeinsames Body-Model für alle Endpunkte, die nur eine `student_id`
     brauchen (skip/disconnect/finish/clear-book-alert/…). Bewusst
     `int | None = None` statt Pflichtfeld: ein komplett fehlendes Feld liefert
-    weiterhin die alte 400-Meldung ("student_id fehlt") aus dem
-    Funktionsrumpf; nur ein falscher Werttyp lässt Pydantic vorab mit 422
-    abbrechen (siehe Abschnittskommentar oben)."""
+    die 400-Meldung ("student_id fehlt") aus dem Funktionsrumpf; nur ein
+    falscher Werttyp lässt Pydantic vorab mit 422 abbrechen (siehe
+    Abschnittskommentar oben)."""
     student_id: int | None = None
 
 
@@ -104,8 +100,7 @@ class CloseClassRequest(BaseModel):
 
 class ContextIdBody(BaseModel):
     """`context_id` optional, auch der ganze Body optional (kein Body im
-    Request → Default-Instanz, `context_id=None` → aktiver Kontext, Kompat zu
-    vorher `body: dict | None = None`)."""
+    Request → Default-Instanz, `context_id=None` → aktiver Kontext)."""
     context_id: str | None = None
 
 

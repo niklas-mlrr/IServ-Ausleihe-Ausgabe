@@ -28,7 +28,7 @@ def test_stats_tracks_checkout():
 
 # ---------------------------------------------------------------------------
 # open_student bei Cancel — Worker-Context muss zurück in den Pool
-# (Regression zum Leak bei schnellem „Weiter"-Klicken, 2026-07-05)
+# (Regression zum Leak bei schnellem „Weiter"-Klicken)
 # ---------------------------------------------------------------------------
 
 class _FakePage:

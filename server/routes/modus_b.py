@@ -41,7 +41,7 @@ async def modus_b_open(request: Request) -> dict:
     state.modus_b_open = True
     # Frisches Join-Secret bei jedem Öffnen → alte Screenshots/QRs aus einer
     # früheren Ausgabe werden ungültig. Innerhalb einer Ausgabe bleibt es konstant
-    # (rotiert NICHT mehr pro Zuordnung, 2026-06-18).
+    # über alle Zuordnungen hinweg.
     state.modus_b_join_secret = gen_join_secret()
     state.modus_b_join_url = f"{_base_url(request)}/student?j={state.modus_b_join_secret}"
     state.modus_b_join_qr = make_qr_data_url(state.modus_b_join_url)
@@ -224,7 +224,7 @@ async def student_pair(body: StudentPairRequest) -> dict:
     session.payment_overridden = bool(not info.get("paid") and override)
     student.status = "active"
 
-    # Join-Secret ist konstant (PLAN §3, 2026-06-18) → kein Rotieren mehr.
+    # Join-Secret ist konstant (PLAN §3): Zuordnung rotiert es nicht.
     # Der QR bleibt unverändert; bereits angezeigte Displays brauchen kein Update.
 
     await hub.broadcast_host(state.state_snapshot())

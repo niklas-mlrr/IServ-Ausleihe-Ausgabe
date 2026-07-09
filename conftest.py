@@ -20,7 +20,7 @@ def client() -> TestClient:
     routet direkt über den ASGI-Callable, Depends/Cookie-Injection inklusive).
     Jeder Test bekommt eine frische `create_app()`-Instanz, aber der globale
     State (`server.state.get_state()`) bleibt ein Singleton — Tests, die den
-    State beeinflussen, patchen ihn wie bisher über `monkeypatch.setattr`.
+    State beeinflussen, patchen ihn über `monkeypatch.setattr`.
     """
     app = create_app()
     return TestClient(app)

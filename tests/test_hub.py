@@ -1,10 +1,10 @@
 """Unit-Tests für den WebSocket-Verteiler (server/hub.py).
 
 Rein logisch — keine echten WebSockets, kein Server. Fokus auf die
-Verteil- und Cleanup-Pfade, die in der Vergangenheit WS-Leaks verursacht
-haben (Hardening 2026-06-18): tote Host-Sockets werden aus der Liste
-entfernt, tote Scanner-Sockets auf `ws=None` gesetzt, und jede
-Host-Broadcast zieht ein `queue_update` an unzugewiesene Scanner nach.
+Verteil- und Cleanup-Pfade, die WS-Leaks verhindern: tote Host-Sockets
+werden aus der Liste entfernt, tote Scanner-Sockets auf `ws=None` gesetzt,
+und jede Host-Broadcast zieht ein `queue_update` an unzugewiesene Scanner
+nach.
 """
 
 from __future__ import annotations

@@ -594,7 +594,7 @@
           r = await fetch('/api/student/pair', { method: 'POST', headers: {'Content-Type':'application/json'},
             body: JSON.stringify({ student_id: studentId, pairing_code: code, override_payment: true }) });
         } else if (det && det.reason === 'unpaid') {
-          // Alte Server-Antwort (Kompatibilität): nur nicht bezahlt.
+          // Fallback für eine abweichende Server-Antwortform: nur nicht bezahlt.
           if (!await confirmDialog(`Schüler nicht bezahlt (offen: ${det.amount_open} €).\n\nTrotzdem freigeben?`, 'Trotzdem freigeben')) return;
           r = await fetch('/api/student/pair', { method: 'POST', headers: {'Content-Type':'application/json'},
             body: JSON.stringify({ student_id: studentId, pairing_code: code, override_payment: true }) });
@@ -1426,7 +1426,7 @@
     }
   });
 
-  // ---- Verkabelung ehemaliger inline on*=-Attribute (Tier 3.2 Refactor) ----
+  // ---- Event-Verkabelung ----
   // Statische Buttons/Selects: direkte addEventListener-Bindung an feste IDs.
   document.getElementById('login-btn').addEventListener('click', doLogin);
   document.getElementById('settings-btn').addEventListener('click', openSettingsDialog);

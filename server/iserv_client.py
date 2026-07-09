@@ -269,10 +269,9 @@ class IsServClient:
             # Referenz: „aktuell ausgeliehen") alle Exemplare, die der Schüler
             # aktuell noch hat. Wir übernehmen sie ungefiltert: ein Buch, das der
             # Schüler — egal wann — ausgeliehen hat und noch nicht zurückgegeben
-            # hat, wird durchgehend als „ausgeliehen" ausgewiesen. Vorher wurde
-            # heuristisch via `distributed_at` auf ein Schuljahrsfenster
-            # gefiltert; das hat Vorjahres-Bücher (noch nicht zurückgegeben)
-            # fälschlich unterschlagen. Siehe PLAN §6.1.
+            # hat, wird durchgehend als „ausgeliehen" ausgewiesen (kein Filtern
+            # auf ein Schuljahrsfenster, sonst würden noch nicht zurückgegebene
+            # Vorjahres-Bücher fälschlich unterschlagen). Siehe PLAN §6.1.
             current_books = []
             for b in detail.get("books", []):
                 bv = b.get("BookView") or {}
@@ -398,7 +397,7 @@ class IsServClient:
         ausleihbaren Titel, unabhängig davon, welche Schüler gerade angemeldet sind.
 
         Klassenstufe → Booklist über `form["grade"]` == `booklist["grade"]`.
-        **Mehrjahresbände sind bewusst enthalten** (2026-07-02d): die komplette
+        **Mehrjahresbände sind bewusst enthalten**: die komplette
         ausleihbare Jahrgangsliste wird gezeigt, auch wenn ein Band die Klassenstufe
         nur als oberen Jahrgang führt.
 
@@ -485,7 +484,7 @@ class IsServClient:
 
         `available`/`distributed`/`deleted` bilden den Lager-Status ab: „im Lager"
         = `available and not distributed and not deleted` (Grundlage für die
-        Buchungs-Vorabprüfung, PLAN §6 / Freigabe 2026-07-02).
+        Buchungs-Vorabprüfung, PLAN §6).
 
         `loaned_to` („Vorname Nachname") ist der **aktueller Ausleiher**, wenn das
         Buch verliehen ist (`distributed`); `loaned_to_id` dessen student_id. Die

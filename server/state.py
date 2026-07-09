@@ -75,7 +75,7 @@ class HelperSession:
     # ISBNs des aktuell zugewiesenen Schülers (Anmeldung + bereits ausgeliehen),
     # für die Scan-Vorabprüfung (analog Modus B).
     expected_isbns: set[str] = field(default_factory=set)
-    # Buchungs-Vorabprüfung (Freigabe 2026-07-02): vorgemerkt = bestellt UND Reihe
+    # Buchungs-Vorabprüfung: vorgemerkt = bestellt UND Reihe
     # noch nicht auf den Schüler ausgeliehen (= buchbar); lent = Reihe bereits
     # ausgeliehen (für klare Fehlermeldung). Getrennt gehalten, weil `expected_isbns`
     # beides vereint und die Buchbarkeit nicht unterscheiden kann.
@@ -91,7 +91,7 @@ class HelperSession:
     # angestoßen. Lädt der Helfer die Seite neu (Reconnect innerhalb der Frist),
     # wird dieser Task cancel't und der Schüler stattdessen neugeladen
     # (s. ws_scanner). Ohne Reconnect → echte Trennung → Schüler zurück auf
-    # 'pending', Worker zu (wie bisher inline im finally).
+    # 'pending', Worker zu.
     end_task: object | None = None
     # View-Toggle „Menü": Helfer hat per Menü-Button die Warteschlangen-Ansicht
     # geöffnet, während sein zugewiesener Schüler im Hintergrund verbunden
@@ -131,7 +131,7 @@ class StudentSessionB:
     # ISBNs, die der Schüler laut Anmeldung erhalten soll bzw. bereits hat.
     # Vor jedem Scan wird das gescannte Buch dagegen geprüft (Modus B).
     expected_isbns: set[str] = field(default_factory=set)
-    # Buchungs-Vorabprüfung (Freigabe 2026-07-02) — s. HelperSession.
+    # Buchungs-Vorabprüfung — s. HelperSession.
     vormerk_isbns: set[str] = field(default_factory=set)
     lent_isbns: set[str] = field(default_factory=set)
     # Ausgemustertes/verliehenes Buch gescannt → Client zeigt ein blockierendes
@@ -210,8 +210,8 @@ class AppState:
         self.student_worker_sessions: dict[int, StudentSession] = {}  # student_id -> Session
         # --- Modus B (Live-Ausgabe) ---
         self.modus_b_open: bool = False
-        # Neu bei jedem Öffnen der Ausgabe erzeugt; rotiert NICHT mehr pro
-        # Zuordnung (PLAN §3, 2026-06-18).
+        # Neu bei jedem Öffnen der Ausgabe erzeugt; bleibt über alle
+        # Zuordnungen innerhalb der Ausgabe konstant (PLAN §3).
         self.modus_b_join_secret: str | None = None
         self.modus_b_join_url: str | None = None
         self.modus_b_join_qr: str | None = None  # PNG-Data-URL für iPad/Host
@@ -303,10 +303,10 @@ class AppState:
     def book_order_of(self, context_id: str | None) -> list[str]:
         """Bücher-Reihenfolge eines EXPLIZITEN Kontexts — `[]`, wenn der Kontext
         unbekannt oder `None` ist. Fällt bewusst NICHT still auf den aktiven Tab
-        zurück (das war der Kompat-Property-Bug: ein Helfer ohne Klassen-
-        Bindung bekam so die Reihenfolge einer zufällig aktiven fremden Klasse
-        angezeigt). Aufrufer ohne Kontext (z. B. ein Helfer, dessen `context_id`
-        `None` ist) bekommen konsequent eine leere Liste statt einer falschen."""
+        zurück: ein Helfer ohne Klassen-Bindung soll nicht die Reihenfolge einer
+        zufällig aktiven fremden Klasse angezeigt bekommen. Aufrufer ohne
+        Kontext (z. B. ein Helfer, dessen `context_id` `None` ist) bekommen
+        konsequent eine leere Liste statt einer falschen."""
         if context_id is None:
             return []
         ctx = self.contexts.get(context_id)

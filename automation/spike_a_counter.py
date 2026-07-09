@@ -100,9 +100,9 @@ def explore(student: str | None) -> None:
         snap(page, "03_ausleihe_app")
         dump_links(page, "03_ausleihe_app")
 
-        # Counter-Ansicht „Aus- u. Rückgabe" (Route per Explore-Lauf 2026-06-12
-        # identifiziert). Navigation ist read-only; Buchungen passieren erst
-        # beim Barcode-Submit, den dieser Modus nie auslöst.
+        # Counter-Ansicht „Aus- u. Rückgabe". Navigation ist read-only;
+        # Buchungen passieren erst beim Barcode-Submit, den dieser Modus nie
+        # auslöst.
         page.goto(f"https://ausleihe.{domain}/#/counter", wait_until="domcontentloaded")
         page.wait_for_timeout(4000)
         snap(page, "04_counter")

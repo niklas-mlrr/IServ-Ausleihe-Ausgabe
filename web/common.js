@@ -17,9 +17,9 @@ function isBookDone(b, scannedIsbns) {
 }
 
 // ---- Beeper: Scan-Ton, kapselt AudioContext/-Buffer als Closure-State ----
-// (identisch aus scan.js/student.html übernommen). Aufrufer prüfen weiterhin
-// SELBST `soundEnabled`, AUSSERHALB von playBeep() — dieses Verhalten bleibt
-// unverändert; Beeper entscheidet nicht, ob geblept wird, nur wie.
+// Gemeinsam für scan.js/student.html. Aufrufer prüfen weiterhin SELBST
+// `soundEnabled`, AUSSERHALB von playBeep() — Beeper entscheidet nicht,
+// ob geblept wird, nur wie.
 const Beeper = (() => {
   let audioCtx = null, audioBuffer = null;
   async function initAudio() {
@@ -66,9 +66,9 @@ const Beeper = (() => {
 //                    Damit bleibt Raum für Sonderfälle (z. B. student.html:
 //                    Close-Code 4006 = entwerteter Token → Re-Join statt
 //                    normalem Reconnect; `finished` → gar nicht reconnecten).
-//   initialDelay, maxDelay, backoffFactor — Backoff-Parameter (Default wie
-//     bisher: 2000ms Start, 30000ms Deckel, ×1.6 je Versuch). Für einen festen
-//     Delay ohne Backoff (bisher host.html): backoffFactor: 1.
+//   initialDelay, maxDelay, backoffFactor — Backoff-Parameter (Default:
+//     2000ms Start, 30000ms Deckel, ×1.6 je Versuch). Für einen festen
+//     Delay ohne Backoff: backoffFactor: 1.
 //
 // Rückgabe: { reconnectNow() } — löst sofort einen neuen Verbindungsversuch
 // aus (delay-Override 0), z. B. nach einem erfolgreichen Re-Join.
