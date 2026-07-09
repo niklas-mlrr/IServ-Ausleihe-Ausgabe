@@ -420,6 +420,10 @@
     /* Abschnitts-Überschrift im Dialog (z. B. „Entwicklung") mit Trennlinie */
     #settings-dialog .settings-section { font-size: .8rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); border-top: 1px solid var(--border); padding-top: 12px; margin-top: 4px; }
     #settings-dialog .settings-hint { font-size: .8rem; color: var(--text-muted); margin-top: -6px; }
+    /* Reiter für die Einstellungs-Abschnitte (Drucker / Bücherliste / Entwicklung) */
+    #settings-dialog #settings-tabs { margin-bottom: 0; }
+    #settings-dialog .settings-tab-panel { display: none; flex-direction: column; gap: 14px; }
+    #settings-dialog .settings-tab-panel.active { display: flex; }
   </style>
 </head>
 <body>
@@ -564,42 +568,56 @@
       <select id="schoolyear-select"><option value="">-- wird geladen… --</option></select>
     </label>
     <p class="settings-hint">Ein Wechsel des Schuljahrs setzt alle geöffneten Klassen-Reiter zurück (Queue, Now-Serving). Bei aktiven Ausgaben erscheint ein Bestätigungsdialog.</p>
-    <div class="settings-row settings-section">Druck</div>
-    <label class="settings-row settings-field" for="printer-select" title="Drucker, über den die Leihscheine gedruckt werden. Standard = PRINTER_NAME aus der .env bzw. Systemstandard.">
-      Drucker
-      <select id="printer-select"><option value="">Standard</option></select>
-    </label>
-    <label class="switch settings-row" title="Zusätzlich die 2. Seite (Schüler-Leihschein) drucken — Seite 1 wird immer gedruckt">
-      <input type="checkbox" id="slip-second-page">
-      <span class="track"></span>
-      Schüler-Leihschein
-    </label>
-    <div class="settings-row settings-booklists" id="settings-booklists">
-      <span class="settings-bl-label">Bücherlisten ordnen</span>
-      <p class="hint">Reihenfolge der ausleihbaren Bücher je Jahrgang für die Scanner-Anzeige.
-        Reiter wählen, per Drag &amp; Drop sortieren, über das Augen-Symbol ausblenden — mit „Speichern" übernehmen.
-        Ausgeblendete Reihen gelten beim Ausleihen nicht mehr als vorgemerkt.</p>
-      <div class="tabs" id="bl-tabs"></div>
-      <div id="bl-list" class="book-order-list"></div>
+
+    <div class="tabs" id="settings-tabs">
+      <button class="tab active" id="settings-tab-drucker-btn" data-settings-tab="drucker">Drucker</button>
+      <button class="tab" id="settings-tab-buecherliste-btn" data-settings-tab="buecherliste">Bücherliste</button>
+      <button class="tab" id="settings-tab-entwicklung-btn" data-settings-tab="entwicklung">Entwicklung</button>
     </div>
-    <div class="settings-row settings-section">Entwicklung</div>
-    <label class="switch settings-row" title="QR-Codes auf die Tailscale-IP (100.x) erzwingen statt der Auto-Auswahl (LAN-first). Aus = Auto.">
-      <input type="checkbox" id="force-tailscale-ip">
-      <span class="track"></span>
-      Tailscale-IP
-    </label>
-    <label class="switch settings-row" title="Beim Drucken wird der Leihschein NICHT an den Drucker geschickt, sondern als PDF in den Browser dieses Host-Rechners heruntergeladen (Download-Prompt). Für Tests ohne Drucker.">
-      <input type="checkbox" id="save-pdf-locally">
-      <span class="track"></span>
-      PDF lokal speichern (statt drucken)
-    </label>
-    <p class="settings-hint">Wenn aktiv, wird jeder Druck als PDF in den Browser dieses Host-Rechners heruntergeladen statt an den Drucker geschickt.</p>
-    <label class="switch settings-row" title="Experimentell: ersetzt beim Drucken den (teils falschen) Klassen-Code hinter „Klasse" auf dem Leihschein durch die echte Klasse des Schülers aus dem System.">
-      <input type="checkbox" id="fix-class-on-slip">
-      <span class="track"></span>
-      Klasse auf Leihschein korrigieren (experimentell)
-    </label>
-    <p class="settings-hint">Überschreibt lokal den Klassen-Code auf dem gedruckten Leihschein mit der echten Klasse des Schülers — der IServ-Leihschein selbst bleibt unverändert.</p>
+
+    <div class="settings-tab-panel active" id="settings-tab-drucker">
+      <label class="settings-row settings-field" for="printer-select" title="Drucker, über den die Leihscheine gedruckt werden. Standard = PRINTER_NAME aus der .env bzw. Systemstandard.">
+        Drucker
+        <select id="printer-select"><option value="">Standard</option></select>
+      </label>
+      <label class="switch settings-row" title="Zusätzlich die 2. Seite (Schüler-Leihschein) drucken — Seite 1 wird immer gedruckt">
+        <input type="checkbox" id="slip-second-page">
+        <span class="track"></span>
+        Schüler-Leihschein
+      </label>
+    </div>
+
+    <div class="settings-tab-panel" id="settings-tab-buecherliste">
+      <div class="settings-row settings-booklists" id="settings-booklists">
+        <span class="settings-bl-label">Bücherlisten ordnen</span>
+        <p class="hint">Reihenfolge der ausleihbaren Bücher je Jahrgang für die Scanner-Anzeige.
+          Reiter wählen, per Drag &amp; Drop sortieren, über das Augen-Symbol ausblenden — mit „Speichern" übernehmen.
+          Ausgeblendete Reihen gelten beim Ausleihen nicht mehr als vorgemerkt.</p>
+        <div class="tabs" id="bl-tabs"></div>
+        <div id="bl-list" class="book-order-list"></div>
+      </div>
+    </div>
+
+    <div class="settings-tab-panel" id="settings-tab-entwicklung">
+      <label class="switch settings-row" title="QR-Codes auf die Tailscale-IP (100.x) erzwingen statt der Auto-Auswahl (LAN-first). Aus = Auto.">
+        <input type="checkbox" id="force-tailscale-ip">
+        <span class="track"></span>
+        Tailscale-IP
+      </label>
+      <label class="switch settings-row" title="Beim Drucken wird der Leihschein NICHT an den Drucker geschickt, sondern als PDF in den Browser dieses Host-Rechners heruntergeladen (Download-Prompt). Für Tests ohne Drucker.">
+        <input type="checkbox" id="save-pdf-locally">
+        <span class="track"></span>
+        PDF lokal speichern (statt drucken)
+      </label>
+      <p class="settings-hint">Wenn aktiv, wird jeder Druck als PDF in den Browser dieses Host-Rechners heruntergeladen statt an den Drucker geschickt.</p>
+      <label class="switch settings-row" title="Experimentell: ersetzt beim Drucken den (teils falschen) Klassen-Code hinter „Klasse" auf dem Leihschein durch die echte Klasse des Schülers aus dem System.">
+        <input type="checkbox" id="fix-class-on-slip">
+        <span class="track"></span>
+        Klasse auf Leihschein korrigieren (experimentell)
+      </label>
+      <p class="settings-hint">Überschreibt lokal den Klassen-Code auf dem gedruckten Leihschein mit der echten Klasse des Schülers — der IServ-Leihschein selbst bleibt unverändert.</p>
+    </div>
+
     <div class="modal-actions">
       <button class="primary" id="settings-dialog-save">Speichern</button>
       <button class="ghost" id="settings-dialog-cancel">Abbrechen</button>
@@ -1755,6 +1773,9 @@
     const saveBtn = document.getElementById('settings-dialog-save');
     const cancelBtn = document.getElementById('settings-dialog-cancel');
     const prevFocus = document.activeElement;
+    // Immer mit dem Drucker-Reiter starten, statt den zuletzt gewählten Reiter zu behalten.
+    document.querySelectorAll('#settings-tabs .tab').forEach(t => t.classList.toggle('active', t.id === 'settings-tab-drucker-btn'));
+    document.querySelectorAll('.settings-tab-panel').forEach(p => p.classList.toggle('active', p.id === 'settings-tab-drucker'));
     // Ausgangswerte aus dem Server-State (globale Quelle der Wahrheit für alle
     // Host-Rechner). Theme/Auto-Hell-Dunkel bleibt die einzige lokale Größe
     // und taucht hier nicht auf.
@@ -2057,6 +2078,14 @@
     if (close) { e.stopPropagation(); closeClass(close.dataset.close); return; }
     const tab = e.target.closest('[data-tab]');
     if (tab) switchTab(tab.dataset.tab);
+  });
+  // Einstellungen-Dialog: Reiter Drucker / Bücherliste / Entwicklung.
+  document.getElementById('settings-tabs').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-settings-tab]');
+    if (!btn) return;
+    const name = btn.dataset.settingsTab;
+    document.querySelectorAll('#settings-tabs .tab').forEach(t => t.classList.toggle('active', t === btn));
+    document.querySelectorAll('.settings-tab-panel').forEach(p => p.classList.toggle('active', p.id === `settings-tab-${name}`));
   });
   document.getElementById('open-class-btn').addEventListener('click', () => openClass());
   document.getElementById('open-test-config-btn').addEventListener('click', () => openTestConfig());
