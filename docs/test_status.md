@@ -81,6 +81,35 @@ lädt ihn (ersetzt den Hintergrund-Schüler). Letzte Klasse wird beim erneuten
       räumt den transienten Schüler sauber auf (kein Worker-Leak, Helfer frei).
       *Gegen Produktion nur nach Freigabe; keine Buchung.*
 
+### Neu 2026-07-09 (Helfer-Menü: Klassen-Reiter für alle offenen Host-Klassen)
+
+Im Peek-Modus (`web/scan.js`/`scan.html` + Server-WS) zeigt das Helfermenü jetzt
+**Reiter für alle offenen Host-Klassen** (alle nicht-impliziten `state.contexts`),
+horizontal scrollbar; eigene Klasse vorausgewählt, sonst erste offene. Pro Reiter
+darunter die Warteschlange dieser Klasse mit „Aufrufen"-Button (wie bisher). Der
+im Hintergrund verbundene Schüler steht im Peek **nur in der Statuszeile**, die
+große `.name-row` ist verborgen. Aufrufen aus einer **fremden** Klasse rebindet
+den Helfer an diese Klasse (`helper.context_id` wechselt; danach zieht „Nächster"
+aus der neuen Klasse) statt abzuweisen. Die Lupe bleibt unverhalten zusätzlich.
+Commit `8bf6c08`.
+
+- [x] **Backend**: `state.real_contexts_summary()` (alle offenen Klassen + je
+      wartende Schüler); `hub.broadcast_queue_size` sendet zusätzlich
+      `contexts_update` (`{contexts, own_context_id}`, pro Helfer) an denselben
+      Kreis (`student_id is None or peeking`), `queue_update` bleibt bestehen;
+      `routes/ws.py`: `contexts_update` bei Connect + `peek_queue`; `call` aus
+      fremder Klasse rebindet statt Fehler (`rebind_helper_to_context` in
+      `sessions.py`). **Unit-Suite grün** (147 passed; +1 in `tests/test_hub.py`
+      `contexts_update`-Broadcast, +1 in `tests/test_queue_flow.py` Rebind).
+- [x] **JS-Syntax/Imports**: `node --check web/scan.js` OK; Server-Imports OK.
+- [ ] **Am Gerät** (manuell, read-only): Host öffnet zwei Klassen-Tabs, Helfer
+      verbinden; Menü öffnen → Reiter für beide Klassen, eigene vorausgewählt,
+      eigene Queue mit Aufrufen-Buttons; fremden Reiter wählen → dessen Queue;
+      Aufrufen eines fremden Schülers → Schüler geladen, Helfer an fremde Klasse
+      gebunden (Host-Helfer-Tabelle zeigt neue Klasse); im Peek Hintergrund-Schüler
+      **nur** in Statuszeile (`.name-row` verborgen); viele Klassen → Reiter
+      horizontal scrollbar; Lupe weiterhin verfügbar.
+
 ### Neu 2026-07-08 (Host-Überarbeitung: Settings + Tab-System)
 
 Multi-Kontext-Refactor des Hosts (`web/host.html`) + Backend
@@ -408,10 +437,12 @@ Zielbild + Phasen: `docs/PLAN.md` bzw. Plan in dieser Session.
 ## Unit-Tests (pytest, `uv run pytest`)
 
 Reine Logik, kein IServ/Playwright/Server — schnell + produktionsneutral, als
-Regressions-Netz und QS-Beleg. **133 Tests, grün (2026-07-08; +3 für
-Menü-Peek — `helper.peeking`-Reset in `end_student`/`assign_student_to_helper`
-+ `broadcast_queue_size` an peekende zugewiesene Helfer — siehe
-`tests/test_hub.py`/`tests/test_queue_flow.py`; 2026-07-07: +14 für
+Regressions-Netz und QS-Beleg. **147 Tests, grün (2026-07-09; +2 für
+Helfer-Menü-Klassen-Reiter — `contexts_update`-Broadcast + Rebind
+`rebind_helper_to_context` — siehe `tests/test_hub.py`/`tests/test_queue_flow.py`;
+2026-07-08: +3 für Menü-Peek — `helper.peeking`-Reset in
+`end_student`/`assign_student_to_helper` + `broadcast_queue_size` an peekende
+zugewiesene Helfer; 2026-07-07: +14 für
 Scanner-Reconnect/Disconnect-Grace + `StudentSession.reload()`, +2 für `lent`-
 Menge aus `current_books` bei ausgeblendeten Reihen + ISBN-Umhängung
 `vormerk→lent` nach Buchung in derselben Session — siehe PLAN §6.1).** Coverage
