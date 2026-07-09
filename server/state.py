@@ -45,6 +45,12 @@ class HelperSession:
     token: str
     name: str
     student_id: int | None = None
+    # Klasse (form) des aktuell zugewiesenen Schülers. Quelle für book_order +
+    # info["form"] beim Reconnect, falls der Schüler NICHT in einer Queue steht
+    # (Helfer-Lupe / search_call — dort gibt es keinen QueueStudent, an dem die
+    # Form hing; s. ws_scanner-Reconnect). Invariant: nur relevant, wenn
+    # student_id is not None; gesetzt ausschließlich in assign_student_to_helper.
+    student_form: str | None = None
     ws: object | None = None  # WebSocket (avoid import cycle)
     created_at: datetime = field(default_factory=datetime.now)
     last_scan: str | None = None

@@ -141,61 +141,64 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
     # Fallback (ohne Schüler): Reihenfolge des Helfer-Kontexts, sonst aktiv.
     _hctx = state.contexts.get(helper.context_id) if helper.context_id else None
     book_order = _hctx.book_order if _hctx else state.book_order
-    if helper.student_id is not None:
+    if helper.student_id is not None and state.iserv is not None:
         student = state.find_student(helper.student_id)
-        if student and state.iserv:
-            try:
-                info = await state.iserv.get_student_info(helper.student_id, state.selected_schoolyear)
-                info["form"] = student.form
-                book_order = await get_book_order_for_form(state, student.form)
-                info["book_order"] = book_order
-                apply_hidden_books(info, await get_hidden_isbns_for_form(state, student.form))
-                helper.expected_isbns = expected_isbns_from_info(info)
-                helper.vormerk_isbns, helper.lent_isbns = booking_isbn_sets_from_info(info)
-                helper.last_scan = None  # Worker-Page wird ggf. neu geladen → Feld leer
-                # Modus A: Bücherliste sofort. Sends über das Hub-Lock
-                # (send_websocket), damit sie nicht mit den Sends des In-Flight-
-                # Lade-Tasks (send_scanner auf denselben neuen WS) interleaven.
-                await hub.send_websocket(websocket, {"type": "student_info", "student": info})
-                load_inflight = helper.load_task is not None and not helper.load_task.done()
-                worker_session = state.student_worker_sessions.get(helper.student_id)
-                worker_present = worker_session is not None
-                if worker_present:
-                    # Worker war bereits bereit → Seite im Worker neu laden
-                    # (read-only GET-Reload auf dem bestehenden Context, kein
-                    # neuer Context). Identität danach re-checken: wurde der
-                    # Worker während des Reloads freigegeben (z. B. /api/skip),
-                    # KEIN `worker_ready` senden, sondern Fehler.
-                    ws_ref = worker_session
+        # Form: aus dem QueueStudent, falls vorhanden (call/next); sonst aus
+        # helper.student_form — der Lupe-Schüler (search_call) steht bewusst
+        # NICHT in einer Queue, seine Form wurde darum beim Zuweisen am Helfer
+        # hinterlegt. So wird auch der Lupe-Schüler beim Reconnect wiederher-
+        # gestellt (inkl. Worker-Reload) statt als `waiting` zu verfallen.
+        form = student.form if student is not None else (helper.student_form or "")
+        try:
+            info = await state.iserv.get_student_info(helper.student_id, state.selected_schoolyear)
+            info["form"] = form
+            book_order = await get_book_order_for_form(state, form)
+            info["book_order"] = book_order
+            apply_hidden_books(info, await get_hidden_isbns_for_form(state, form))
+            helper.expected_isbns = expected_isbns_from_info(info)
+            helper.vormerk_isbns, helper.lent_isbns = booking_isbn_sets_from_info(info)
+            helper.last_scan = None  # Worker-Page wird ggf. neu geladen → Feld leer
+            # Modus A: Bücherliste sofort. Sends über das Hub-Lock
+            # (send_websocket), damit sie nicht mit den Sends des In-Flight-
+            # Lade-Tasks (send_scanner auf denselben neuen WS) interleaven.
+            await hub.send_websocket(websocket, {"type": "student_info", "student": info})
+            load_inflight = helper.load_task is not None and not helper.load_task.done()
+            worker_session = state.student_worker_sessions.get(helper.student_id)
+            worker_present = worker_session is not None
+            if worker_present:
+                # Worker war bereits bereit → Seite im Worker neu laden
+                # (read-only GET-Reload auf dem bestehenden Context, kein
+                # neuer Context). Identität danach re-checken: wurde der
+                # Worker während des Reloads freigegeben (z. B. /api/skip),
+                # KEIN `worker_ready` senden, sondern Fehler.
+                ws_ref = worker_session
+                reload_ok = False
+                try:
+                    await ws_ref.reload()
+                    reload_ok = state.student_worker_sessions.get(helper.student_id) is ws_ref
+                except Exception as e:  # noqa: BLE001
+                    log.warning("Worker-Reload (Reconnect) für %d fehlgeschlagen: %s", helper.student_id, e)
                     reload_ok = False
-                    try:
-                        await ws_ref.reload()
-                        reload_ok = state.student_worker_sessions.get(helper.student_id) is ws_ref
-                    except Exception as e:  # noqa: BLE001
-                        log.warning("Worker-Reload (Reconnect) für %d fehlgeschlagen: %s", helper.student_id, e)
-                        reload_ok = False
-                    if reload_ok:
-                        await hub.send_websocket(websocket, {"type": "worker_ready"})
-                    else:
-                        await hub.send_websocket(
-                            websocket, {"type": "error", "msg": "Worker-Reload fehlgeschlagen"}
-                        )
-                elif load_inflight:
-                    # Worker wird gerade erst geöffnet (open_student läuft).
-                    # KEIN `worker_ready` senden — der In-Flight-Lade-Task
-                    # (`load_and_push_helper_student`) liefert ihn über
-                    # send_scanner(token) an den neuen WS. student_info steht
-                    # schon (oben gesendet), ggf. doppelt (vom In-Flight-Task) —
-                    # harmlos.
-                    pass
-                else:
-                    # Degraded-Modus (kein worker_pool) oder Worker nie
-                    # bereit: wie bisher sofort `worker_ready` senden.
+                if reload_ok:
                     await hub.send_websocket(websocket, {"type": "worker_ready"})
-            except Exception as e:
-                await hub.send_websocket(websocket, {"type": "error", "msg": str(e)})
-        elif student is None:
-            await hub.send_websocket(websocket, {"type": "waiting", "msg": "Warte auf Schüler-Zuweisung", "queue_size": state.pending_count(helper.context_id), "queue": state.pending_queue_as_list(helper.context_id)})
+                else:
+                    await hub.send_websocket(
+                        websocket, {"type": "error", "msg": "Worker-Reload fehlgeschlagen"}
+                    )
+            elif load_inflight:
+                # Worker wird gerade erst geöffnet (open_student läuft).
+                # KEIN `worker_ready` senden — der In-Flight-Lade-Task
+                # (`load_and_push_helper_student`) liefert ihn über
+                # send_scanner(token) an den neuen WS. student_info steht
+                # schon (oben gesendet), ggf. doppelt (vom In-Flight-Task) —
+                # harmlos.
+                pass
+            else:
+                # Degraded-Modus (kein worker_pool) oder Worker nie
+                # bereit: wie bisher sofort `worker_ready` senden.
+                await hub.send_websocket(websocket, {"type": "worker_ready"})
+        except Exception as e:
+            await hub.send_websocket(websocket, {"type": "error", "msg": str(e)})
     else:
         await hub.send_websocket(websocket, {"type": "waiting", "msg": "Warte auf Schüler-Zuweisung", "queue_size": state.pending_count(helper.context_id), "queue": state.pending_queue_as_list(helper.context_id)})
 

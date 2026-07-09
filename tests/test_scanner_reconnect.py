@@ -234,10 +234,11 @@ def test_reload_renavigates_existing_page():
 
     asyncio.run(session.reload())
 
-    # load_card navigiert App-Root + Schüler-Route (zwei GETs) auf der
-    # bestehenden Page — kein neuer Context.
+    # Angular steht schon → kein App-Root. Kurzer Hop auf #/counter erzwingt
+    # einen echten Re-Render, danach zurück auf die Schüler-Route (beides
+    # In-App-Hashrouten, kein vollständiger Root-Load).
     assert page.gotos == [
-        "https://ausleihe.example.test/",
+        "https://ausleihe.example.test/#/counter",
         "https://ausleihe.example.test/#/counter/student/42",
     ]
     assert session._card_loaded is True
@@ -414,9 +415,9 @@ async def _fake_relogin(page, label):
 
 
 def test_reload_performs_relogin_on_expired_session():
-    """Bei abgelaufener Session führt reload() (via load_card → _goto_authed)
-    den Re-Login aus und navigiert danach erfolgreich — alles auf derselben
-    Page, kein neuer Context."""
+    """Bei abgelaufener Session führt reload() den Re-Login aus (direkt beim
+    #/counter-Hop) und navigiert danach erfolgreich — alles auf derselben
+    Page, kein neuer Context, kein App-Root-Load."""
     page = _ExpiredPage()
     session = StudentSession(
         context=None, page=page, domain="example.test",
@@ -426,12 +427,12 @@ def test_reload_performs_relogin_on_expired_session():
 
     asyncio.run(session.reload())
 
-    # Genau ein Re-Login (beim ersten _goto_authed, App-Root), danach authed.
+    # Genau ein Re-Login (beim ersten _goto_authed, #/counter-Hop), danach authed.
     assert page.relogin_calls == 1
-    # gotos: App-Root (→ Login) → Re-Login → App-Root (Retry) → Schüler-Route.
+    # gotos: #/counter (→ Login) → Re-Login → #/counter (Retry) → Schüler-Route.
     assert page.gotos == [
-        "https://ausleihe.example.test/",
-        "https://ausleihe.example.test/",
+        "https://ausleihe.example.test/#/counter",
+        "https://ausleihe.example.test/#/counter",
         "https://ausleihe.example.test/#/counter/student/42",
     ]
     assert session._card_loaded is True
@@ -439,7 +440,11 @@ def test_reload_performs_relogin_on_expired_session():
 
 def test_reload_raises_when_session_expired_and_no_relogin():
     """Ohne Re-Login-Callable muss reload() bei abgelaufener Session
-    kontrolliert werfen (statt stillschweigend eine tote Kartei zu behalten)."""
+    kontrolliert werfen (statt stillschweigend eine tote Kartei zu behalten).
+
+    Der direkte Reload-Versuch scheitert am #/counter-Hop (Login-Redirect);
+    der Fallback auf das vollständige load_card() scheitert am App-Root ebenfalls
+    → RuntimeError propagiert. Beide Gotos wurden protokolliert."""
     page = _ExpiredPage()
     session = StudentSession(
         context=None, page=page, domain="example.test",
@@ -455,8 +460,11 @@ def test_reload_raises_when_session_expired_and_no_relogin():
         assert "kein Re-Login" in str(e)
 
     assert raised, "reload() muss RuntimeError bei fehlendem Re-Login werfen"
-    # Abbruch nach dem ersten goto — kein zweiter Versuch, keine Schüler-Route.
-    assert page.gotos == ["https://ausleihe.example.test/"]
+    # #/counter-Versuch (→ Login) + Fallback load_card(): App-Root (→ Login).
+    assert page.gotos == [
+        "https://ausleihe.example.test/#/counter",
+        "https://ausleihe.example.test/",
+    ]
     assert page.relogin_calls == 0
     assert session._card_loaded is False
 
@@ -511,9 +519,9 @@ class _TimeoutPage(_FakePage):
 
 
 def test_reload_succeeds_when_barcode_field_times_out():
-    """Erscheint das Barcode-Feld nach 20 s nicht, gibt load_card nur eine
-    Warnung aus und setzt _card_loaded trotzdem True — reload() darf nicht
-    werfen (Timeout ist im read-only Reload-Pfad nicht fatal)."""
+    """Erscheint das Barcode-Feld nach dem direkten Reload nicht, fällt reload()
+    auf das vollständige load_card() zurück. Dessen Barcode-Timeout ist nicht
+    fatal (warnen + _card_loaded=True) — reload() wirft nicht."""
     page = _TimeoutPage()
     session = StudentSession(
         context=None, page=page, domain="example.test",
@@ -523,7 +531,11 @@ def test_reload_succeeds_when_barcode_field_times_out():
     asyncio.run(session.reload())  # wirft nicht
 
     assert session._card_loaded is True, "Trotz Timeout als geladen markiert"
+    # Direkter Versuch (#/counter → Schüler-Route) + Fallback load_card()
+    # (App-Root → Schüler-Route).
     assert page.gotos == [
+        "https://ausleihe.example.test/#/counter",
+        "https://ausleihe.example.test/#/counter/student/42",
         "https://ausleihe.example.test/",
         "https://ausleihe.example.test/#/counter/student/42",
     ]
@@ -559,9 +571,10 @@ async def _fake_relogin_student_route(page, label):
 
 
 def test_reload_relogin_on_student_route_redirect():
-    """App-Root noch authed, aber die Schüler-Route triggert den Login-Redirect
-    → Re-Login feuert beim zweiten _goto_authed, danach erfolgreicher Retry
-    der Schüler-Route. Alles auf derselben Page (read-only)."""
+    """App ist initialisiert (kein Root-Load nötig); der #/counter-Hop läuft
+    authed, aber die Schüler-Route triggert den Login-Redirect → Re-Login feuert
+    beim zweiten _goto_authed, danach erfolgreicher Retry der Schüler-Route.
+    Alles auf derselben Page (read-only)."""
     page = _StudentRouteExpiredPage()
     session = StudentSession(
         context=None, page=page, domain="example.test",
@@ -572,10 +585,10 @@ def test_reload_relogin_on_student_route_redirect():
     asyncio.run(session.reload())
 
     assert page.relogin_calls == 1
-    # gotos: App-Root (authed) → Schüler-Route (→ Login) → Re-Login →
+    # gotos: #/counter (authed) → Schüler-Route (→ Login) → Re-Login →
     # Schüler-Route (Retry, authed).
     assert page.gotos == [
-        "https://ausleihe.example.test/",
+        "https://ausleihe.example.test/#/counter",
         "https://ausleihe.example.test/#/counter/student/42",
         "https://ausleihe.example.test/#/counter/student/42",
     ]

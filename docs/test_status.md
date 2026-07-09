@@ -28,6 +28,53 @@
 
 ## Offen / zu testen
 
+### Neu 2026-07-09 (Scanner: Reconnect stellt auch Lupe-Schüler wieder her + schneller Worker-Reload)
+
+Wird die Helferclient-Seite neu geladen, stellt der Reconnect-Pfad
+(`server/routes/ws.py` `ws_scanner`) den aktuell geladenen Schüler wieder her
+und lädt die Kartei im Worker neu (`StudentSession.reload()` → `worker_ready`).
+Zwei Lücken/Verbesserungen:
+
+- **Lupe-Schüler (`search_call`)** ging bisher beim Reload verloren: er ist
+  bewusst **nicht** in einer Queue eingetragen, also lief `state.find_student`
+  None → der Reconnect sendete `waiting`, der Schüler war weg, der Worker
+  wurde **nicht** neu geladen. Fix: `HelperSession.student_form` speichert die
+  Klasse beim Zuweisen (`assign_student_to_helper`); der Reconnect nimmt die
+  Form daraus, falls `find_student` None liefert, und durchläuft dann auch für
+  den Lupe-Schüler den Wiederherstellungs-+Worker-Reload-Pfad. `end_student`
+  räumt `student_form` in beiden Zweigen mit auf. (Hintergrund/Peek ist nur
+  eine Ansicht — beim Reconnect kommt der Schüler ohnehin als aktiv zurück,
+  `helper.peeking` wird auf False gesetzt.)
+- **`StudentSession.reload()` beschleunigt**: Angular steht auf der bereits
+  geöffneten Page → kein App-Root-Load (~4 s) mehr. Stattdessen Hop auf
+  `#/counter` (erzwingt echten Re-Render — gleicher Hash allein wäre ein
+  Angular-No-Op ohne frische Buchdaten) und zurück auf `#/counter/student/<id>`,
+  beides In-App-Hashrouten via `_goto_authed` (inkl. Re-Login-Recovery). Sicherer
+  Fallback auf vollständiges `load_card()` (Root + Schüler-Route), falls das
+  Barcode-Feld nicht erscheint. `load_card` (frisches `open_student`) bleibt
+  unverändert — dort muss Angular von der Root initialisiert werden (Spike B).
+  Nur GET-Routen, kein `page.reload()` (kein Post-Re-Post-Risiko).
+
+- [x] **Unit-Suite**: `uv run pytest` **149 grün**. `tests/test_scanner_reconnect.py`
+      reload-Tests an neue Goto-Sequenz (`#/counter` → Schüler-Route, Fallback
+      `load_card`) angepasst (Re-Login/Timeout/fehlendes-Re-Login/Schüler-Route-
+      Redirect). `tests/test_queue_flow.py` +1 (`assign_student_to_helper` setzt
+      `student_form` für Queue- wie Lupe-Schüler; Advance wechselt die Form
+      mit) sowie `student_form`-Clear-Assertionen im transienten `end_student`-
+      und `assign`-Test.
+- [ ] **Am Gerät** (manuell, read-only, erst nach Freigabe — PLAN §6):
+      (1) Helfer lädt Schüler (call/next) → Seite neu laden → Schüler sofort
+      wieder da, Worker reloaded **direkt** auf die Schüler-Route (Log/Browser:
+      `#/counter` → `#/counter/student/<id>`, **kein** Root-Load). (2) Gleiches
+      mit **Lupe-Schüler** (`search_call`): Reload → Schüler wiederhergestellt,
+      `worker_ready`, keine `waiting`. (3) Gleiches mit **Hintergrund-Schüler**
+      (Peek offen): Reload → Schüler als aktiv zurück, Worker reloaded.
+      (4) **Fallback**: Situation erzwingen, in der das Barcode-Feld nach
+      direktem Reload nicht erscheint → `load_card()` läuft, Kartei steht am
+      Ende. (5) Buchdaten nach Reload gegen die IServ-Kartei abgleichen
+      (nicht veraltet — gleicher Hash dürfte dank `#/counter`-Hop kein No-Op
+      sein). Jede Test-Ausleihe sofort zurücknehmen.
+
 ### Neu 2026-07-09 (Host: „Test Config" als eigener Tab statt Sub-Reiter)
 
 Der „Test Config"-Sub-Reiter im „Schüler hinzufügen"-Bereich jedes Klassen-Tabs
@@ -429,7 +476,11 @@ Zielbild + Phasen: `docs/PLAN.md` bzw. Plan in dieser Session.
       Worker bereits bereit stand, wird die in ihm geöffnete Kartei-Seite per
       `StudentSession.reload()` (Re-Navigation über GET-Routen, kein
       `page.reload()` — kein Post-Re-Post-Risiko) auf dem **bestehenden**
-      Context neu geladen; dann `worker_ready`. Läuft der Lade-Task noch, liefert
+      Context neu geladen; dann `worker_ready`.
+      **Update 2026-07-09:** `reload()` springt auf initialisierter Page direkt
+      die Schüler-Route an (Hop `#/counter` → `#/counter/student/<id>`, kein
+      App-Root-Load mehr) und stellt zudem auch Lupe-Schüler wieder her — siehe
+      Sektion oben. Läuft der Lade-Task noch, liefert
       dieser `worker_ready` selbst an den neuen WS. Mechanismus: das `finally`
       des alten Scanner-WS stößt den Teardown verzögert als Task an
       (`_deferred_end`, Grace `_RECONNECT_GRACE_S=3.0`) statt inline; ein
@@ -525,7 +576,11 @@ Zielbild + Phasen: `docs/PLAN.md` bzw. Plan in dieser Session.
 ## Unit-Tests (pytest, `uv run pytest`)
 
 Reine Logik, kein IServ/Playwright/Server — schnell + produktionsneutral, als
-Regressions-Netz und QS-Beleg. **147 Tests, grün (2026-07-09; +2 für
+Regressions-Netz und QS-Beleg. **149 Tests, grün (2026-07-09; +2 für
+Reconnect-stellt-auch-Lupe-Schüler-wieder-her + schnelleren
+`StudentSession.reload()` — `HelperSession.student_form`-Setzen/Clear + neue
+reload-Goto-Sequenz — siehe `tests/test_queue_flow.py`/
+`tests/test_scanner_reconnect.py`; 2026-07-09: +2 für
 Helfer-Menü-Klassen-Reiter — `contexts_update`-Broadcast + Rebind
 `rebind_helper_to_context` — siehe `tests/test_hub.py`/`tests/test_queue_flow.py`;
 2026-07-08: +3 für Menü-Peek — `helper.peeking`-Reset in
@@ -548,13 +603,13 @@ die E2E-Skripte V3–V7 ab.
 | `tests/test_ratelimit.py` | Drossel (allow/throttle, Fenster-Ablauf, pro-IP, sweep) |
 | `tests/test_booking_gate.py` | Buchungs-Gate: ohne Flag kein Worker-/Enter-Zugriff |
 | `tests/test_sessions.py` | Session-Lebenszyklus, Token/Code-Eindeutigkeit, harte Invalidierung |
-| `tests/test_queue_flow.py` | Queue-Übergänge: `gen_pairing_code` (skip/Erschöpfung), `end_student` (Status/Helfer-Lösung/Worker-Release), `advance_helper` (leer + nächster; sendet `loading`, kein Idle-`waiting`), `assign_student_to_helper` (gezielter Aufruf aus der Warteschlange — ältester Wartender bleibt unangetastet; `loading`-WS-Push), `pending_queue_as_list` (nur status='pending'), harte Worker-Freigabe; **2026-07-08:** `end_student`/`assign_student_to_helper` resetten `helper.peeking` (Menü-Peek) |
+| `tests/test_queue_flow.py` | Queue-Übergänge: `gen_pairing_code` (skip/Erschöpfung), `end_student` (Status/Helfer-Lösung/Worker-Release), `advance_helper` (leer + nächster; sendet `loading`, kein Idle-`waiting`), `assign_student_to_helper` (gezielter Aufruf aus der Warteschlange — ältester Wartender bleibt unangetastet; `loading`-WS-Push), `pending_queue_as_list` (nur status='pending'), harte Worker-Freigabe; **2026-07-09:** `assign_student_to_helper` setzt `helper.student_form` (Queue- wie Lupe-Schüler; Advance wechselt die Form mit), `end_student` räumt `student_form` (auch transienter Zweig); **2026-07-08:** `end_student`/`assign_student_to_helper` resetten `helper.peeking` (Menü-Peek) |
 | `tests/test_api_guards.py` | Endpunkt-Logik: Auth-Guard (`_require_host`), Login, `add-student` (Validierung/Duplikat 409), `add-test-students`-Idempotenz, skip/finish-Validierung, Buchungs-Gate HTTP-Ebene (403), `_base_url`/`_last_scan_for` |
 | `tests/test_printing.py` | Backend-Resolution (auto je Plattform) + `file`-Backend |
 | `tests/test_worker_pool.py` | `WorkerPool.stats()` (total/available/in_use) |
 | `tests/test_tls.py` | Cert hat SAN (localhost/127.0.0.1/cn), idempotent |
 | `tests/test_booking_precheck.py` | Buchungs-Vorabprüfung (`evaluate_scan_for_booking`: Prüf-Reihenfolge `deleted → series_already_lent → not_in_stock → not_enrolled`; `book_deleted`-Vorrang; `not_in_stock`-vor-`not_enrolled`; `series_already_lent`-vor-`not_in_stock` auch bei lagerndem Exemplar; `unknown_book`, `not_ready`, Lookup-Fehler) + `process_scan`-Gate-Verhalten (Buchen/Stagen/kein Feldkontakt) + Alert-Broadcast (`not_in_stock`/`book_deleted`→Alert mit `source`; `series_already_lent`→kein Alert) + `loaned_to`-Durchreichung (Name-Feld getrennt von `msg`; Helfer-`scan_result`+Host-`book_alert` carry `loaned_to`, Schüler-Source strippt es auf `None`; msg bleibt name-frei) — auch für `book_deleted` mit `student_id` (Ersatzanspruch) + `lent` autoritativ aus `current_books` (ungefiltert, ignoriert `apply_hidden_books` — ausgeblendete Reihe die der Schüler hat bleibt `series_already_lent`) + ISBN-Umhängung `vormerk→lent` nach `booked` in derselben Session (Session-Mutables passed-by-reference, kein Neuladen) |
-| `tests/test_scanner_reconnect.py` | Scanner-Reconnect/Disconnect-Grace (Modus A): `_deferred_end`-Re-Checks (Reconnect/`student_id`-Wechsel/neuer Schüler → No-op; echte Trennung → Teardown; Cancel → No-op), In-Flight-`load_task`-Cancel, Exception-Robustheit (`end_student`-/`broadcast_host`-Fehler schlucken), Worker-Release ohne Queue-Eintrag; `StudentSession.reload()` (App-Root+Schüler-Route re-navigieren, Re-Login bei Login-Redirect auf App-Root UND Schüler-Route, RuntimeError ohne Re-Login, Barcode-Timeout nicht fatal) — RAM-State/Fake-Pages, kein Browser/IServ |
+| `tests/test_scanner_reconnect.py` | Scanner-Reconnect/Disconnect-Grace (Modus A): `_deferred_end`-Re-Checks (Reconnect/`student_id`-Wechsel/neuer Schüler → No-op; echte Trennung → Teardown; Cancel → No-op), In-Flight-`load_task`-Cancel, Exception-Robustheit (`end_student`-/`broadcast_host`-Fehler schlucken), Worker-Release ohne Queue-Eintrag; `StudentSession.reload()` **(2026-07-09: direkter Schüler-Route-Hop `#/counter`→`#/counter/student/<id>` auf initialisierter Page statt App-Root+Schüler-Route, mit `load_card`-Fallback; Re-Login bei Login-Redirect, RuntimeError ohne Re-Login, Barcode-Timeout → Fallback)** — RAM-State/Fake-Pages, kein Browser/IServ |
 
 ## Hinweise zum Testen (wenn es so weit ist)
 

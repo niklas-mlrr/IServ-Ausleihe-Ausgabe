@@ -98,16 +98,52 @@ class StudentSession:
         log.info("Kartei für Schüler %d geladen", self._student_id)
 
     async def reload(self) -> None:
-        """Kartei auf der bereits offenen Page neu laden (read-only GET).
+        """Kartei auf der bereits initialisierten Page neu laden (read-only GET).
 
-        Re-navigiert ``self._page`` über :meth:`load_card` (inkl. Re-Login-
-        Recovery). Bewusst KEIN ``page.reload()`` — das könnte ein vorheriges
-        POST-Result re-posten; ``load_card`` nutzt ausschließlich GET-Routen
-        (App-Root + Schüler-Route). Einsatzfall: Helfer lädt die Seite neu,
-        während der Worker bereits bereit stand — die Kartei wird auf dem
-        bestehenden Context frisch geladen statt einen neuen zu öffnen.
+        Einsatzfall: Helfer lädt die Seite neu, während der Worker bereits bereit
+        stand — die Kartei wird auf dem bestehenden Context frisch geladen statt
+        einen neuen zu öffnen.
+
+        Schneller als :meth:`load_card`: Angular steht schon (die Page wurde zuvor
+        per ``load_card`` geöffnet) → der App-Root-Load (~4 s Wartezeit) entfällt.
+        Stattdessen wird direkt auf die Schüler-Route gesprungen. Da ein
+        **gleicher Hash** in Angular ein No-Op wäre (kein Re-Fetch → veraltete
+        Buchdaten), wird vorher kurz auf ``#/counter`` (ohne Schüler) gehoppt
+        und danach zurück auf die Schüler-Route — beides In-App-Hashrouten, die
+        einen echten Re-Render erzwingen. ``_goto_authed`` (inkl. Re-Login-
+        Recovery) bleibt erhalten; bewusst KEIN ``page.reload()`` (könnte ein
+        vorheriges POST-Result re-posten, s. load_card).
+
+        Fallback: erscheint das Barcode-Feld danach nicht (z. B. Angular doch
+        nicht initialisiert — Tab-Wiederherstellung), läuft einmal das
+        vollständige ``load_card()`` (Root + Schüler-Route, wie beim Öffnen).
         """
-        await self.load_card()
+        page = self._page
+        domain = self._domain
+        self._card_loaded = False
+        try:
+            # Kurzer Hop auf #/counter erzwingt einen echten Re-Render der
+            # Schülerkartei (gleicher Hash allein wäre ein Angular-No-Op).
+            await self._goto_authed(f"https://ausleihe.{domain}/#/counter", 1500)
+            await self._goto_authed(
+                f"https://ausleihe.{domain}/#/counter/student/{self._student_id}", 2000
+            )
+            try:
+                await page.locator('input.tt-input[placeholder*="Buch scannen"]').wait_for(
+                    state="visible", timeout=8_000
+                )
+            except PlaywrightTimeout:
+                log.warning(
+                    "Barcode-Feld bei direktem Reload für %d nicht erschienen — full load_card()",
+                    self._student_id,
+                )
+                await self.load_card()
+                return
+            self._card_loaded = True
+            log.info("Kartei für Schüler %d reloaded (direkte Schüler-Route)", self._student_id)
+        except Exception as e:  # noqa: BLE001 — direkter Reload gescheitert (z. B. Login ohne relogin) → sicherer Fallback
+            log.warning("Direkter Reload für %d fehlgeschlagen (%s) — full load_card()", self._student_id, e)
+            await self.load_card()
 
     # Selektor des Counter-Eingabefeldes nach Schülerauswahl (Spike A).
     _BARCODE_SEL = 'input.tt-input[placeholder*="Buch scannen"]'

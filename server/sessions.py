@@ -626,6 +626,7 @@ async def end_student(
             if h.load_task is not None and not h.load_task.done():
                 h.load_task.cancel()
             h.student_id = None
+            h.student_form = None
             h.expected_isbns = set()
             h.vormerk_isbns = set()
             h.lent_isbns = set()
@@ -660,6 +661,7 @@ async def end_student(
             if helper.load_task is not None and not helper.load_task.done():
                 helper.load_task.cancel()
             helper.student_id = None
+            helper.student_form = None
             helper.expected_isbns = set()
             helper.vormerk_isbns = set()
             helper.lent_isbns = set()
@@ -815,6 +817,7 @@ async def assign_student_to_helper(state: AppState, hub, helper, student) -> dic
     student.status = "active"
     student.assigned_helper = helper.token
     helper.student_id = student.student_id
+    helper.student_form = student.form  # für Reconnect, falls Schüler nicht in Queue (Lupe)
     helper.peeking = False  # neuer Schüler → keine Queue-Ansicht mehr
     await hub.broadcast_host(state.state_snapshot())
     # Client in den Lade-Zustand versetzen: Queue verbergen, „wird geladen …"

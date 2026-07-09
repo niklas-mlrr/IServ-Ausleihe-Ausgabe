@@ -890,6 +890,28 @@ abbaut. `Hub.send_websocket` serialisiert die Reconnect-Sends über das
 Per-WS-Lock gegen den In-Flight-Lade-Task. Nur GET, kein DB-/IServ-Write.
 Tests: `tests/test_scanner_reconnect.py` (14). Live am Gerät noch offen.
 
+**Reconnect-Ergänzung (2026-07-09):** Zwei Punkte.
+(1) **Lupe-Schüler überleben den Reload.** Bisher stellte der Reconnect nur
+Schüler wieder her, die in einer Queue stehen (`call`/`next`) — der Lupe-Schüler
+(`search_call`, bewusst nicht gequeuät) fiel durchs Raster: `find_student` →
+None → `waiting`, Schüler weg, Worker nicht neu geladen. Neu speichert
+`HelperSession.student_form` die Klasse beim Zuweisen (`assign_student_to_helper`); der Reconnect nimmt die Form daraus, falls `find_student` None
+liefert, und durchläuft für den Lupe-Schüler denselben Wiederherstellungs- +
+Worker-Reload-Pfad. `end_student` räumt `student_form` in beiden Zweigen.
+(Peek/Hintergrund ist nur eine Ansicht — beim Reconnect kommt der Schüler als
+aktiv zurück, `helper.peeking` wird False.)
+(2) **`StudentSession.reload()` schneller.** Auf der bereits initialisierten
+Page entfällt der App-Root-Load (~4 s); stattdessen Hop `#/counter` →
+`#/counter/student/<id>` (In-App-Hashrouten via `_goto_authed`, inkl. Re-Login-
+Recovery). Der `#/counter`-Hop erzwingt einen echten Re-Render (gleicher Hash
+allein wäre ein Angular-No-Op ohne frische Buchdaten). Fallback auf
+`load_card()` (Root + Schüler-Route), falls das Barcode-Feld nicht erscheint.
+`load_card` (frisches `open_student`) bleibt unverändert — dort muss Angular
+von der Root initialisiert werden (Spike B). Nur GET, kein `page.reload()`.
+Tests: Suite **149 grün** (`tests/test_scanner_reconnect.py` reload-Sequenzen
+angepasst, `tests/test_queue_flow.py` +`student_form`-Setzen/Clear). Live am
+Gerät offen (read-only, Freigabe — §6).
+
 Nur GET / read-only — `get_student_info` (GET) + `open_student` (Browser-
 Navigation ohne Submit), keine DB-/IServ-Writes, keine neuen Endpoints.
 Tests: `tests/test_queue_flow.py` +Assertion (`student_info` mit `books==[]`

@@ -371,6 +371,7 @@ def test_end_student_transient_search_student_cleans_helper():
     st = _state_with_iserv()
     hub = _FakeHub()
     helper = HelperSession(token="h1", name="Helfer", student_id=77, peeking=True)
+    helper.student_form = "10a"   # war via Lupe zugewiesen → Form am Helfer
     st.helper_sessions["h1"] = helper
     # Bewusst KEIN _add_student → 77 steht in keiner Queue (Schnellsprung).
     worker = _FakeWorker()
@@ -379,6 +380,7 @@ def test_end_student_transient_search_student_cleans_helper():
     asyncio.run(end_student_call(st, hub, 77, "done", "completed"))
 
     assert helper.student_id is None            # Helfer freigegeben (sonst stale)
+    assert helper.student_form is None          # Form aufräumen (sonst stale beim Reconnect)
     assert helper.peeking is False
     assert helper.expected_isbns == set()        # ISBN-Sets auch am transienten Pfad leer
     assert 77 not in st.student_worker_sessions   # Worker freigegeben
@@ -404,6 +406,7 @@ def test_assign_transient_search_student_loads_without_queue():
     asyncio.run(_assign_and_drain(st, hub, helper, student))
 
     assert helper.student_id == 88
+    assert helper.student_form == "10a"        # Form am Helfer — Quelle für Reconnect
     assert helper.peeking is False               # neuer Schüler beendet den Peek
     assert student.status == "active"
     assert student.assigned_helper == "h1"
@@ -412,6 +415,34 @@ def test_assign_transient_search_student_loads_without_queue():
     assert "loading" in types and "student_info" in types and "worker_ready" in types
     # Der Student taucht in KEINER Kontext-Queue (Schnellsprung, nicht eingetragen).
     assert st.find_student(88) is None
+
+
+def test_assign_student_to_helper_sets_student_form_for_reconnect():
+    """`helper.student_form` wird beim Zuweisen aus `student.form` gesetzt — für
+    Queue-Schüler (call/next) ebenso wie für transiente Lupe-Schüler. Der
+    Reconnect-Pfad (ws_scanner) braucht die Form, um book_order + info["form"]
+    zu liefern, falls `find_student` den Schüler nicht findet (Lupe: nicht in
+    einer Queue). Voraussetzung für die Lupe-Wiederherstellung beim Seiten-Reload."""
+    st = _state_with_iserv()
+    hub = _FakeHub()
+    # Queue-Schüler (form "10b") — der Normalfall.
+    queue_student = _add_student(st, 5, status="pending")
+    queue_student.form = "10b"
+    helper = HelperSession(token="h1", name="Helfer")
+    st.helper_sessions["h1"] = helper
+
+    asyncio.run(_assign_and_drain(st, hub, helper, queue_student))
+
+    assert helper.student_id == 5
+    assert helper.student_form == "10b"
+
+    # Auch nach advance (end+assign des nächsten) steht die Form des NEUEN
+    # Schülers — keine Drift der vorherigen.
+    nxt = _add_student(st, 6, status="pending")
+    nxt.form = "10c"
+    asyncio.run(_advance_and_drain(st, hub, helper))
+    assert helper.student_id == 6
+    assert helper.student_form == "10c"
 
 
 # ---------------------------------------------------------------------------
