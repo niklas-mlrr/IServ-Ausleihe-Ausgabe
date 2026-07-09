@@ -57,6 +57,9 @@ class _FakeHub:
     async def broadcast_settings(self, *a, **kw) -> None:
         pass
 
+    async def send_scanner(self, token, msg) -> None:
+        pass
+
 
 def _make_config(**over) -> Config:
     base = dict(
@@ -436,3 +439,241 @@ def test_settings_slip_default_reads_second_page_field(client, ctx):
 def test_settings_requires_auth(client, ctx):
     r = client.post("/api/settings/save-pdf-locally", json={"enabled": True})
     assert r.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Kontext-Lifecycle: open-class (Doppel-Öffnen), close-class (Teardown +
+# Helfer-Lösung + Kontext-Wechsel), set-active-context (unbekannte ID → 404).
+# ---------------------------------------------------------------------------
+
+class _FakeIServForClasses:
+    """Minimaler IServ-Stub für open-class: liefert zwei Schüler."""
+
+    async def get_students_for_form(self, form, schoolyear):
+        return [
+            {"student_id": 1, "lastname": "A", "firstname": "a"},
+            {"student_id": 2, "lastname": "B", "firstname": "b"},
+        ]
+
+
+def test_open_class_creates_context_and_populates_queue(client, ctx):
+    state, _, _ = ctx
+    state.iserv = _FakeIServForClasses()
+    r = client.post("/api/open-class", json={"form": "10a"}, cookies={"session_id": "sid"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["count"] == 2
+    assert "reused" not in body
+    ctx_id = body["context_id"]
+    assert state.contexts[ctx_id].form == "10a"
+    assert {s.student_id for s in state.contexts[ctx_id].queue} == {1, 2}
+    assert state.active_context_id == ctx_id
+
+
+def test_open_class_reused_no_second_queue(client, ctx):
+    """Doppel-Öffnen derselben Klasse aktiviert den bestehenden Kontext wieder
+    (reused: true) — es entsteht KEINE zweite Queue."""
+    state, _, _ = ctx
+    state.iserv = _FakeIServForClasses()
+    first = client.post("/api/open-class", json={"form": "10a"}, cookies={"session_id": "sid"}).json()
+    ctx_id = first["context_id"]
+
+    # Aktiven Kontext umschalten, damit der zweite Aufruf ihn nachweislich
+    # wieder AKTIVIERT (statt bloß unangetastet zu lassen).
+    other = state.open_context("10b")
+    assert state.active_context_id == other.id
+
+    second = client.post("/api/open-class", json={"form": "10a"}, cookies={"session_id": "sid"})
+    assert second.status_code == 200
+    body = second.json()
+    assert body["context_id"] == ctx_id
+    assert body["reused"] is True
+    assert body["count"] == 2
+    # Nur EIN Kontext für "10a" — keine zweite Queue angelegt.
+    assert sum(1 for c in state.contexts.values() if c.form == "10a") == 1
+    assert state.active_context_id == ctx_id
+
+
+def test_close_class_ends_students_and_releases_helper_bindings(client, ctx):
+    from server.state import HelperSession, QueueStudent
+
+    state, _, _ = ctx
+    class_ctx = state.open_context("10a")
+    class_ctx.queue.append(
+        QueueStudent(student_id=1, lastname="A", firstname="a", form="10a", status="active", assigned_helper="h1")
+    )
+    class_ctx.queue.append(
+        QueueStudent(student_id=2, lastname="B", firstname="b", form="10a", status="pending")
+    )
+    helper = HelperSession(token="h1", name="Helfer", student_id=1, context_id=class_ctx.id)
+    state.helper_sessions["h1"] = helper
+
+    r = client.post(
+        "/api/close-class", json={"context_id": class_ctx.id}, cookies={"session_id": "sid"}
+    )
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "context_id": class_ctx.id}
+
+    # Kontext komplett weg — keine Reste der Queue.
+    assert class_ctx.id not in state.contexts
+    # Helfer-Bindung an diesen Kontext gelöst und Schüler-Zuweisung aufgeräumt.
+    assert helper.context_id is None
+    assert helper.student_id is None
+
+
+def test_close_class_switches_active_context_when_active_one_closed(client, ctx):
+    state, _, _ = ctx
+    a = state.open_context("10a")
+    b = state.open_context("10b")
+    # `b` ist jetzt der aktive Kontext (zuletzt geöffnet).
+    assert state.active_context_id == b.id
+
+    r = client.post("/api/close-class", json={"context_id": b.id}, cookies={"session_id": "sid"})
+    assert r.status_code == 200
+    # Aktiver Kontext wechselt auf den verbleibenden Kontext `a`.
+    assert state.active_context_id == a.id
+
+
+def test_close_class_unknown_context_404(client, ctx):
+    r = client.post("/api/close-class", json={"context_id": "does-not-exist"}, cookies={"session_id": "sid"})
+    assert r.status_code == 404
+
+
+def test_set_active_context_unknown_id_404(client, ctx):
+    r = client.post("/api/set-active-context", json={"context_id": "does-not-exist"}, cookies={"session_id": "sid"})
+    assert r.status_code == 404
+
+
+def test_set_active_context_switches(client, ctx):
+    state, _, _ = ctx
+    a = state.open_context("10a")
+    b = state.open_context("10b")
+    assert state.active_context_id == b.id
+
+    r = client.post("/api/set-active-context", json={"context_id": a.id}, cookies={"session_id": "sid"})
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "active_context_id": a.id}
+    assert state.active_context_id == a.id
+
+
+# ---------------------------------------------------------------------------
+# student/pair — Pairing-TOCTOU (Aufgabe 2, wertvollster Test): zwischen dem
+# `await get_student_info(...)` und der verbindlichen Bindung liegt ein
+# Re-Check. Eine parallele Anfrage kann in genau diesem Fenster den Zustand
+# ändern (Code neu vergeben, Session entwertet, Schüler nicht mehr pending) —
+# der Endpoint MUSS dann 409 liefern statt zu binden.
+# ---------------------------------------------------------------------------
+
+class _FakeIServInfo:
+    """get_student_info liefert normale Info UND führt dabei eine vom Test
+    übergebene Mutation aus — simuliert eine Nebenläufigkeit während des Awaits."""
+
+    def __init__(self, mutate) -> None:
+        self._mutate = mutate
+
+    async def get_student_info(self, student_id, schoolyear):
+        self._mutate()
+        return {"student_id": student_id, "books": [], "enrolled": False}
+
+
+def _pair_setup(state):
+    """Session (pending_pairing) + wartender Schüler, bereit zum Pairing."""
+    import server.sessions as sessions
+    from server.state import QueueStudent
+
+    session = sessions.create_student_session(state)
+    session.pairing_code = "1234"
+    class_ctx = state.open_context("10a")
+    student = QueueStudent(student_id=1, lastname="A", firstname="a", form="10a", status="pending")
+    class_ctx.queue.append(student)
+    return session, student
+
+
+def test_student_pair_toctou_session_revoked_during_await(client, ctx):
+    """Während des IServ-Awaits wird die Session entwertet (z. B. Timeout/
+    Ausgabe geschlossen) — der Re-Check muss das erkennen, nicht binden."""
+    state, _, _ = ctx
+    session, student = _pair_setup(state)
+
+    def mutate():
+        session.state = "revoked"
+
+    state.iserv = _FakeIServInfo(mutate)
+
+    r = client.post(
+        "/api/student/pair",
+        json={"pairing_code": "1234", "student_id": 1},
+        cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 409
+    # Darf NICHT gebunden haben.
+    assert student.status == "pending"
+    assert session.student_id is None
+
+
+def test_student_pair_toctou_student_taken_during_await(client, ctx):
+    """Während des IServ-Awaits schnappt sich eine parallele Anfrage denselben
+    Schüler (Status kippt auf 'active') — Re-Check muss 409 liefern."""
+    state, _, _ = ctx
+    session, student = _pair_setup(state)
+
+    def mutate():
+        student.status = "active"
+
+    state.iserv = _FakeIServInfo(mutate)
+
+    r = client.post(
+        "/api/student/pair",
+        json={"pairing_code": "1234", "student_id": 1},
+        cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 409
+    assert session.student_id is None
+
+
+def test_student_pair_toctou_code_reassigned_during_await(client, ctx):
+    """Während des IServ-Awaits wird der Pairing-Code einer anderen Session
+    zugeteilt (find_session_by_code(code) ist danach nicht mehr `session`) —
+    Re-Check muss 409 liefern, nicht die alte Session binden."""
+    import server.sessions as sessions
+
+    state, _, _ = ctx
+    session, student = _pair_setup(state)
+    other_session = sessions.create_student_session(state)
+
+    def mutate():
+        # Der Code wird "neu vergeben" — simuliert dadurch, dass ein anderer
+        # Session-Token jetzt denselben Code trägt (Race: alte Session wurde
+        # entwertet + neu erzeugt mit demselben freien Code).
+        other_session.pairing_code = "1234"
+        session.pairing_code = "9999"
+
+    state.iserv = _FakeIServInfo(mutate)
+
+    r = client.post(
+        "/api/student/pair",
+        json={"pairing_code": "1234", "student_id": 1},
+        cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 409
+    assert student.status == "pending"
+    assert session.student_id is None
+
+
+def test_student_pair_happy_path_binds_when_nothing_changed(client, ctx):
+    """Gegenprobe: ändert sich während des Awaits nichts, bindet der Endpoint
+    ganz normal (kein falsch-positiver Guard)."""
+    state, _, _ = ctx
+    session, student = _pair_setup(state)
+    state.iserv = _FakeIServInfo(lambda: None)
+
+    r = client.post(
+        "/api/student/pair",
+        json={"pairing_code": "1234", "student_id": 1},
+        cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "student_id": 1}
+    assert student.status == "active"
+    assert session.student_id == 1
+    assert session.state == "paired"
