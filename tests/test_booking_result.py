@@ -3,9 +3,16 @@
 Diese Methode entscheidet nach einem Enter-Submit (echte Buchung gegen
 Produktion — nur im freigegebenen Buchungstest erreichbar), ob das Ergebnis
 `booked`, `error` oder `unknown` war. Die Selektoren sind im Code als
-UNVERIFIZIERT markiert; der dokumentierte Bug (Typeahead-Eingabefeld enthält
-den Barcode nach ``fill()`` noch als Wert und würde ohne den ``has_not``-Filter
-fälschlich als „Buchung erfolgreich" gelesen) ist der wichtigste Test hier.
+UNVERIFIZIERT markiert.
+
+Zum ``has_not``-Filter: Im realen IServ-DOM liegt ``input.tt-input`` in einem
+``<form>`` **oberhalb** der Tabellen, in keiner ``<tr>`` — und ``inner_text()``
+gibt ohnehin keine Input-Werte zurück. Der hier getestete False-Positive kann
+also im heutigen DOM nicht auftreten. Der Test hält den Filter dennoch fest,
+weil er gegen **Selektor-Drift** schützt: fiele ein Listen-Selektor künftig auf
+einen Wrapper, der das Feld oder ein Typeahead-Dropdown (dessen Vorschläge echte
+Textknoten sind) umschließt, würde der Barcode wieder mitgelesen. Der Fake baut
+deshalb bewusst eine DOM-Form, die es real (noch) nicht gibt.
 
 Kein echter Browser — ein minimaler Fake bildet nur die Teilmenge der
 Playwright-Locator-API nach, die ``_read_booking_result`` tatsächlich nutzt:
@@ -14,9 +21,10 @@ Playwright-Locator-API nach, die ``_read_booking_result`` tatsächlich nutzt:
 
 Struktur an ``automation/out/06b_kartei_geladen.html`` orientiert (gitignored,
 daher nur als Schnipsel hier übernommen): Bücherzeilen liegen in
-``<table class="table"><tbody><tr ng-repeat="book in bl.books ...">`` mit dem
-Buchcode in einem ``<samp>``-Kindelement; das Typeahead-Feld ist
-``input.tt-input`` mit ``tt-hint``-Begleitelement.
+``<table class="table"><tbody><tr ng-repeat="book in bl.books ...">``; der
+Buchcode steht als siebenstellige, nullgepolsterte Zahl in einer eigenen
+``<td>``-Spalte. Das Typeahead-Feld ist ``input.tt-input`` mit
+``tt-hint``-Begleitelement.
 """
 
 from __future__ import annotations

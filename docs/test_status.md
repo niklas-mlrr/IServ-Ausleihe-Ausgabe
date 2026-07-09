@@ -33,26 +33,45 @@
 | V14 | **WS-Message-Dispatch Scanner** — `call` mit pending-Re-Check, Umbinden an fremde Klasse (`rebind_helper_to_context`), `search_call` (Lupe) für queue-losen Schüler + fehlendes `form`, Peek-Toggle (`queue`/`close`), Scan ohne zugewiesenen Schüler, unbekanntes Token, malformed JSON-Frame beendet die Schleife nicht | `tests/test_ws_scanner.py` (8 Tests, echter `websocket_connect` ohne Lifespan, Fake-IServ, `worker_pool=None`) | 2026-07-09 | grün |
 | V15 | **Pairing-TOCTOU** — ändert sich zwischen Code-Auflösung und `get_student_info`-Await der Zustand (Session revoked / Schüler bereits vergeben / Code neu belegt), antwortet `/api/student/pair` mit 409 statt eine stale Zuordnung zu committen | `tests/test_api_guards.py::test_student_pair_toctou_*` (3 Tests) + `test_student_pair_happy_path_binds_when_nothing_changed` | 2026-07-09 | grün |
 | V16 | **Kontext-Lifecycle** — doppeltes Öffnen derselben Klasse reaktiviert statt dupliziert; `close_class` löst gebundene Helfer; Aktiv-Kontext-Wechsel bei unbekannter ID → 404 | `tests/test_api_guards.py::test_open_class_creates_context_and_populates_queue`, `test_close_class_switches_active_context_when_active_one_closed`, `test_close_class_unknown_context_404`, `test_set_active_context_*` | 2026-07-09 | grün |
-| V17 | **`_read_booking_result`** gegen Fake-Locator — wichtigster Fall: steht der Barcode nur im Typeahead-Eingabefeld und in keiner Buchzeile, ist das Ergebnis `unknown`, nicht `booked` (False-Positive-Schutz via `has_not`-Filter); außerdem sichtbarer/unsichtbarer Error-Alert, `nothing_found`, Locator-Exception schluckt statt zu propagieren | `tests/test_booking_result.py` (6 Tests) | 2026-07-09 | grün; ohne den `has_not`-Filter wird `test_barcode_only_in_typeahead_input_does_not_count_as_booked` rot (selbst nachgefahren) — **siehe offener Befund unten zur DOM-Voraussetzung dieses Filters** |
+| V17 | **`_read_booking_result`** gegen Fake-Locator — `has_not`-Filter (Schutz gegen Selektor-Drift, s. u.), sichtbarer/unsichtbarer Error-Alert, `nothing_found`, Locator-Exception schluckt statt zu propagieren | `tests/test_booking_result.py` (6 Tests) | 2026-07-09 | grün; ohne den `has_not`-Filter wird `test_barcode_only_in_typeahead_input_does_not_count_as_booked` rot (selbst nachgefahren). **Der getestete False-Positive kann im heutigen DOM nicht auftreten** (Feld liegt in keiner `<tr>`, `inner_text()` liefert keine Input-Werte) — der Test sichert den Filter gegen Selektor-Drift, s. „Offen" unten |
 
 ## Offen / zu testen
 
-### Offen 2026-07-09 (Worker: `has_not`-Filter in `_read_booking_result` — DOM-Annahme unverifiziert)
+### Offen 2026-07-09 (Worker: Robustheit der Erfolgs-Erkennung in `_read_booking_result`)
 
-Der `has_not`-Filter in `automation/worker.py::_read_booking_result` schützt nur
-dann gegen den Typeahead-False-Positive (V17), wenn das Typeahead-Eingabefeld
-im echten IServ-DOM ein **Nachfahre** eines Bücherlisten-Selektors ist. Wäre es
-ein Geschwisterelement, filterte er nichts — eine fehlgeschlagene Buchung
-könnte dann als `booked` gemeldet werden, obwohl der Barcode nur im Suchfeld
-und in keiner Buchzeile stand. Ohne echtes DOM nicht entscheidbar (der
-Unit-Test in V17 verifiziert nur die Filter-Logik gegen einen Fake-Locator,
-nicht die Struktur-Annahme selbst).
+**Vorgeschichte, geklärt:** Ein früherer Eintrag hier vermutete einen
+False-Positive — der `has_not`-Filter würde nichts filtern, falls das
+Typeahead-Feld ein Geschwister statt ein Nachfahre der Bücherzeilen sei, und
+eine fehlgeschlagene Buchung könnte als `booked` durchgehen. Die Auswertung des
+DOM-Dumps `automation/out/06b_kartei_geladen.html` beantwortet das:
 
-- [ ] **Beim ersten scharfen Buchungslauf mit einem ausgemusterten Buch gezielt
-      beobachten** (nur mit Freigabe Niklas + Lukas, PLAN §6): DOM-Struktur um
-      das Typeahead-Feld inspizieren (Vorfahre vs. Geschwister des
-      Bücherlisten-Selektors) und `_read_booking_result` bei Bedarf
-      nachschärfen.
+- `input.tt-input` liegt in einem `<form>` **oberhalb** der Tabellen
+  (`form > div.form-group > div.input-group > span.twitter-typeahead`), keine
+  der 16 `<tr>` im Dokument enthält ein `<input>`. Der Filter ist also ein No-op.
+- Der False-Positive kann trotzdem **nicht** eintreten: der Erfolgs-Check liest
+  `inner_text()` einer Zeile, und der *Wert* eines `<input>` ist kein Textknoten.
+  Der Filter stammt aus einer früheren Implementierung, die `get_by_text(barcode)`
+  über die ganze Seite laufen ließ. Er bleibt als Schutz gegen Selektor-Drift.
+- Die Bücherzeilen sind `<tr ng-repeat="book in bl.books">`; der Buchcode steht
+  als siebenstellige, nullgepolsterte Zahl in einer eigenen `<td>`-Spalte
+  (z. B. `0017798`). Die Selektoren `.books-list`, `.lent-books` und
+  `.student-books` kamen im DOM nicht vor und wurden entfernt.
+
+**Was offen bleibt** — beides zeigt in Richtung `unknown`, nie in Richtung
+`booked` (und `/api/commit-book` wertet nur `booked` als Erfolg), ist also
+sicherheitsseitig unkritisch, aber unbequem im Betrieb:
+
+- [ ] **Substring statt Spalten-Vergleich:** `barcode in row_text` prüft gegen
+      den *gesamten* Zeilentext (Titel + Code + Zeitstempel) statt gegen die
+      Code-Spalte. Bei durchgängig siebenstelligen Codes praktisch kollisionsfrei,
+      aber unpräzise. Ein Wechsel auf einen exakten Spalten-Vergleich ist ein
+      Eingriff im scharfen Buchungspfad → **nur mit Freigabe Niklas + Lukas und
+      an einem ausgemusterten Buch** (PLAN §6).
+- [ ] **Festes Zeitfenster:** `commit_barcode` wartet pauschal
+      `wait_for_timeout(1500)` vor dem Auslesen. Rendert Angular die neue Zeile
+      langsamer, meldet die Methode `unknown` obwohl gebucht wurde. Beim ersten
+      scharfen Lauf beobachten, ob 1500 ms reichen; sonst auf ein
+      `wait_for`-Prädikat auf die neue Zeile umstellen.
 
 ### Offen 2026-07-09 (Scanner: Reconnect stellt auch Lupe-Schüler wieder her + schneller Worker-Reload)
 
@@ -431,10 +450,10 @@ Details/Umsetzung: `docs/CHANGELOG.md` (PLAN O10).
       Enter, `/api/commit-book`, `ALLOW_BOOKING=false` default; Gate verifiziert = V10).
       Noch zu testen (nur mit Freigabe Niklas + Lukas): `ALLOW_BOOKING=true`, echtes
       Enter, **Erfolgs-/Fehler-Selektoren in `_read_booking_result()` bestätigen**
-      (Filter-Logik unit-getestet gegen Fake-Locator = V17, die zugrundeliegende
-      DOM-Struktur-Annahme des `has_not`-Filters ist aber weiter unverifiziert —
-      siehe „Offen 2026-07-09 (Worker: `has_not`-Filter …)" oben), Ausgabe +
-      sofortige Rücknahme eines ausgemusterten Buchs; Rückbau-Plan vorher
+      (Listen-Selektoren gegen einen DOM-Dump verifiziert, Filter-Logik
+      unit-getestet = V17; offen bleiben Substring-statt-Spalten-Vergleich und das
+      feste 1500-ms-Fenster — siehe „Offen 2026-07-09 (Worker: Robustheit …)" oben),
+      Ausgabe + sofortige Rücknahme eines ausgemusterten Buchs; Rückbau-Plan vorher
       ausfüllen (`docs/rueckbau_plan_VORLAGE.md`).
 - [ ] **Scanner-Fehlerfälle** aus dem DOM (falsche Serie, nicht angemeldet, schon
       verliehen, unbekannter Code) — beobachtbar erst im freigegebenen Buchungstest.

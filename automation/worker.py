@@ -221,7 +221,13 @@ class StudentSession:
         """Best-effort Erfolg/Fehler aus dem DOM lesen (Spike A). UNVERIFIZIERT.
 
         Selektoren sind bis zum freigegebenen Buchungstest nicht final bestätigt;
-        bei Unsicherheit `unknown` zurückgeben statt Erfolg vorzutäuschen.
+        bei Unsicherheit `unknown` zurückgeben statt Erfolg vorzutäuschen. Beide
+        bekannten Schwächen der Erfolgs-Erkennung (Substring-Vergleich gegen den
+        ganzen Zeilentext statt gegen die Code-Spalte; festes 1500-ms-Fenster vor
+        dem Auslesen) zeigen in Richtung `unknown`, nie in Richtung `booked` —
+        und `/api/commit-book` wertet ausschließlich `booked` als Erfolg. Eine
+        verpasste Erkennung heißt darum „Host prüft von Hand", nicht „stille
+        Falschbuchung". Details: `docs/test_status.md`.
         """
         page = self._page
         # 1) Sichtbarer Fehlerhinweis? (Bootstrap-typische rote Meldungen)
@@ -235,23 +241,26 @@ class StudentSession:
             except Exception:  # noqa: BLE001
                 continue
         # 2) Buchcode in der Bücherliste aufgetaucht? (Indikator Erfolg)
-        # WICHTIG: get_by_text(barcode) auf der ganzen Page trifft auch das
-        # Typeahead-Eingabefeld (input.tt-input), das den Barcode nach fill()
-        # noch als Wert enthält — das meldet einen fehlgeschlagenen Booking als
-        # Erfolg (False-Positive). Daher: Scope auf Nicht-Input-Container, die
-        # die ausgeliehenen Bücher auflisten, und Typeahead-Dropdown sowie
-        # Eingabefeld explizit ausschließen. Selektoren unverifiziert → bewusst
-        # mehrere Kandidaten prüfen und bei Unklarheit `unknown` bleiben.
+        # Der Zeilentext kommt aus `inner_text()`; der Wert eines <input> ist kein
+        # Textknoten und taucht darin nie auf. Das Typeahead-Feld kann die
+        # Erkennung also nicht verfälschen — anders als bei einem früheren
+        # `get_by_text(barcode)` über die ganze Seite, für das `input_scope`
+        # ursprünglich gebaut wurde. `has_not` bleibt als Schutz gegen
+        # Selektor-Drift: fiele ein Selektor künftig auf einen Wrapper, der das
+        # Feld oder ein Typeahead-Dropdown (Textknoten!) umschließt, würde der
+        # Barcode sonst wieder mitgelesen.
         try:
             # Eingabefeld + Typeahead-Suggestions, die den Barcode abbilden:
             input_scope = page.locator('input.tt-input, .tt-dropdown-menu, .tt-hint')
-            # Kandidaten für die Bücherliste der Schülerkartei (Counter-Seite).
+            # Bücherliste der Schülerkartei. Beide Selektoren treffen dieselben
+            # `<tr ng-repeat="book in bl.books">`-Zeilen (das ng-repeat sitzt auf
+            # dem <tr>) und sind gegen einen DOM-Dump der geladenen Kartei
+            # verifiziert. Hier gehören nur belegte Selektoren rein: ein geratener,
+            # zu weiter Selektor würde die Erfolgs-Erkennung auf Container
+            # ausdehnen, die den Barcode aus anderer Quelle enthalten können.
             list_selectors = [
                 'table tbody tr',
-                '.books-list',
-                '.lent-books',
                 '[ng-repeat*="book"]',
-                '.student-books',
             ]
             for sel in list_selectors:
                 rows = page.locator(sel).filter(has_not=input_scope)

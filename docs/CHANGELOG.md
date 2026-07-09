@@ -8,6 +8,29 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-09 — `_read_booking_result`: DOM-Annahme geklärt, Selektoren bereinigt
+
+Auswertung des DOM-Dumps `automation/out/06b_kartei_geladen.html` klärt die
+zuvor als offen geführte Frage zum `has_not`-Filter:
+
+- `input.tt-input` liegt in einem `<form>` oberhalb der Tabellen; **keine** der
+  16 `<tr>` enthält ein `<input>`. Der Filter ist im heutigen DOM ein No-op.
+- Der befürchtete False-Positive kann trotzdem nicht eintreten: der Erfolgs-Check
+  liest `inner_text()`, und der Wert eines `<input>` ist kein Textknoten. Der
+  Filter stammt aus einer Implementierung mit `get_by_text(barcode)` über die
+  ganze Seite. Er bleibt — als Schutz gegen Selektor-Drift (Typeahead-Dropdowns
+  rendern echte Textknoten).
+- `.books-list`, `.lent-books`, `.student-books` kamen im DOM nicht vor und sind
+  entfernt. Es bleiben die zwei verifizierten Selektoren, die dieselben
+  `<tr ng-repeat="book in bl.books">`-Zeilen treffen. Weniger Kandidaten kann eine
+  Erkennung höchstens von `booked` auf `unknown` kippen — die sichere Richtung.
+
+Der Eintrag in `docs/test_status.md` war entsprechend zu alarmistisch und ist
+korrigiert. Neu dort als offen geführt: der Substring-Vergleich gegen den ganzen
+Zeilentext (statt gegen die Code-Spalte) und das feste `wait_for_timeout(1500)`.
+Beide zeigen Richtung `unknown`, nie Richtung `booked`; eine Änderung im scharfen
+Buchungspfad nur mit Freigabe (PLAN §6). Kein Verhaltenseingriff in diesem Commit.
+
 ## 2026-07-09 — Wartbarkeits-Refactoring (ruff, Modularisierung, Testabdeckung)
 
 Sieben Commits, reines Aufräumen — keine neuen Endpoints, keine Feature-Änderung
