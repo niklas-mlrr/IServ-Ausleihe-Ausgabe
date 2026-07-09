@@ -5,7 +5,7 @@
 > Risiko hier unter „Offen / zu testen" eintragen; nach erfolgreichem Test in
 > „Verifiziert" verschieben (mit Datum + Skript/Befund). Bezug: `docs/PLAN.md`.
 >
-> Stand: 2026-07-05 (Unit-Test-Zahlen aktualisiert nach Review Tier 1–3).
+> Stand: 2026-07-09 (Wartbarkeits-Refactoring, 187 Tests grün).
 > Alle bisherigen Tests sind **read-only** gegen IServ
 > (kein Submit, keine Buchung — PLAN §6).
 >
@@ -29,8 +29,30 @@
 | V10 | **Buchungs-Gate** — bei `ALLOW_BOOKING=false` wird der Worker (Enter) nie berührt | `handle_commit` Smoke (uv) | 2026-06-15 | Default→`blocked` ohne Worker-Zugriff; echter Config-Default `False`; Snapshot `False`. Beweist: kein Enter gegen Produktion |
 | V11 | Härtung: `WorkerPool.stats()`, `worker_pool` im Snapshot, Limiter-`sweep()` | uv-Smoke | 2026-06-15 | stats total/available/in_use korrekt; sweep leert alte/leere Buckets; Snapshot enthält `worker_pool` |
 | V12 | **Spike C / O4 — Silent-Print Windows** (echter Druck am Zielgerät) | `automation/test_printer.py "HP LaserJet Professional P1102"` | 2026-06-22 | rc=0, Seite ausgedruckt; SumatraPDF via winget nach `%LOCALAPPDATA%\SumatraPDF\`; `PRINTER_NAME=HP LaserJet Professional P1102` in `.env` setzen |
+| V13 | **Stale-Guards Modus A/B** — wird `helper.student_id` bzw. die Modus-B-Session während des `open_student()`-Awaits verändert, schließt der neu geöffnete Worker-Context sich selbst statt registriert zu werden (kein Leak) | `tests/test_stale_guards.py` (4 Tests: je Modus A/B ein Stale- und ein Happy-Path-Fall) | 2026-07-09 | grün; Mutationsprobe bestanden (Guard-Zeile auskommentiert → Test rot) |
+| V14 | **WS-Message-Dispatch Scanner** — `call` mit pending-Re-Check, Umbinden an fremde Klasse (`rebind_helper_to_context`), `search_call` (Lupe) für queue-losen Schüler + fehlendes `form`, Peek-Toggle (`queue`/`close`), Scan ohne zugewiesenen Schüler, unbekanntes Token, malformed JSON-Frame beendet die Schleife nicht | `tests/test_ws_scanner.py` (8 Tests, echter `websocket_connect` ohne Lifespan, Fake-IServ, `worker_pool=None`) | 2026-07-09 | grün |
+| V15 | **Pairing-TOCTOU** — ändert sich zwischen Code-Auflösung und `get_student_info`-Await der Zustand (Session revoked / Schüler bereits vergeben / Code neu belegt), antwortet `/api/student/pair` mit 409 statt eine stale Zuordnung zu committen | `tests/test_api_guards.py::test_student_pair_toctou_*` (3 Tests) + `test_student_pair_happy_path_binds_when_nothing_changed` | 2026-07-09 | grün |
+| V16 | **Kontext-Lifecycle** — doppeltes Öffnen derselben Klasse reaktiviert statt dupliziert; `close_class` löst gebundene Helfer; Aktiv-Kontext-Wechsel bei unbekannter ID → 404 | `tests/test_api_guards.py::test_open_class_creates_context_and_populates_queue`, `test_close_class_switches_active_context_when_active_one_closed`, `test_close_class_unknown_context_404`, `test_set_active_context_*` | 2026-07-09 | grün |
+| V17 | **`_read_booking_result`** gegen Fake-Locator — wichtigster Fall: steht der Barcode nur im Typeahead-Eingabefeld und in keiner Buchzeile, ist das Ergebnis `unknown`, nicht `booked` (False-Positive-Schutz via `has_not`-Filter); außerdem sichtbarer/unsichtbarer Error-Alert, `nothing_found`, Locator-Exception schluckt statt zu propagieren | `tests/test_booking_result.py` (6 Tests) | 2026-07-09 | grün; ohne den `has_not`-Filter wird `test_barcode_only_in_typeahead_input_does_not_count_as_booked` rot (selbst nachgefahren) — **siehe offener Befund unten zur DOM-Voraussetzung dieses Filters** |
 
 ## Offen / zu testen
+
+### Offen 2026-07-09 (Worker: `has_not`-Filter in `_read_booking_result` — DOM-Annahme unverifiziert)
+
+Der `has_not`-Filter in `automation/worker.py::_read_booking_result` schützt nur
+dann gegen den Typeahead-False-Positive (V17), wenn das Typeahead-Eingabefeld
+im echten IServ-DOM ein **Nachfahre** eines Bücherlisten-Selektors ist. Wäre es
+ein Geschwisterelement, filterte er nichts — eine fehlgeschlagene Buchung
+könnte dann als `booked` gemeldet werden, obwohl der Barcode nur im Suchfeld
+und in keiner Buchzeile stand. Ohne echtes DOM nicht entscheidbar (der
+Unit-Test in V17 verifiziert nur die Filter-Logik gegen einen Fake-Locator,
+nicht die Struktur-Annahme selbst).
+
+- [ ] **Beim ersten scharfen Buchungslauf mit einem ausgemusterten Buch gezielt
+      beobachten** (nur mit Freigabe Niklas + Lukas, PLAN §6): DOM-Struktur um
+      das Typeahead-Feld inspizieren (Vorfahre vs. Geschwister des
+      Bücherlisten-Selektors) und `_read_booking_result` bei Bedarf
+      nachschärfen.
 
 ### Offen 2026-07-09 (Scanner: Reconnect stellt auch Lupe-Schüler wieder her + schneller Worker-Reload)
 
@@ -409,8 +431,11 @@ Details/Umsetzung: `docs/CHANGELOG.md` (PLAN O10).
       Enter, `/api/commit-book`, `ALLOW_BOOKING=false` default; Gate verifiziert = V10).
       Noch zu testen (nur mit Freigabe Niklas + Lukas): `ALLOW_BOOKING=true`, echtes
       Enter, **Erfolgs-/Fehler-Selektoren in `_read_booking_result()` bestätigen**
-      (bisher unverifiziert), Ausgabe + sofortige Rücknahme eines ausgemusterten
-      Buchs; Rückbau-Plan vorher ausfüllen (`docs/rueckbau_plan_VORLAGE.md`).
+      (Filter-Logik unit-getestet gegen Fake-Locator = V17, die zugrundeliegende
+      DOM-Struktur-Annahme des `has_not`-Filters ist aber weiter unverifiziert —
+      siehe „Offen 2026-07-09 (Worker: `has_not`-Filter …)" oben), Ausgabe +
+      sofortige Rücknahme eines ausgemusterten Buchs; Rückbau-Plan vorher
+      ausfüllen (`docs/rueckbau_plan_VORLAGE.md`).
 - [ ] **Scanner-Fehlerfälle** aus dem DOM (falsche Serie, nicht angemeldet, schon
       verliehen, unbekannter Code) — beobachtbar erst im freigegebenen Buchungstest.
 - [ ] **End-to-End inkl. echter Buchung** (Modus A und B).
@@ -418,26 +443,24 @@ Details/Umsetzung: `docs/CHANGELOG.md` (PLAN O10).
 ## Unit-Tests (pytest, `uv run pytest`)
 
 Reine Logik, kein IServ/Playwright/Server — schnell + produktionsneutral, als
-Regressions-Netz und QS-Beleg. **149 Tests, grün (2026-07-09; +2 für
-Reconnect-stellt-auch-Lupe-Schüler-wieder-her + schnelleren
-`StudentSession.reload()` — `HelperSession.student_form`-Setzen/Clear + neue
-reload-Goto-Sequenz — siehe `tests/test_queue_flow.py`/
-`tests/test_scanner_reconnect.py`; 2026-07-09: +2 für
-Helfer-Menü-Klassen-Reiter — `contexts_update`-Broadcast + Rebind
-`rebind_helper_to_context` — siehe `tests/test_hub.py`/`tests/test_queue_flow.py`;
-2026-07-08: +3 für Menü-Peek — `helper.peeking`-Reset in
-`end_student`/`assign_student_to_helper` + `broadcast_queue_size` an peekende
-zugewiesene Helfer; 2026-07-07: +14 für
-Scanner-Reconnect/Disconnect-Grace + `StudentSession.reload()`, +2 für `lent`-
-Menge aus `current_books` bei ausgeblendeten Reihen + ISBN-Umhängung
-`vormerk→lent` nach Buchung in derselben Session — siehe PLAN §6.1).** Coverage
-(`--cov=server` in `addopts`): **45 %** gesamt
-(vorher 39 %/2026-06-18, 37 %, initial 20 %); Kernlogik deutlich höher —
+Regressions-Netz und QS-Beleg. **187 Tests, grün (2026-07-09; +29 aus dem
+Wartbarkeits-Refactoring — neu `tests/test_stale_guards.py` (4),
+`tests/test_ws_scanner.py` (8), `tests/test_booking_result.py` (6) sowie
+Kontext-Lifecycle- und Pairing-TOCTOU-Ergänzungen in `tests/test_api_guards.py`;
+siehe V13–V17 oben und `docs/CHANGELOG.md` für die Details.
+Vorherige Chronologie (2026-06-16 – 2026-07-08) steht in `docs/CHANGELOG.md`,
+nicht mehr hier ausgeschrieben).** Coverage
+(`--cov=server` in `addopts`): **59 %** gesamt
+(vorher 47 %/2026-07-08, 45 %/2026-07-05, 39 %/2026-06-18, 37 %, initial 20 %);
+`routes/ws.py` 13 % → 38 %, `sessions.py` 65 % → 74 %, `modus_b.py` 21 % → 47 %,
+`classes.py` 52 % → 75 %. Kernlogik deutlich höher —
 `hub.py` 82 %, `state.py` 93 %, `sessions.py` 60 %, `config.py` 93 %,
 `ratelimit.py` 100 %, `tls.py` 69 %, `book_order.py` 76 %.
 Bewusst niedrig bleiben IServ-/Playwright-/Wiring-Module (`iserv_client.py`
-31 %, `routes/api.py` 31 %, `routes/ws.py`, `app.py`, `main.py`) — die decken
-die E2E-Skripte V3–V7 ab.
+31 %, `routes/ws.py` 38 %, `app.py`, `main.py`) — die decken die E2E-Skripte
+V3–V7 ab. `routes/api.py` selbst ist nur noch der Aggregator (100 %, 8
+Anweisungen); die Endpunkt-Logik sitzt jetzt in den neun `routes/`-Modulen,
+siehe Coverage-Tabelle oben.
 
 | Datei | Deckt ab |
 |-------|----------|
@@ -446,7 +469,10 @@ die E2E-Skripte V3–V7 ab.
 | `tests/test_booking_gate.py` | Buchungs-Gate: ohne Flag kein Worker-/Enter-Zugriff |
 | `tests/test_sessions.py` | Session-Lebenszyklus, Token/Code-Eindeutigkeit, harte Invalidierung |
 | `tests/test_queue_flow.py` | Queue-Übergänge: `gen_pairing_code` (skip/Erschöpfung), `end_student` (Status/Helfer-Lösung/Worker-Release), `advance_helper` (leer + nächster; sendet `loading`, kein Idle-`waiting`), `assign_student_to_helper` (gezielter Aufruf aus der Warteschlange — ältester Wartender bleibt unangetastet; `loading`-WS-Push), `pending_queue_as_list` (nur status='pending'), harte Worker-Freigabe; **2026-07-09:** `assign_student_to_helper` setzt `helper.student_form` (Queue- wie Lupe-Schüler; Advance wechselt die Form mit), `end_student` räumt `student_form` (auch transienter Zweig); **2026-07-08:** `end_student`/`assign_student_to_helper` resetten `helper.peeking` (Menü-Peek) |
-| `tests/test_api_guards.py` | Endpunkt-Logik: Auth-Guard (`_require_host`), Login, `add-student` (Validierung/Duplikat 409), `add-test-students`-Idempotenz, skip/finish-Validierung, Buchungs-Gate HTTP-Ebene (403), `_base_url`/`_last_scan_for` |
+| `tests/test_api_guards.py` | Endpunkt-Logik: Auth-Guard (`_require_host`), Login, `add-student` (Validierung/Duplikat 409), `add-test-students`-Idempotenz, skip/finish-Validierung, Buchungs-Gate HTTP-Ebene (403), `_base_url`/`_last_scan_for`; **2026-07-09 (V15/V16):** Kontext-Lifecycle (Doppel-Öffnen reaktiviert, `close_class` löst Helfer, unbekannte Kontext-ID → 404) + drei Pairing-TOCTOU-Fälle (Session revoked / Schüler vergeben / Code neu belegt während des `get_student_info`-Awaits → 409) |
+| `tests/test_stale_guards.py` (V13) | `open_student()`-Re-Check nach dem Await: ändert sich `helper.student_id` (Modus A) bzw. die Modus-B-Session während des Worker-Aufbaus, wird der neue Context sofort wieder geschlossen statt registriert (kein Leak); Happy-Path registriert korrekt |
+| `tests/test_ws_scanner.py` (V14) | Scanner-WS-Dispatch über echten `websocket_connect` (ohne Lifespan, Fake-IServ, `worker_pool=None`): unbekanntes Token, Scan ohne Schüler, malformed JSON-Frame tötet die Schleife nicht, Peek-Toggle, `call` auf nicht-pending Schüler, `call` bindet Helfer an fremde Klasse um, `search_call` für queue-losen Schüler, `search_call` ohne `form` → Fehler |
+| `tests/test_booking_result.py` (V17) | `_read_booking_result` gegen Fake-Locator: sichtbarer Error-Alert (gekürzt) → `error`, unsichtbarer Alert ignoriert, Barcode in Buchzeile → `booked`, Barcode **nur** im Typeahead-Feld → `unknown` (der `has_not`-Filter, der genau das verhindert), nichts gefunden → `unknown`, Locator-Exception wird geschluckt |
 | `tests/test_printing.py` | Backend-Resolution (auto je Plattform) + `file`-Backend |
 | `tests/test_worker_pool.py` | `WorkerPool.stats()` (total/available/in_use) |
 | `tests/test_tls.py` | Cert hat SAN (localhost/127.0.0.1/cn), idempotent |

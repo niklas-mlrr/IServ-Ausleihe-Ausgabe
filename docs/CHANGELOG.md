@@ -8,6 +8,70 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-09 — Wartbarkeits-Refactoring (ruff, Modularisierung, Testabdeckung)
+
+Sieben Commits, reines Aufräumen — keine neuen Endpoints, keine Feature-Änderung
+außer den beiden unten markierten Verhaltensänderungen.
+
+- **Linter eingezogen** (`39c94f9`): `ruff` (E/F/W/I/B/UP/SIM) + `.pre-commit-config.yaml`;
+  vorher gab es keinen. 38 Findings automatisch behoben, 22× `raise … from e/None`
+  ergänzt. `E501`/`SIM105` bewusst ignoriert (Begründung in `pyproject.toml`).
+- **Toter Code entfernt** (`b7ac0cc`): `/api/select-class` + `/api/add-test-students`
+  hatten keine Aufrufer mehr. Damit fiel der als Strangler-Pattern markierte
+  AppState-Kompat-Layer (`queue`/`active_form`/`book_order`/`class_catalog*`-
+  Properties, `ClassContext.implicit`, `ensure_active_context`) weg. Neu:
+  `AppState.book_order_of(context_id)` und `AppState.active_students()`.
+  - **Verhaltensänderung:** `book_order_of()` liefert `[]` für einen Kontext
+    ohne eigene Reihenfolge statt — wie der Kompat-Layer es tat — still auf die
+    gerade aktive Klasse zurückzufallen. Ein Helfer ohne Klassenbindung bekam
+    dadurch bisher unbemerkt die Buchreihenfolge einer fremden, zufällig
+    aktiven Klasse; jetzt bekommt er eine leere Liste (Client rendert dann in
+    Server-Sortierung).
+  - **Bugfix:** Der Guard in `/api/select-schoolyear` prüfte nur die Queue des
+    aktiven Klassen-Tabs. Aktive Schüler in anderen, nicht-aktiven Tabs wurden
+    beim Schuljahreswechsel ohne Warnung abgerissen. `AppState.active_students()`
+    iteriert jetzt alle Kontexte, nicht nur den aktiven.
+- **Frontend entflochten** (`d66e2e9`): neu `web/common.js` (`escapeHtml`,
+  `isBookDone`, `Beeper`, gemeinsames `connectWebSocket`); `web/host.html`
+  (2167 Zeilen) aufgeteilt in `web/host.html` (221 Zeilen) + `web/host.js` +
+  `web/host.css`. Weiterhin kein Build-Step.
+- **Dokumentation strukturiert** (`a0ccb72`): `docs/CHANGELOG.md` neu angelegt;
+  `docs/PLAN.md` 993 → 675 Zeilen, `docs/test_status.md` 619 → 461 Zeilen
+  (Chronologie-Prosa ausgelagert ins Changelog).
+- **Server-Duplikate entfernt** (`84ad84c`): `hydrate_student_info()`,
+  `_detach_helper()`, `_grade_and_catalog()`, `QueueStudent.from_iserv()`
+  waren mehrfach implementiert bzw. inline dupliziert.
+- **API-Schicht umgebaut** (`7dc1f67`, `a7a75b4`): `require_host` ist jetzt eine
+  FastAPI-Dependency auf einem `host_router` statt 30× wiederholter Cookie-
+  Boilerplate; ~20 Pydantic-Request-Models ersetzen die manuelle Body-Validierung.
+  Die drei Dev-Bool-Toggles laufen jetzt über `POST /api/settings/{key}`
+  (Whitelist) statt eigener Endpunkte. `server/routes/api.py` (1425 Zeilen) ist
+  in neun Module aufgeteilt (`_deps.py`, `auth.py`, `classes.py`, `booklists.py`,
+  `helpers.py`, `queue.py`, `slips.py`, `modus_b.py`, `settings.py`); `api.py`
+  bleibt als Aggregator/Re-Export, `server/app.py` unverändert.
+  - **Verhaltensänderung:** Validierungsfehler bei Request-Bodies liefern jetzt
+    HTTP 422 statt 400 (Pydantic-Standard). Kein bestehender Client wertete den
+    400er-Statuscode aus, daher unkritisch. Die strukturierten 409-Responses
+    (`active_sessions`/`blocked`) und die Buchungs-Gates sind unverändert;
+    `confirm` bleibt bewusst `bool = False` statt Pflichtfeld, damit ein
+    fehlendes `confirm` weiterhin NACH dem `ALLOW_BOOKING`-Gate abgewiesen wird
+    (403 vor 400/422) — empirisch mit Spion-Worker nachgeprüft.
+- **Testabdeckung ausgebaut** (`d17ee5b`): 158 → 187 Tests. Neu
+  `tests/test_stale_guards.py` (Stale-Guards Modus A/B), `tests/test_ws_scanner.py`
+  (WS-Message-Dispatch: `call`, `search_call`, Peek-Toggle, malformed Frame),
+  `tests/test_booking_result.py` (`_read_booking_result`, inkl. Typeahead-
+  False-Positive-Schutz). Coverage gesamt 47 % → 59 %, `routes/ws.py` 13 % → 38 %,
+  `sessions.py` 65 % → 74 %. Jeder neue Guard-Test hat eine Mutationsprobe
+  bestanden (Guard-Zeile auskommentiert → Test rot → zurückgenommen).
+- **Kommentar-Historie aufgeräumt** (`b1c1d59`): Datums-/Freigabe-Marker und
+  Vorher-Nachher-Erzählungen aus Code-Kommentaren entfernt (leben jetzt hier im
+  Changelog bzw. im Git-Log). Invarianten, Race-Condition-Hinweise und alle
+  Produktionsschutz-/`noqa`-Begründungen blieben unangetastet — verifiziert per
+  AST-Vergleich, kein ausführbarer Code geändert.
+
+Ergebnis: 187/187 Tests grün, ruff sauber, kein produktives Verhalten außer den
+zwei oben markierten Punkten geändert.
+
 ## 2026-07-09 — Menü-Icon-Animation, Warteschlangen-Überschrift
 
 Menü-Icon: drei Balken → Linkspfeil (←) beim Öffnen, auf derselben

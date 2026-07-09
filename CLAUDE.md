@@ -71,6 +71,10 @@ Rückbau-Plan; Real-Buchungen nie unbeaufsichtigt.
 - **Bei `/wiki-ingest` in diesem Projekt immer beide Seiten prüfen:**
   1. `docs/` — fehlen Protokolle/Entscheidungen/Messwerte aus der Session?
   2. Wiki-Overview — stimmen Status, Phasen-Stand und Verweise noch?
+- Die Änderungshistorie (chronologisches Protokoll, was sich wann geändert hat)
+  lebt **ausschließlich** in `docs/CHANGELOG.md` — nicht in Code-Kommentaren,
+  nicht in `docs/PLAN.md`/`docs/test_status.md` (die bleiben Zielbild bzw.
+  Verifiziert-/Offen-Stand) und nicht in der Wiki-Overview.
 
 ## Projekt-Setup
 
@@ -80,15 +84,19 @@ Rückbau-Plan; Real-Buchungen nie unbeaufsichtigt.
 - `.env` nach Vorlage `.env.example` (`ISERV_DOMAIN`, `ISERV_USERNAME`,
   `ISERV_PASSWORD`, `HOST_PASSWORD`; optional `PORT`, `WORKER_CONTEXTS`
   sowie die Druck-Variablen `PRINT_BACKEND`, `PRINTER_NAME`, `SUMATRA_PATH`).
+- Linting: `uvx ruff check server/ automation/ tests/` (Regeln + Ignores in
+  `pyproject.toml` unter `[tool.ruff]`); `pre-commit install` zieht denselben
+  Ruff-Hook (`--fix`) vor jedem Commit (`.pre-commit-config.yaml`).
 
 ## Struktur
 
 | Pfad | Inhalt |
 |------|--------|
-| `server/` | FastAPI-App: HTTPS (`tls.py`), WebSocket-Hub (`hub.py`), Rollen/Sessions (`sessions.py`, `state.py`), IServ-Read-Client (`iserv_client.py`), Druck (`printing.py`), Bücher-Reihenfolge (`book_order.py`), Rate-Limiting (`ratelimit.py`), Endpunkte (`routes/`) |
+| `server/` | FastAPI-App: HTTPS (`tls.py`), WebSocket-Hub (`hub.py`), Rollen/Sessions (`sessions.py`, `state.py`), IServ-Read-Client (`iserv_client.py`), Druck (`printing.py`), Bücher-Reihenfolge (`book_order.py`), Rate-Limiting (`ratelimit.py`), Endpunkte (`routes/` — Paket aus neun Modulen: `_deps.py`/`auth.py`/`classes.py`/`booklists.py`/`helpers.py`/`queue.py`/`slips.py`/`modus_b.py`/`settings.py`, `api.py` als Aggregator, `ws.py` für WebSockets) |
 | `automation/` | Playwright-Worker (`worker.py`) + Spikes + E2E-Skripte (`e2e_*.py`); Ausgaben in `automation/out/` (gitignored) |
-| `web/` | Statische UI ohne Build-Step: `host.html` (Host), `scan.html`/`scan.js` (Helfer-Scanner, Modus A), `student.html` (Schüler, Modus B), `qr-display.html` (iPad), `html5-qrcode.min.js`, `beep.mp3` |
+| `web/` | Statische UI ohne Build-Step: `host.html` (Host, schlankes Grundgerüst) + `host.js`/`host.css` (Logik/Styles), `common.js` (gemeinsame Helfer: `escapeHtml`, `isBookDone`, `Beeper`, `connectWebSocket`), `scan.html`/`scan.js` (Helfer-Scanner, Modus A), `student.html` (Schüler, Modus B), `qr-display.html` (iPad), `html5-qrcode.min.js`, `beep.mp3` |
 | `docs/PLAN.md` | Projektplan — bei Entscheidungen fortschreiben (Arbeitsgrundlage) |
+| `docs/CHANGELOG.md` | Chronologisches Änderungsprotokoll, neueste Einträge zuerst — Heimatort der „was hat sich wann geändert"-Historie |
 | `docs/test_status.md` | Lebender Test-/Verifizierungsstand (verifiziert vs. offen) |
 | `docs/spikes/` | Spike-Protokolle (Seminarfach-Material) |
 | `tests/` | pytest-Unit-Tests (Suite grün, siehe `docs/test_status.md` für aktuellen Stand) |
