@@ -18,6 +18,7 @@ let studentActive = false;          // ist gerade ein Schüler zugewiesen?
 let workerPending = false;          // Schüler zugewiesen, aber Worker noch nicht bereit
 let queueSize = null;               // zuletzt gemeldete Warteschlangengröße
 let queueList = [];                // wartende Schüler (Fallback, eigene Klasse)
+let queueListAll = [];             // wie queueList, aber inkl. active/done (Fallback)
 let loadingStudent = false;        // Schüler wird geladen (next/call gesendet,
                                   //  student_info steht noch aus) — Queue verbergen
 let waitingMsg = 'Warte auf Schüler-Zuweisung';
@@ -116,6 +117,19 @@ function currentQueue() {
     return (c && Array.isArray(c.queue)) ? c.queue : [];
   }
   return Array.isArray(queueList) ? queueList : [];
+}
+// Wie currentQueue(), aber inkl. der bereits aufgerufenen (active) und
+// abgeschlossenen (done) Schüler des gewählten Tabs — für die Gruppen-Boxen
+// unter der eigentlichen (wartenden) Warteschlange. Fällt auf currentQueue()
+// zurück, falls der Server (alte Session) noch kein `queue_all` liefert.
+function currentFullQueue() {
+  if (contextsData.length) {
+    const c = contextsData.find(x => x.id === selectedCtxId) || contextsData[0];
+    if (c && Array.isArray(c.queue_all)) return c.queue_all;
+  } else if (Array.isArray(queueListAll) && queueListAll.length) {
+    return queueListAll;
+  }
+  return currentQueue();
 }
 function currentQueueSize() {
   return currentQueue().length;
@@ -259,8 +273,28 @@ function renderBooks(books, animate = false) {
 // Klick ruft genau diesen Schüler gezielt auf (WS `call`) — read-only gegen
 // IServ/DB; nur die lokale Helfer-Zuweisung wird gesetzt. Bei Aufruf aus einer
 // fremden Klasse bindet der Server den Helfer an diese Klasse (s. server/ws.py).
+// Eine Zeile innerhalb einer Gruppen-Box (aktiv/fertig) — alle Zeilen einer
+// Gruppe teilen sich eine gemeinsame Box statt je eine eigene (s.
+// .queue-group), anders als bei den wartenden Schülern (eigene book-row je
+// Schüler). Aktive Schüler werden bereits von einem Helfer bedient (kein
+// „Aufrufen"-Button); fertige lassen sich erneut aufrufen (z. B. um
+// nachträglich ein Buch zu erfassen) — Button wie bei den Wartenden.
+function renderQueueGroupItem(s, withCallBtn) {
+  const form = (s.form || '').replace(/^Klasse\s+/i, '');
+  const name = `${s.lastname}, ${s.firstname}`;
+  const sidAttr = withCallBtn ? ` data-student-id="${escapeHtml(String(s.student_id))}"` : '';
+  const callBtn = withCallBtn ? '<div class="qg-call"><button class="call-btn">Aufrufen</button></div>' : '';
+  return `<div class="queue-group-item"${sidAttr}>`
+    + `<div class="qg-fach">${escapeHtml(form)}</div>`
+    + `<div class="qg-name">${escapeHtml(name)}</div>${callBtn}</div>`;
+}
+
 function renderQueue() {
   const list = currentQueue();
+  const full = currentFullQueue();
+  const active = full.filter(s => s.status === 'active');
+  const done = full.filter(s => s.status === 'done');
+  let html = '';
   if (!list.length) {
     // Keine Klasse offen: der Hinweis steht bereits an Stelle der Klassen-Reiter
     // (renderQueueTabs); darunter in der eigentlichen Warteschlange bleibt die
@@ -268,21 +302,32 @@ function renderQueue() {
     // aber eine andere (rechts daneben) hat noch Wartende, wird die als
     // Vorschlag genannt — der Reiter selbst ist zusätzlich markiert (s.
     // renderQueueTabs, .qtab-suggested).
-    if (!contextsData.length) { bookRowsEl.innerHTML = ''; return; }
+    if (!contextsData.length && !active.length && !done.length) { bookRowsEl.innerHTML = ''; return; }
     const suggested = selectedCtxId === ownContextId ? suggestedQueueContext() : null;
-    bookRowsEl.innerHTML = suggested
+    html += suggested
       ? `<div class="book-empty">Warteschlange leer — weiter mit „${escapeHtml((suggested.form || 'Klasse').replace(/^Klasse\s+/i, ''))}"?</div>`
       : '<div class="book-empty">Warteschlange leer</div>';
-    return;
+  } else {
+    html += list.map(s => {
+      const form = (s.form || '').replace(/^Klasse\s+/i, '');
+      const name = `${s.lastname}, ${s.firstname}`;
+      return `<div class="book-row queue-row" data-student-id="${escapeHtml(String(s.student_id))}">`
+        + `<div class="b-fach">${escapeHtml(form)}</div>`
+        + `<div class="b-title">${escapeHtml(name)}</div>`
+        + `<div class="b-call"><button class="call-btn">Aufrufen</button></div></div>`;
+    }).join('');
   }
-  bookRowsEl.innerHTML = list.map(s => {
-    const form = (s.form || '').replace(/^Klasse\s+/i, '');
-    const name = `${s.lastname}, ${s.firstname}`;
-    return `<div class="book-row queue-row" data-student-id="${escapeHtml(String(s.student_id))}">`
-      + `<div class="b-fach">${escapeHtml(form)}</div>`
-      + `<div class="b-title">${escapeHtml(name)}</div>`
-      + `<div class="b-call"><button class="call-btn">Aufrufen</button></div></div>`;
-  }).join('');
+  // Gemeinsame Box je Status statt je Schüler eine eigene Zeile — anders als
+  // bei den wartenden Schülern (list) oben, die weiterhin je einen eigenen
+  // "Aufrufen"-Button brauchen. Aktiv: kein Button. Fertig: Button (erneutes
+  // Aufrufen), analog zu den Wartenden.
+  if (active.length) {
+    html += `<div class="queue-group queue-group-active">${active.map(s => renderQueueGroupItem(s, false)).join('')}</div>`;
+  }
+  if (done.length) {
+    html += `<div class="queue-group queue-group-done">${done.map(s => renderQueueGroupItem(s, true)).join('')}</div>`;
+  }
+  bookRowsEl.innerHTML = html;
 }
 
 // Weiter-Button: dieselbe Schaltfläche in beiden Modi, sie wandert nur —
@@ -345,7 +390,7 @@ function renderQueueTabs() {
 bookRowsEl.addEventListener('click', (e) => {
   const btn = e.target.closest('.call-btn');
   if (!btn) return;
-  const row = btn.closest('.queue-row');
+  const row = btn.closest('[data-student-id]');
   const sid = row ? row.dataset.studentId : null;
   if (sid == null) return;
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
@@ -495,6 +540,7 @@ function handleServerMessage(msg) {
     closeLendModal();
     if (typeof msg.queue_size === 'number') queueSize = msg.queue_size;
     if (Array.isArray(msg.queue)) queueList = msg.queue;
+    if (Array.isArray(msg.queue_all)) queueListAll = msg.queue_all;
     if (msg.msg) waitingMsg = msg.msg;
     renderWaitingStatus();
     renderQueueTabs();
@@ -502,6 +548,7 @@ function handleServerMessage(msg) {
   } else if (msg.type === 'queue_update') {
     if (typeof msg.queue_size === 'number') queueSize = msg.queue_size;
     if (Array.isArray(msg.queue)) queueList = msg.queue;
+    if (Array.isArray(msg.queue_all)) queueListAll = msg.queue_all;
     // Peek (Menü): Queue anzeigen, obwohl ein Schüler zugewiesen ist — dieser
     // bleibt im Hintergrund verbunden. Sonst nur anzeigen, wenn weder ein
     // Schüler geladen ist noch gerade einer geladen wird (next/call gesendet,

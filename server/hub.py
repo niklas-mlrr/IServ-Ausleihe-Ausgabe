@@ -94,8 +94,15 @@ class Hub:
             if (helper.student_id is None or helper.peeking) and helper.ws is not None:
                 qsize = s.pending_count(helper.context_id)
                 queue = s.pending_queue_as_list(helper.context_id)
+                queue_all = s.queue_as_list(helper.context_id)
                 if not await self._safe_send(
-                    helper.ws, {"type": "queue_update", "queue_size": qsize, "queue": queue}
+                    helper.ws,
+                    {
+                        "type": "queue_update",
+                        "queue_size": qsize,
+                        "queue": queue,
+                        "queue_all": queue_all,
+                    },
                 ):
                     helper.ws = None
                     continue

@@ -646,6 +646,7 @@ async def _detach_helper(state: AppState, hub, helper, helper_notify: dict | Non
             "msg": "Warte auf Schüler-Zuweisung",
             "queue_size": state.pending_count(helper.context_id),
             "queue": state.pending_queue_as_list(helper.context_id),
+            "queue_all": state.queue_as_list(helper.context_id),
         },
     )
 
@@ -816,6 +817,7 @@ async def assign_next_pending_to_helper(state: AppState, hub, helper) -> dict:
                 "msg": "Warteschlange leer",
                 "queue_size": state.pending_count(helper.context_id),
                 "queue": state.pending_queue_as_list(helper.context_id),
+                "queue_all": state.queue_as_list(helper.context_id),
             },
         )
         return {"ok": False, "reason": "empty"}
@@ -842,8 +844,9 @@ async def assign_student_to_helper(state: AppState, hub, helper, student) -> dic
     Schüler aus der Warteschlange). Setzt den Schüler auf 'active', ordnet
     ihn dem Helfer zu und stößt das Laden von Schülerinfo + Worker-Context
     als Hintergrund-Task an. Rein lokale Zuweisung — kein IServ-/DB-Schreib.
-    Der Aufrufer stellt sicher, dass `student.status == 'pending'` ist und
-    der Helfer keinen aktiven Schüler mehr hat.
+    Der Aufrufer stellt sicher, dass `student.status` `'pending'` oder
+    `'done'` ist (erneutes Aufrufen eines fertigen Schülers) und der Helfer
+    keinen aktiven Schüler mehr hat.
     """
     student.status = "active"
     student.assigned_helper = helper.token

@@ -199,6 +199,7 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                 "msg": "Warte auf Schüler-Zuweisung",
                 "queue_size": state.pending_count(helper.context_id),
                 "queue": state.pending_queue_as_list(helper.context_id),
+                "queue_all": state.queue_as_list(helper.context_id),
             },
         )
 
@@ -249,16 +250,19 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                 continue
 
             if mtype == "call":
-                # Helfer ruft einen konkreten wartenden Schüler aus der
-                # Warteschlange auf (Button in der Queue-Anzeige). Rein lokale
+                # Helfer ruft einen konkreten Schüler aus der Warteschlangen-
+                # Anzeige auf (Button bei wartenden UND bereits fertigen
+                # Schülern — Fertige lassen sich so erneut aufrufen, z. B. um
+                # nachträglich ein vergessenes Buch zu erfassen). Rein lokale
                 # Zuweisung — kein IServ-/DB-Schreibzugriff. Der Schüler muss
-                # noch 'pending' sein; zwischen Prüfung und Zuweisung liegt kein
-                # Await, also atomar im Eventloop (kein Doppel-Aufruf zweier
-                # Helfer auf denselben Schüler).
+                # 'pending' oder 'done' sein (nicht 'active': bereits bei einem
+                # Helfer, nicht 'skipped'); zwischen Prüfung und Zuweisung
+                # liegt kein Await, also atomar im Eventloop (kein Doppel-
+                # Aufruf zweier Helfer auf denselben Schüler).
                 sid = raw.get("student_id")
                 target_pair = state.find_student_with_ctx(sid) if sid is not None else None
                 target = target_pair[1] if target_pair else None
-                if target is None or target.status != "pending":
+                if target is None or target.status not in ("pending", "done"):
                     await hub.send_websocket(
                         websocket,
                         {
@@ -414,6 +418,7 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                         "type": "queue_update",
                         "queue_size": state.pending_count(helper.context_id),
                         "queue": state.pending_queue_as_list(helper.context_id),
+                        "queue_all": state.queue_as_list(helper.context_id),
                     },
                 )
                 # Frische Kontext-Übersicht (alle offenen Klassen + eigene) für
