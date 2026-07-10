@@ -182,3 +182,18 @@ Vorrang vor dem `Host`-Header (aber nicht über `HOST_IP` im Auto-Zweig).
 Cert-Gotcha: SAN wird einmalig erzeugt und gecacht. Auf dem VPS kann ein altes
 Cert die Tailscale-IP noch nicht im SAN haben → bei Cert-Warnung auf der
 `100.x` `certs/` löschen, damit neu generiert wird (SAN enthält dann `100.x`).
+
+## 10. Gotcha: POST auf unregistrierte Route liefert 405, nicht 404
+
+Symptom: Ein `POST` auf eine (noch) nicht registrierte Route antwortet mit
+**405 Method Not Allowed**, nicht mit dem erwarteten 404 Not Found.
+
+Ursache: `server/app.py` mountet `StaticFiles` als GET/HEAD-Catch-all auf
+`/` — der Pfad existiert also für GET, nur die Methode `POST` ist auf ihm
+nicht erlaubt, daher 405 statt 404. Beim Debuggen einer vermeintlich
+fehlenden Route zuerst prüfen, ob es sich nur um eine Methoden-Verwechslung
+handelt.
+
+Verwandt: `server/main.py` startet uvicorn mit `reload=False` (kein
+Auto-Reload) — nach einer Routen-Änderung muss der Server-Prozess manuell
+neu gestartet werden, sonst bleibt die alte Route aktiv.

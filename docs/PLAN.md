@@ -82,6 +82,24 @@ Helfer-/Schüler-Handy (Browser: Kamera-Scanner)      iPad (QR-Anzeige)
 - **Druck:** Server holt das offizielle Leihschein-PDF über die API und
   druckt direkt (SumatraPDF `-print-to` oder `win32print`).
 
+**IServ-API-Verhalten (Gotchas, Phase-2-Spikes 2026-06-12):**
+
+- **Klassen/Schüler-Endpoint:** `GET /schoolyears/:sy/forms` (direkter
+  Client-Call, kein SDK-Wrapper) liefert in **einem** Request alle Klassen
+  mit Schüler-Members, deren aktuell ausgeliehenen Büchern und
+  Enrollment-Status. Klassen mit **weniger als 5 Mitgliedern** werden
+  herausgefiltert (= Puffer-Klassen, siehe `get_forms` in
+  `server/iserv_client.py`).
+- **`student_upcoming_form` ist null am Schuljahresende** — die aktuelle
+  Klasse eines Schülers ist dann nur über den `/forms`-Endpoint abrufbar,
+  **nicht** aus `admin.get_enrollments()`.
+- **Klasse im Scanner (2026-06-17):** `get_student_info` liefert **keine**
+  Klasse; die Klasse (`form`) wird aus der Queue (`QueueStudent.form`) in
+  den `student_info`-Payload injiziert. IServ-Klassennamen tragen ein
+  Präfix „Klasse "; der gespeicherte `form`-Wert darf **nicht** verändert
+  werden (muss für `get_students_for_form` matchen) — das Präfix wird
+  daher nur in der UI gestrippt, nicht im gespeicherten Wert.
+
 ## 3. Rollen- und Sicherheitsmodell
 
 | Rolle | Gerät | Zugang | Darf |
