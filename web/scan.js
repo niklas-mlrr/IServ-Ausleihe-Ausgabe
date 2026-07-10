@@ -1,4 +1,11 @@
 const statusEl = document.getElementById('status-text');
+// Zentraler Setter: hält die Alert-Farbe (Ausgemustert/anderweitig verliehen)
+// strikt an den Alert-Text gebunden — jeder andere Statustext (z.B. "<Code>
+// gesendet") setzt automatisch wieder die normale Schrift.
+function setStatusText(text, isAlert = false) {
+  statusEl.textContent = text;
+  statusEl.classList.toggle('status-book-deleted', isAlert);
+}
 const dotEl = document.getElementById('dot');
 const sNameEl = document.getElementById('s-name');
 const sFormEl = document.getElementById('s-form');
@@ -81,9 +88,9 @@ function waitForScans(timeoutMs = 3000) {
 
 function renderWaitingStatus() {
   const n = currentQueueSize();
-  statusEl.textContent = (n > 0 || contextsData.length || queueSize != null)
+  setStatusText((n > 0 || contextsData.length || queueSize != null)
     ? `Warteschlange: ${n}`
-    : waitingMsg;
+    : waitingMsg);
 }
 
 // Peek-Statuszeile: Warteschlange angezeigt, aber der zugewiesene Schüler ist
@@ -94,7 +101,7 @@ function renderPeekStatus() {
   const name = sNameEl.textContent.trim();
   const form = sFormEl.textContent.trim();
   const who = name ? `${name}${form ? ` (${form})` : ''} im Hintergrund` : 'Schüler im Hintergrund';
-  statusEl.textContent = `${who} — Warteschlange: ${currentQueueSize()}`;
+  setStatusText(`${who} — Warteschlange: ${currentQueueSize()}`);
 }
 
 // Aktuell gewählte Klassen-Queue: aus den Klassen-Reitern (contextsData) oder
@@ -142,7 +149,7 @@ function syncQueueView() {
 // „Warten…" — die Bücherliste ist zwar schon da, aber Scans buchen erst nach
 // `worker_ready`.
 function setReadyStatus() {
-  if (studentActive) statusEl.textContent = workerPending ? 'Warten…' : 'Scanner bereit — Buch scannen';
+  if (studentActive) setStatusText(workerPending ? 'Warten…' : 'Scanner bereit — Buch scannen');
   else renderWaitingStatus();
 }
 
@@ -282,7 +289,7 @@ bookRowsEl.addEventListener('click', (e) => {
   // peeking bleibt bewusst true: scheitert der Aufruf (Schüler inzwischen
   // genommen), kehrt der Client automatisch in die Peek-Ansicht zurück. Im
   // Erfolgsfall setzt der `loading`-Handler peeking auf false.
-  statusEl.textContent = 'Schüler wird aufgerufen …';
+  setStatusText('Schüler wird aufgerufen …');
   bookRowsEl.innerHTML = '<div class="book-empty">Schüler wird geladen …</div>';
   ws.send(JSON.stringify({ type: 'call', student_id: Number(sid) }));
 });
@@ -325,7 +332,6 @@ function handleServerMessage(msg) {
     currentBooks = s.books || [];
     resetScannedState();
     renderBooks(currentBooks);
-    statusEl.classList.remove('status-book-deleted');
     closeBookAlertModal();
     // Bücher sofort sichtbar; Scans+„Scanner bereit"-Status aber erst, sobald
     // der Worker bereit ist (`worker_ready`). Bis dahin „Warten…" + Scans ignor.
@@ -351,13 +357,12 @@ function handleServerMessage(msg) {
     currentBooks = [];
     resetScannedState();
     bookRowsEl.innerHTML = '<div class="book-empty">Schüler wird geladen …</div>';
-    statusEl.classList.remove('status-book-deleted');
     closeBookAlertModal();
     currentStudent = null;
     lendingApproved = false;
     heldScanValue = null;
     closeLendModal();
-    statusEl.textContent = 'Warten…';
+    setStatusText('Warten…');
     // Ursprung Lupe-Suche: Panel + Menü bewusst schließen (zurück zur
     // Scanner-Ansicht), damit der geladene Schüler sofort scannbar ist.
     // `call`/`next` aus dem Peek lassen das Menü weiter offen (bestehendes
@@ -386,8 +391,7 @@ function handleServerMessage(msg) {
     // bestellt, unbekannt, noch nicht geladen, Prüf-Fehler, an sich selbst
     // verliehen) war der Host nie informiert → Clear ist dort ein No-op.
     const isAlert = !OK_STATUSES.has(msg.status);
-    statusEl.classList.toggle('status-book-deleted', isAlert);
-    statusEl.textContent = `${escapeHtml(msg.barcode)} — ${escapeHtml(msg.msg || msg.status)}`;
+    setStatusText(`${escapeHtml(msg.barcode)} — ${escapeHtml(msg.msg || msg.status)}`, isAlert);
     if (isAlert) showBookAlertModal(msg);
   } else if (msg.type === 'settings') {
     slipSecondPageDefault = !!msg.slip_second_page;
@@ -400,7 +404,7 @@ function handleServerMessage(msg) {
     const detail = msg.ok
       ? `Leihschein: ${escapeHtml(msg.detail || 'gedruckt')}`
       : `Druck fehlgeschlagen: ${escapeHtml(msg.msg || '')}`;
-    statusEl.textContent = detail;
+    setStatusText(detail);
     // „Drucken & nächster Schüler": nur bei erfolgreichem Druck weiterschalten.
     if (printThenNext) {
       printThenNext = false;
@@ -421,7 +425,6 @@ function handleServerMessage(msg) {
     resetScannedState();
     pendingScans = 0;
     drainScanWaiters();
-    statusEl.classList.remove('status-book-deleted');
     closeBookAlertModal();
     currentStudent = null;
     lendingApproved = false;
@@ -472,7 +475,7 @@ function handleServerMessage(msg) {
     // gekommen → Menü/Panel offen lassen zum erneuten Versuch, Flag aber
     // zurücksetzen, damit ein späteres fremdes `loading` sie nicht doch schließt.
     searchSubmitted = false;
-    statusEl.textContent = 'Fehler: ' + (msg.msg || '');
+    setStatusText('Fehler: ' + (msg.msg || ''));
     dotEl.className = 'dot err';
     heldScanValue = null;
     closeLendModal();
@@ -485,7 +488,7 @@ function handleServerMessage(msg) {
 
 function connect() {
   if (!token) {
-    statusEl.textContent = 'Kein Token in der URL — vom Host QR-Code scannen';
+    setStatusText('Kein Token in der URL — vom Host QR-Code scannen');
     dotEl.className = 'dot err';
     return;
   }
@@ -493,10 +496,10 @@ function connect() {
     onSocket: (s) => { ws = s; },
     onOpen: () => { dotEl.className = 'dot ok'; setReadyStatus(); },
     onClose: (e, reconnect) => {
-      dotEl.className = 'dot err'; statusEl.textContent = 'Getrennt — neu verbinden…';
+      dotEl.className = 'dot err'; setStatusText('Getrennt — neu verbinden…');
       reconnect();
     },
-    onError: () => { dotEl.className = 'dot err'; statusEl.textContent = 'Verbindungsfehler'; },
+    onError: () => { dotEl.className = 'dot err'; setStatusText('Verbindungsfehler'); },
     onMessage: e => { try { handleServerMessage(JSON.parse(e.data)); } catch (_) {} },
   });
 }
@@ -563,8 +566,7 @@ function advanceToNext() {
   resetScannedState();
   workerPending = true;
   loadingStudent = true;  // nächste Schülerzugewiesen, wird gerade geladen → Queue verbergen
-  statusEl.classList.remove('status-book-deleted');
-  statusEl.textContent = 'Warten…';
+  setStatusText('Warten…');
   ws.send(JSON.stringify({ type: 'next' }));
 }
 
@@ -575,7 +577,7 @@ function closeNextModal() { nextModal.classList.remove('show'); }
 async function requestNext() {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   if (!studentActive) { advanceToNext(); return; }
-  statusEl.textContent = 'Prüfe Scans …';
+  setStatusText('Prüfe Scans …');
   await waitForScans();
   setReadyStatus();
   const { vorgemerkt, offen } = computeOpenBooks();
@@ -649,8 +651,8 @@ function closePrintModal() { printModal.classList.remove('show'); }
 // (vorgemerkte, noch nicht gescannte Bücher) berechnen und Default setzen.
 async function openPrintDialog() {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  if (!studentActive) { statusEl.textContent = 'Kein Schüler zugewiesen'; return; }
-  statusEl.textContent = 'Prüfe Scans …';
+  if (!studentActive) { setStatusText('Kein Schüler zugewiesen'); return; }
+  setStatusText('Prüfe Scans …');
   await waitForScans();
   setReadyStatus();
   const { vorgemerkt, offen } = computeOpenBooks();
@@ -687,7 +689,7 @@ function sendPrint(thenNext) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   printThenNext = thenNext;
   printBtn.disabled = true;
-  statusEl.textContent = 'Leihschein wird gedruckt …';
+  setStatusText('Leihschein wird gedruckt …');
   ws.send(JSON.stringify({ type: 'print', second_page: slipCheck.checked }));
   closePrintModal();
 }
@@ -747,7 +749,7 @@ modalLendYesBtn.addEventListener('click', () => {
   if (v == null) return;
   lastValue = v; cooldown = true;
   setTimeout(() => { cooldown = false; lastValue = ''; }, 2000);
-  statusEl.textContent = 'Gesendet: ' + v;
+  setStatusText('Gesendet: ' + v);
   sendScan(v);
 });
 
@@ -756,13 +758,13 @@ modalLendYesBtn.addEventListener('click', () => {
 modalLendNoBtn.addEventListener('click', () => {
   closeLendModal();
   heldScanValue = null;
-  statusEl.textContent = 'Nicht ausgeliehen — Buch nicht eingegeben';
+  setStatusText('Nicht ausgeliehen — Buch nicht eingegeben');
 });
 lendConfirmModal.addEventListener('click', (e) => {
   if (e.target === lendConfirmModal) {  // Click außerhalb der Box = verwerfen
     closeLendModal();
     heldScanValue = null;
-    statusEl.textContent = 'Nicht ausgeliehen — Buch nicht eingegeben';
+    setStatusText('Nicht ausgeliehen — Buch nicht eingegeben');
   }
 });
 document.addEventListener('keydown', (e) => {
@@ -773,7 +775,7 @@ document.addEventListener('keydown', (e) => {
   if (lendConfirmModal.classList.contains('show')) {
     closeLendModal();
     heldScanValue = null;
-    statusEl.textContent = 'Nicht ausgeliehen — Buch nicht eingegeben';
+    setStatusText('Nicht ausgeliehen — Buch nicht eingegeben');
   }
 });
 
@@ -1289,9 +1291,9 @@ function onScanSuccess(value) {
     heldScanValue = value;
     renderLendWarning(lendWarnEl);
     lendConfirmModal.classList.add('show');
-    statusEl.textContent = 'Freigabe erforderlich — Buch zurückgehalten';
+    setStatusText('Freigabe erforderlich — Buch zurückgehalten');
   } else {
-    statusEl.textContent = 'Gesendet: ' + value;
+    setStatusText('Gesendet: ' + value);
     sendScan(value);
   }
   if (navigator.vibrate) navigator.vibrate(80);
@@ -1324,7 +1326,7 @@ async function initScanner(cameraId) {
   isCameraRunning = false;
   reloadBtn.disabled = true;
   reloadBtn.textContent = '...';
-  if (!workerPending) statusEl.textContent = 'Kamera startet…';
+  if (!workerPending) setStatusText('Kamera startet…');
 
   if (html5QrCode) {
     try { await html5QrCode.stop(); } catch (e) {}
@@ -1345,7 +1347,7 @@ async function initScanner(cameraId) {
     isTorchOn = false;
     torchBtn.classList.remove('torch-on');
     if (ws && ws.readyState === WebSocket.OPEN) setReadyStatus();
-    else statusEl.textContent = 'Neu verbinden…';
+    else setStatusText('Neu verbinden…');
     const video = document.querySelector('#reader video');
     if (video && video.srcObject) {
       const track = video.srcObject.getVideoTracks()[0];
@@ -1354,7 +1356,7 @@ async function initScanner(cameraId) {
     }
   } catch (err) {
     console.error('Camera error:', err);
-    statusEl.textContent = 'Kamerafehler — neu laden';
+    setStatusText('Kamerafehler — neu laden');
     dotEl.className = 'dot err';
   }
 

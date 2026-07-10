@@ -8,6 +8,22 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-10 — Scan-Client: Alert-Farbe der Statuszeile bleibt am Alert-Text
+
+`web/scan.js` toggelte `status-book-deleted` (rot/fett) auf `#status-text`
+direkt neben etlichen `textContent`-Zuweisungen, ohne die Klasse an anderer
+Stelle zuverlässig zurückzunehmen — nach einem Alert (ausgemustert/an
+jemand anders verliehen) blieb die Formatierung teils auf nachfolgenden,
+harmlosen Statustexten (z. B. „Gesendet: `<Code>`") hängen.
+
+Neuer zentraler Setter `setStatusText(text, isAlert = false)` setzt Text und
+Klasse in einem Schritt; alle ~25 Zuweisungsstellen laufen jetzt darüber.
+Die Alert-Formatierung gilt damit nur noch für den einen Aufruf im
+`scan_result`-Handler, der sie mit `isAlert = true` explizit anfordert —
+jeder andere Statustext setzt automatisch die normale Schrift zurück.
+
+Reiner UI-Fix, kein Verhaltenseingriff auf dem Buchungspfad.
+
 ## 2026-07-09 — `_read_booking_result`: DOM-Annahme geklärt, Selektoren bereinigt
 
 Auswertung des DOM-Dumps `automation/out/06b_kartei_geladen.html` klärt die
