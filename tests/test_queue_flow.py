@@ -120,6 +120,7 @@ def test_end_student_sets_status_and_releases_helper():
                 "msg": "Warte auf Schüler-Zuweisung",
                 "queue_size": st.pending_count(),
                 "queue": st.pending_queue_as_list(),
+                "queue_all": st.queue_as_list(),
             },
         )
     ]

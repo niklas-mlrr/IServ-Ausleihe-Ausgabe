@@ -208,6 +208,7 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                 "msg": "Warte auf Schüler-Zuweisung",
                 "queue_size": state.pending_count(helper.context_id),
                 "queue": state.pending_queue_as_list(helper.context_id),
+                "queue_all": state.queue_as_list(helper.context_id),
             },
         )
 
@@ -423,6 +424,7 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                         "type": "queue_update",
                         "queue_size": state.pending_count(helper.context_id),
                         "queue": state.pending_queue_as_list(helper.context_id),
+                        "queue_all": state.queue_as_list(helper.context_id),
                     },
                 )
                 # Frische Kontext-Übersicht (alle offenen Klassen + eigene) für

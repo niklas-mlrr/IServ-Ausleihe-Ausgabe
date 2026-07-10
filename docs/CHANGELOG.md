@@ -8,6 +8,23 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-10 — Helferclient: aktive/fertige Schüler als Gruppen-Boxen unter der Warteschlange
+
+Die Warteschlangen-Ansicht im Helferclient (`web/scan.js`, `renderQueue`)
+zeigt jetzt zusätzlich zu den wartenden Schülern (unverändert je eigene Zeile
+mit „Aufrufen"-Button) die gerade aufgerufenen (`status: "active"`) und
+bereits fertigen (`status: "done"`) Schüler der gewählten Klasse — je Status
+eine gemeinsame Box (blau/grün, `.queue-group`) statt einer Einzel-Box pro
+Schüler wie bei den Büchern. Abstände zwischen den Boxen sowie zwischen den
+Namen innerhalb einer Box sind auf 7px vereinheitlicht (wie zwischen den
+Steuer-Elementen der oberen Leiste, `.top-bar`/`.gear-wrap`).
+
+Serverseitig liefert `AppState.real_contexts_summary()` (`server/state.py`)
+sowie die `waiting`/`queue_update`-Nachrichten (`server/sessions.py`,
+`server/hub.py`, `server/routes/ws.py`) dafür zusätzlich zum bisherigen
+`queue`-Feld (nur pending, für Tab-Badge/Status-Count unverändert) ein neues
+`queue_all`-Feld mit allen Schülern des Kontexts (inkl. active/done/skipped).
+
 ## 2026-07-10 — Host: Sofort-fertig-Filter beim Klassen-Öffnen
 
 Im „Neue Klasse öffnen"-Reiter vier Umschalter ergänzt: Schüler ohne aktuelle

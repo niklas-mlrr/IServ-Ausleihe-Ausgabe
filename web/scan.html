@@ -279,6 +279,22 @@
       background: var(--surface-2); color: var(--fg); border: 1px solid var(--border); cursor: pointer; transition: background .2s; }
     .call-btn:hover { background: var(--surface-3); }
     .call-btn:active { background: var(--surface-4); }
+    /* Gruppen-Boxen unter der eigentlichen (wartenden) Warteschlange: alle
+       gerade aufgerufenen (aktiv) bzw. bereits fertigen Schüler teilen sich
+       je EINE gemeinsame Box statt einer Zeile pro Schüler (anders als bei
+       den Büchern/wartenden Schülern). Abstand zur vorigen Box/Zeile sowie
+       zwischen den Namen innerhalb einer Box: 7px, wie zwischen den
+       Steuer-Elementen oben (Menü/Zahnrad/…, s. .top-bar/.gear-wrap). */
+    .queue-group {
+      display: flex; flex-direction: column; gap: 7px;
+      border-radius: 8px; border: 2px solid transparent; padding: 8px 10px;
+      margin-bottom: 7px; font-size: .9rem;
+    }
+    .queue-group-active { background: rgba(33,150,243,.14); border-color: rgba(33,150,243,.55); }
+    .queue-group-done   { background: rgba(46,125,50,.16);  border-color: rgba(46,125,50,.55); }
+    .queue-group-item { display: grid; grid-template-columns: 4.5rem 1fr; gap: 8px; align-items: center; }
+    .queue-group-item .qg-fach { font-weight: 600; }
+    .queue-group-item .qg-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     /* Bewegungsreduktion respektieren: FLIP-Transition praktisch sofort. */
     @media (prefers-reduced-motion: reduce) {
       .book-row { transition: transform .01ms !important; }

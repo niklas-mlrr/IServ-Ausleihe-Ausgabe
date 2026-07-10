@@ -66,6 +66,7 @@ def test_broadcast_host_pushes_queue_size_to_unassigned_scanners() -> None:
         "type": "queue_update",
         "queue_size": 3,
         "queue": s.pending_queue_as_list(),
+        "queue_all": s.queue_as_list(),
     } in unassigned.sent
     assert assigned.sent == []
 
@@ -87,6 +88,7 @@ def test_broadcast_queue_size_reaches_assigned_helper_while_peeking() -> None:
         "type": "queue_update",
         "queue_size": 2,
         "queue": s.pending_queue_as_list(),
+        "queue_all": s.queue_as_list(),
     } in peeking.sent
     assert assigned.sent == []
 

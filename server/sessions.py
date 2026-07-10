@@ -657,6 +657,7 @@ async def _detach_helper(state: AppState, hub, helper, helper_notify: dict | Non
             "msg": "Warte auf Schüler-Zuweisung",
             "queue_size": state.pending_count(helper.context_id),
             "queue": state.pending_queue_as_list(helper.context_id),
+            "queue_all": state.queue_as_list(helper.context_id),
         },
     )
 
@@ -830,6 +831,7 @@ async def assign_next_pending_to_helper(state: AppState, hub, helper) -> dict:
                 "msg": "Warteschlange leer",
                 "queue_size": state.pending_count(helper.context_id),
                 "queue": state.pending_queue_as_list(helper.context_id),
+                "queue_all": state.queue_as_list(helper.context_id),
             },
         )
         return {"ok": False, "reason": "empty"}

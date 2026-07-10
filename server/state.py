@@ -397,12 +397,16 @@ class AppState:
         Reiter im Helfer-Menü (Warteschlange je Tab mit „Aufrufen"). Einfüge-
         reihenfolge der ``dict`` bleibt erhalten = Reihenfolge wie im Host.
         Wartende (nicht active/done/skipped), weil nur diese aufrufbar sind —
-        analog ``pending_queue_as_list``."""
+        analog ``pending_queue_as_list``. Zusätzlich ``queue_all`` mit ALLEN
+        Schülern (inkl. active/done/skipped) für die Gruppen-Boxen unter der
+        Warteschlange im Helfer-Client — ``queue_size``/Tab-Badge bleiben
+        bewusst auf ``queue`` (nur pending) gestützt."""
         return [
             {
                 "id": c.id,
                 "form": c.form,
                 "queue": [s.as_dict() for s in c.queue if s.status == "pending"],
+                "queue_all": [s.as_dict() for s in c.queue],
             }
             for c in self.contexts.values()
         ]
