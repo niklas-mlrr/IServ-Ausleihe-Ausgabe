@@ -202,10 +202,7 @@ async def clear_book_alert(body: StudentRef) -> dict:
         session.book_alert_open = False
         session.book_alert_payload = None
         if session.ws is not None:
-            try:
-                await session.ws.send_json({"type": "book_alert_clear"})
-            except Exception:
-                pass
+            await get_hub().send_websocket(session.ws, {"type": "book_alert_clear"})
 
     await get_hub().broadcast_host(
         {"type": "book_alert", "student_id": student_id, "cleared": True}

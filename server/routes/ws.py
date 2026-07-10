@@ -79,6 +79,7 @@ async def _deferred_end(state, hub, helper, student_id: int) -> None:
 @router.websocket("/ws/host")
 async def ws_host(websocket: WebSocket, session_id: str | None = Cookie(default=None)) -> None:
     state = get_state()
+    hub = get_hub()
     from ..config import get_config
 
     if not state.is_host_session_valid(session_id, get_config().host_session_ttl_s):
@@ -88,7 +89,7 @@ async def ws_host(websocket: WebSocket, session_id: str | None = Cookie(default=
     await websocket.accept()
     state.host_ws_connections.append(websocket)
     try:
-        await websocket.send_json(state.state_snapshot())
+        await hub.send_websocket(websocket, state.state_snapshot())
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
@@ -267,11 +268,12 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                 target_pair = state.find_student_with_ctx(sid) if sid is not None else None
                 target = target_pair[1] if target_pair else None
                 if target is None or target.status != "pending":
-                    await websocket.send_json(
+                    await hub.send_websocket(
+                        websocket,
                         {
                             "type": "error",
                             "msg": "Schüler nicht (mehr) in der Warteschlange",
-                        }
+                        },
                     )
                     # Queue sofort nachpushen, damit der Client die aktuelle
                     # Liste sieht (z. B. zwischenzeitlich von anderem Helfer
@@ -310,7 +312,9 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                 # (IServ, read-only). Schuljahrbezogen gecached, damit wieder-
                 # holtes Öffnen der Suche keine IServ-Roundtrips auslöst.
                 if state.iserv is None:
-                    await websocket.send_json({"type": "search_classes", "classes": []})
+                    await hub.send_websocket(
+                        websocket, {"type": "search_classes", "classes": []}
+                    )
                     continue
                 sy = state.selected_schoolyear
                 cached = state.class_names_cache.get(sy)
@@ -319,12 +323,15 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                         cached = await state.iserv.get_class_names(sy)
                     except Exception as e:  # noqa: BLE001
                         log.warning("search_classes fehlgeschlagen: %s", e)
-                        await websocket.send_json(
-                            {"type": "error", "msg": f"Klassen konnten nicht geladen werden: {e}"}
+                        await hub.send_websocket(
+                            websocket,
+                            {"type": "error", "msg": f"Klassen konnten nicht geladen werden: {e}"},
                         )
                         continue
                     state.class_names_cache[sy] = cached
-                await websocket.send_json({"type": "search_classes", "classes": cached})
+                await hub.send_websocket(
+                    websocket, {"type": "search_classes", "classes": cached}
+                )
                 continue
 
             if mtype == "search_students":
@@ -332,8 +339,9 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                 # schuljahrbezogen gecached (Key "schoolyear|form").
                 form = str(raw.get("form") or "").strip()
                 if state.iserv is None:
-                    await websocket.send_json(
-                        {"type": "search_students", "form": form, "students": []}
+                    await hub.send_websocket(
+                        websocket,
+                        {"type": "search_students", "form": form, "students": []},
                     )
                     continue
                 sy = state.selected_schoolyear
@@ -344,13 +352,15 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                         cached = await state.iserv.get_students_for_form(form, sy)
                     except Exception as e:  # noqa: BLE001
                         log.warning("search_students fehlgeschlagen: %s", e)
-                        await websocket.send_json(
-                            {"type": "error", "msg": f"Schüler konnten nicht geladen werden: {e}"}
+                        await hub.send_websocket(
+                            websocket,
+                            {"type": "error", "msg": f"Schüler konnten nicht geladen werden: {e}"},
                         )
                         continue
                     state.form_students_cache[key] = cached
-                await websocket.send_json(
-                    {"type": "search_students", "form": form, "students": cached}
+                await hub.send_websocket(
+                    websocket,
+                    {"type": "search_students", "form": form, "students": cached},
                 )
                 continue
 
@@ -367,12 +377,16 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                 lastname = str(raw.get("lastname") or "").strip()
                 firstname = str(raw.get("firstname") or "").strip()
                 if sid is None or not form:
-                    await websocket.send_json({"type": "error", "msg": "Schüler/Klasse fehlt"})
+                    await hub.send_websocket(
+                        websocket, {"type": "error", "msg": "Schüler/Klasse fehlt"}
+                    )
                     continue
                 try:
                     sid = int(sid)
                 except (TypeError, ValueError):
-                    await websocket.send_json({"type": "error", "msg": "Ungültige Schüler-ID"})
+                    await hub.send_websocket(
+                        websocket, {"type": "error", "msg": "Ungültige Schüler-ID"}
+                    )
                     continue
                 if helper.student_id is not None:
                     await end_student(
@@ -453,8 +467,9 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                 # Leihschein des aktuell zugewiesenen Schülers drucken.
                 # Read-only PDF-Abruf + lokaler Druck (kein IServ-Submit).
                 if helper.student_id is None:
-                    await websocket.send_json(
-                        {"type": "print_result", "ok": False, "msg": "Kein Schüler zugewiesen"}
+                    await hub.send_websocket(
+                        websocket,
+                        {"type": "print_result", "ok": False, "msg": "Kein Schüler zugewiesen"},
                     )
                     continue
                 # Seite 1 wird immer gedruckt; Seite 2 (Schüler-Leihschein) nur,
@@ -463,10 +478,12 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                 pages = None if second_page else "1"
                 try:
                     result = await print_loan_slip_for(state, helper.student_id, pages=pages)
-                    await websocket.send_json({"type": "print_result", **result})
+                    await hub.send_websocket(websocket, {"type": "print_result", **result})
                 except Exception as e:  # noqa: BLE001 — Fehler dem Client melden
                     log.exception("Leihschein-Druck (Scanner) fehlgeschlagen")
-                    await websocket.send_json({"type": "print_result", "ok": False, "msg": str(e)})
+                    await hub.send_websocket(
+                        websocket, {"type": "print_result", "ok": False, "msg": str(e)}
+                    )
                 continue
 
             if mtype != "scan":
@@ -481,13 +498,14 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
 
             student_id = helper.student_id
             if student_id is None:
-                await websocket.send_json(
+                await hub.send_websocket(
+                    websocket,
                     {
                         "type": "scan_result",
                         "barcode": barcode,
                         "status": "error",
                         "msg": "Kein Schüler zugewiesen",
-                    }
+                    },
                 )
                 continue
 
@@ -504,7 +522,9 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
             )
             # ISBN mitgeben, damit der Helferclient das gescannte Buch in seiner
             # Liste markieren kann.
-            await websocket.send_json({"type": "scan_result", "barcode": barcode, **result})
+            await hub.send_websocket(
+                websocket, {"type": "scan_result", "barcode": barcode, **result}
+            )
             await hub.broadcast_host(state.state_snapshot())
 
     except WebSocketDisconnect:
@@ -607,7 +627,9 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
     session.last_activity = datetime.now()
 
     if session.state == "pending_pairing":
-        await websocket.send_json({"type": "pending", "pairing_code": session.pairing_code})
+        await hub.send_websocket(
+            websocket, {"type": "pending", "pairing_code": session.pairing_code}
+        )
     elif session.state == "paired" and session.student_id is not None:
         # Reconnect nach Pairing: Identität (ohne Bücher) erneut senden; die
         # Bücherliste kommt mit `worker_ready` — sofort, wenn der Worker bereits
@@ -617,23 +639,24 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
             qs = state.find_student(session.student_id)
             info = await hydrate_student_info(state, info, qs.form if qs else "", session)
             books = info.get("books", [])
-            await websocket.send_json(
+            await hub.send_websocket(
+                websocket,
                 {
                     "type": "student_info",
                     "student": {**info, "books": []},
                     "payment_overridden": session.payment_overridden,
-                }
+                },
             )
             load_inflight = session.load_task is not None and not session.load_task.done()
             worker_present = state.student_worker_sessions.get(session.student_id) is not None
             if not load_inflight or worker_present:
-                await websocket.send_json({"type": "worker_ready", "books": books})
+                await hub.send_websocket(websocket, {"type": "worker_ready", "books": books})
             # Blockierendes Ausgemustert-Hinweis-Modal überlebt einen Reconnect
             # (z. B. Seiten-Reload) — erst der Host darf es per Button schließen.
             if session.book_alert_open and session.book_alert_payload:
-                await websocket.send_json(session.book_alert_payload)
+                await hub.send_websocket(websocket, session.book_alert_payload)
         except Exception as e:
-            await websocket.send_json({"type": "error", "msg": str(e)})
+            await hub.send_websocket(websocket, {"type": "error", "msg": str(e)})
 
     await hub.broadcast_host(state.state_snapshot())
 
@@ -659,13 +682,14 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
                 if not barcode:
                     continue
                 if session.state != "paired" or session.student_id is None:
-                    await websocket.send_json(
+                    await hub.send_websocket(
+                        websocket,
                         {
                             "type": "scan_result",
                             "barcode": barcode,
                             "status": "error",
                             "msg": "Noch nicht freigegeben",
-                        }
+                        },
                     )
                     continue
                 if session.book_alert_open:
@@ -687,7 +711,7 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
                 if result.get("status") in ("book_deleted", "not_in_stock"):
                     session.book_alert_open = True
                     session.book_alert_payload = payload
-                await websocket.send_json(payload)
+                await hub.send_websocket(websocket, payload)
                 await hub.broadcast_host(state.state_snapshot())
 
             elif mtype == "finish":

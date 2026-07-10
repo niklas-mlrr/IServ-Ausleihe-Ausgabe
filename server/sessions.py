@@ -594,10 +594,7 @@ async def invalidate_session(
     ws = session.ws
     session.ws = None
     if ws is not None:
-        try:
-            await ws.send_json({"type": "closed", "reason": new_state})
-        except Exception:
-            pass
+        await get_hub().send_websocket(ws, {"type": "closed", "reason": new_state})
         try:
             await ws.close(code=4006)
         except Exception:
@@ -901,16 +898,14 @@ async def load_and_push_paired_student(
     # Bücher erst mit `worker_ready` senden — Identität (inkl. book_order) sofort.
     books = info.get("books", [])
     if session.ws is not None:
-        try:
-            await session.ws.send_json(
-                {
-                    "type": "student_info",
-                    "student": {**info, "books": []},
-                    "payment_overridden": session.payment_overridden,
-                }
-            )
-        except Exception:
-            pass
+        await get_hub().send_websocket(
+            session.ws,
+            {
+                "type": "student_info",
+                "student": {**info, "books": []},
+                "payment_overridden": session.payment_overridden,
+            },
+        )
 
     if state.worker_pool:
         try:
@@ -921,12 +916,10 @@ async def load_and_push_paired_student(
         except Exception as e:  # noqa: BLE001
             log.exception("Worker-Session (Modus B) für %d fehlgeschlagen", student.student_id)
             if session.ws is not None:
-                try:
-                    await session.ws.send_json(
-                        {"type": "error", "msg": f"Playwright-Fehler: {e}. Buchung manuell."}
-                    )
-                except Exception:
-                    pass
+                await get_hub().send_websocket(
+                    session.ws,
+                    {"type": "error", "msg": f"Playwright-Fehler: {e}. Buchung manuell."},
+                )
             # Kein `worker_ready`: Worker nie bereit → Bücherliste bleibt aus,
             # Scans ignoriert. Host muss den Schüler überspringen/manuell lösen.
             await hub.broadcast_host(state.state_snapshot())
@@ -953,10 +946,7 @@ async def load_and_push_paired_student(
     # Worker bereit (oder Degraded-Modus ohne worker_pool): Bücherliste an den
     # Schüler pushen + Client flippt von „Wird geladen…" auf „Scanner bereit".
     if session.ws is not None:
-        try:
-            await session.ws.send_json({"type": "worker_ready", "books": books})
-        except Exception:
-            pass
+        await get_hub().send_websocket(session.ws, {"type": "worker_ready", "books": books})
 
     await hub.broadcast_host(state.state_snapshot())
 
@@ -970,19 +960,19 @@ async def send_display_update(state: AppState, display: DisplaySession) -> None:
     """Aktuellen Zustand an ein Display schicken: Reg-Code, QR oder 'geschlossen'."""
     if display.ws is None:
         return
-    try:
-        if not display.authorized:
-            msg = {
-                "type": "registration",
-                "code": display.registration_code,
-                "display_id": display.display_id,
-            }
-        elif state.modus_b_open and state.modus_b_join_qr:
-            msg = {"type": "qr", "qr": state.modus_b_join_qr, "url": state.modus_b_join_url}
-        else:
-            msg = {"type": "closed"}
-        await display.ws.send_json(msg)
-    except Exception:
+    if not display.authorized:
+        msg = {
+            "type": "registration",
+            "code": display.registration_code,
+            "display_id": display.display_id,
+        }
+    elif state.modus_b_open and state.modus_b_join_qr:
+        msg = {"type": "qr", "qr": state.modus_b_join_qr, "url": state.modus_b_join_url}
+    else:
+        msg = {"type": "closed"}
+    # `send_websocket` gibt False statt zu werfen — Cleanup dediziert am
+    # Rückgabewert, nicht mehr per except (s. Wave-2-Konvertierung).
+    if not await get_hub().send_websocket(display.ws, msg):
         display.ws = None
 
 
