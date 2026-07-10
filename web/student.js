@@ -1,3 +1,4 @@
+(function () {
 const views = {
   pending: document.getElementById('view-pending'),
   active: document.getElementById('view-active'),
@@ -393,4 +394,5 @@ setInterval(() => {
 (async function boot() {
   if (token) { connect(); }            // bestehender Token → verbinden (Server prüft Gültigkeit)
   else if (await join()) { connect(); } // sonst per QR-Secret neue Session
+})();
 })();
