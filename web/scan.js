@@ -2,6 +2,8 @@ const statusEl = document.getElementById('status-text');
 // Zentraler Setter: hält die Alert-Farbe (Ausgemustert/anderweitig verliehen)
 // strikt an den Alert-Text gebunden — jeder andere Statustext (z.B. "<Code>
 // gesendet") setzt automatisch wieder die normale Schrift.
+// Nimmt PLAIN TEXT entgegen (kein HTML) — schreibt auf textContent, das
+// Entities nicht interpretiert; escapeHtml()-te Strings hier wären falsch.
 function setStatusText(text, isAlert = false) {
   statusEl.textContent = text;
   statusEl.classList.toggle('status-book-deleted', isAlert);
@@ -452,7 +454,7 @@ function handleServerMessage(msg) {
     // bestellt, unbekannt, noch nicht geladen, Prüf-Fehler, an sich selbst
     // verliehen) war der Host nie informiert → Clear ist dort ein No-op.
     const isAlert = !OK_STATUSES.has(msg.status);
-    setStatusText(`${escapeHtml(msg.barcode)} — ${escapeHtml(msg.msg || msg.status)}`, isAlert);
+    setStatusText(`${msg.barcode} — ${msg.msg || msg.status}`, isAlert);
     if (isAlert) showBookAlertModal(msg);
   } else if (msg.type === 'settings') {
     slipSecondPageDefault = !!msg.slip_second_page;
@@ -463,8 +465,8 @@ function handleServerMessage(msg) {
   } else if (msg.type === 'print_result') {
     printBtn.disabled = false;
     const detail = msg.ok
-      ? `Leihschein: ${escapeHtml(msg.detail || 'gedruckt')}`
-      : `Druck fehlgeschlagen: ${escapeHtml(msg.msg || '')}`;
+      ? `Leihschein: ${msg.detail || 'gedruckt'}`
+      : `Druck fehlgeschlagen: ${msg.msg || ''}`;
     setStatusText(detail);
     // „Drucken & nächster Schüler": nur bei erfolgreichem Druck weiterschalten.
     if (printThenNext) {
@@ -682,7 +684,8 @@ function showBookAlertModal(msg) {
   const meta = ALERT_META[msg.status] || { title: 'Buch-Hinweis', color: '#f44336' };
   bookAlertTitleEl.textContent = meta.title;
   bookAlertTitleEl.style.color = meta.color;
-  bookAlertTextEl.textContent = `${escapeHtml(msg.barcode)} — ${escapeHtml(msg.msg || meta.title)}`;
+  // Plain text (kein HTML) — bookAlertTextEl.textContent interpretiert keine Entities.
+  bookAlertTextEl.textContent = `${msg.barcode} — ${msg.msg || meta.title}`;
   // „currently lent to someone else": Name des aktuellen Ausleihers als
   // eigene Zeile (nur bei not_in_stock belegt; read-only aus /books/:code).
   // Bei book_deleted mit loaned_to → Ersatzanspruch-Hinweis statt „verliehen".
