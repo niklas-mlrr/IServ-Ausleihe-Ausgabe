@@ -64,6 +64,32 @@ Regressions-Prosa ("ohne X würde Y passieren") lebt jetzt hier. Laut
 CLAUDE.md gehört Änderungshistorie ausschließlich ins Changelog, nicht in
 Code-Kommentare.
 
+## 2026-07-10 — Welle 4b + 5: Kommentar-Trim vollzogen, AppState entflochten
+
+Ergänzt die „Wellen 0–4"-Zusammenfassung oben um zwei weitere Schritte, die
+im direkten Anschluss folgten:
+
+- **Welle 4b (Vollzug):** Der in Welle 4 beschriebene Kommentar-Trim wurde
+  umgesetzt — `b1b83f3` hielt die Absicht im Changelog fest, `35b269e` führte
+  ihn im Code aus: netto **−34 Kommentarzeilen** über `server/routes/ws.py`,
+  `server/sessions.py`, `automation/worker.py`. Die Regressions-Prosa lebt
+  jetzt ausschließlich im Changelog (siehe oben); im Code bleibt je
+  Invariante ein Satz (die Invariante im Präsens) plus ein Test-Verweis.
+- **Welle 5 (State-Split):** `AppState` (`server/state.py`) trug 25 Felder
+  über fünf Zuständigkeiten. `RuntimeSettings` (die fünf Host-/Entwickler-
+  Toggles) und `IservCaches` (die fünf schuljahresbezogenen IServ-Caches)
+  wurden als eigene Dataclasses herausgelöst — `AppState` behält nur noch
+  17 direkte Felder plus 11 dünne Forwarding-Properties (nötig, weil
+  `server/routes/settings.py::_BOOL_SETTINGS` per `setattr(state, attr,
+  value)` auf die alten Attributnamen schreibt). Das Draht-Format von
+  `state_snapshot()` bleibt dabei unverändert — vor dem Split per
+  Charakterisierungs-Test eingefroren (`tests/test_state_contract.py`,
+  `09e2ed5`); dieser Test darf bei künftigen Refactorings **nicht**
+  angepasst werden, ein Fehlschlag bedeutet, dass sich das Draht-Format
+  geändert hat (`0fef31d`).
+
+Test-Suite: **187 → 201** grün.
+
 ## 2026-07-10 — Host: Sofort-fertig-Filter beim Klassen-Öffnen
 
 Im „Neue Klasse öffnen"-Reiter vier Umschalter ergänzt: Schüler ohne aktuelle
