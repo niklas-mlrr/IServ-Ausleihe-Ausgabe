@@ -92,11 +92,11 @@ Rückbau-Plan; Real-Buchungen nie unbeaufsichtigt.
 
 | Pfad | Inhalt |
 |------|--------|
-| `server/` | FastAPI-App: HTTPS (`tls.py`), WebSocket-Hub (`hub.py`), Rollen/Sessions (`sessions.py`, `state.py`), IServ-Read-Client (`iserv_client.py`), Druck (`printing.py`), Bücher-Reihenfolge (`book_order.py`), Rate-Limiting (`ratelimit.py`), Endpunkte (`routes/` — Paket aus neun Modulen: `_deps.py`/`auth.py`/`classes.py`/`booklists.py`/`helpers.py`/`queue.py`/`slips.py`/`modus_b.py`/`settings.py`, `api.py` als Aggregator, `ws.py` für WebSockets) |
+| `server/` | FastAPI-App: HTTPS (`tls.py`), WebSocket-Hub (`hub.py`), Rollen/Sessions (`sessions.py`, `state.py` — `AppState` + seit Welle 5 ausgelagert: `RuntimeSettings`, `IservCaches`), IServ-Read-Client (`iserv_client.py`), Druck (`printing.py`), Bücher-Reihenfolge (`book_order.py`), Rate-Limiting (`ratelimit.py`), Endpunkte (`routes/` — Paket aus neun Modulen: `_deps.py`/`auth.py`/`classes.py`/`booklists.py`/`helpers.py`/`queue.py`/`slips.py`/`modus_b.py`/`settings.py`, `api.py` als Aggregator, `ws.py` für WebSockets) |
 | `automation/` | Playwright-Worker (`worker.py`) + Spikes + E2E-Skripte (`e2e_*.py`); Ausgaben in `automation/out/` (gitignored) |
-| `web/` | Statische UI ohne Build-Step: `host.html` (Host, schlankes Grundgerüst) + `host.js`/`host.css` (Logik/Styles), `common.js` (gemeinsame Helfer: `escapeHtml`, `isBookDone`, `Beeper`, `connectWebSocket`), `scan.html`/`scan.js` (Helfer-Scanner, Modus A), `student.html` (Schüler, Modus B), `qr-display.html` (iPad), `html5-qrcode.min.js`, `beep.mp3` |
+| `web/` | Statische UI ohne Build-Step: `host.html` (Host, schlankes Grundgerüst) + `host.js`/`host.css` (Logik/Styles), `common.js` (gemeinsame Helfer: `escapeHtml`, `isBookDone`, `Beeper`, `connectWebSocket`), `scan.html`/`scan.js` (Helfer-Scanner, Modus A), `student.html`/`student.js` (Schüler, Modus B), `qr-display.html` (iPad), `html5-qrcode.min.js`, `beep.mp3` |
 | `docs/PLAN.md` | Projektplan — bei Entscheidungen fortschreiben (Arbeitsgrundlage) |
 | `docs/CHANGELOG.md` | Chronologisches Änderungsprotokoll, neueste Einträge zuerst — Heimatort der „was hat sich wann geändert"-Historie |
 | `docs/test_status.md` | Lebender Test-/Verifizierungsstand (verifiziert vs. offen) |
 | `docs/spikes/` | Spike-Protokolle (Seminarfach-Material) |
-| `tests/` | pytest-Unit-Tests (Suite grün, siehe `docs/test_status.md` für aktuellen Stand) |
+| `tests/` | pytest-Unit-Tests (Suite grün, siehe `docs/test_status.md` für aktuellen Stand); `tests/test_state_contract.py` friert das Draht-Format von `state_snapshot()` als Charakterisierungs-Test ein — bei Refactorings nicht anpassen |
