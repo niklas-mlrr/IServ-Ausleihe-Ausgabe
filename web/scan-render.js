@@ -1,93 +1,13 @@
-const statusEl = document.getElementById('status-text');
-// Zentraler Setter: hält die Alert-Farbe (Ausgemustert/anderweitig verliehen)
-// strikt an den Alert-Text gebunden — jeder andere Statustext (z.B. "<Code>
-// gesendet") setzt automatisch wieder die normale Schrift.
-// Nimmt PLAIN TEXT entgegen (kein HTML) — schreibt auf textContent, das
-// Entities nicht interpretiert; escapeHtml()-te Strings hier wären falsch.
-function setStatusText(text, isAlert = false) {
-  statusEl.textContent = text;
-  statusEl.classList.toggle('status-book-deleted', isAlert);
-}
-const dotEl = document.getElementById('dot');
-const sNameEl = document.getElementById('s-name');
-const sFormEl = document.getElementById('s-form');
-const sPayEl = document.getElementById('s-pay');
-const bookRowsEl = document.getElementById('book-rows');
-let ws;
-let studentActive = false;          // ist gerade ein Schüler zugewiesen?
-let workerPending = false;          // Schüler zugewiesen, aber Worker noch nicht bereit
-let queueSize = null;               // zuletzt gemeldete Warteschlangengröße
-let queueList = [];                // wartende Schüler (Fallback, eigene Klasse)
-let queueListAll = [];             // wie queueList, aber inkl. active/done (Fallback)
-let loadingStudent = false;        // Schüler wird geladen (next/call gesendet,
-                                  //  student_info steht noch aus) — Queue verbergen
-let waitingMsg = 'Warte auf Schüler-Zuweisung';
-let peeking = false;                // Menü-Toggle: Warteschlangen-Ansicht bei
-let idleMenuOpen = false;           // Menü geöffnet OHNE Schüler (Idle): Kamera-
-                                  //  zeile eingeklappt, Queue bleibt sichtbar.
-// ---- Klassen-Reiter (Helfer-Menü): alle im Host offenen Klassen ----
-// `contextsData` kommt vom Server (`contexts_update`): je Klasse id, form und
-// ihre wartenden Schüler. `selectedCtxId` = gewählter Tab; `ownContextId` =
-// Klasse, an die dieser Helfer gebunden (Vorauswahl beim Öffnen). Ist nichts
-// geladen, fällt currentQueue() auf die eigene Klasse zurück (queueList).
-let contextsData = [];
-let selectedCtxId = null;
-let ownContextId = null;
-let queueView = false;             // .app.queue-view gesetzt? (Peek oder Idle)
-                                  //  verbundenem Hintergrund-Schüler (kein Trennen)
-// ---- Lupen-Suche (Peek-Modus): Schnellsprung zu beliebigem Schüler ----
-// Klassen + Schüler pro Klasse kommen vom Server (IServ, read-only) und werden
-// clientseitig für die Session gecacht. `searchOpen` = Panel ausgeklappt;
-// `searchSubmitted` markiert eine laufende search_call-Antwort (lädt der neue
-// Schüler, schließt das Panel + Menü bewusst — `call`/`next` lassen das Menü
-// sonst offen). Letzte Klasse in localStorage für die Vorauswahl beim Öffnen.
-let searchOpen = false;
-let searchSubmitted = false;
-let searchClassCache = null;                 // string[] aller Klassen des Schuljahrs
-const searchStudentsCache = new Map();        // form -> Schüler-Array (IServ)
-const SEARCH_LASTCLASS_KEY = 'ausleihe-search-lastclass';
+// web/scan-render.js — DOM-Rendering, Modals, Kamera-Steuerung + Event-Verkabelung
+// Teil des scan.html-Frontends (siehe scan-state.js/scan-ws.js/scan-render.js,
+// in dieser Reihenfolge nach html5-qrcode.min.js + common.js eingebunden).
+// Kein Build-Step: alle drei Dateien teilen sich eine gemeinsame Top-Level-
+// Scope (klassische <script>-Tags), zusätzlich exponiert auf window.__scan
+// für Debug-/Introspektionszwecke.
 
-// ---- Druck-Dialog / Buch-Status ----
-let currentBooks = [];              // Buchliste des aktuellen Schülers
-const scannedIsbns = new Set();     // ISBNs erfolgreich gescannter (gestageter) Bücher
-const scanOrder = new Map();        // ISBN -> Scan-Sequenz (für „zuletzt ausgegeben oben")
-let scanSeq = 0;
-function resetScannedState() { scannedIsbns.clear(); scanOrder.clear(); scanSeq = 0; }
-let bookOrder = [];                 // klassenweite ISBN-Reihenfolge (vom Host konfiguriert)
-let slipSecondPageDefault = false;  // Host-Default für „Schüler-Leihschein" (2. Seite)
-let pendingScans = 0;               // noch nicht quittierte Scans (Sequenzierung)
-const scanWaiters = [];             // Resolver, die auf pendingScans===0 warten
-let printThenNext = false;          // „Drucken & nächster Schüler" angeklickt?
+window.__scan = window.__scan || {};
 
-// ---- Ausleih-Freigabe bei Unstimmigkeit (Nachweis fehlt / Rechnung offen) ----
-// Rein client-seitig: pupil-Flags kommen mit `student_info` (GET, s. server/
-// iserv_client.py). Beim ersten Scan eines betroffenen Schülers wird der Scan
-// zurückgehalten und ein Bestätigungsdialog gezeigt, bevor server-seitig die
-// Lager-/Anmeldeprüfung + Worker-Eintragung laufen. „Ja" merkt die Freigabe
-// bis zum Neuladen des Schülers; „Nein" verwirft den Scan (nächster Scan fragt
-// erneut). Kein DB-/IServ-Schreibzugriff.
-let currentStudent = null;          // Schüler-Objekt aus dem letzten student_info
-let lendingApproved = false;        // Freigabe für den aktuellen Schüler erteilt?
-let heldScanValue = null;           // Scan, der auf die Freigabe-Entscheidung wartet
 
-function drainScanWaiters() {
-  if (pendingScans <= 0) {
-    pendingScans = 0;
-    while (scanWaiters.length) scanWaiters.shift()();
-  }
-}
-
-// Auf den Abschluss aller laufenden Scans warten, bevor die Liste verglichen
-// wird (mit Sicherheits-Timeout, falls eine Quittung ausbleibt).
-function waitForScans(timeoutMs = 3000) {
-  if (pendingScans <= 0) return Promise.resolve();
-  return new Promise(resolve => {
-    let done = false;
-    const fin = () => { if (!done) { done = true; resolve(); } };
-    scanWaiters.push(fin);
-    setTimeout(fin, timeoutMs);
-  });
-}
 
 function renderWaitingStatus() {
   const n = currentQueueSize();
@@ -111,85 +31,7 @@ function renderPeekStatus() {
 // Fallback auf die eigene Klasse (queueList, falls noch keine Kontext-Übersicht
 // vom Server vorliegt). currentQueueSize() ist die Anzahl der wartenden Schüler
 // des gewählten Tabs — für die Statuszeile und die Queue-Anzeige.
-function currentQueue() {
-  if (contextsData.length) {
-    const c = contextsData.find(x => x.id === selectedCtxId) || contextsData[0];
-    return (c && Array.isArray(c.queue)) ? c.queue : [];
-  }
-  return Array.isArray(queueList) ? queueList : [];
-}
-// Wie currentQueue(), aber inkl. der bereits aufgerufenen (active) und
-// abgeschlossenen (done) Schüler des gewählten Tabs — für die Gruppen-Boxen
-// unter der eigentlichen (wartenden) Warteschlange. Fällt auf currentQueue()
-// zurück, falls der Server (alte Session) noch kein `queue_all` liefert.
-function currentFullQueue() {
-  if (contextsData.length) {
-    const c = contextsData.find(x => x.id === selectedCtxId) || contextsData[0];
-    if (c && Array.isArray(c.queue_all)) return c.queue_all;
-  } else if (Array.isArray(queueListAll) && queueListAll.length) {
-    return queueListAll;
-  }
-  return currentQueue();
-}
-function currentQueueSize() {
-  return currentQueue().length;
-}
 
-// Vorauswahl des aktiven Tabs sichern: eigene Klasse (ownContextId) falls offen,
-// sonst erste offene Klasse. Nur setzen, wenn noch keiner gewählt oder der
-// gewählte nicht mehr existiert (Klasse zwischenzeitlich geschlossen).
-function ensureSelectedCtx() {
-  const ids = contextsData.map(c => c.id);
-  if (selectedCtxId && ids.includes(selectedCtxId)) return;
-  selectedCtxId = (ownContextId && ids.includes(ownContextId))
-    ? ownContextId
-    : (ids[0] || null);
-}
-
-// Klassen-Vorschlag: ist die eigene Klasse (ownContextId) leer, aber ein
-// Reiter WEITER RECHTS (später in contextsData, gleiche Reihenfolge wie im
-// Host) hat noch Wartende, wird dieser als Vorschlag markiert (s.
-// renderQueueTabs) — „Weiter" springt dann direkt dorthin, statt aus der
-// leeren eigenen Klasse zu ziehen (advanceToNext), und bindet den Helfer
-// serverseitig an diese Klasse um (s. advance_helper in sessions.py).
-function suggestedQueueContext() {
-  if (!contextsData.length || !ownContextId) return null;
-  const idx = contextsData.findIndex(c => c.id === ownContextId);
-  if (idx === -1) return null;
-  const own = contextsData[idx];
-  if (own.queue && own.queue.length) return null;  // eigene Queue nicht leer -> kein Vorschlag
-  for (let i = idx + 1; i < contextsData.length; i++) {
-    if (contextsData[i].queue && contextsData[i].queue.length) return contextsData[i];
-  }
-  return null;
-}
-
-// Queue-Ansicht (Name-row verborgen, Queue-Header mit Klassen-Reitern sichtbar)
-// gilt im Peek (Hintergrund-Schüler) und im Idle (kein Schüler). Während ein
-// Schüler geladen wird (loadingStudent), ist sie aus — dann steht „wird geladen"
-// im Buchbereich. syncQueueView leitet sie aus dem Helfer-Zustand ab; der Menü-
-// Übergang (animateMenu) toggelt .queue-view bewusst selbst synchron zum FLIP.
-function setQueueView(on) {
-  queueView = on;
-  appEl.classList.toggle('queue-view', on);
-}
-function syncQueueView() {
-  setQueueView(peeking || (!studentActive && !loadingStudent));
-}
-
-// Ruhezustand der Statuszeile: solange kein Schüler geladen ist (und keiner
-// gerade geladen wird), zeigt die Statuszeile immer die Warteschlangenlänge.
-// Ist ein Schüler zugewiesen, aber der Worker noch nicht bereit, steht hier
-// „Warten…" — die Bücherliste ist zwar schon da, aber Scans buchen erst nach
-// `worker_ready`.
-function setReadyStatus() {
-  if (studentActive) setStatusText(workerPending ? 'Warten…' : 'Scanner bereit — Buch scannen');
-  else renderWaitingStatus();
-}
-
-// escapeHtml, isBookDone: siehe common.js (vor scan.js eingebunden).
-
-const token = new URLSearchParams(location.search).get('token');
 
 function renderBooks(books, animate = false) {
   if (!books || !books.length) {
@@ -403,264 +245,7 @@ bookRowsEl.addEventListener('click', (e) => {
   ws.send(JSON.stringify({ type: 'call', student_id: Number(sid) }));
 });
 
-function handleServerMessage(msg) {
-  if (msg.type === 'student_info') {
-    studentActive = true;
-    loadingStudent = false;  // Schüler geladen — Bücherliste ersetzt die Queue
-    peeking = false;          // (neuer) Schüler geladen → keine Queue-Ansicht
-    idleMenuOpen = false;     // Schüler geladen → Idle-Menü hinfällig (gelöscht
-                             //  bereits beim loading, hier nur defensiv)
-    setMenuTitle();
-    syncQueueView();
-    const s = msg.student;
-    currentStudent = s;          // Flags für den Freigabe-Dialog (s. unten)
-    lendingApproved = false;     // neuer Schüler → Freigabe zurücksetzen
-    heldScanValue = null;
-    closeLendModal();
-    sNameEl.textContent = `${s.lastname}, ${s.firstname}`;
-    sFormEl.textContent = (s.form || '').replace(/^Klasse\s+/i, '');
-    // Bezahlt-/Offen-Status, ergänzt um „Nachweis fehlt"-Hinweise (Ermäßigung
-    // bzw. Befreiung): Antrag gestellt, aber noch unentschieden — gleiche Farbe
-    // wie „Offen". Reihenfolge: erst die Nachweise, dann der Offene Betrag.
-    const payParts = [];
-    if (!s.enrolled) {
-      payParts.push('<span class="wait">Nicht angemeldet</span>');
-    } else {
-      const nachweis = s.remission_pending || s.exemption_pending;
-      if (s.remission_pending)  payParts.push('<span class="unpaid">Ermäßigungsnachweis fehlt</span>');
-      if (s.exemption_pending) payParts.push('<span class="unpaid">Befreiungsnachweis fehlt</span>');
-      // „Bezahlt" entfallen, wenn ein Nachweis fehlt — der Hinweis geht vor.
-      if (s.paid && !nachweis) {
-        payParts.push('<span class="paid">Bezahlt</span>');
-      } else if (!s.paid) {
-        payParts.push(`<span class="unpaid">Offen: ${escapeHtml(s.amount_open)} €</span>`);
-      }
-    }
-    sPayEl.innerHTML = payParts.join(' · ');
-    if (Array.isArray(s.book_order)) bookOrder = s.book_order;
-    currentBooks = s.books || [];
-    resetScannedState();
-    renderBooks(currentBooks);
-    closeBookAlertModal();
-    // Bücher sofort sichtbar; Scans+„Scanner bereit"-Status aber erst, sobald
-    // der Worker bereit ist (`worker_ready`). Bis dahin „Warten…" + Scans ignor.
-    workerPending = true;
-    setReadyStatus();
-  } else if (msg.type === 'worker_ready') {
-    workerPending = false;
-    setReadyStatus();
-  } else if (msg.type === 'loading') {
-    // Server beginnt, einen neuen Schüler für diesen Helfer zu laden („Weiter"/
-    // „Nächster"/„Aufrufen"). Queue verbergen, „wird geladen …" zeigen — NICHT
-    // die Warteschlange aufblitzen lassen, selbst wenn kurz vorher ein
-    // Idle-`waiting` stand (Host-„Nächster" ohne vorherigen Schüler).
-    studentActive = false;
-    workerPending = true;
-    loadingStudent = true;
-    // Ein Schüler wird aufgerufen (Aufrufen/Weiter/Nächster/Lupen-Suche) →
-    // ein offenes Menü (Peek MIT Hintergrund-Schüler wie Idle OHNE) schließt
-    // dabei immer, damit sofort scannbar ist, statt dass der Helfer manuell
-    // zurückwechseln muss.
-    const menuWasOpen = peeking || idleMenuOpen || searchOpen;
-    peeking = false;          // Schülerwechsel beendet den Peek
-    idleMenuOpen = false;     // ... und ein ggf. offenes Idle-Menü
-    resetSearchPanel();       // ... und ein ggf. offenes Such-Panel (ohne Animation)
-    setMenuTitle();
-    syncQueueView();
-    sNameEl.textContent = '';
-    sFormEl.textContent = '';
-    sPayEl.innerHTML = '';
-    currentBooks = [];
-    resetScannedState();
-    bookRowsEl.innerHTML = '<div class="book-empty">Schüler wird geladen …</div>';
-    closeBookAlertModal();
-    currentStudent = null;
-    lendingApproved = false;
-    heldScanValue = null;
-    closeLendModal();
-    setStatusText('Warten…');
-    if (menuWasOpen) animateMenu(false, true);
-  } else if (msg.type === 'scan_result') {
-    if (pendingScans > 0) pendingScans--;
-    // Erfolgreicher Scan → Buch in der Liste als „erledigt" markieren:
-    // 'booked' = tatsächlich gebucht (ALLOW_BOOKING an), 'staged' = nur ins
-    // Feld gefüllt (Gate aus / read-only Betrieb).
-    if ((msg.status === 'staged' || msg.status === 'booked') && msg.isbn) {
-      scannedIsbns.add(msg.isbn);
-      scanOrder.set(msg.isbn, ++scanSeq);   // zuletzt gescanntes zuoberst in „erledigt"
-      renderBooks(currentBooks, true);     // FLIP: Zeilen an neue Position fahren
-    }
-    drainScanWaiters();
-    // Jeder nicht-verbuchbare Scan (alles außer staged/booked) → Statuszeile
-    // deutlich + Hinweis-Modal am Gerät. Der Helfer schließt es selbst
-    // (Button/Klick-außerhalb/Escape/nächster Scan). Bei ausgemustert /
-    // verliehen-an-andere räumt dismissBookAlert zusätzlich die Host-Meldung
-    // auf (server: clear_book_alert); bei den reinen Hinweisen (nicht
-    // bestellt, unbekannt, noch nicht geladen, Prüf-Fehler, an sich selbst
-    // verliehen) war der Host nie informiert → Clear ist dort ein No-op.
-    const isAlert = !OK_STATUSES.has(msg.status);
-    setStatusText(`${msg.barcode} — ${msg.msg || msg.status}`, isAlert);
-    if (isAlert) showBookAlertModal(msg);
-  } else if (msg.type === 'settings') {
-    slipSecondPageDefault = !!msg.slip_second_page;
-    if (Array.isArray(msg.book_order)) {
-      bookOrder = msg.book_order;
-      if (studentActive) renderBooks(currentBooks);  // aktuelle Liste live umsortieren
-    }
-  } else if (msg.type === 'print_result') {
-    printBtn.disabled = false;
-    const detail = msg.ok
-      ? `Leihschein: ${msg.detail || 'gedruckt'}`
-      : `Druck fehlgeschlagen: ${msg.msg || ''}`;
-    setStatusText(detail);
-    // „Drucken & nächster Schüler": nur bei erfolgreichem Druck weiterschalten.
-    if (printThenNext) {
-      printThenNext = false;
-      if (msg.ok) advanceToNext();
-    }
-  } else if (msg.type === 'waiting') {
-    studentActive = false;
-    workerPending = false;
-    loadingStudent = false;  // kein Schüler (mehr) geladen — Queue anzeigen
-    peeking = false;          // kein Schüler → Peek hinfällig
-    setMenuTitle();
-    syncQueueView();
-    sNameEl.textContent = '';
-    sFormEl.textContent = '';
-    sPayEl.innerHTML = '';
-    bookRowsEl.innerHTML = '';
-    currentBooks = [];
-    resetScannedState();
-    pendingScans = 0;
-    drainScanWaiters();
-    closeBookAlertModal();
-    currentStudent = null;
-    lendingApproved = false;
-    heldScanValue = null;
-    closeLendModal();
-    if (typeof msg.queue_size === 'number') queueSize = msg.queue_size;
-    if (Array.isArray(msg.queue)) queueList = msg.queue;
-    if (Array.isArray(msg.queue_all)) queueListAll = msg.queue_all;
-    if (msg.msg) waitingMsg = msg.msg;
-    renderWaitingStatus();
-    renderQueueTabs();
-    renderQueue();
-  } else if (msg.type === 'queue_update') {
-    if (typeof msg.queue_size === 'number') queueSize = msg.queue_size;
-    if (Array.isArray(msg.queue)) queueList = msg.queue;
-    if (Array.isArray(msg.queue_all)) queueListAll = msg.queue_all;
-    // Peek (Menü): Queue anzeigen, obwohl ein Schüler zugewiesen ist — dieser
-    // bleibt im Hintergrund verbunden. Sonst nur anzeigen, wenn weder ein
-    // Schüler geladen ist noch gerade einer geladen wird (next/call gesendet,
-    // student_info steht aus). Die Klassen-Reiter selbst kommen via
-    // `contexts_update`; hier nur die (Fallback-)Queue und der Count.
-    if (peeking) { renderPeekStatus(); if (!contextsData.length) renderQueue(); }
-    else if (!studentActive && !loadingStudent) { renderWaitingStatus(); if (!contextsData.length) renderQueue(); }
-  } else if (msg.type === 'contexts_update') {
-    // Alle im Host offenen Klassen + je ihre wartenden Schüler. Quelle für die
-    // Klassen-Reiter im Helfer-Menü. own_context_id = Klasse, an die dieser
-    // Helfer gebunden (Vorauswahl beim Öffnen). Live auf allen Zustandsänderungen
-    // (open/close-class, Aufrufe, Abschlüsse) via broadcast_queue_size.
-    contextsData = Array.isArray(msg.contexts) ? msg.contexts : [];
-    ownContextId = msg.own_context_id || null;
-    ensureSelectedCtx();
-    renderQueueTabs();
-    if (peeking) { renderPeekStatus(); renderQueue(); }
-    else if (!studentActive && !loadingStudent) { renderWaitingStatus(); renderQueue(); }
-  } else if (msg.type === 'search_classes') {
-    // Lupen-Suche: alle Klassen des Schuljahrs (IServ). Session-Cache füllen
-    // und Dropdown aufbauen — letzte Klasse vorwählen (localStorage), sonst
-    // erste. Sofort Schüler der gewählten Klasse nachladen.
-    searchClassCache = Array.isArray(msg.classes) ? msg.classes : [];
-    renderSearchClasses();
-  } else if (msg.type === 'search_students') {
-    // Lupen-Suche: alle Schüler einer Klasse (IServ). Session-Cache füllen
-    // und Dropdown aufbauen, falls die Klasse aktuell gewählt ist.
-    const list = Array.isArray(msg.students) ? msg.students : [];
-    searchStudentsCache.set(msg.form, list);
-    if (searchOpen && searchClassSel.value === msg.form) renderSearchStudents(msg.form, list);
-  } else if (msg.type === 'error') {
-    loadingStudent = false;  // Laden gescheitert → Queue wieder freigeben
-    // Lupe-Suche gescheitert (z. B. ungültige ID/IServ-Fehler): kein `loading`
-    // gekommen → Menü/Panel offen lassen zum erneuten Versuch, Flag aber
-    // zurücksetzen, damit ein späteres fremdes `loading` sie nicht doch schließt.
-    searchSubmitted = false;
-    setStatusText('Fehler: ' + (msg.msg || ''));
-    dotEl.className = 'dot err';
-    heldScanValue = null;
-    closeLendModal();
-    // Peek geöffnet (z. B. Aufruf aus der Queue gescheitert) → zurück in die
-    // Peek-Ansicht; sonst nur bei freiem Helfer die Queue zeigen.
-    if (peeking) renderQueue();
-    else if (!studentActive) renderQueue();
-  }
-}
 
-function connect() {
-  if (!token) {
-    setStatusText('Kein Token in der URL — vom Host QR-Code scannen');
-    dotEl.className = 'dot err';
-    return;
-  }
-  connectWebSocket(() => `wss://${location.host}/ws/scanner/${token}`, {
-    onSocket: (s) => { ws = s; },
-    onOpen: () => { dotEl.className = 'dot ok'; setReadyStatus(); },
-    onClose: (e, reconnect) => {
-      dotEl.className = 'dot err'; setStatusText('Getrennt — neu verbinden…');
-      reconnect();
-    },
-    onError: () => { dotEl.className = 'dot err'; setStatusText('Verbindungsfehler'); },
-    onMessage: e => { try { handleServerMessage(JSON.parse(e.data)); } catch (_) {} },
-  });
-}
-connect();
-
-let lastValue = '', cooldown = false, html5QrCode = null, currentCameraId = null, isTorchOn = false, isCameraRunning = false, isRestarting = false, soundEnabled = false;
-const ICON_VOLUME_ON = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>';
-const ICON_VOLUME_OFF = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>';
-const cameraSelect = document.getElementById('camera-select');
-const torchBtn = document.getElementById('torch-btn');
-const soundBtn = document.getElementById('sound-btn');
-const reloadBtn = document.getElementById('reload-btn');
-const gearBtn = document.getElementById('gear-btn');
-const menuBtn = document.getElementById('menu-btn');
-const printBtn = document.getElementById('print-btn');
-const nextBtn = document.getElementById('next-btn');
-const camDropdown = document.getElementById('cam-dropdown');
-const readerEl = document.getElementById('reader');
-const searchBtn = document.getElementById('search-btn');
-const searchPanel = document.getElementById('search-panel');
-const searchClassSel = document.getElementById('search-class');
-const searchStudentSel = document.getElementById('search-student');
-const appEl = document.querySelector('.app');
-const topSectionEl = document.querySelector('.top-section');
-const statusbarEl = document.querySelector('.status-bar');
-const statusInnerEl = document.getElementById('status');
-const nameRowEl = document.querySelector('.name-row');
-const queueSlotEl = document.getElementById('queue-slot');
-const queueTabsEl = document.getElementById('queue-tabs');
-const bookWrapEl = document.querySelector('.book-table-wrap');
-const rightColEl = document.querySelector('.right-col');
-const bookAlertModal = document.getElementById('book-alert-modal');
-const bookAlertTitleEl = document.getElementById('book-alert-title');
-const bookAlertTextEl = document.getElementById('book-alert-text');
-const bookAlertBorrowerEl = document.getElementById('book-alert-borrower');
-const bookAlertCloseBtn = document.getElementById('book-alert-close');
-const printModal = document.getElementById('print-modal');
-const printWarnEl = document.getElementById('print-warn');
-const slipCheck = document.getElementById('slip-second-page');
-const modalPrintBtn = document.getElementById('modal-print');
-const modalPrintNextBtn = document.getElementById('modal-print-next');
-const modalCancelBtn = document.getElementById('modal-cancel');
-const nextModal = document.getElementById('next-modal');
-const nextWarnEl = document.getElementById('next-warn');
-const modalNextConfirmBtn = document.getElementById('modal-next-confirm');
-const modalNextCancelBtn = document.getElementById('modal-next-cancel');
-const lendConfirmModal = document.getElementById('lend-confirm-modal');
-const lendWarnEl = document.getElementById('lend-warn');
-const modalLendYesBtn = document.getElementById('modal-lend-yes');
-const modalLendNoBtn = document.getElementById('modal-lend-no');
-let scanFlashTimeout = null;
 
 // Nächster Schüler: aktuellen abschließen + nächsten aus der Queue laden.
 // Alten Schüler sofort entfernen und "Warten…" zeigen, auch während
@@ -716,17 +301,6 @@ nextModal.addEventListener('click', (e) => { if (e.target === nextModal) closeNe
 // am Gerät. Der Helfer schließt JEDES dieser Modal selbst (Button / Klick
 // außerhalb / Escape / nächster Scan); clear_book_alert räumt ggfls. die
 // Host-Meldung auf (No-op für Status ohne Host-Broadcast).
-const OK_STATUSES = new Set(['staged', 'booked']);
-// status → {title, color} für das Hinweis-Modal.
-const ALERT_META = {
-  book_deleted:        { title: 'Ausgemustertes Buch gescannt',  color: '#f44336' },
-  not_in_stock:        { title: 'Buch noch verliehen',           color: '#f44336' },
-  series_already_lent: { title: 'Buch bereits an dich verliehen', color: '#e69500' },
-  not_enrolled:        { title: 'Buch nicht bestellt',           color: '#e69500' },
-  unknown_book:        { title: 'Buch unbekannt',                color: '#f44336' },
-  not_ready:           { title: 'Buchliste noch nicht geladen',   color: '#e69500' },
-  error:               { title: 'Fehler bei der Prüfung',         color: '#f44336' },
-};
 function showBookAlertModal(msg) {
   const meta = ALERT_META[msg.status] || { title: 'Buch-Hinweis', color: '#f44336' };
   bookAlertTitleEl.textContent = meta.title;
@@ -780,13 +354,6 @@ async function openPrintDialog() {
 
 // Vorgemerkte (status !== 'ausgeliehen'), in dieser Session noch nicht
 // gescannte Bücher ermitteln. Rein lokal — kein IServ-/DB-Zugriff.
-function computeOpenBooks() {
-  const vorgemerkt = currentBooks.filter(b => b.status !== 'ausgeliehen');
-  const offen = vorgemerkt.filter(b => !(b.isbn && scannedIsbns.has(b.isbn)));
-  return { vorgemerkt, offen };
-}
-
-// Hinweis auf offene Bücher in das Ziel-Element rendern oder ausblenden.
 function renderOpenWarning(el, vorgemerkt, offen) {
   if (offen.length > 0) {
     const items = offen.map(b =>
@@ -825,12 +392,6 @@ printModal.addEventListener('click', (e) => { if (e.target === printModal) close
 // `lendingApproved` dann weiterhin false steht, fragt der nächste Scan erneut.
 // „Ja" setzt `lendingApproved` → weitere Bücher werden nicht mehr angefragt,
 // bis der Schüler neu geladen wird (Reset in student_info/loading/waiting).
-function studentHasUnstimmigkeit() {
-  const s = currentStudent;
-  if (!s || !s.enrolled) return false;   // „nicht angemeldet" bleibt außen vor
-  return !!(s.remission_pending || s.exemption_pending || !s.paid);
-}
-
 // Unstimmigkeit-Liste im Dialog rendern (gleiche Texte wie der s-pay-Block).
 function renderLendWarning(el) {
   const s = currentStudent || {};
@@ -964,16 +525,6 @@ setMenuTitle();
 // deren diskreten x-Sprung mitmachen (Statuszeile: full-width x=0 → Mittel-Spalte
 // x=52). Es wird darum für den Übergang ins .top-section (nicht transformiert,
 // positioniert) umgehängt und dort an alter Stelle festgepinnt. ----
-const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-const MENU_MS = reduceMotion ? 1 : 350;
-const MENU_EASE = 'cubic-bezier(.22,.61,.36,1)';
-// Steuer-Elemente, die im Menü-Modus verschwinden (Menü-Button + #status + Lupe + Weiter bleiben sichtbar).
-const menuHideEls = [gearBtn, readerEl, rightColEl, printBtn];
-// Inline-Props, die animateMenu temporär setzt → für Cleanup/Abbbruch zurücksetzen.
-const MENU_INLINE_PROPS = ['position','left','top','width','height','margin','boxSizing',
-  'display','flexDirection','flexWrap','alignItems','justifyContent','gap',
-  'opacity','transition','transform'];
-let menuAnimGen = 0;   // schützt vor Cleanup-Kollisionen bei schnellem Toggeln
 
 function clearMenuInline(el) {
   MENU_INLINE_PROPS.forEach(p => { el.style[p] = ''; });
@@ -982,7 +533,6 @@ function clearMenuInline(el) {
 // Layout-relevanten Computed-Style snapshoten, damit ein per position:absolute
 // aus dem Fluss genommenes Element seine innere Anordnung behält (z. B. right-col
 // bleibt flex-direction:column, statt auf Row zurückzufallen).
-const LAYOUT_PROPS = ['display','flexDirection','flexWrap','alignItems','justifyContent','gap'];
 function snapshotLayout(el) {
   const cs = getComputedStyle(el);
   return Object.fromEntries(LAYOUT_PROPS.map(p => [p, cs[p]]));
@@ -1505,3 +1055,52 @@ setInterval(() => {
   }
 }, 3000);
 
+
+// Zur Introspektion/Debugging zusätzlich auf window.__scan verfügbar
+// machen (rein additiv — der Code oben referenziert weiterhin die
+// bare Bezeichner aus der gemeinsamen Skript-Scope, keine funktionale
+// Abhängigkeit von window.__scan).
+window.__scan.renderWaitingStatus = renderWaitingStatus;
+window.__scan.renderPeekStatus = renderPeekStatus;
+window.__scan.renderBooks = renderBooks;
+window.__scan.renderQueueGroupItem = renderQueueGroupItem;
+window.__scan.renderQueue = renderQueue;
+window.__scan.updateNextBtnPlacement = updateNextBtnPlacement;
+window.__scan.renderQueueTabs = renderQueueTabs;
+window.__scan.advanceToNext = advanceToNext;
+window.__scan.closeNextModal = closeNextModal;
+window.__scan.requestNext = requestNext;
+window.__scan.showBookAlertModal = showBookAlertModal;
+window.__scan.closeBookAlertModal = closeBookAlertModal;
+window.__scan.dismissBookAlert = dismissBookAlert;
+window.__scan.closePrintModal = closePrintModal;
+window.__scan.openPrintDialog = openPrintDialog;
+window.__scan.renderOpenWarning = renderOpenWarning;
+window.__scan.sendPrint = sendPrint;
+window.__scan.renderLendWarning = renderLendWarning;
+window.__scan.closeLendModal = closeLendModal;
+window.__scan.sendScan = sendScan;
+window.__scan.setMenuTitle = setMenuTitle;
+window.__scan.clearMenuInline = clearMenuInline;
+window.__scan.snapshotLayout = snapshotLayout;
+window.__scan.applyLayout = applyLayout;
+window.__scan.pinAbsoluteAt = pinAbsoluteAt;
+window.__scan.menuRefFor = menuRefFor;
+window.__scan.restorePrint = restorePrint;
+window.__scan.flipTargetsToPosition = flipTargetsToPosition;
+window.__scan.animateMenu = animateMenu;
+window.__scan.openPeek = openPeek;
+window.__scan.closePeek = closePeek;
+window.__scan.openIdleMenu = openIdleMenu;
+window.__scan.closeIdleMenu = closeIdleMenu;
+window.__scan.flipSearchTargets = flipSearchTargets;
+window.__scan.animateSearchPanel = animateSearchPanel;
+window.__scan.resetSearchPanel = resetSearchPanel;
+window.__scan.renderSearchClasses = renderSearchClasses;
+window.__scan.renderSearchStudents = renderSearchStudents;
+window.__scan.loadSearchStudents = loadSearchStudents;
+window.__scan.openSearch = openSearch;
+window.__scan.closeSearch = closeSearch;
+window.__scan.submitSearchStudent = submitSearchStudent;
+window.__scan.onScanSuccess = onScanSuccess;
+window.__scan.initScanner = initScanner;

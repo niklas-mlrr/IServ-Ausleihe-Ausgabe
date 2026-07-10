@@ -1,44 +1,10 @@
-  let ws = null;
-  let state = { active_context_id: null, contexts: {}, queue: [], active_form: null, helpers: {}, modus_b: { open: false, pending: [], pending_count: 0, displays: [], join_url: null }, selected_schoolyear: null };
-  let mbQrDataUrl = null;
-  // QR-Modal-Beobachter: schließt das Popup automatisch, sobald der gezeigte QR gescannt wurde.
-  // { kind: 'student'|'display', baseline: <Zählerstand beim Öffnen> }
-  let qrWatch = null;
-  let armedStudentId = null;  // Schüler, der per "Pairing"-Button scharfgestellt ist (Code-Klick ordnet zu)
-  let studentAlerts = {};  // student_id -> {text} — ausgemustert/verliehen-Meldung fürs Now-Serving-Kästchen
-  let prevPendingCount = null;  // letzter mb.pending_count — Anstieg => neuer Code (Beep+Blink)
+// web/host-render.js — DOM-Rendering + Event-Verkabelung
+// Teil des host.html-Frontends (siehe host-state.js/host-ws.js/host-render.js,
+// in dieser Reihenfolge nach common.js eingebunden). Kein Build-Step: alle drei
+// Dateien teilen sich eine gemeinsame Top-Level-Scope (klassische <script>-Tags),
+// zusätzlich exponiert auf window.__host für Debug-/Introspektionszwecke.
 
-  // ---- Tab-Modell ----
-  // activeTab: 'host' | 'new' | <context_id> — rein pro Bediener/Browser
-  // (welcher Reiter gerade fokussiert ist), NICHT global, nicht persistiert.
-  // tabOrder: Reihenfolge der Klassen-Reiter (nur context_ids). Wird global aus
-  // dem Server-State (`state.contexts`, Einfügereihenfolge) abgeleitet — die
-  // offenen Klassen sind auf jedem angemeldeten Host-Rechner sichtbar. Inhalte
-  // leben ohnehin serverseitig im Speicher.
-  let tabOrder = [];
-  let activeTab = 'host';
-  let classList = [];                 // Klassen-Liste aus /api/classes (für Wähler + Single-Selects)
-  let ctxSingleStudents = {};         // context_id -> [students] für den Einzelne-Schüler-Select
-  // SVG-Icons für die Queue-Steuer-Buttons (pro Klassen-Tab neu gerendert).
-  const ICO_RESET = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>';
-  const ICO_CLEAR = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
-  const ICO_DISC  = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/></svg>';
-  const ICO_HELPER = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
-
-  // Schüler über alle Kontexte finden (student_id ist schulweit eindeutig).
-  function findStudentInState(studentId) {
-    for (const id of Object.keys(state.contexts || {})) {
-      const s = (state.contexts[id].queue || []).find(q => q.student_id === studentId);
-      if (s) return s;
-    }
-    return null;
-  }
-  function findCtxOfStudent(studentId) {
-    for (const id of Object.keys(state.contexts || {})) {
-      if ((state.contexts[id].queue || []).some(q => q.student_id === studentId)) return id;
-    }
-    return null;
-  }
+window.__host = window.__host || {};
 
   // ---- Audio (Beep bei neuem Pairing-Code) — initAudio/playBeep: siehe common.js (Beeper) ----
   // Modus-B-Karte kurz aufblinken lassen (Klasse entfernt sich nach der Animation selbst)
@@ -98,52 +64,6 @@
     location.reload();
   }
 
-  // ---- WebSocket ----
-  // Bisher: fester 3000ms-Reconnect ohne Backoff (kein Cap nötig) — über
-  // backoffFactor: 1 unverändert nachgebildet (siehe common.js).
-  function connectWs() {
-    const dot = document.getElementById('ws-dot');
-    const label = document.getElementById('ws-label');
-    const setConn = (ok) => { dot.className = 'ws-dot ' + (ok ? 'ok' : 'err'); label.textContent = ok ? 'Verbunden' : 'Getrennt'; };
-    connectWebSocket(() => `wss://${location.host}/ws/host`, {
-      onSocket: (s) => { ws = s; },
-      initialDelay: 3000, backoffFactor: 1,
-      onOpen: () => setConn(true),
-      onClose: (e, reconnect) => { setConn(false); reconnect(); },
-      onError: () => setConn(false),
-      onMessage: e => {
-        let msg;
-        try { msg = JSON.parse(e.data); }
-        catch (err) { console.warn('Bad WS frame', err); return; }
-        if (msg.type === 'state') applyState(msg);
-        else if (msg.type === 'book_alert') showBookAlert(msg);
-        else if (msg.type === 'loan_slip_download') downloadLoanSlip(msg);
-      },
-    });
-  }
-
-  // „PDF lokal speichern": der Server schickt den Leihschein base64-kodiert über
-  // die Host-WS; hier als Blob-Download im Browser des Host-Rechners auslösen
-  // (Download-Prompt bzw. Ablage im Download-Ordner, je nach Browsereinstellung).
-  function downloadLoanSlip(msg) {
-    try {
-      const bin = atob(msg.data_b64 || '');
-      const bytes = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = msg.filename || 'leihschein.pdf';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 10000);
-      showMsg('Leihschein heruntergeladen: ' + (msg.filename || 'leihschein.pdf'));
-    } catch (err) {
-      console.error('Leihschein-Download fehlgeschlagen', err);
-      showMsg('Leihschein-Download fehlgeschlagen');
-    }
-  }
 
   // escapeHtml: siehe common.js (vor host.js eingebunden).
 
@@ -259,8 +179,6 @@
   }
 
   // ---- Klassen öffnen/schließen ----
-  const AUTO_DONE_KEYS = ['not_enrolled', 'unpaid', 'remission_pending', 'exemption_pending'];
-  const AUTO_DONE_STORAGE_KEY = 'autoDoneFilters';
 
   function getAutoDoneSelection() {
     return AUTO_DONE_KEYS.filter(k => document.getElementById(`auto-done-${k}`)?.checked);
@@ -695,36 +613,6 @@
     renderCtxPairing(id);
   }
 
-  // ---- State rendering ----
-  function applyState(s) {
-    state = s;
-    if (!state.modus_b) state.modus_b = { open: false, pending: [], pending_count: 0, displays: [] };
-    if (!state.contexts) state.contexts = {};
-    // Neuer Pairing-Code? -> Beep + Blink, damit der Host es ohne Hinschauen merkt.
-    const pc = state.modus_b.pending_count || 0;
-    if (state.modus_b.open && prevPendingCount !== null && pc > prevPendingCount) {
-      Beeper.playBeep();
-      flashModusB();
-    }
-    prevPendingCount = pc;
-    // Schuljahr-Select (im Einstellungen-Dialog) mit dem Server-State synchron
-    // halten (z. B. wenn ein anderer Host das Schuljahr wechselt). '' = aktuelles Jahr.
-    const syEl = document.getElementById('schoolyear-select');
-    if (syEl && syEl.options.length) syEl.value = state.selected_schoolyear || '';
-    // Tabs global aus dem Server-State ableiten (Einfügereihenfolge der
-    // Kontext-Keys = Reihenfolge, in der Klassen serverseitig geöffnet wurden,
-    // auf jedem Host-Rechner identisch). Aktiven Tab ggf. auf Host zurückfallen
-    // lassen, falls sein Kontext nicht mehr existiert (Server-Restart / auf
-    // anderem Rechner geschlossen). Schuljahr-Wechsel leert alle Kontexte →
-    // alle Klassen-Reiter verschwinden.
-    tabOrder = Object.keys(state.contexts);
-    if (activeTab !== 'host' && activeTab !== 'new' && !state.contexts[activeTab]) activeTab = 'host';
-    maybeCloseQrOnScan();
-    renderTabBar();
-    renderPanels();
-    renderWorkerStatus();
-    renderStatusBar();
-  }
 
   // Now-Serving pro Klassen-Tab: die gerade bedienten (aktiven) Schüler dieser
   // Klasse groß und prominent — die eine Information, die der Host während der
@@ -785,21 +673,6 @@
     el.innerHTML = `<div class="ns-head">Aktuell in Ausgabe</div>${body}${nextLbl}`;
   }
 
-  // QR-Popup automatisch schließen, sobald der gezeigte Code gescannt wurde
-  // (neuer Pairing-Code beim Schüler-QR, neues Display beim iPad-QR, bzw. der
-  // Helfer sich erfolgreich verbunden hat).
-  function maybeCloseQrOnScan() {
-    if (!qrWatch) return;
-    if (qrWatch.kind === 'helper') {
-      if ((state.helpers || {})[qrWatch.token]?.connected) closeQr();
-      return;
-    }
-    const mb = state.modus_b || {};
-    const grown = qrWatch.kind === 'student'
-      ? (mb.pending_count || 0) > qrWatch.baseline
-      : ((mb.displays || []).length) > qrWatch.baseline;
-    if (grown) closeQr();
-  }
 
   // Konsolidierte Status-Bar: Modus B, Queue-Zähler und iPad-Stand.
   // (WS-Dot via connectWs, Worker via renderWorkerStatus — gleiche Elemente.)
@@ -1005,39 +878,6 @@
     if (_modalPrevFocus) { _modalPrevFocus.focus(); _modalPrevFocus = null; }
   }
 
-  // Ausgemustertes oder anderweitig verliehenes Buch wurde gescannt (Scanner
-  // oder Schüler-Client) — als Toast melden UND im „Aktuell in Ausgabe"-
-  // Kästchen der betreffenden Person festhalten (bis die Ausgabe abgeschlossen
-  // wird bzw. state.queue diesen Schüler nicht mehr als aktiv führt).
-  function showBookAlert(msg) {
-    if (msg.student_id == null) return;
-    const cid = findCtxOfStudent(msg.student_id);
-    if (msg.cleared) {
-      delete studentAlerts[msg.student_id];
-      if (cid) renderCtxNowServing(cid);
-      return;
-    }
-    const label = msg.kind === 'book_deleted' ? 'Ausgemustertes Buch gescannt' : 'Bereits verliehenes Buch gescannt';
-    const who = msg.student ? ` (${escapeHtml(msg.student)})` : '';
-    // „currently lent to someone else": aktuellen Ausleiher namentlich nennen
-    // (nur bei not_in_stock belegt; read-only aus /books/:code, PLAN §3.7).
-    // Toast bleibt als rotes Kästchen (warn) — nur im Now-Serving-Kästchen ist
-    // der Meldungstext normal und „verliehen an …" rot. Bei book_deleted mit
-    // loaned_to → „Ersatzanspruch …" (ausgemustert, aber noch Schüler-verknüpft).
-    const loaned = msg.loaned_to
-      ? (msg.kind === 'book_deleted'
-          ? ` — Ersatzanspruch ${escapeHtml(msg.loaned_to)}`
-          : ` — verliehen an ${escapeHtml(msg.loaned_to)}`)
-      : '';
-    showMsg(`${label}: ${escapeHtml(msg.title || msg.barcode)}${who}${loaned}`, 'warn');
-    studentAlerts[msg.student_id] = {
-      text: `${label}: ${msg.title || msg.barcode}`,
-      borrower: msg.loaned_to || null,
-      kind: msg.kind || null,
-      source: msg.source || 'student',
-    };
-    if (cid) renderCtxNowServing(cid);
-  }
 
   // Host gibt das blockierende Hinweis-Modal am Schüler-Client wieder frei
   // (der Client hat bewusst keinen eigenen Schließen-Button).
@@ -1217,13 +1057,6 @@
     saveBtn.focus();
   }
 
-  // ---- Bücherlisten ordnen (Einstellungen-Dialog, Reiter je Jahrgang) ----
-  // Analog zur Klassen-Bücher-Reihenfolge, aber jahrgangsweit und vorab: pro
-  // Booklist ein Reiter, Katalog wird beim Anklicken lazy geladen. Änderungen
-  // leben lokal bis „Speichern" (dann POST je geänderten Jahrgang).
-  let blData = {};        // grade -> { catalog:{isbn:{title,subject}}, order:[isbn], saved:[isbn], loaded:bool }
-  let blActiveGrade = null;
-  let blDragIndex = null, blDropIndex = null, blDropPos = null;
 
   function settingsOpen() { return document.getElementById('settings-dialog').classList.contains('show'); }
 
@@ -1517,3 +1350,88 @@
       document.addEventListener('pointerdown', () => Beeper.initAudio(), { once: true });
     }
   });
+
+// Zur Introspektion/Debugging zusätzlich auf window.__host verfügbar
+// machen (rein additiv — der Code oben referenziert weiterhin die
+// bare Bezeichner aus der gemeinsamen Skript-Scope, keine funktionale
+// Abhängigkeit von window.__host).
+window.__host.flashModusB = flashModusB;
+window.__host.applyTheme = applyTheme;
+window.__host.cycleTheme = cycleTheme;
+window.__host.doLogin = doLogin;
+window.__host.doLogout = doLogout;
+window.__host.renderTabBar = renderTabBar;
+window.__host.switchTab = switchTab;
+window.__host.setActiveContext = setActiveContext;
+window.__host.showPanel = showPanel;
+window.__host.renderPanels = renderPanels;
+window.__host.classSelectOptions = classSelectOptions;
+window.__host.buildClassPanel = buildClassPanel;
+window.__host.getAutoDoneSelection = getAutoDoneSelection;
+window.__host.loadAutoDoneSelection = loadAutoDoneSelection;
+window.__host.openClass = openClass;
+window.__host.openTestConfig = openTestConfig;
+window.__host.closeClass = closeClass;
+window.__host.dropTab = dropTab;
+window.__host.loadSchoolyears = loadSchoolyears;
+window.__host.selectSchoolyear = selectSchoolyear;
+window.__host.loadClasses = loadClasses;
+window.__host.ctxLoadStudents = ctxLoadStudents;
+window.__host.ctxOnStudentChange = ctxOnStudentChange;
+window.__host.ctxAddSingleStudent = ctxAddSingleStudent;
+window.__host.ctxResetQueue = ctxResetQueue;
+window.__host.ctxClearQueue = ctxClearQueue;
+window.__host.ctxDisconnectAll = ctxDisconnectAll;
+window.__host.addHelper = addHelper;
+window.__host.removeHelper = removeHelper;
+window.__host.nextStudent = nextStudent;
+window.__host.skipStudent = skipStudent;
+window.__host.disconnectStudent = disconnectStudent;
+window.__host.finishStudent = finishStudent;
+window.__host.openPrintDialog = openPrintDialog;
+window.__host.printLoanSlip = printLoanSlip;
+window.__host.openModusB = openModusB;
+window.__host.closeModusB = closeModusB;
+window.__host.showMbQr = showMbQr;
+window.__host.authorizeDisplay = authorizeDisplay;
+window.__host.showDisplayQr = showDisplayQr;
+window.__host.doPair = doPair;
+window.__host.pairStudent = pairStudent;
+window.__host.cancelArm = cancelArm;
+window.__host.renderModusBControl = renderModusBControl;
+window.__host.renderCtxPairing = renderCtxPairing;
+window.__host.renderHostTab = renderHostTab;
+window.__host.renderClassTab = renderClassTab;
+window.__host.renderCtxNowServing = renderCtxNowServing;
+window.__host.renderStatusBar = renderStatusBar;
+window.__host.setForceTailscaleIp = setForceTailscaleIp;
+window.__host.pushSavePdfLocally = pushSavePdfLocally;
+window.__host.pushFixClassOnSlip = pushFixClassOnSlip;
+window.__host.setPrinter = setPrinter;
+window.__host.renderWorkerStatus = renderWorkerStatus;
+window.__host.renderHelpers = renderHelpers;
+window.__host.setHelperClass = setHelperClass;
+window.__host.renderCtxQueue = renderCtxQueue;
+window.__host.trapFocus = trapFocus;
+window.__host.showQr = showQr;
+window.__host.closeQr = closeQr;
+window.__host.clearBookAlert = clearBookAlert;
+window.__host.showMsg = showMsg;
+window.__host.confirmDialog = confirmDialog;
+window.__host.busy = busy;
+window.__host.pushSlipDefault = pushSlipDefault;
+window.__host.openSettingsDialog = openSettingsDialog;
+window.__host.settingsOpen = settingsOpen;
+window.__host.loadBooklistTabs = loadBooklistTabs;
+window.__host.selectBooklistTab = selectBooklistTab;
+window.__host.renderBooklistList = renderBooklistList;
+window.__host.onBlToggleHidden = onBlToggleHidden;
+window.__host.clearBlDropMarks = clearBlDropMarks;
+window.__host.onBlDragStart = onBlDragStart;
+window.__host.onBlDragOver = onBlDragOver;
+window.__host.onBlDrop = onBlDrop;
+window.__host.onBlDragEnd = onBlDragEnd;
+window.__host.saveChangedBooklistOrders = saveChangedBooklistOrders;
+window.__host.saveBooklistOrder = saveBooklistOrder;
+window.__host.saveBooklistHidden = saveBooklistHidden;
+window.__host.handleDelegatedAction = handleDelegatedAction;
