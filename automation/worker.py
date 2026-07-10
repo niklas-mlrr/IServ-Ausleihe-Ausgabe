@@ -518,9 +518,9 @@ class WorkerPool:
                     raise RuntimeError("Kein freier Worker-Context verfügbar") from None
             context = self._contexts.pop(0)
 
-        # new_page() kann bei transienten Playwright-Transportfehlern werfen.
-        # Stand das außerhalb des protected try/except, würde der Context leaken
-        # (Pool schrumpft dauerhaft). Daher: bei Fehlern Context zurückgeben.
+        # new_page() kann werfen (auch CancelledError, daher BaseException) —
+        # Context in jedem Fall zurückgeben, sonst leakt er aus dem Pool.
+        # Abgesichert: tests/test_worker_pool.py::test_open_student_cancel_returns_context
         try:
             page = await context.new_page()
         except BaseException:  # noqa: BLE001 — inkl. CancelledError!
@@ -534,10 +534,9 @@ class WorkerPool:
         try:
             await session.load_card()
         except BaseException as e:  # noqa: BLE001 — inkl. CancelledError!
-            # Wird der Task während load_card abgebrochen (z. B. „Weiter" am
-            # Helfer, bevor open_student zurückkam), MUSS der Context zurück in
-            # den Pool — sonst leakt er. `except Exception` fängt CancelledError
-            # (seit Py3.8 BaseException) nicht, daher hier BaseException.
+            # `except Exception` fängt CancelledError NICHT (seit Py3.8 eine
+            # BaseException) — hier bewusst BaseException, damit ein Cancel
+            # während load_card den Context trotzdem zurück in den Pool gibt.
             log.warning("load_card für %d fehlgeschlagen/abgebrochen: %s", student_id, e)
             try:
                 await page.close()
@@ -552,11 +551,9 @@ class WorkerPool:
     async def release(self, session: StudentSession) -> None:
         """Context nach Abschluss eines Schülers zurück in den Pool.
 
-        Idempotent: ein zweiter Aufruf (z. B. durch Race im Server-Code) würde
-        denselben Context sonst zweimal appenden → zwei open_student poppen ihn
-        „zweimal", beide erzeugen Pages auf demselben Context, stats().available
-        würde über total liegen. Daher: Context atomar aus der Session entfernen
-        und nur dann appenden, wenn er noch da war."""
+        Idempotent (Context wird atomar aus der Session entfernt und nur dann
+        appended, wenn er noch da war).
+        Abgesichert: tests/test_worker_pool.py::test_release_is_idempotent_no_double_append"""
         await session.close()
         ctx = session._context
         session._context = None

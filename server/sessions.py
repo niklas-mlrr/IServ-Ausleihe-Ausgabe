@@ -342,15 +342,10 @@ async def process_scan(
         result = await handle_scan(state, student_id, barcode)
     result.setdefault("isbn", decision.get("isbn"))
     # Erfolgreiche Buchung (Enter) macht die Reihe auf dem Schüler ausgeliehen:
-    # ISBN von `vormerk` nach `lent` umhängen. Sonst würde ein erneuter Scan
-    # desselben Exemplars (oder eines weiteren Exemplars derselben Reihe) in
-    # derselben Session — ohne Neuladen des Schülers — als „verliehen an jemand
-    # anderes" (`not_in_stock`, loaned_to = der Schüler selbst) statt als „an
-    # dich selbst verliehen" (`series_already_lent`) deklariert, weil das
-    # serverseitig verliehene Exemplar `distributed` ist, `lent_isbns` aber
-    # noch aus der Lade-Zeit stammt. Die übergebenen Mengen sind die Session-
-    # Sets (Mutables, passed-by-reference) — das Update greift am Helper-/
-    # Schüler-Session-State; ein Neuladen ist nicht nötig.
+    # ISBN von `vormerk` nach `lent` umhängen, damit ein erneuter Scan derselben
+    # Reihe in dieser Session korrekt als „an dich selbst verliehen" erkannt
+    # wird. Die Mengen sind die Session-Sets (Mutables, passed-by-reference) —
+    # das Update greift direkt am Helper-/Schüler-Session-State.
     if result.get("status") == "booked" and decision.get("isbn"):
         lent_isbns.add(decision["isbn"])
         vormerk_isbns.discard(decision["isbn"])
@@ -516,10 +511,11 @@ def release_worker(state: AppState, worker) -> None:
     """Worker-Context nach Abschluss zurück in den Pool (statt ihn zu verlieren).
 
     Fällt auf reines Schließen zurück, falls kein Pool verfügbar ist. Die
-    Release-Coroutine wird als Task mit starkem Reference gehalten — CPython's
-    asyncio führt Tasks nur in einem WeakSet, ein fire-and-forget-Task kann
-    sonst mid-Coroutine GC'd werden und der Context bleibt für immer aus dem
-    Pool draußen (bei WORKER_CONTEXTS=2 reicht das zweimal zum stillen Drain).
+    Release-Coroutine wird als Task mit starker Referenz gehalten — asyncio
+    hält Tasks selbst nur schwach (WeakSet), ein unreferenzierter Task kann
+    daher mid-Coroutine GC't werden, bevor er den Context zurückgibt.
+    Abgesichert (Bookkeeping, nicht das GC-Verhalten selbst):
+    tests/test_sessions.py::test_release_worker_holds_task_in_flight_and_discards_after
     """
     pool = state.worker_pool
     coro = (
@@ -530,7 +526,7 @@ def release_worker(state: AppState, worker) -> None:
     t.add_done_callback(_release_tasks.discard)
 
 
-# Starke Referenzen auf in-flight Release-Tasks — verhindert GC vor Completion.
+# Starke Referenzen auf in-flight Release-Tasks (asyncio hält Tasks nur schwach).
 _release_tasks: set[asyncio.Task] = set()
 
 
@@ -616,18 +612,11 @@ async def _detach_helper(state: AppState, hub, helper, helper_notify: dict | Non
     tatsächlich (noch) diesem Schüler zugeordnet ist.
 
     In-flight Lade-Task abbrechen, damit ein noch laufendes open_student seinen
-    Worker-Context zurückgibt (BaseException-Handler in worker.py). Sonst leakt
-    der Context, weil er erst nach open_student in student_worker_sessions
-    registriert wird und pop() unten Nichts fände — Pool läuft unter schnellem
-    „Weiter"-Klicken leer.
+    Worker-Context zurückgibt (BaseException-Handler in worker.py).
 
-    WICHTIG (Reihenfolge nicht verändern): student_id wird VOR dem Await auf
-    None gesetzt, damit der Stale-Guard in load_and_push_helper_student (der
-    helper.student_id gegen den ursprünglich zugewiesenen student_id prüft) den
-    nach open_student noch synchronen set_worker_session-Aufruf überspringt und
-    den Context selbst schließt. Der Await selbst ist sicher (kein Lock
-    gehalten) — der Task wartet nur auf open_student (BaseException-Handler
-    fängt Cancel) oder ist schon darüber hinaus und läuft via Stale-Guard leer.
+    Reihenfolge nicht verändern: `student_id` muss VOR dem Await auf None
+    gesetzt werden, damit der Stale-Guard in load_and_push_helper_student
+    greift.
     """
     if helper.load_task is not None and not helper.load_task.done():
         helper.load_task.cancel()
@@ -756,13 +745,10 @@ async def load_and_push_helper_student(state: AppState, hub, student, helper) ->
             # Kein `worker_ready`: Worker nie bereit → Scans bleiben am Client
             # ignoriert, Status zeigt den Fehler. Bücherliste ist bereits da.
             return
-        # Stale-Guard: end_student/skip kann während open_student gelaufen sein
-        # und helper.student_id auf None gesetzt haben. CancelledError trifft
-        # erst am nächsten await — aber zwischen open_student-Return und
-        # set_worker_session gibt es KEIN await (synchroner Aufruf). Ohne
-        # diesen Guard würde der Task den Context für einen student_id
-        # registrieren, dessen end_student schon gelaufen ist → Worker-Orphan
-        # unter totalem student_id (Pool-Slot belegt, niemand poppt ihn jemals).
+        # Stale-Guard: helper.student_id muss noch dem hier zugewiesenen
+        # student_id entsprechen, bevor der Context registriert wird.
+        # Abgesichert: tests/test_stale_guards.py
+        #   ::test_load_and_push_helper_student_stale_guard_closes_orphan_context
         if helper.student_id != assigned_student_id:
             log.info(
                 "Stale load_and_push_helper_student für %d — Helfer nicht mehr "
@@ -924,10 +910,10 @@ async def load_and_push_paired_student(
             # Scans ignoriert. Host muss den Schüler überspringen/manuell lösen.
             await hub.broadcast_host(state.state_snapshot())
             return
-        # Stale-Gard: invalidate_session/Modus-B-Close kann während open_student
-        # gelaufen sein (session.state != "paired" oder student_id gezogen).
-        # Dann Context selbst schließen — set_worker_session würde sonst einen
-        # Orphan unter totalem student_id registrieren.
+        # Stale-Guard: Session muss noch demselben student_id "paired" sein,
+        # bevor der Context registriert wird.
+        # Abgesichert: tests/test_stale_guards.py
+        #   ::test_load_and_push_paired_student_stale_guard_closes_orphan_context
         if session.student_id != paired_student_id or session.state != "paired":
             log.info(
                 "Stale load_and_push_paired_student für %d — Session nicht mehr "

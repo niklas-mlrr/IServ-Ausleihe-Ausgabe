@@ -26,23 +26,16 @@ from ..state import DisplaySession, QueueStudent, get_state
 log = logging.getLogger(__name__)
 router = APIRouter()
 
-# Grace-Frist für den Scanner-Disconnect: das finally des Scanner-WS stößt den
-# Schüler-Teardown (end_student: Schüler zurück auf 'pending', Worker zu) nicht
-# sofort an, sondern verzögert als Task. Lädt der Helfer die Seite neu, nimmt
-# die neue Verbindung den Grace-Task cancel't und lädt den Schüler neu (Reconnect
-# mit ggf. Worker-Reload). Ohne Reconnect innerhalb der Frist gilt die Trennung
-# als echt → Teardown läuft (so bleibt ein „active" auf einem toten Helfer-Token
-# nicht stehen; Modus-A-Queue-Einträge werden vom Sweeper nicht abgeräumt).
+# Grace-Frist zwischen Scanner-Disconnect und Schüler-Teardown (Reconnect-Fenster).
+# Abgesichert: tests/test_scanner_reconnect.py
 _RECONNECT_GRACE_S = 3.0
 
 
 async def _deferred_end(state, hub, helper, student_id: int) -> None:
     """Verzögerter Teardown des Helfer-Schülers nach WS-Trennung (s. ws_scanner).
 
-    Re-Checks vor dem Eingreifen schützen gegen Reconnect / Weiter-Schalten
-    während der Frist: ein Reconnect cancelt diesen Task (dann läuft er nicht
-    mehr bis hier); zur Sicherheit prüfen wir trotzdem ``helper.ws`` (neue
-    Verbindung?) und ``helper.student_id`` (noch derselbe Schüler?)."""
+    Abgesichert: tests/test_scanner_reconnect.py::test_deferred_end_noop_on_reconnect,
+    ::test_deferred_end_noop_on_student_changed"""
     try:
         await asyncio.sleep(_RECONNECT_GRACE_S)
     except asyncio.CancelledError:
@@ -50,9 +43,7 @@ async def _deferred_end(state, hub, helper, student_id: int) -> None:
     # Re-Check 1: Helfer hat wieder eine Verbindung (Reconnect) → kein Teardown.
     if helper.ws is not None:
         return
-    # Re-Check 2: Helfer wurde inzwischen weitergeschaltet/zurückgesetzt
-    # (z. B. /api/skip, /api/reset-queue, /api/disconnect-all — alle setzen
-    # helper.student_id auf None bzw. einen neuen Schüler).
+    # Re-Check 2: Helfer wurde inzwischen weitergeschaltet/zurückgesetzt.
     if helper.student_id != student_id:
         return
     try:
@@ -531,16 +522,9 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
         pass
     finally:
         # WS-Referenz nur lösen, wenn keine neue Verbindung übernommen hat.
+        # Abgesichert: tests/test_ws_scanner.py::test_finally_noop_when_ownership_stolen
         if helper.ws is websocket:
             helper.ws = None
-            # Echte Trennung (kein Reconnect hat übernommen): Schüler-Teardown
-            # verzögert anstoßen (Grace-Frist). Ein innerhalb der Frist
-            # folgender Reconnect (Seite neu laden) cancelt diesen Task und lädt
-            # den Schüler neu — so geht der Schüler beim Helfer-Neuladen nicht
-            # verloren. Ohne Reconnect läuft der Teardown nach der Frist
-            # (Schüler zurück auf 'pending', Worker zu) — so bleibt kein
-            # „active" auf einem toten Helfer-Token stehen (Modus-A-Queue-
-            # Einträge werden vom Sweeper nicht abgeräumt, s. _deferred_end).
             if helper.student_id is not None:
                 # Eventuell noch laufenden Grace-Task der vorigen Trennung
                 # abräumen (z. B. zweite Trennung während der Frist) — synchron
@@ -555,8 +539,7 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                 helper.end_task = asyncio.create_task(
                     _deferred_end(state, hub, helper, helper.student_id)
                 )
-        # else: Reconnect hat helper.ws bereits übernommen → Student/Worker
-        # unangetastet lassen (der Reconnect-Pfad lädt den Schüler neu).
+        # else: Reconnect hat übernommen — nichts tun.
         try:
             await hub.broadcast_host(state.state_snapshot())
         except Exception:
