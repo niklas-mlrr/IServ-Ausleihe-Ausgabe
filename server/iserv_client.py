@@ -164,9 +164,14 @@ class IsServClient:
         um Titel und Fach (subjects_flat) für alle Bücher aufzulösen.
         """
         if self._series_map is None:
+            # _get_client() vor dem Lock holen: es nimmt selbst _init_lock (nicht
+            # reentrant), ein Aufruf innerhalb dieses `with`-Blocks würde den
+            # aufrufenden Thread für immer an sich selbst blockieren, sobald
+            # _get_series_map() als erste Lazy-Init-Stelle erreicht wird (bisher
+            # nur durch die Aufreihenfolge in den _sync()-Bodies verhindert).
+            client = self._get_client()
             with self._init_lock:
                 if self._series_map is None:
-                    client = self._get_client()
                     self._series_map = {s.isbn: s for s in client.series.get_all()}
         return self._series_map
 
