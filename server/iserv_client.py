@@ -111,21 +111,22 @@ class IsServClient:
 
         return client.schoolyears.get_current()["id"]
 
+    def _sy_cache_stale(self, now: datetime | None = None) -> bool:
+        """Ob der gecachte Default-Schuljahr-Wert die TTL überschritten hat."""
+        if self._default_sy_id is None:
+            return True
+        if self._default_sy_at is None:
+            return True
+        now = now or datetime.now()
+        return (now - self._default_sy_at).total_seconds() > _DEFAULT_SY_TTL_S
+
     def _resolve_sy(self, client: AusleiheClient, schoolyear: str | None) -> str:
         """Explizit gewähltes Schuljahr oder das gecachte Default-Jahr (mit TTL)."""
         if schoolyear:
             return schoolyear
-        now = datetime.now()
-        stale = (
-            self._default_sy_at is None
-            or (now - self._default_sy_at).total_seconds() > _DEFAULT_SY_TTL_S
-        )
-        if self._default_sy_id is None or stale:
+        if self._sy_cache_stale():
             with self._init_lock:
-                if self._default_sy_id is None or (
-                    self._default_sy_at is None
-                    or (datetime.now() - self._default_sy_at).total_seconds() > _DEFAULT_SY_TTL_S
-                ):
+                if self._sy_cache_stale():
                     self._default_sy_id = self._pick_default(self._active_years(client), client)
                     self._default_sy_at = datetime.now()
         return self._default_sy_id
