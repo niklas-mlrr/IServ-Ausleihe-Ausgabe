@@ -273,15 +273,20 @@ function renderBooks(books, animate = false) {
 // Klick ruft genau diesen Schüler gezielt auf (WS `call`) — read-only gegen
 // IServ/DB; nur die lokale Helfer-Zuweisung wird gesetzt. Bei Aufruf aus einer
 // fremden Klasse bindet der Server den Helfer an diese Klasse (s. server/ws.py).
-// Eine Zeile innerhalb einer Gruppen-Box (aktiv/fertig) — kein „Aufrufen"-
-// Button (die Schüler sind bereits aufgerufen bzw. fertig), alle Zeilen einer
-// Gruppe teilen sich eine gemeinsame Box statt je eine eigene (s. .queue-group).
-function renderQueueGroupItem(s) {
+// Eine Zeile innerhalb einer Gruppen-Box (aktiv/fertig) — alle Zeilen einer
+// Gruppe teilen sich eine gemeinsame Box statt je eine eigene (s.
+// .queue-group), anders als bei den wartenden Schülern (eigene book-row je
+// Schüler). Aktive Schüler werden bereits von einem Helfer bedient (kein
+// „Aufrufen"-Button); fertige lassen sich erneut aufrufen (z. B. um
+// nachträglich ein Buch zu erfassen) — Button wie bei den Wartenden.
+function renderQueueGroupItem(s, withCallBtn) {
   const form = (s.form || '').replace(/^Klasse\s+/i, '');
   const name = `${s.lastname}, ${s.firstname}`;
-  return `<div class="queue-group-item">`
+  const sidAttr = withCallBtn ? ` data-student-id="${escapeHtml(String(s.student_id))}"` : '';
+  const callBtn = withCallBtn ? '<div class="qg-call"><button class="call-btn">Aufrufen</button></div>' : '';
+  return `<div class="queue-group-item"${sidAttr}>`
     + `<div class="qg-fach">${escapeHtml(form)}</div>`
-    + `<div class="qg-name">${escapeHtml(name)}</div></div>`;
+    + `<div class="qg-name">${escapeHtml(name)}</div>${callBtn}</div>`;
 }
 
 function renderQueue() {
@@ -314,12 +319,13 @@ function renderQueue() {
   }
   // Gemeinsame Box je Status statt je Schüler eine eigene Zeile — anders als
   // bei den wartenden Schülern (list) oben, die weiterhin je einen eigenen
-  // "Aufrufen"-Button brauchen.
+  // "Aufrufen"-Button brauchen. Aktiv: kein Button. Fertig: Button (erneutes
+  // Aufrufen), analog zu den Wartenden.
   if (active.length) {
-    html += `<div class="queue-group queue-group-active">${active.map(renderQueueGroupItem).join('')}</div>`;
+    html += `<div class="queue-group queue-group-active">${active.map(s => renderQueueGroupItem(s, false)).join('')}</div>`;
   }
   if (done.length) {
-    html += `<div class="queue-group queue-group-done">${done.map(renderQueueGroupItem).join('')}</div>`;
+    html += `<div class="queue-group queue-group-done">${done.map(s => renderQueueGroupItem(s, true)).join('')}</div>`;
   }
   bookRowsEl.innerHTML = html;
 }
@@ -384,7 +390,7 @@ function renderQueueTabs() {
 bookRowsEl.addEventListener('click', (e) => {
   const btn = e.target.closest('.call-btn');
   if (!btn) return;
-  const row = btn.closest('.queue-row');
+  const row = btn.closest('[data-student-id]');
   const sid = row ? row.dataset.studentId : null;
   if (sid == null) return;
   if (!ws || ws.readyState !== WebSocket.OPEN) return;

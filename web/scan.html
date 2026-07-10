@@ -292,9 +292,14 @@
     }
     .queue-group-active { background: rgba(33,150,243,.14); border-color: rgba(33,150,243,.55); }
     .queue-group-done   { background: rgba(46,125,50,.16);  border-color: rgba(46,125,50,.55); }
+    /* Aktiv-Gruppe: nur Klasse + Name (kein Button). Fertig-Gruppe: Zeilen
+       haben zusätzlich den „Aufrufen"-Button (data-student-id gesetzt), daher
+       dieselbe 3-Spalten-Aufteilung wie bei den wartenden book-row.queue-row. */
     .queue-group-item { display: grid; grid-template-columns: 4.5rem 1fr; gap: 8px; align-items: center; }
+    .queue-group-item[data-student-id] { grid-template-columns: 4.5rem 1fr auto; }
     .queue-group-item .qg-fach { font-weight: 600; }
     .queue-group-item .qg-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .queue-group-item .qg-call { display: flex; justify-content: flex-end; align-items: center; }
     /* Bewegungsreduktion respektieren: FLIP-Transition praktisch sofort. */
     @media (prefers-reduced-motion: reduce) {
       .book-row { transition: transform .01ms !important; }

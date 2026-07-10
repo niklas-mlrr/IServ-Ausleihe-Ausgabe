@@ -97,7 +97,12 @@ class Hub:
                 queue_all = s.queue_as_list(helper.context_id)
                 if not await self._safe_send(
                     helper.ws,
-                    {"type": "queue_update", "queue_size": qsize, "queue": queue, "queue_all": queue_all},
+                    {
+                        "type": "queue_update",
+                        "queue_size": qsize,
+                        "queue": queue,
+                        "queue_all": queue_all,
+                    },
                 ):
                     helper.ws = None
                     continue

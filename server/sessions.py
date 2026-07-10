@@ -858,8 +858,9 @@ async def assign_student_to_helper(state: AppState, hub, helper, student) -> dic
     Schüler aus der Warteschlange). Setzt den Schüler auf 'active', ordnet
     ihn dem Helfer zu und stößt das Laden von Schülerinfo + Worker-Context
     als Hintergrund-Task an. Rein lokale Zuweisung — kein IServ-/DB-Schreib.
-    Der Aufrufer stellt sicher, dass `student.status == 'pending'` ist und
-    der Helfer keinen aktiven Schüler mehr hat.
+    Der Aufrufer stellt sicher, dass `student.status` `'pending'` oder
+    `'done'` ist (erneutes Aufrufen eines fertigen Schülers) und der Helfer
+    keinen aktiven Schüler mehr hat.
     """
     student.status = "active"
     student.assigned_helper = helper.token
