@@ -8,6 +8,62 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-10 — Wartbarkeits-Wellen 0–4: Hygiene, Tests, Kommentar-Diät
+
+Fünf Wellen Aufräumarbeit an Server/Automation/Web, ohne Verhaltensänderung
+am Buchungspfad:
+
+- **Welle 0 (Hygiene):** `.claude/` ignoriert, macOS-Artefakte entfernt,
+  ruff-format-Pre-Commit-Hook eingerichtet, danach einmalig `ruff format`
+  über `server/`, `automation/`, `tests/` laufen lassen; E501-Ignore auf
+  `automation/` eingegrenzt statt global (`e9d603f`, `ab3f62f`, `23ff27d`).
+- **Welle 1 (Bugfixes):** doppelte HTML-Maskierung durch `escapeHtml` in
+  `textContent`-Zuweisungen entfernt (Host- und Schüler-Client,
+  `db6452b`, `101c285`); Selbst-Deadlock in `_get_series_map` durch einen
+  nicht-reentranten Lock behoben (`53d0fd4`).
+- **Welle 2 (WS-Serialisierung):** alle WebSocket-Sends laufen jetzt über
+  den Hub-Lock (`12b3777`), abgesichert durch einen Test, der konkurrierende
+  Sends auf derselben Verbindung serialisiert nachweist (`a48bf24`).
+- **Welle 3 (Web-Refactor):** `student.html`s Inline-JS nach `web/student.js`
+  ausgelagert (`077167b`); `host.js` nutzt den gemeinsamen `Beeper` aus
+  `common.js` statt einer eigenen Audio-Kopie (`66dbcef`).
+- **Welle 4 (Nebenläufigkeits-Invarianten):** sieben zuvor nur in Prosa
+  behauptete Concurrency-Garantien durch benannte Tests abgesichert
+  (`4b9bf69`, `4a43fde`). Die Invarianten und ihr jeweiliger Grund:
+  1. `_deferred_end` (ws.py) — ein Reconnect innerhalb der Grace-Frist ODER
+     ein zwischenzeitliches Weiterschalten darf den verzögerten
+     Schüler-Teardown NICHT mehr auslösen (Re-Checks auf `helper.ws` und
+     `helper.student_id`).
+  2. `ws_scanner`s `finally` (ws.py) — das `if helper.ws is websocket`-Gate
+     verhindert, dass die alte Verbindung nach einem Reconnect den frisch
+     übernommenen Schüler/Worker wieder abbaut.
+  3. `load_and_push_helper_student` (sessions.py) — Stale-Guard vor
+     `set_worker_session`: wurde der Helfer während `open_student` schon
+     weitergeschaltet, muss der Context selbst geschlossen werden, sonst
+     bleibt er als Orphan unter einer toten `student_id` im Pool hängen.
+  4. `load_and_push_paired_student` (sessions.py) — dieselbe Garantie für
+     Modus B (Prüfung auf `session.student_id`/`session.state`).
+  5. `release_worker` + `_release_tasks` (sessions.py) — Release-Tasks
+     werden in einem modulglobalen Set stark referenziert, weil
+     `asyncio` Tasks sonst nur schwach hält; ohne das Set kann ein
+     Fire-and-forget-Task mitten in der Coroutine GC't werden und der
+     Context bleibt für immer draußen (bei `WORKER_CONTEXTS=2` genügen
+     zwei stille Drains, um den Pool leerzuräumen).
+  6. `WorkerPool.open_student` (worker.py) — beide Fehlerpfade
+     (`new_page()`, `load_card()`) fangen `BaseException` statt
+     `Exception`, weil `except Exception` `asyncio.CancelledError` seit
+     Python 3.8 nicht mehr abfängt; ohne den weiten Fang würde ein
+     Cancel (z. B. schnelles „Weiter") den Context aus dem Pool verlieren.
+  7. `WorkerPool.release` — idempotent per Attribut-Nullung
+     (`session._context = None`), damit ein doppelter Release (Race im
+     Server-Code) nicht denselben Context zweimal in den Pool anhängt.
+
+Die Kommentare an diesen sieben Stellen sind auf je einen Satz (die
+Invariante im Präsens) plus einen Test-Verweis gekürzt; die vorherige
+Regressions-Prosa ("ohne X würde Y passieren") lebt jetzt hier. Laut
+CLAUDE.md gehört Änderungshistorie ausschließlich ins Changelog, nicht in
+Code-Kommentare.
+
 ## 2026-07-10 — Host: Sofort-fertig-Filter beim Klassen-Öffnen
 
 Im „Neue Klasse öffnen"-Reiter vier Umschalter ergänzt: Schüler ohne aktuelle
