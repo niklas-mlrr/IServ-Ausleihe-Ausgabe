@@ -40,26 +40,7 @@
     return null;
   }
 
-  // ---- Audio (Beep bei neuem Pairing-Code) — Muster aus web/scan.html ----
-  let audioCtx = null, audioBuffer = null;
-  async function initAudio() {
-    if (audioBuffer) return;
-    try {
-      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      // Stiller Buffer entsperrt den AudioContext während der Nutzergeste (iOS/Safari)
-      const silence = audioCtx.createBuffer(1, 1, audioCtx.sampleRate);
-      const silSrc = audioCtx.createBufferSource();
-      silSrc.buffer = silence; silSrc.connect(audioCtx.destination); silSrc.start(0);
-      await audioCtx.resume();
-      const resp = await fetch('/beep.mp3');
-      audioBuffer = await audioCtx.decodeAudioData(await resp.arrayBuffer());
-    } catch (e) { /* Audio optional — Blink bleibt als visuelles Signal */ }
-  }
-  function playBeep() {
-    if (!audioCtx || !audioBuffer) return;
-    const src = audioCtx.createBufferSource();
-    src.buffer = audioBuffer; src.connect(audioCtx.destination); src.start(0);
-  }
+  // ---- Audio (Beep bei neuem Pairing-Code) — initAudio/playBeep: siehe common.js (Beeper) ----
   // Modus-B-Karte kurz aufblinken lassen (Klasse entfernt sich nach der Animation selbst)
   function flashModusB() {
     const card = document.getElementById('mb-status').closest('.card');
@@ -96,7 +77,7 @@
     const pw = document.getElementById('pw-input').value;
     const r = await fetch('/api/login', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ password: pw }) });
     if (r.ok) {
-      initAudio();  // Login-Klick ist die Nutzergeste, die den AudioContext entsperrt
+      Beeper.initAudio();  // Login-Klick ist die Nutzergeste, die den AudioContext entsperrt
       document.getElementById('login-view').style.display = 'none';
       document.getElementById('main-view').style.display = '';
       loadSchoolyears();
@@ -722,7 +703,7 @@
     // Neuer Pairing-Code? -> Beep + Blink, damit der Host es ohne Hinschauen merkt.
     const pc = state.modus_b.pending_count || 0;
     if (state.modus_b.open && prevPendingCount !== null && pc > prevPendingCount) {
-      playBeep();
+      Beeper.playBeep();
       flashModusB();
     }
     prevPendingCount = pc;
@@ -1533,6 +1514,6 @@
       // Dev-Toggles kommen via WS vom Server (globale Quelle), kein Browser-Push
       // beim Auto-Login mehr. Theme bleibt pro Browser (localStorage).
       // Auto-Login hat keine Login-Geste -> AudioContext beim ersten Klick entsperren
-      document.addEventListener('pointerdown', () => initAudio(), { once: true });
+      document.addEventListener('pointerdown', () => Beeper.initAudio(), { once: true });
     }
   });

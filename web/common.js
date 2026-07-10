@@ -24,15 +24,17 @@ const Beeper = (() => {
   let audioCtx = null, audioBuffer = null;
   async function initAudio() {
     if (audioBuffer) return;
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    // Silent buffer to unlock iOS AudioContext during user gesture
-    const silence = audioCtx.createBuffer(1, 1, audioCtx.sampleRate);
-    const silSrc = audioCtx.createBufferSource();
-    silSrc.buffer = silence; silSrc.connect(audioCtx.destination); silSrc.start(0);
-    await audioCtx.resume();
-    const response = await fetch('/beep.mp3');
-    const arrayBuf = await response.arrayBuffer();
-    audioBuffer = await audioCtx.decodeAudioData(arrayBuf);
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      // Silent buffer to unlock iOS AudioContext during user gesture
+      const silence = audioCtx.createBuffer(1, 1, audioCtx.sampleRate);
+      const silSrc = audioCtx.createBufferSource();
+      silSrc.buffer = silence; silSrc.connect(audioCtx.destination); silSrc.start(0);
+      await audioCtx.resume();
+      const response = await fetch('/beep.mp3');
+      const arrayBuf = await response.arrayBuffer();
+      audioBuffer = await audioCtx.decodeAudioData(arrayBuf);
+    } catch (e) { /* Audio optional — Ton entfällt, Rest der Seite bleibt nutzbar */ }
   }
   function playBeep() {
     if (!audioCtx || !audioBuffer) return;
