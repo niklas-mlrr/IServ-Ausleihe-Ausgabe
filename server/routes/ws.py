@@ -31,6 +31,37 @@ router = APIRouter()
 _RECONNECT_GRACE_S = 3.0
 
 
+async def safe_broadcast(hub, state) -> None:
+    """Host-Broadcast, dessen Fehler bewusst verschluckt werden.
+
+    Wird an mehreren Stellen (Deferred-Teardown, `finally`-Blöcke der WS-
+    Handler) verwendet, an denen ein fehlgeschlagener Broadcast den
+    umgebenden Ablauf (Teardown bzw. Verbindungsabbau) nicht stören darf.
+    """
+    try:
+        await hub.broadcast_host(state.state_snapshot())
+    except Exception:  # noqa: BLE001 — Broadcast-Fehler nicht propagieren
+        pass
+
+
+async def _take_over_ws(holder, websocket) -> None:
+    """Übernimmt eine Reconnect-Verbindung auf `holder.ws` (Helfer oder Schüler-Session).
+
+    Synchron übernehmen — VOR jedem await. So erkennt das `finally` des alten
+    WS (das asynchron zum Reconnect läuft) an `holder.ws is websocket`, dass
+    ein Reconnect übernommen hat, und löst KEINEN Teardown aus.
+    """
+    old_ws = holder.ws
+    holder.ws = websocket
+    # Reconnect: die alte Verbindung sauber schließen, statt sie verwaist offen
+    # zu lassen.
+    if old_ws is not None and old_ws is not websocket:
+        try:
+            await old_ws.close(code=4009, reason="Neue Verbindung")
+        except Exception:
+            pass
+
+
 async def _deferred_end(state, hub, helper, student_id: int) -> None:
     """Verzögerter Teardown des Helfer-Schülers nach WS-Trennung (s. ws_scanner).
 
@@ -61,10 +92,7 @@ async def _deferred_end(state, hub, helper, student_id: int) -> None:
         )
     except Exception:  # noqa: BLE001 — Sweeper-Loop-artige Robustheit: ein fehlgeschlagener Teardown darf den Task nicht crashen
         log.exception("deferred end_student für %d fehlgeschlagen", student_id)
-    try:
-        await hub.broadcast_host(state.state_snapshot())
-    except Exception:  # noqa: BLE001 — Broadcast-Fehler nicht propagieren
-        pass
+    await safe_broadcast(hub, state)
 
 
 @router.websocket("/ws/host")
@@ -92,6 +120,295 @@ async def ws_host(websocket: WebSocket, session_id: str | None = Cookie(default=
             pass
 
 
+# ---------------------------------------------------------------------------
+# Modus A — Helfer-Scanner: Dispatch-Tabelle für die Empfangsschleife
+# ---------------------------------------------------------------------------
+
+
+async def _handle_next(state, hub, helper, websocket, raw) -> None:
+    # Aktuellen Schüler abschließen (kein Browser-Submit) und
+    # nächsten Wartenden auf diesen Helfer setzen. `context_id`
+    # (optional): Client hat vorgeschlagen, auf eine andere
+    # (nicht-leere) Klasse umzuspringen, weil die eigene
+    # Warteschlange leer ist — s. advance_helper.
+    await advance_helper(state, hub, helper, context_id=raw.get("context_id"))
+
+
+async def _handle_call(state, hub, helper, websocket, raw) -> None:
+    # Helfer ruft einen konkreten Schüler aus der Warteschlangen-
+    # Anzeige auf (Button bei wartenden UND bereits fertigen
+    # Schülern — Fertige lassen sich so erneut aufrufen, z. B. um
+    # nachträglich ein vergessenes Buch zu erfassen). Rein lokale
+    # Zuweisung — kein IServ-/DB-Schreibzugriff. Der Schüler muss
+    # 'pending' oder 'done' sein (nicht 'active': bereits bei einem
+    # Helfer, nicht 'skipped'); zwischen Prüfung und Zuweisung
+    # liegt kein Await, also atomar im Eventloop (kein Doppel-
+    # Aufruf zweier Helfer auf denselben Schüler).
+    sid = raw.get("student_id")
+    target_pair = state.find_student_with_ctx(sid) if sid is not None else None
+    target = target_pair[1] if target_pair else None
+    if target is None or target.status not in ("pending", "done"):
+        await hub.send_websocket(
+            websocket,
+            {
+                "type": "error",
+                "msg": "Schüler nicht (mehr) in der Warteschlange",
+            },
+        )
+        # Queue sofort nachpushen, damit der Client die aktuelle
+        # Liste sieht (z. B. zwischenzeitlich von anderem Helfer
+        # aufgerufen) — statt auf den nächsten Broadcast zu warten.
+        await hub.broadcast_queue_size(state)
+        return
+    # Aufrufen aus einer fremden Klasse (anderer Klassen-Tab im
+    # Helfer-Menü) ist erlaubt: der Helfer wird dabei an die Klasse
+    # des aufgerufenen Schülers gebunden (helper.context_id), sodass
+    # „Nächster" danach aus dieser Klasse zieht (Workflow „ich
+    # bediene jetzt diese Klasse"). `(aktive)`-Helfer (context_id
+    # None) werden beim ersten Aufruf ebenfalls gebunden.
+    if target_pair[0].id != helper.context_id:
+        rebind_helper_to_context(helper, target_pair[0].id)
+    if helper.student_id is not None:
+        # Aufrufen aus der Peek-Ansicht (Menü): der alte Schüler wird
+        # NICHT abgeschlossen, sondern als 'pending' zurück in die
+        # Warteschlange gelegt (noch nicht bearbeitet). Der Worker-
+        # Context schließt (revoked), der Schüler bleibt aber in der
+        # Queue verfügbar — wie beim Disconnect-Teardown
+        # (`_deferred_end`). Der „Weiter"-Button (`next`) dagegen
+        # schließt den Schüler als 'done' ab (s. advance_helper).
+        await end_student(
+            state,
+            hub,
+            helper.student_id,
+            queue_status="pending",
+            session_state="revoked",
+            helper_notify={"type": "loading"},  # Queue verbergen — neuer wird geladen
+        )
+    await assign_student_to_helper(state, hub, helper, target)
+
+
+async def _handle_search_classes(state, hub, helper, websocket, raw) -> None:
+    # Helfer-Lupe: Liste aller Klassen des gewählten Schuljahrs
+    # (IServ, read-only). Schuljahrbezogen gecached, damit wieder-
+    # holtes Öffnen der Suche keine IServ-Roundtrips auslöst.
+    if state.iserv is None:
+        await hub.send_websocket(websocket, {"type": "search_classes", "classes": []})
+        return
+    sy = state.selected_schoolyear
+    cached = state.caches.class_names_cache.get(sy)
+    if cached is None:
+        try:
+            cached = await state.iserv.get_class_names(sy)
+        except Exception as e:  # noqa: BLE001
+            log.warning("search_classes fehlgeschlagen: %s", e)
+            await hub.send_websocket(
+                websocket,
+                {"type": "error", "msg": f"Klassen konnten nicht geladen werden: {e}"},
+            )
+            return
+        state.caches.class_names_cache[sy] = cached
+    await hub.send_websocket(websocket, {"type": "search_classes", "classes": cached})
+
+
+async def _handle_search_students(state, hub, helper, websocket, raw) -> None:
+    # Helfer-Lupe: alle Schüler einer Klasse (IServ, read-only),
+    # schuljahrbezogen gecached (Key "schoolyear|form").
+    form = str(raw.get("form") or "").strip()
+    if state.iserv is None:
+        await hub.send_websocket(
+            websocket,
+            {"type": "search_students", "form": form, "students": []},
+        )
+        return
+    sy = state.selected_schoolyear
+    key = f"{sy}|{form}"
+    cached = state.caches.form_students_cache.get(key)
+    if cached is None:
+        try:
+            cached = await state.iserv.get_students_for_form(form, sy)
+        except Exception as e:  # noqa: BLE001
+            log.warning("search_students fehlgeschlagen: %s", e)
+            await hub.send_websocket(
+                websocket,
+                {"type": "error", "msg": f"Schüler konnten nicht geladen werden: {e}"},
+            )
+            return
+        state.caches.form_students_cache[key] = cached
+    await hub.send_websocket(
+        websocket,
+        {"type": "search_students", "form": form, "students": cached},
+    )
+
+
+async def _handle_search_call(state, hub, helper, websocket, raw) -> None:
+    # Helfer-Lupe: gezielt einen beliebigen IServ-Schüler laden
+    # (Schnellsprung — der Schüler muss NICHT in der Warteschlange
+    # stehen). Aktuellen Schüler wie beim Peek-`call` auf 'pending'
+    # zurückgeben, dann einen transienten QueueStudent (bewusst NICHT
+    # in eine Queue eingetragen) via assign_student_to_helper laden.
+    # Read-only: IServ/DB werden nur gelesen (get_student_info),
+    # kein Write.
+    sid = raw.get("student_id")
+    form = str(raw.get("form") or "").strip()
+    lastname = str(raw.get("lastname") or "").strip()
+    firstname = str(raw.get("firstname") or "").strip()
+    if sid is None or not form:
+        await hub.send_websocket(websocket, {"type": "error", "msg": "Schüler/Klasse fehlt"})
+        return
+    try:
+        sid = int(sid)
+    except (TypeError, ValueError):
+        await hub.send_websocket(websocket, {"type": "error", "msg": "Ungültige Schüler-ID"})
+        return
+    if helper.student_id is not None:
+        await end_student(
+            state,
+            hub,
+            helper.student_id,
+            queue_status="pending",
+            session_state="revoked",
+            helper_notify={"type": "loading"},  # Queue verbergen — neuer wird geladen
+        )
+    student = QueueStudent(
+        student_id=sid,
+        lastname=lastname,
+        firstname=firstname,
+        form=form,
+        status="active",
+        assigned_helper=helper.token,
+    )
+    await assign_student_to_helper(state, hub, helper, student)
+
+
+async def _handle_peek_queue(state, hub, helper, websocket, raw) -> None:
+    # Menü-Toggle: Helfer schaltet auf die Warteschlangen-Ansicht,
+    # während sein Schüler im Hintergrund verbunden bleibt (kein
+    # Trennen, kein IServ-/DB-Zugriff). Peek-Flag setzen, damit
+    # nachfolgende `broadcast_queue_size`-Updates diesen Helfer
+    # erreichen, und sofort die aktuelle Queue pushen (für ein
+    # unmittelbares Rendern, ohne auf den nächsten Broadcast zu
+    # warten).
+    helper.peeking = True
+    await hub.send_scanner(
+        helper.token,
+        {
+            "type": "queue_update",
+            "queue_size": state.pending_count(helper.context_id),
+            "queue": state.pending_queue_as_list(helper.context_id),
+            "queue_all": state.queue_as_list(helper.context_id),
+        },
+    )
+    # Frische Kontext-Übersicht (alle offenen Klassen + eigene) für
+    # die Klassen-Reiter — ein Helfer mit aktivem Schüler bekommt
+    # sonst keine Live-contexts_update (broadcast_queue_size erreicht
+    # ihn nur, weil hier gerade peeking=True gesetzt wurde; das eigene
+    # peek_queue sendet sie aber bewusst sofort, ohne auf den nächsten
+    # Broadcast zu warten).
+    await hub.send_scanner(
+        helper.token,
+        {
+            "type": "contexts_update",
+            "contexts": state.real_contexts_summary(),
+            "own_context_id": helper.context_id,
+        },
+    )
+
+
+async def _handle_peek_close(state, hub, helper, websocket, raw) -> None:
+    # Menü-Toggle zurück zur Schüler-Ansicht. Kein Push nötig — der
+    # Client stellt die Bücherliste lokal wieder her.
+    helper.peeking = False
+
+
+async def _handle_clear_book_alert(state, hub, helper, websocket, raw) -> None:
+    # Helfer schließt sein Ausgemustert-Hinweis-Modal selbst (Button)
+    # → Host-Meldung für diesen Schüler ebenfalls aufräumen, damit das
+    # Now-Serving-Kästchen wieder normal angezeigt wird. Read-only,
+    # kein IServ-/DB-Zugriff; nur ein Host-Broadcast.
+    sid = helper.student_id
+    if sid is not None:
+        await hub.broadcast_host(
+            {
+                "type": "book_alert",
+                "student_id": sid,
+                "cleared": True,
+            }
+        )
+
+
+async def _handle_print(state, hub, helper, websocket, raw) -> None:
+    # Leihschein des aktuell zugewiesenen Schülers drucken.
+    # Read-only PDF-Abruf + lokaler Druck (kein IServ-Submit).
+    if helper.student_id is None:
+        await hub.send_websocket(
+            websocket,
+            {"type": "print_result", "ok": False, "msg": "Kein Schüler zugewiesen"},
+        )
+        return
+    # Seite 1 wird immer gedruckt; Seite 2 (Schüler-Leihschein) nur,
+    # wenn der Helfer sie im Druck-Dialog aktiviert hat.
+    second_page = bool(raw.get("second_page"))
+    pages = None if second_page else "1"
+    try:
+        result = await print_loan_slip_for(state, helper.student_id, pages=pages)
+        await hub.send_websocket(websocket, {"type": "print_result", **result})
+    except Exception as e:  # noqa: BLE001 — Fehler dem Client melden
+        log.exception("Leihschein-Druck (Scanner) fehlgeschlagen")
+        await hub.send_websocket(websocket, {"type": "print_result", "ok": False, "msg": str(e)})
+
+
+async def _handle_scan(state, hub, helper, websocket, raw) -> None:
+    barcode = str(raw.get("value", "")).strip()
+    if not barcode:
+        return
+
+    helper.last_scan = barcode
+    log.info("Scan von Helper %s: %s", helper.token, barcode)
+
+    student_id = helper.student_id
+    if student_id is None:
+        await hub.send_websocket(
+            websocket,
+            {
+                "type": "scan_result",
+                "barcode": barcode,
+                "status": "error",
+                "msg": "Kein Schüler zugewiesen",
+            },
+        )
+        return
+
+    # Scan verarbeiten: Buchungs-Vorabprüfung (im Lager? bestellt? Reihe
+    # noch nicht ausgeliehen?) → buchen (Enter) oder — Gate aus — stagen.
+    # Nicht erfüllt → Feld wird NICHT berührt.
+    result = await process_scan(
+        state,
+        student_id,
+        helper.vormerk_isbns,
+        helper.lent_isbns,
+        barcode,
+        source="helper",
+    )
+    # ISBN mitgeben, damit der Helferclient das gescannte Buch in seiner
+    # Liste markieren kann.
+    await hub.send_websocket(websocket, {"type": "scan_result", "barcode": barcode, **result})
+    await hub.broadcast_host(state.state_snapshot())
+
+
+_SCANNER_HANDLERS = {
+    "next": _handle_next,
+    "call": _handle_call,
+    "search_classes": _handle_search_classes,
+    "search_students": _handle_search_students,
+    "search_call": _handle_search_call,
+    "peek_queue": _handle_peek_queue,
+    "peek_close": _handle_peek_close,
+    "clear_book_alert": _handle_clear_book_alert,
+    "print": _handle_print,
+    "scan": _handle_scan,
+}
+
+
 @router.websocket("/ws/scanner/{token}")
 async def ws_scanner(websocket: WebSocket, token: str) -> None:
     state = get_state()
@@ -114,18 +431,7 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
         t.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await t
-    # Synchron übernehmen — VOR jedem await. So erkennt das finally des alten
-    # WS (das asynchron zum Reconnect läuft) an `helper.ws is websocket`, dass
-    # ein Reconnect übernommen hat, und löst KEINEN Teardown aus.
-    old_ws = helper.ws
-    helper.ws = websocket
-    # Reconnect: die alte Verbindung sauber schließen, statt sie verwaist offen
-    # zu lassen.
-    if old_ws is not None and old_ws is not websocket:
-        try:
-            await old_ws.close(code=4009, reason="Neue Verbindung")
-        except Exception:
-            pass
+    await _take_over_ws(helper, websocket)
 
     # Schüler bereits zugewiesen? Info sofort schicken. Die Reihenfolge wird
     # anhand des Jahrgangs *dieses* Schülers ermittelt (nicht einer globalen
@@ -240,288 +546,10 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                 continue
             mtype = raw.get("type")
 
-            if mtype == "next":
-                # Aktuellen Schüler abschließen (kein Browser-Submit) und
-                # nächsten Wartenden auf diesen Helfer setzen. `context_id`
-                # (optional): Client hat vorgeschlagen, auf eine andere
-                # (nicht-leere) Klasse umzuspringen, weil die eigene
-                # Warteschlange leer ist — s. advance_helper.
-                await advance_helper(state, hub, helper, context_id=raw.get("context_id"))
-                continue
-
-            if mtype == "call":
-                # Helfer ruft einen konkreten Schüler aus der Warteschlangen-
-                # Anzeige auf (Button bei wartenden UND bereits fertigen
-                # Schülern — Fertige lassen sich so erneut aufrufen, z. B. um
-                # nachträglich ein vergessenes Buch zu erfassen). Rein lokale
-                # Zuweisung — kein IServ-/DB-Schreibzugriff. Der Schüler muss
-                # 'pending' oder 'done' sein (nicht 'active': bereits bei einem
-                # Helfer, nicht 'skipped'); zwischen Prüfung und Zuweisung
-                # liegt kein Await, also atomar im Eventloop (kein Doppel-
-                # Aufruf zweier Helfer auf denselben Schüler).
-                sid = raw.get("student_id")
-                target_pair = state.find_student_with_ctx(sid) if sid is not None else None
-                target = target_pair[1] if target_pair else None
-                if target is None or target.status not in ("pending", "done"):
-                    await hub.send_websocket(
-                        websocket,
-                        {
-                            "type": "error",
-                            "msg": "Schüler nicht (mehr) in der Warteschlange",
-                        },
-                    )
-                    # Queue sofort nachpushen, damit der Client die aktuelle
-                    # Liste sieht (z. B. zwischenzeitlich von anderem Helfer
-                    # aufgerufen) — statt auf den nächsten Broadcast zu warten.
-                    await hub.broadcast_queue_size(state)
-                    continue
-                # Aufrufen aus einer fremden Klasse (anderer Klassen-Tab im
-                # Helfer-Menü) ist erlaubt: der Helfer wird dabei an die Klasse
-                # des aufgerufenen Schülers gebunden (helper.context_id), sodass
-                # „Nächster" danach aus dieser Klasse zieht (Workflow „ich
-                # bediene jetzt diese Klasse"). `(aktive)`-Helfer (context_id
-                # None) werden beim ersten Aufruf ebenfalls gebunden.
-                if target_pair[0].id != helper.context_id:
-                    rebind_helper_to_context(helper, target_pair[0].id)
-                if helper.student_id is not None:
-                    # Aufrufen aus der Peek-Ansicht (Menü): der alte Schüler wird
-                    # NICHT abgeschlossen, sondern als 'pending' zurück in die
-                    # Warteschlange gelegt (noch nicht bearbeitet). Der Worker-
-                    # Context schließt (revoked), der Schüler bleibt aber in der
-                    # Queue verfügbar — wie beim Disconnect-Teardown
-                    # (`_deferred_end`). Der „Weiter"-Button (`next`) dagegen
-                    # schließt den Schüler als 'done' ab (s. advance_helper).
-                    await end_student(
-                        state,
-                        hub,
-                        helper.student_id,
-                        queue_status="pending",
-                        session_state="revoked",
-                        helper_notify={"type": "loading"},  # Queue verbergen — neuer wird geladen
-                    )
-                await assign_student_to_helper(state, hub, helper, target)
-                continue
-
-            if mtype == "search_classes":
-                # Helfer-Lupe: Liste aller Klassen des gewählten Schuljahrs
-                # (IServ, read-only). Schuljahrbezogen gecached, damit wieder-
-                # holtes Öffnen der Suche keine IServ-Roundtrips auslöst.
-                if state.iserv is None:
-                    await hub.send_websocket(
-                        websocket, {"type": "search_classes", "classes": []}
-                    )
-                    continue
-                sy = state.selected_schoolyear
-                cached = state.caches.class_names_cache.get(sy)
-                if cached is None:
-                    try:
-                        cached = await state.iserv.get_class_names(sy)
-                    except Exception as e:  # noqa: BLE001
-                        log.warning("search_classes fehlgeschlagen: %s", e)
-                        await hub.send_websocket(
-                            websocket,
-                            {"type": "error", "msg": f"Klassen konnten nicht geladen werden: {e}"},
-                        )
-                        continue
-                    state.caches.class_names_cache[sy] = cached
-                await hub.send_websocket(
-                    websocket, {"type": "search_classes", "classes": cached}
-                )
-                continue
-
-            if mtype == "search_students":
-                # Helfer-Lupe: alle Schüler einer Klasse (IServ, read-only),
-                # schuljahrbezogen gecached (Key "schoolyear|form").
-                form = str(raw.get("form") or "").strip()
-                if state.iserv is None:
-                    await hub.send_websocket(
-                        websocket,
-                        {"type": "search_students", "form": form, "students": []},
-                    )
-                    continue
-                sy = state.selected_schoolyear
-                key = f"{sy}|{form}"
-                cached = state.caches.form_students_cache.get(key)
-                if cached is None:
-                    try:
-                        cached = await state.iserv.get_students_for_form(form, sy)
-                    except Exception as e:  # noqa: BLE001
-                        log.warning("search_students fehlgeschlagen: %s", e)
-                        await hub.send_websocket(
-                            websocket,
-                            {"type": "error", "msg": f"Schüler konnten nicht geladen werden: {e}"},
-                        )
-                        continue
-                    state.caches.form_students_cache[key] = cached
-                await hub.send_websocket(
-                    websocket,
-                    {"type": "search_students", "form": form, "students": cached},
-                )
-                continue
-
-            if mtype == "search_call":
-                # Helfer-Lupe: gezielt einen beliebigen IServ-Schüler laden
-                # (Schnellsprung — der Schüler muss NICHT in der Warteschlange
-                # stehen). Aktuellen Schüler wie beim Peek-`call` auf 'pending'
-                # zurückgeben, dann einen transienten QueueStudent (bewusst NICHT
-                # in eine Queue eingetragen) via assign_student_to_helper laden.
-                # Read-only: IServ/DB werden nur gelesen (get_student_info),
-                # kein Write.
-                sid = raw.get("student_id")
-                form = str(raw.get("form") or "").strip()
-                lastname = str(raw.get("lastname") or "").strip()
-                firstname = str(raw.get("firstname") or "").strip()
-                if sid is None or not form:
-                    await hub.send_websocket(
-                        websocket, {"type": "error", "msg": "Schüler/Klasse fehlt"}
-                    )
-                    continue
-                try:
-                    sid = int(sid)
-                except (TypeError, ValueError):
-                    await hub.send_websocket(
-                        websocket, {"type": "error", "msg": "Ungültige Schüler-ID"}
-                    )
-                    continue
-                if helper.student_id is not None:
-                    await end_student(
-                        state,
-                        hub,
-                        helper.student_id,
-                        queue_status="pending",
-                        session_state="revoked",
-                        helper_notify={"type": "loading"},  # Queue verbergen — neuer wird geladen
-                    )
-                student = QueueStudent(
-                    student_id=sid,
-                    lastname=lastname,
-                    firstname=firstname,
-                    form=form,
-                    status="active",
-                    assigned_helper=helper.token,
-                )
-                await assign_student_to_helper(state, hub, helper, student)
-                continue
-
-            if mtype == "peek_queue":
-                # Menü-Toggle: Helfer schaltet auf die Warteschlangen-Ansicht,
-                # während sein Schüler im Hintergrund verbunden bleibt (kein
-                # Trennen, kein IServ-/DB-Zugriff). Peek-Flag setzen, damit
-                # nachfolgende `broadcast_queue_size`-Updates diesen Helfer
-                # erreichen, und sofort die aktuelle Queue pushen (für ein
-                # unmittelbares Rendern, ohne auf den nächsten Broadcast zu
-                # warten).
-                helper.peeking = True
-                await hub.send_scanner(
-                    token,
-                    {
-                        "type": "queue_update",
-                        "queue_size": state.pending_count(helper.context_id),
-                        "queue": state.pending_queue_as_list(helper.context_id),
-                        "queue_all": state.queue_as_list(helper.context_id),
-                    },
-                )
-                # Frische Kontext-Übersicht (alle offenen Klassen + eigene) für
-                # die Klassen-Reiter — ein Helfer mit aktivem Schüler bekommt
-                # sonst keine Live-contexts_update (broadcast_queue_size erreicht
-                # ihn nur, weil hier gerade peeking=True gesetzt wurde; das eigene
-                # peek_queue sendet sie aber bewusst sofort, ohne auf den nächsten
-                # Broadcast zu warten).
-                await hub.send_scanner(
-                    token,
-                    {
-                        "type": "contexts_update",
-                        "contexts": state.real_contexts_summary(),
-                        "own_context_id": helper.context_id,
-                    },
-                )
-                continue
-
-            if mtype == "peek_close":
-                # Menü-Toggle zurück zur Schüler-Ansicht. Kein Push nötig — der
-                # Client stellt die Bücherliste lokal wieder her.
-                helper.peeking = False
-                continue
-
-            if mtype == "clear_book_alert":
-                # Helfer schließt sein Ausgemustert-Hinweis-Modal selbst (Button)
-                # → Host-Meldung für diesen Schüler ebenfalls aufräumen, damit das
-                # Now-Serving-Kästchen wieder normal angezeigt wird. Read-only,
-                # kein IServ-/DB-Zugriff; nur ein Host-Broadcast.
-                sid = helper.student_id
-                if sid is not None:
-                    await hub.broadcast_host(
-                        {
-                            "type": "book_alert",
-                            "student_id": sid,
-                            "cleared": True,
-                        }
-                    )
-                continue
-
-            if mtype == "print":
-                # Leihschein des aktuell zugewiesenen Schülers drucken.
-                # Read-only PDF-Abruf + lokaler Druck (kein IServ-Submit).
-                if helper.student_id is None:
-                    await hub.send_websocket(
-                        websocket,
-                        {"type": "print_result", "ok": False, "msg": "Kein Schüler zugewiesen"},
-                    )
-                    continue
-                # Seite 1 wird immer gedruckt; Seite 2 (Schüler-Leihschein) nur,
-                # wenn der Helfer sie im Druck-Dialog aktiviert hat.
-                second_page = bool(raw.get("second_page"))
-                pages = None if second_page else "1"
-                try:
-                    result = await print_loan_slip_for(state, helper.student_id, pages=pages)
-                    await hub.send_websocket(websocket, {"type": "print_result", **result})
-                except Exception as e:  # noqa: BLE001 — Fehler dem Client melden
-                    log.exception("Leihschein-Druck (Scanner) fehlgeschlagen")
-                    await hub.send_websocket(
-                        websocket, {"type": "print_result", "ok": False, "msg": str(e)}
-                    )
-                continue
-
-            if mtype != "scan":
-                continue
-
-            barcode = str(raw.get("value", "")).strip()
-            if not barcode:
-                continue
-
-            helper.last_scan = barcode
-            log.info("Scan von Helper %s: %s", token, barcode)
-
-            student_id = helper.student_id
-            if student_id is None:
-                await hub.send_websocket(
-                    websocket,
-                    {
-                        "type": "scan_result",
-                        "barcode": barcode,
-                        "status": "error",
-                        "msg": "Kein Schüler zugewiesen",
-                    },
-                )
-                continue
-
-            # Scan verarbeiten: Buchungs-Vorabprüfung (im Lager? bestellt? Reihe
-            # noch nicht ausgeliehen?) → buchen (Enter) oder — Gate aus — stagen.
-            # Nicht erfüllt → Feld wird NICHT berührt.
-            result = await process_scan(
-                state,
-                student_id,
-                helper.vormerk_isbns,
-                helper.lent_isbns,
-                barcode,
-                source="helper",
-            )
-            # ISBN mitgeben, damit der Helferclient das gescannte Buch in seiner
-            # Liste markieren kann.
-            await hub.send_websocket(
-                websocket, {"type": "scan_result", "barcode": barcode, **result}
-            )
-            await hub.broadcast_host(state.state_snapshot())
+            handler = _SCANNER_HANDLERS.get(mtype)
+            if handler is not None:
+                await handler(state, hub, helper, websocket, raw)
+            # Unbekannter/nicht behandelter Typ → ignorieren (wie bisher).
 
     except WebSocketDisconnect:
         pass
@@ -545,10 +573,7 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                     _deferred_end(state, hub, helper, helper.student_id)
                 )
         # else: Reconnect hat übernommen — nichts tun.
-        try:
-            await hub.broadcast_host(state.state_snapshot())
-        except Exception:
-            pass
+        await safe_broadcast(hub, state)
 
 
 # ---------------------------------------------------------------------------
@@ -578,10 +603,7 @@ async def ws_display(websocket: WebSocket) -> None:
         pass
     finally:
         state.displays.pop(display.display_id, None)
-        try:
-            await hub.broadcast_host(state.state_snapshot())
-        except Exception:
-            pass
+        await safe_broadcast(hub, state)
 
 
 # ---------------------------------------------------------------------------
@@ -605,13 +627,7 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
 
     await websocket.accept()
     # Reconnect: vorherige Verbindung derselben Session sauber schließen.
-    old_ws = session.ws
-    if old_ws is not None and old_ws is not websocket:
-        try:
-            await old_ws.close(code=4009, reason="Neue Verbindung")
-        except Exception:
-            pass
-    session.ws = websocket
+    await _take_over_ws(session, websocket)
     session.last_activity = datetime.now()
 
     if session.state == "pending_pairing":
@@ -724,7 +740,4 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
         # WS-Referenz nur lösen, wenn es noch unsere Verbindung ist.
         if session.ws is websocket:
             session.ws = None
-        try:
-            await hub.broadcast_host(state.state_snapshot())
-        except Exception:
-            pass
+        await safe_broadcast(hub, state)
