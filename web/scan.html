@@ -48,9 +48,12 @@
     /* ---- Obere Sektion: Steuerleiste (Kamera-Zeile) + Statuszeile.
        Normal: zwei Grid-Zeilen (top / status). Im Menü-Modus (.app.menu-open)
        kollabiert das Grid zu EINER Zeile mit drei Spalten
-       (Menü 52px | Status 1fr | Lupe 52px) — die Statuszeile rückt auf die
+       (Menü 52px | Status 1fr | Weiter 52px) — die Statuszeile rückt auf die
        Höhe des Menü-Buttons, der restliche Inhalt darunter wandert mit nach
-       oben (per JS-FLIP animiert). ---- */
+       oben (per JS-FLIP animiert). Der Weiter-Button (#next-btn) sitzt sonst
+       in der Statuszeile; im Menü wandert er (per JS, updateNextBtnPlacement)
+       hierher — an die Stelle, an der früher die Lupe stand. Es ist dieselbe
+       Schaltfläche in beiden Modi, nur die Position wechselt. ---- */
     .top-section {
       display: grid;
       grid-template-areas: "top" "status";
@@ -62,23 +65,21 @@
     }
     .top-bar { grid-area: top; display: flex; gap: 7px; align-items: flex-start; }
     .status-bar { grid-area: status; }
-    .search-btn { display: none; }
     .app.menu-open .top-section {
-      grid-template-areas: "menu status search";
+      grid-template-areas: "menu status next";
       grid-template-columns: 52px 1fr 52px;
       grid-template-rows: auto;
     }
     .app.menu-open .top-bar { grid-area: menu; }
     .app.menu-open .status-bar { grid-area: status; }
-    .app.menu-open .search-btn { grid-area: search; display: flex; }
+    .app.menu-open .top-section > #next-btn { grid-area: next; width: 52px; height: 52px; font-size: 1.4rem; }
     /* Im Menü-Modus verschwinden Kamerafeld + alle Steuer-Buttons; nur der
-       Menü-Button (links) und die Lupe (rechts) bleiben, dazwischen #status. */
+       Menü-Button (links) und der Weiter-Button (rechts) bleiben, dazwischen #status. */
     .app.menu-open #gear-btn,
     .app.menu-open #cam-dropdown,
     .app.menu-open #reader,
     .app.menu-open .right-col,
-    .app.menu-open #print-btn,
-    .app.menu-open #next-btn { display: none; }
+    .app.menu-open #print-btn { display: none; }
 
     .gear-wrap { position: relative; display: flex; flex-direction: column; gap: 7px; width: 52px; }
     .gear-wrap button { width: 52px; height: 52px; }
@@ -135,18 +136,20 @@
     /* bar2 (Schaft) bleibt untransformiert */
     .torch-on { background: #4caf50 !important; }
     .sound-on { background: #4caf50 !important; }
-    /* Lupen-Button (Menü-Modus): quadratisch wie die rechten Steuer-Buttons,
-       geometrisches Line-Icon (Kreis + Strich) im Stil der anderen Icons.
-       Im Normalmodus display:none; im Menü-Modus blendet er per opacity ein. */
-    .search-btn {
-      width: 52px; height: 52px; border: none; border-radius: 8px;
-      background: var(--surface-2); color: var(--fg); font-size: 1.4rem;
-      cursor: pointer; align-items: center; justify-content: center;
-      opacity: 0; transition: opacity .35s cubic-bezier(.22,.61,.36,1), background .2s;
+    /* Lupen-Button: sitzt fest in der Warteschlangen-Kopfzeile (neben „Warte-
+       schlange", s. .qh-title), wird aber nur im Menü (Peek/Idle-Menü)
+       gebraucht — dort blendet er per Opacity dynamisch ein/aus, ohne die
+       Zeile selbst zu verschieben (kein JS/Reparenting nötig). */
+    #queue-header #search-btn {
+      width: 40px; height: 40px; border: none; border-radius: 8px;
+      background: var(--surface-2); color: var(--fg); font-size: 1.1rem;
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; opacity: 0; pointer-events: none;
+      transition: opacity .35s cubic-bezier(.22,.61,.36,1), background .2s;
     }
-    .app.menu-open .search-btn { opacity: 1; }
-    .search-btn:hover { background: var(--surface-3); }
-    .search-btn:active { background: var(--surface-4); }
+    .app.menu-open #queue-header #search-btn { opacity: 1; pointer-events: auto; }
+    #queue-header #search-btn:hover { background: var(--surface-3); }
+    #queue-header #search-btn:active { background: var(--surface-4); }
 
     /* ---- Kamera-Dropdown (über Zahnrad) ---- */
     .cam-dropdown {
@@ -191,14 +194,22 @@
        Ansicht) zusammen; nur einer ist sichtbar (toggle per .app.queue-view).
        So bleibt der FLIP-Ankerpunkt (Slot) stabil, während der Inhalt wechselt. */
     #queue-slot { position: relative; }
-    #queue-header { display: none; margin: 12px 2px 2px; }
+    #queue-header { display: none; margin: 7px 2px 2px; }
     .app.queue-view .name-row { display: none; }
     .app.queue-view #queue-header { display: block; }
     /* „Warteschlange"-Überschrift: gleiche Schrift-Eigenschaften wie der
        Schülername (.s-name) im geladenen Zustand — gleiche Größe/Gewicht,
        keine Kapitälchen/Sperrung/Transparenz. */
+    /* Rechtsbündiger Platz für die Lupe (justify-content:space-between,
+       s. #queue-header #search-btn oben). */
     .qh-title {
-      font-size: 1.5rem; font-weight: 700; line-height: 1.2; margin-bottom: 8px;
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      font-size: 1.5rem; font-weight: 700; line-height: 1.2; margin-bottom: 7px;
+    }
+    /* Weiter-Button: reine Positions-Transition (kein Ein-/Ausblenden — er
+       bleibt immer sichtbar, s. updateNextBtnPlacement in scan.js). */
+    #next-btn {
+      transition: background .2s, transform .35s cubic-bezier(.22,.61,.36,1);
     }
     /* Klassen-Reiter: horizontal scrollbar, falls sie zu breit werden. Der
        aktive Reiter ist „nach unten offen" (wie im Host): Basis-Linie unter
@@ -260,6 +271,8 @@
     @media (prefers-reduced-motion: reduce) {
       .book-row { transition: transform .01ms !important; }
       .menu-icon .bar { transition: transform .01ms !important; }
+      #next-btn { transition: background .2s, transform .01ms; }
+      #queue-header #search-btn { transition: background .2s, opacity .01ms; }
     }
 
     /* ---- Druck-Dialog (Modal) ---- */
@@ -345,9 +358,6 @@
       <button id="next-btn" title="Nächster Schüler"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg></button>
     </div>
 
-    <!-- Lupen-Button (nur im Menü-Modus sichtbar): geometrisches Icon
-         (Kreis + Strich) im Stil der anderen Line-Icons. Funktion folgt. -->
-    <button id="search-btn" class="search-btn" type="button" title="Lupe"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>
   </div>
 
     <!-- Lupen-Suche (nur im Peek-Modus per Lupe geöffnet): zwei Dropdowns
@@ -373,7 +383,12 @@
            horizontal scrollbar. Wird per .app.queue-view eingeblendet
            (Name-row dann ausgeblendet); Auswahl zeigt darunter die Queue. -->
       <div id="queue-header">
-        <div class="qh-title">Warteschlange</div>
+        <div class="qh-title">
+          <span>Warteschlange</span>
+          <!-- Lupen-Button (nur im Menü sichtbar, blendet dynamisch ein/aus):
+               geometrisches Icon (Kreis + Strich) im Stil der anderen Line-Icons. -->
+          <button id="search-btn" type="button" title="Lupe"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>
+        </div>
         <div id="queue-tabs" class="queue-tabs"></div>
       </div>
     </div>
