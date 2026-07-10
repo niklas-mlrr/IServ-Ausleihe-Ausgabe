@@ -35,7 +35,7 @@ async def _grade_and_catalog(state: AppState, form: str) -> tuple[int | None, li
     Aufrufer entscheidet über den passenden leeren Fallback (`[]` bzw. `set()`)."""
     if not form or state.iserv is None:
         return None
-    cached = state.form_catalog_cache.get(form)
+    cached = state.caches.form_catalog_cache.get(form)
     if cached is None:
         try:
             grade, catalog = await state.iserv.get_class_book_catalog(
@@ -45,7 +45,7 @@ async def _grade_and_catalog(state: AppState, form: str) -> tuple[int | None, li
             log.exception("Jahrgangs-Katalog für Klasse %r konnte nicht geladen werden", form)
             return None
         cached = (grade, [b["isbn"] for b in catalog])
-        state.form_catalog_cache[form] = cached
+        state.caches.form_catalog_cache[form] = cached
     return cached
 
 
@@ -73,7 +73,7 @@ async def get_book_order_for_form(state: AppState, form: str) -> list[str]:
     grade, catalog_isbns = cached
     if grade is None:
         return []
-    stored = state.book_orders_by_grade.get(grade)
+    stored = state.caches.book_orders_by_grade.get(grade)
     return normalize_book_order(catalog_isbns, stored) if stored else catalog_isbns
 
 
@@ -92,4 +92,4 @@ async def get_hidden_isbns_for_form(state: AppState, form: str) -> set[str]:
     grade, _ = cached
     if grade is None:
         return set()
-    return state.hidden_isbns_by_grade.get(grade, set())
+    return state.caches.hidden_isbns_by_grade.get(grade, set())

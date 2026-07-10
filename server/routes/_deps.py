@@ -226,7 +226,7 @@ def _base_url(request: Request) -> str:
     # Toggle „Tailscale-IP": erzwingt die Tailscale-IP in JEDER QR-URL, auch wenn
     # der Host die Seite bereits über eine echte IP (statt localhost) geöffnet hat
     # — der Host-Header würde sonst gewinnen und der Toggle bliebe wirkungslos.
-    if get_state().force_tailscale_ip:
+    if get_state().settings.force_tailscale_ip:
         ts = _detect_lan_ip(force_tailscale=True)
         if ts:
             port = port or str(cfg.port)

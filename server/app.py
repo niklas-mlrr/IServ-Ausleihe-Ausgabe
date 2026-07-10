@@ -33,9 +33,12 @@ async def lifespan(app: FastAPI):
     from .booklist_store import load as load_booklist_state
 
     try:
-        state.book_orders_by_grade, state.hidden_isbns_by_grade = load_booklist_state()
+        state.caches.book_orders_by_grade, state.caches.hidden_isbns_by_grade = (
+            load_booklist_state()
+        )
         log.info(
-            "Bücher-Reihenfolge/Ausblendung geladen: %d Jahrgänge", len(state.book_orders_by_grade)
+            "Bücher-Reihenfolge/Ausblendung geladen: %d Jahrgänge",
+            len(state.caches.book_orders_by_grade),
         )
     except Exception:
         log.exception("Laden der booklist-Persistenz fehlgeschlagen (non-fatal)")

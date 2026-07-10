@@ -186,16 +186,16 @@ def test_reset_class_order_keeps_booklist_orders():
     # Klassen-/Schülerwechsel setzt die aktive Reihenfolge zurück, aber die
     # jahrgangsweiten (schuljahrweit gültigen) Reihenfolgen bleiben bestehen.
     st = AppState()
-    st.book_orders_by_grade = {9: ["A", "B"]}
+    st.caches.book_orders_by_grade = {9: ["A", "B"]}
     st.reset_class_book_order()
-    assert st.book_orders_by_grade == {9: ["A", "B"]}
+    assert st.caches.book_orders_by_grade == {9: ["A", "B"]}
 
 
 def test_reset_booklist_orders_clears_all_grades():
     st = AppState()
-    st.book_orders_by_grade = {9: ["A"], 10: ["B"]}
+    st.caches.book_orders_by_grade = {9: ["A"], 10: ["B"]}
     st.reset_booklist_orders()
-    assert st.book_orders_by_grade == {}
+    assert st.caches.book_orders_by_grade == {}
 
 
 def test_snapshot_includes_book_order():
@@ -207,10 +207,10 @@ def test_snapshot_includes_book_order():
 
 def test_reset_booklist_orders_clears_hidden_too():
     st = AppState()
-    st.book_orders_by_grade = {9: ["A"]}
-    st.hidden_isbns_by_grade = {9: {"A"}}
+    st.caches.book_orders_by_grade = {9: ["A"]}
+    st.caches.hidden_isbns_by_grade = {9: {"A"}}
     st.reset_booklist_orders()
-    assert st.book_orders_by_grade == {} and st.hidden_isbns_by_grade == {}
+    assert st.caches.book_orders_by_grade == {} and st.caches.hidden_isbns_by_grade == {}
 
 
 # ---------------------------------------------------------------------------
@@ -245,7 +245,7 @@ def test_get_hidden_isbns_for_form_resolves_grade_via_class_catalog():
     st = AppState()
     st.iserv = c
     st.selected_schoolyear = "2025/2026"
-    st.hidden_isbns_by_grade = {9: {"A"}}
+    st.caches.hidden_isbns_by_grade = {9: {"A"}}
     hidden = asyncio.run(get_hidden_isbns_for_form(st, "9a"))
     assert hidden == {"A"}
 
@@ -261,6 +261,6 @@ def test_get_hidden_isbns_for_form_empty_when_grade_unresolvable():
     st = AppState()
     st.iserv = c
     st.selected_schoolyear = "2025/2026"
-    st.hidden_isbns_by_grade = {8: {"A"}}
+    st.caches.hidden_isbns_by_grade = {8: {"A"}}
     hidden = asyncio.run(get_hidden_isbns_for_form(st, "9z"))
     assert hidden == set()

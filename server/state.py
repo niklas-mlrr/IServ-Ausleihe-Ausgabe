@@ -173,6 +173,76 @@ class DisplaySession:
 
 
 @dataclass
+class RuntimeSettings:
+    """Die fünf Host-/Entwickler-Toggles + der Drucker-Override — im
+    Einstellungen-Dialog gesetzt, gemeinsam in `routes/settings.py::_BOOL_SETTINGS`
+    (die vier Bool-Toggles) verwaltet. `AppState` behält dünne Forwarding-
+    Properties (siehe dort), damit `setattr(state, name, value)` (routes/settings.py)
+    und direkte Attributzugriffe weiter funktionieren."""
+
+    # Header-Toggle „Tailscale-IP": erzwingt die Tailscale/CGNAT-IP in
+    # QR-/Join-URLs statt der Auto-Auswahl (LAN-first). False = Auto.
+    force_tailscale_ip: bool = False
+    # Entwickler-Toggle „PDF lokal speichern": erzwingt beim Drucken das
+    # `file`-Backend (Leihschein wird ins Ausgabeverzeichnis geschrieben
+    # statt an den Drucker geschickt) — unabhängig von PRINT_BACKEND. Für
+    # Tests ohne physischen Drucker. False = normaler Druckweg.
+    save_pdf_locally: bool = False
+    # Experimenteller Entwickler-Toggle „Klasse auf Leihschein korrigieren":
+    # ersetzt beim Drucken den (teils falschen) Klassen-Code hinter „Klasse "
+    # auf dem IServ-Leihschein durch die echte Klasse des Schülers aus dem
+    # Serverstate. Rein lokale PDF-Bearbeitung, kein IServ-Write. False = aus.
+    fix_class_on_slip: bool = False
+    # Host-Toggle „Schüler-Leihschein" (2. Seite): Default für den Druck-
+    # Dialog im Helferclient. Wird vom Host gesetzt und an Helfer gesynct.
+    slip_second_page_default: bool = False
+    # Einstellungen-Dialog: am Host gewählter Leihschein-Drucker. None =
+    # PRINTER_NAME aus der .env bzw. Systemstandard. Reiner In-Memory-State.
+    printer_name_override: str | None = None
+
+
+@dataclass
+class IservCaches:
+    """Die fünf jahrgangs-/schuljahrbezogenen IServ-Caches — gemeinsam von
+    `AppState.reset_booklist_orders()` beim Schuljahreswechsel geleert
+    (`clear_all()`). `AppState` behält dünne Forwarding-Properties (siehe dort)."""
+
+    # Jahrgangsweite Bücher-Reihenfolgen (im Einstellungen-Dialog vorab pro
+    # Bücherliste gesetzt). grade -> ISBN-Sequenz. Speist beim Klassenladen
+    # den Kontext-`book_order` (Jahrgang der Klasse). Reiner In-Memory-State,
+    # kein DB-/IServ-Write. Wird erst beim Schuljahreswechsel geleert.
+    book_orders_by_grade: dict[int, list[str]] = field(default_factory=dict)
+    # Ausgeblendete Buchreihen pro Jahrgang (Einstellungen-Dialog, „Ausblenden"-
+    # Button je Buch). Ausgeblendete ISBNs werden beim Scannen nicht mehr als
+    # „vorgemerkt" geführt/angezeigt (weder Scanner- noch Handy-Anzeige) und
+    # sind daher auch nicht buchbar. Reiner In-Memory-State, kein DB-/IServ-
+    # Write — betrifft nur die lokale Anzeige/Buchungsprüfung. Wird wie
+    # `book_orders_by_grade` erst beim Schuljahreswechsel geleert.
+    hidden_isbns_by_grade: dict[int, set[str]] = field(default_factory=dict)
+    # Katalog-Cache für klassenübergreifende Warteschlangen (einzeln
+    # hinzugefügte Schüler/„Test Config", ggf. aus verschiedenen Jahrgängen):
+    # form-Name -> (grade, catalog_isbns). Erspart einen IServ-Roundtrip pro
+    # Schüler-Zuweisung; wird wie `book_orders_by_grade` erst beim
+    # Schuljahreswechsel geleert.
+    form_catalog_cache: dict[str, tuple[int | None, list[str]]] = field(default_factory=dict)
+    # Caches für die Helfer-Lupensuche (read-only IServ-GETs, schuljahr-
+    # bezogen): Klassennamen + Schüler pro Klasse. Sparen IServ-Roundtrips
+    # beim wiederholten Öffnen der Suche. Werden wie die anderen Caches
+    # beim Schuljahreswechsel geleert. Keys: schoolyear bzw. "schoolyear|form".
+    class_names_cache: dict[str, list[str]] = field(default_factory=dict)
+    form_students_cache: dict[str, list[dict]] = field(default_factory=dict)
+
+    def clear_all(self) -> None:
+        """Alle fünf Caches leeren (Schuljahreswechsel: andere Booklists,
+        ISBNs passen nicht mehr)."""
+        self.book_orders_by_grade = {}
+        self.hidden_isbns_by_grade = {}
+        self.form_catalog_cache = {}
+        self.class_names_cache = {}
+        self.form_students_cache = {}
+
+
+@dataclass
 class ClassContext:
     """Eine parallel bedienbare Klasse („Klassen-Tab" am Host).
 
@@ -208,6 +278,16 @@ class AppState:
         self.worker_pool: WorkerPool | None = None
         self.iserv: IsServClient | None = None
         self.student_worker_sessions: dict[int, StudentSession] = {}  # student_id -> Session
+        # Die fünf Host-/Entwickler-Toggles + Drucker-Override (früher einzelne
+        # Felder auf AppState) — siehe RuntimeSettings. Über state.settings.*
+        # ansprechbar; Forwarding-Properties unten halten `setattr(state, name,
+        # value)` (routes/settings.py) und direkte Attributzugriffe kompatibel.
+        self.settings = RuntimeSettings()
+        # Die fünf jahrgangs-/schuljahrbezogenen IServ-Caches (früher einzelne
+        # Felder auf AppState) — siehe IservCaches. Über state.caches.*
+        # ansprechbar; Forwarding-Properties unten halten direkte
+        # Attributzugriffe kompatibel.
+        self.caches = IservCaches()
         # --- Modus B (Live-Ausgabe) ---
         self.modus_b_open: bool = False
         # Neu bei jedem Öffnen der Ausgabe erzeugt; bleibt über alle
@@ -217,49 +297,107 @@ class AppState:
         self.modus_b_join_qr: str | None = None  # PNG-Data-URL für iPad/Host
         self.student_sessions: dict[str, StudentSessionB] = {}  # session_token -> Session
         self.displays: dict[str, DisplaySession] = {}  # display_id -> Display
-        # Header-Toggle „Tailscale-IP": erzwingt die Tailscale/CGNAT-IP in
-        # QR-/Join-URLs statt der Auto-Auswahl (LAN-first). False = Auto.
-        self.force_tailscale_ip: bool = False
-        # Entwickler-Toggle „PDF lokal speichern": erzwingt beim Drucken das
-        # `file`-Backend (Leihschein wird ins Ausgabeverzeichnis geschrieben
-        # statt an den Drucker geschickt) — unabhängig von PRINT_BACKEND. Für
-        # Tests ohne physischen Drucker. False = normaler Druckweg.
-        self.save_pdf_locally: bool = False
-        # Experimenteller Entwickler-Toggle „Klasse auf Leihschein korrigieren":
-        # ersetzt beim Drucken den (teils falschen) Klassen-Code hinter „Klasse "
-        # auf dem IServ-Leihschein durch die echte Klasse des Schülers aus dem
-        # Serverstate. Rein lokale PDF-Bearbeitung, kein IServ-Write. False = aus.
-        self.fix_class_on_slip: bool = False
-        # Host-Toggle „Schüler-Leihschein" (2. Seite): Default für den Druck-
-        # Dialog im Helferclient. Wird vom Host gesetzt und an Helfer gesynct.
-        self.slip_second_page_default: bool = False
-        # Einstellungen-Dialog: am Host gewählter Leihschein-Drucker. None =
-        # PRINTER_NAME aus der .env bzw. Systemstandard. Reiner In-Memory-State.
-        self.printer_name_override: str | None = None
-        # Jahrgangsweite Bücher-Reihenfolgen (im Einstellungen-Dialog vorab pro
-        # Bücherliste gesetzt). grade -> ISBN-Sequenz. Speist beim Klassenladen
-        # den Kontext-`book_order` (Jahrgang der Klasse). Reiner In-Memory-State,
-        # kein DB-/IServ-Write. Wird erst beim Schuljahreswechsel geleert.
-        self.book_orders_by_grade: dict[int, list[str]] = {}
-        # Ausgeblendete Buchreihen pro Jahrgang (Einstellungen-Dialog, „Ausblenden"-
-        # Button je Buch). Ausgeblendete ISBNs werden beim Scannen nicht mehr als
-        # „vorgemerkt" geführt/angezeigt (weder Scanner- noch Handy-Anzeige) und
-        # sind daher auch nicht buchbar. Reiner In-Memory-State, kein DB-/IServ-
-        # Write — betrifft nur die lokale Anzeige/Buchungsprüfung. Wird wie
-        # `book_orders_by_grade` erst beim Schuljahreswechsel geleert.
-        self.hidden_isbns_by_grade: dict[int, set[str]] = {}
-        # Katalog-Cache für klassenübergreifende Warteschlangen (einzeln
-        # hinzugefügte Schüler/„Test Config", ggf. aus verschiedenen Jahrgängen):
-        # form-Name -> (grade, catalog_isbns). Erspart einen IServ-Roundtrip pro
-        # Schüler-Zuweisung; wird wie `book_orders_by_grade` erst beim
-        # Schuljahreswechsel geleert.
-        self.form_catalog_cache: dict[str, tuple[int | None, list[str]]] = {}
-        # Caches für die Helfer-Lupensuche (read-only IServ-GETs, schuljahr-
-        # bezogen): Klassennamen + Schüler pro Klasse. Sparen IServ-Roundtrips
-        # beim wiederholten Öffnen der Suche. Werden wie die anderen Caches
-        # beim Schuljahreswechsel geleert. Keys: schoolyear bzw. "schoolyear|form".
-        self.class_names_cache: dict[str, list[str]] = {}
-        self.form_students_cache: dict[str, list[dict]] = {}
+
+    # -----------------------------------------------------------------
+    # Forwarding-Properties: RuntimeSettings
+    # -----------------------------------------------------------------
+    # `state.settings.<name>` ist die eigentliche Heimat; diese dünnen
+    # Properties halten zwei bestehende Zugriffspfade kompatibel, ohne die
+    # Dataclass zu duplizieren:
+    #   1. `routes/settings.py::set_bool_setting` ruft `setattr(state, attr,
+    #      value)` gegen die `_BOOL_SETTINGS`-Whitelist auf — das braucht ein
+    #      echtes Attribut/Property auf AppState, kein verschachteltes.
+    #   2. Bestehende direkte Zugriffe (`state.printer_name_override = ...`)
+    #      bleiben funktionsfähig.
+
+    @property
+    def force_tailscale_ip(self) -> bool:
+        return self.settings.force_tailscale_ip
+
+    @force_tailscale_ip.setter
+    def force_tailscale_ip(self, value: bool) -> None:
+        self.settings.force_tailscale_ip = value
+
+    @property
+    def save_pdf_locally(self) -> bool:
+        return self.settings.save_pdf_locally
+
+    @save_pdf_locally.setter
+    def save_pdf_locally(self, value: bool) -> None:
+        self.settings.save_pdf_locally = value
+
+    @property
+    def fix_class_on_slip(self) -> bool:
+        return self.settings.fix_class_on_slip
+
+    @fix_class_on_slip.setter
+    def fix_class_on_slip(self, value: bool) -> None:
+        self.settings.fix_class_on_slip = value
+
+    @property
+    def slip_second_page_default(self) -> bool:
+        return self.settings.slip_second_page_default
+
+    @slip_second_page_default.setter
+    def slip_second_page_default(self, value: bool) -> None:
+        self.settings.slip_second_page_default = value
+
+    @property
+    def printer_name_override(self) -> str | None:
+        return self.settings.printer_name_override
+
+    @printer_name_override.setter
+    def printer_name_override(self, value: str | None) -> None:
+        self.settings.printer_name_override = value
+
+    # -----------------------------------------------------------------
+    # Forwarding-Properties: IservCaches
+    # -----------------------------------------------------------------
+    # Gibt jeweils das echte Dict/Set aus `state.caches` zurück (kein Kopieren)
+    # — `st.book_orders_by_grade[9] = [...]` mutiert also den echten Cache.
+    # Der Setter erlaubt zusätzlich die komplette Neuzuweisung
+    # (`st.book_orders_by_grade = {...}`), wie sie u. a. `server/app.py` beim
+    # Laden der Persistenz und einzelne Tests nutzen.
+
+    @property
+    def book_orders_by_grade(self) -> dict[int, list[str]]:
+        return self.caches.book_orders_by_grade
+
+    @book_orders_by_grade.setter
+    def book_orders_by_grade(self, value: dict[int, list[str]]) -> None:
+        self.caches.book_orders_by_grade = value
+
+    @property
+    def hidden_isbns_by_grade(self) -> dict[int, set[str]]:
+        return self.caches.hidden_isbns_by_grade
+
+    @hidden_isbns_by_grade.setter
+    def hidden_isbns_by_grade(self, value: dict[int, set[str]]) -> None:
+        self.caches.hidden_isbns_by_grade = value
+
+    @property
+    def form_catalog_cache(self) -> dict[str, tuple[int | None, list[str]]]:
+        return self.caches.form_catalog_cache
+
+    @form_catalog_cache.setter
+    def form_catalog_cache(self, value: dict[str, tuple[int | None, list[str]]]) -> None:
+        self.caches.form_catalog_cache = value
+
+    @property
+    def class_names_cache(self) -> dict[str, list[str]]:
+        return self.caches.class_names_cache
+
+    @class_names_cache.setter
+    def class_names_cache(self, value: dict[str, list[str]]) -> None:
+        self.caches.class_names_cache = value
+
+    @property
+    def form_students_cache(self) -> dict[str, list[dict]]:
+        return self.caches.form_students_cache
+
+    @form_students_cache.setter
+    def form_students_cache(self, value: dict[str, list[dict]]) -> None:
+        self.caches.form_students_cache = value
 
     # -----------------------------------------------------------------
     # Kontext-Verwaltung
@@ -327,12 +465,9 @@ class AppState:
 
     def reset_booklist_orders(self) -> None:
         """Alle jahrgangsweiten Bücher-Reihenfolgen leeren (Schuljahreswechsel:
-        andere Booklists, ISBNs passen nicht mehr)."""
-        self.book_orders_by_grade = {}
-        self.hidden_isbns_by_grade = {}
-        self.form_catalog_cache = {}
-        self.class_names_cache = {}
-        self.form_students_cache = {}
+        andere Booklists, ISBNs passen nicht mehr). Delegiert an
+        `IservCaches.clear_all()`."""
+        self.caches.clear_all()
 
     # -----------------------------------------------------------------
     # Kontextbewusste Lookups
@@ -441,11 +576,11 @@ class AppState:
             "modus_b": self.modus_b_snapshot(),
             "allow_booking": get_config().allow_booking,
             "worker_pool": worker_stats,
-            "force_tailscale_ip": self.force_tailscale_ip,
-            "save_pdf_locally": self.save_pdf_locally,
-            "fix_class_on_slip": self.fix_class_on_slip,
-            "slip_second_page_default": self.slip_second_page_default,
-            "printer_name": self.printer_name_override,
+            "force_tailscale_ip": self.settings.force_tailscale_ip,
+            "save_pdf_locally": self.settings.save_pdf_locally,
+            "fix_class_on_slip": self.settings.fix_class_on_slip,
+            "slip_second_page_default": self.settings.slip_second_page_default,
+            "printer_name": self.settings.printer_name_override,
             "book_order": list(ctx.book_order) if ctx else [],
         }
 

@@ -32,7 +32,7 @@ def _persist_booklist_settings(state) -> None:
     Schreibfehler werden geloggt, der In-Memory-State bleibt Leading und der
     Endpoint crasht nicht."""
     try:
-        save_booklist_state(state.book_orders_by_grade, state.hidden_isbns_by_grade)
+        save_booklist_state(state.caches.book_orders_by_grade, state.caches.hidden_isbns_by_grade)
     except Exception:
         log.exception("Speichern der booklist-Einstellungen fehlgeschlagen (non-fatal)")
 
@@ -55,8 +55,8 @@ async def _ensure_class_catalog(state, context_id: str | None = None) -> None:
     ctx.class_catalog_grade = grade
     catalog_isbns = [b["isbn"] for b in catalog]
     if grade is not None:
-        state.form_catalog_cache[ctx.form] = (grade, catalog_isbns)
-    stored = state.book_orders_by_grade.get(grade) if grade is not None else None
+        state.caches.form_catalog_cache[ctx.form] = (grade, catalog_isbns)
+    stored = state.caches.book_orders_by_grade.get(grade) if grade is not None else None
     if stored:
         ctx.book_order = normalize_book_order(catalog_isbns, stored)
     elif not ctx.book_order:
@@ -87,9 +87,9 @@ async def get_booklist_order(grade: int) -> dict:
         log.exception("Jahrgangs-Bücherliste konnte nicht geladen werden")
         raise HTTPException(502, f"IServ-Fehler: {e}") from e
     catalog_isbns = [b["isbn"] for b in catalog]
-    stored = state.book_orders_by_grade.get(grade)
+    stored = state.caches.book_orders_by_grade.get(grade)
     order = normalize_book_order(catalog_isbns, stored) if stored else catalog_isbns
-    hidden = sorted(state.hidden_isbns_by_grade.get(grade, set()) & set(catalog_isbns))
+    hidden = sorted(state.caches.hidden_isbns_by_grade.get(grade, set()) & set(catalog_isbns))
     return {"grade": grade, "catalog": catalog, "order": order, "hidden": hidden}
 
 
@@ -118,7 +118,7 @@ async def set_booklist_order(body: BooklistOrderRequest) -> dict:
         raise HTTPException(502, f"IServ-Fehler: {e}") from e
     catalog_isbns = [b["isbn"] for b in catalog]
     order = normalize_book_order(catalog_isbns, requested)
-    state.book_orders_by_grade[grade] = order
+    state.caches.book_orders_by_grade[grade] = order
     _persist_booklist_settings(state)
     hub = get_hub()
     # Jeder Helfer bekommt (unabhängig von der aktiven Klasse) seine eigene,
@@ -159,7 +159,7 @@ async def set_booklist_hidden(body: BooklistHiddenRequest) -> dict:
         raise HTTPException(502, f"IServ-Fehler: {e}") from e
     catalog_isbns = {b["isbn"] for b in catalog}
     hidden = {isbn for isbn in requested if isinstance(isbn, str) and isbn in catalog_isbns}
-    state.hidden_isbns_by_grade[grade] = hidden
+    state.caches.hidden_isbns_by_grade[grade] = hidden
     _persist_booklist_settings(state)
     hub = get_hub()
     await hub.broadcast_settings()

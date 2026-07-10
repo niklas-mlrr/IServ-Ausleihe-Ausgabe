@@ -133,7 +133,7 @@ class Hub:
                 book_order = s.book_order_of(helper.context_id)
             msg = {
                 "type": "settings",
-                "slip_second_page": s.slip_second_page_default,
+                "slip_second_page": s.settings.slip_second_page_default,
                 "book_order": book_order,
             }
             if not await self._safe_send(helper.ws, msg):

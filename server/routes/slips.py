@@ -56,7 +56,7 @@ async def get_printers() -> dict:
     cfg = get_config()
     state = get_state()
     info = await list_printers(cfg.print_backend)
-    info["current"] = state.printer_name_override or cfg.printer_name
+    info["current"] = state.settings.printer_name_override or cfg.printer_name
     info["env_default"] = cfg.printer_name
     return info
 
@@ -70,9 +70,9 @@ async def set_printer(body: PrinterRequest) -> dict:
     """
     state = get_state()
     name = body.printer.strip()
-    state.printer_name_override = name or None
+    state.settings.printer_name_override = name or None
     await get_hub().broadcast_host(state.state_snapshot())
-    return {"ok": True, "printer": state.printer_name_override}
+    return {"ok": True, "printer": state.settings.printer_name_override}
 
 
 # ---------------------------------------------------------------------------

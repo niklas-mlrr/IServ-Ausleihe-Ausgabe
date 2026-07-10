@@ -34,7 +34,7 @@ async def set_force_tailscale_ip(body: BoolToggleRequest, request: Request) -> d
     die Ausgabe gerade offen ist.
     """
     state = get_state()
-    state.force_tailscale_ip = body.enabled
+    state.settings.force_tailscale_ip = body.enabled
 
     if state.modus_b_open and state.modus_b_join_secret:
         state.modus_b_join_url = f"{_base_url(request)}/student?j={state.modus_b_join_secret}"
@@ -42,7 +42,7 @@ async def set_force_tailscale_ip(body: BoolToggleRequest, request: Request) -> d
         await broadcast_displays(state)
 
     await get_hub().broadcast_host(state.state_snapshot())
-    return {"ok": True, "force_tailscale_ip": state.force_tailscale_ip}
+    return {"ok": True, "force_tailscale_ip": state.settings.force_tailscale_ip}
 
 
 # Whitelist für POST /api/settings/{key} — bündelt die drei strukturell

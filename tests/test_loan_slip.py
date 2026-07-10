@@ -128,11 +128,14 @@ def test_print_loan_slip_applies_class_override(tmp_path, monkeypatch):
         student_id = 2159
         form = "11b"
 
-    class FakeState:
-        iserv = FakeIServ()
+    class FakeSettings:
         printer_name_override = None
         save_pdf_locally = False
         fix_class_on_slip = True
+
+    class FakeState:
+        iserv = FakeIServ()
+        settings = FakeSettings()
         queue = [FakeQS()]
         active_form = "99z"
 

@@ -415,7 +415,7 @@ def test_settings_save_pdf_locally(client, ctx):
     )
     assert r.status_code == 200
     assert r.json() == {"ok": True, "save_pdf_locally": True}
-    assert state.save_pdf_locally is True
+    assert state.settings.save_pdf_locally is True
 
 
 def test_settings_fix_class_on_slip(client, ctx):
@@ -425,7 +425,7 @@ def test_settings_fix_class_on_slip(client, ctx):
     )
     assert r.status_code == 200
     assert r.json() == {"ok": True, "fix_class_on_slip": True}
-    assert state.fix_class_on_slip is True
+    assert state.settings.fix_class_on_slip is True
 
 
 def test_settings_slip_default_reads_second_page_field(client, ctx):
@@ -437,7 +437,7 @@ def test_settings_slip_default_reads_second_page_field(client, ctx):
     )
     assert r.status_code == 200
     assert r.json() == {"ok": True, "slip_second_page_default": True}
-    assert state.slip_second_page_default is True
+    assert state.settings.slip_second_page_default is True
 
 
 def test_settings_requires_auth(client, ctx):

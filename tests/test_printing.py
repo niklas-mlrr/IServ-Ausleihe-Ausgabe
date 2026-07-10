@@ -49,10 +49,13 @@ def test_print_loan_slip_for_reads_and_prints(tmp_path, monkeypatch):
             calls["fetch"] = (student_id, variant)
             return b"%PDF-1.4\nslip\n"
 
-    class FakeState:
-        iserv = FakeIServ()
+    class FakeSettings:
         printer_name_override = None
         save_pdf_locally = False
+
+    class FakeState:
+        iserv = FakeIServ()
+        settings = FakeSettings()
 
     cfg = Config(
         iserv_domain="example.org",
@@ -107,11 +110,14 @@ def test_print_loan_slip_save_pdf_locally_pushes_download(tmp_path, monkeypatch)
 
     ws = _FakeHostWS()
 
-    class FakeState:
-        iserv = FakeIServ()
+    class FakeSettings:
         printer_name_override = None
         save_pdf_locally = True
         fix_class_on_slip = False
+
+    class FakeState:
+        iserv = FakeIServ()
+        settings = FakeSettings()
         host_ws_connections = [ws]
 
     monkeypatch.setattr(sessions, "get_config", lambda: _cfg(tmp_path, print_backend="lp"))
@@ -135,11 +141,14 @@ def test_print_loan_slip_save_pdf_locally_falls_back_to_file(tmp_path, monkeypat
         async def get_loan_slip_pdf(self, student_id, variant="student"):
             return b"%PDF-1.4\nslip\n"
 
-    class FakeState:
-        iserv = FakeIServ()
+    class FakeSettings:
         printer_name_override = None
         save_pdf_locally = True
         fix_class_on_slip = False
+
+    class FakeState:
+        iserv = FakeIServ()
+        settings = FakeSettings()
         host_ws_connections = []  # kein Host-Browser verbunden
 
     monkeypatch.setattr(sessions, "get_config", lambda: _cfg(tmp_path, print_backend="lp"))

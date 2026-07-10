@@ -131,7 +131,7 @@ async def select_schoolyear(body: SelectSchoolyearRequest) -> dict:
     # über alle Schuljahre); `normalize_book_order` + `hidden & catalog` fangen
     # ISBN-Drift zum anderen Schuljahr ab. Nur der Katalog-Cache muss weg, da
     # die ISBNs jahresspezifisch sind.
-    state.form_catalog_cache.clear()
+    state.caches.form_catalog_cache.clear()
     await hub.broadcast_host(state.state_snapshot())
     return {"ok": True, "selected": schoolyear}
 

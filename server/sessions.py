@@ -419,7 +419,7 @@ async def print_loan_slip_for(
     # Experimenteller Toggle „Klasse auf Leihschein korrigieren": den (teils
     # falschen) Klassen-Code auf dem IServ-PDF lokal durch die echte Klasse des
     # Schülers ersetzen. Rein lokale PDF-Bearbeitung, kein IServ-Write.
-    if getattr(state, "fix_class_on_slip", False):
+    if getattr(state.settings, "fix_class_on_slip", False):
         form = _student_form(state, student_id)
         if form:
             from .loan_slip import override_class_on_slip
@@ -435,7 +435,7 @@ async def print_loan_slip_for(
     # Entwickler-Toggle „PDF lokal speichern": nicht drucken, sondern das PDF in
     # den Browser des Host-Rechners herunterladen (Download-Prompt) — die
     # Anzeige/Weiterverarbeitung passiert dort lokal, kein IServ-Write.
-    if state.save_pdf_locally:
+    if state.settings.save_pdf_locally:
         delivered = await _download_slip_to_host(state, student_id, pdf, pages=pages)
         if delivered:
             log.info(
@@ -469,7 +469,7 @@ async def print_loan_slip_for(
     result = await print_pdf(
         pdf,
         backend=cfg.print_backend,
-        printer_name=state.printer_name_override or cfg.printer_name,
+        printer_name=state.settings.printer_name_override or cfg.printer_name,
         sumatra_path=cfg.sumatra_path,
         output_dir=cfg.print_output_dir,
         label=f"leihschein_{student_id}",

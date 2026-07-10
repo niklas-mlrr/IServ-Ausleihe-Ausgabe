@@ -207,7 +207,7 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
         websocket,
         {
             "type": "settings",
-            "slip_second_page": state.slip_second_page_default,
+            "slip_second_page": state.settings.slip_second_page_default,
             "book_order": book_order,
         },
     )
@@ -308,7 +308,7 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                     )
                     continue
                 sy = state.selected_schoolyear
-                cached = state.class_names_cache.get(sy)
+                cached = state.caches.class_names_cache.get(sy)
                 if cached is None:
                     try:
                         cached = await state.iserv.get_class_names(sy)
@@ -319,7 +319,7 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                             {"type": "error", "msg": f"Klassen konnten nicht geladen werden: {e}"},
                         )
                         continue
-                    state.class_names_cache[sy] = cached
+                    state.caches.class_names_cache[sy] = cached
                 await hub.send_websocket(
                     websocket, {"type": "search_classes", "classes": cached}
                 )
@@ -337,7 +337,7 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                     continue
                 sy = state.selected_schoolyear
                 key = f"{sy}|{form}"
-                cached = state.form_students_cache.get(key)
+                cached = state.caches.form_students_cache.get(key)
                 if cached is None:
                     try:
                         cached = await state.iserv.get_students_for_form(form, sy)
@@ -348,7 +348,7 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                             {"type": "error", "msg": f"Schüler konnten nicht geladen werden: {e}"},
                         )
                         continue
-                    state.form_students_cache[key] = cached
+                    state.caches.form_students_cache[key] = cached
                 await hub.send_websocket(
                     websocket,
                     {"type": "search_students", "form": form, "students": cached},
