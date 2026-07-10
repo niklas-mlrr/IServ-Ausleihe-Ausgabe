@@ -38,7 +38,9 @@ async def _grade_and_catalog(state: AppState, form: str) -> tuple[int | None, li
     cached = state.form_catalog_cache.get(form)
     if cached is None:
         try:
-            grade, catalog = await state.iserv.get_class_book_catalog(form, state.selected_schoolyear)
+            grade, catalog = await state.iserv.get_class_book_catalog(
+                form, state.selected_schoolyear
+            )
         except Exception:
             log.exception("Jahrgangs-Katalog für Klasse %r konnte nicht geladen werden", form)
             return None

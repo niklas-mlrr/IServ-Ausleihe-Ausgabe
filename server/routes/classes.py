@@ -48,7 +48,9 @@ async def _apply_auto_done(state: AppState, ctx: ClassContext, auto_done: list[s
         try:
             info = await state.iserv.get_student_info(student.student_id, state.selected_schoolyear)
         except Exception:
-            log.exception("Anmelde-/Zahlstatus für Schüler %s konnte nicht geladen werden", student.student_id)
+            log.exception(
+                "Anmelde-/Zahlstatus für Schüler %s konnte nicht geladen werden", student.student_id
+            )
             return
         if not info.get("enrolled"):
             if "not_enrolled" in filters:
@@ -67,6 +69,7 @@ async def _apply_auto_done(state: AppState, ctx: ClassContext, auto_done: list[s
 # ---------------------------------------------------------------------------
 # Schuljahr
 # ---------------------------------------------------------------------------
+
 
 @host_router.get("/api/schoolyears")
 async def get_schoolyears() -> dict:
@@ -97,13 +100,18 @@ async def select_schoolyear(body: SelectSchoolyearRequest) -> dict:
     # einem nicht-fokussierten Klassen-Tab würde sonst übersehen und der
     # Schuljahreswechsel risse ihn ohne Warnung ab.
     active_q = state.active_students()
-    live_b = [s for s in state.student_sessions.values() if s.state in ("pending_pairing", "paired")]
+    live_b = [
+        s for s in state.student_sessions.values() if s.state in ("pending_pairing", "paired")
+    ]
     if (active_q or live_b) and not body.force:
-        raise HTTPException(409, detail={
-            "reason": "active_sessions",
-            "msg": f"{len(active_q)} aktive Schüler / {len(live_b)} Live-Session(s) — "
-                   "Schuljahreswechsel bricht sie ab.",
-        })
+        raise HTTPException(
+            409,
+            detail={
+                "reason": "active_sessions",
+                "msg": f"{len(active_q)} aktive Schüler / {len(live_b)} Live-Session(s) — "
+                "Schuljahreswechsel bricht sie ab.",
+            },
+        )
 
     # Laufende Sessions sauber beenden (keine verwaisten Sessions).
     for sess in list(state.student_sessions.values()):
@@ -132,6 +140,7 @@ async def select_schoolyear(body: SelectSchoolyearRequest) -> dict:
 # Klassen
 # ---------------------------------------------------------------------------
 
+
 @host_router.get("/api/classes")
 async def get_classes() -> dict:
     state = get_state()
@@ -151,6 +160,7 @@ async def get_classes() -> dict:
 # Klassen-Kontexte (Multi-Tab) — öffnen / schließen / aktivieren
 # ---------------------------------------------------------------------------
 
+
 @host_router.post("/api/open-class")
 async def open_class(body: OpenClassRequest) -> dict:
     """Neuen Klassen-Kontext öffnen (Klassen-Tab am Host). Lädt die Schüler der
@@ -163,9 +173,7 @@ async def open_class(body: OpenClassRequest) -> dict:
     state = get_state()
     hub = get_hub()
 
-    existing = next(
-        (c for c in state.contexts.values() if c.form == form), None
-    )
+    existing = next((c for c in state.contexts.values() if c.form == form), None)
     if existing is not None:
         state.set_active_context(existing.id)
         await hub.broadcast_host(state.state_snapshot())
@@ -209,8 +217,12 @@ async def close_class(body: CloseClassRequest) -> dict:
     # wahr (student_id eindeutig); broadcast=False → am Ende einmal bündeln.
     for s in list(ctx.queue):
         await end_student(
-            state, hub, s.student_id,
-            queue_status="skipped", session_state="revoked", broadcast=False,
+            state,
+            hub,
+            s.student_id,
+            queue_status="skipped",
+            session_state="revoked",
+            broadcast=False,
         )
     # Helfer-Bindungen an diesen Kontext lösen (ihre Schüler oben bereits
     # abgeschlossen; context_id weg → „Nächster" zieht künftig aus dem aktiven
@@ -305,7 +317,9 @@ async def add_student_to_queue(body: AddStudentRequest) -> dict:
 # Override-Datei `tests/test_students.local.json` (gitignored) kann die Liste
 # ersetzen — fehlt sie, gilt dieser Default. Buchungen gegen Produktion werden
 # ohnehin nur mit Niklas + expliziter Freigabe gefahren (CLAUDE.md).
-_TEST_STUDENTS_FILE = Path(__file__).resolve().parent.parent.parent / "tests" / "test_students.local.json"
+_TEST_STUDENTS_FILE = (
+    Path(__file__).resolve().parent.parent.parent / "tests" / "test_students.local.json"
+)
 _TEST_STUDENTS_DEFAULT = [
     {"student_id": 2159, "firstname": "Niklas", "lastname": "Müller", "form": "Klasse 12Slw"},
     {"student_id": 2164, "firstname": "Lukas", "lastname": "Podleschny", "form": "Klasse 12Mk"},
@@ -322,7 +336,9 @@ def _load_test_students() -> list[dict]:
         log.warning("Testschüler-Datei nicht gefunden (%s) — nutze Default.", _TEST_STUDENTS_FILE)
         return list(_TEST_STUDENTS_DEFAULT)
     except (OSError, ValueError) as exc:
-        log.warning("Testschüler-Datei nicht lesbar (%s: %s) — nutze Default.", _TEST_STUDENTS_FILE, exc)
+        log.warning(
+            "Testschüler-Datei nicht lesbar (%s: %s) — nutze Default.", _TEST_STUDENTS_FILE, exc
+        )
         return list(_TEST_STUDENTS_DEFAULT)
     if not isinstance(data, list) or not all(isinstance(item, dict) for item in data):
         log.warning("Testschüler-Datei hat falsches Format — nutze Default.")

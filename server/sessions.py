@@ -37,6 +37,7 @@ _REG_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 # Token-/Code-Erzeugung
 # ---------------------------------------------------------------------------
 
+
 def gen_session_token() -> str:
     """~256 bit Zufall — der eigentliche Zugangs-Credential."""
     return secrets.token_urlsafe(32)
@@ -72,6 +73,7 @@ def make_qr_data_url(url: str) -> str:
 # ---------------------------------------------------------------------------
 # Gemeinsame Scan-Logik (genutzt von /ws/scanner UND /ws/student)
 # ---------------------------------------------------------------------------
+
 
 async def handle_scan(state: AppState, student_id: int, barcode: str) -> dict:
     """Barcode an die Playwright-Worker-Session des Schülers geben.
@@ -306,21 +308,23 @@ async def process_scan(
         # Ausgabe"-Kästchen der betreffenden Person.
         if decision["status"] in ("book_deleted", "not_in_stock"):
             student = state.find_student(student_id)
-            await get_hub().broadcast_host({
-                "type": "book_alert",
-                "kind": decision["status"],
-                "source": source,
-                "student_id": student_id,
-                "barcode": barcode,
-                "isbn": decision.get("isbn"),
-                "title": decision.get("title"),
-                "msg": decision.get("msg"),
-                "student": f"{student.lastname}, {student.firstname}" if student else None,
-                # „currently lent to someone else": Name des aktuellen Ausleihers
-                # (nur bei not_in_stock belegt; read-only, PLAN §3.7 — nicht loggen).
-                "loaned_to": decision.get("loaned_to"),
-                "loaned_to_id": decision.get("loaned_to_id"),
-            })
+            await get_hub().broadcast_host(
+                {
+                    "type": "book_alert",
+                    "kind": decision["status"],
+                    "source": source,
+                    "student_id": student_id,
+                    "barcode": barcode,
+                    "isbn": decision.get("isbn"),
+                    "title": decision.get("title"),
+                    "msg": decision.get("msg"),
+                    "student": f"{student.lastname}, {student.firstname}" if student else None,
+                    # „currently lent to someone else": Name des aktuellen Ausleihers
+                    # (nur bei not_in_stock belegt; read-only, PLAN §3.7 — nicht loggen).
+                    "loaned_to": decision.get("loaned_to"),
+                    "loaned_to_id": decision.get("loaned_to_id"),
+                }
+            )
         return {
             "status": decision["status"],
             "msg": decision["msg"],
@@ -429,7 +433,8 @@ async def print_loan_slip_for(
         else:
             log.warning(
                 "Klasse-Korrektur aktiv, aber keine Klasse für student_id=%s "
-                "ermittelbar — Leihschein wird unverändert gedruckt", student_id,
+                "ermittelbar — Leihschein wird unverändert gedruckt",
+                student_id,
             )
 
     # Entwickler-Toggle „PDF lokal speichern": nicht drucken, sondern das PDF in
@@ -440,21 +445,28 @@ async def print_loan_slip_for(
         if delivered:
             log.info(
                 "Leihschein an %d Host-Browser gesendet: student_id=%s pages=%s",
-                delivered, student_id, pages or "alle",
+                delivered,
+                student_id,
+                pages or "alle",
             )
             return {
-                "ok": True, "backend": "download",
+                "ok": True,
+                "backend": "download",
                 "detail": f"an {delivered} Host-Browser gesendet",
             }
         # Kein Host-Browser verbunden → Download unmöglich. Als Sicherheitsnetz
         # ins Ausgabeverzeichnis schreiben, damit der Leihschein nicht verloren geht.
         log.warning(
             "PDF-lokal aktiv, aber kein Host-Browser verbunden — student_id=%s "
-            "wird ins Ausgabeverzeichnis gespeichert", student_id,
+            "wird ins Ausgabeverzeichnis gespeichert",
+            student_id,
         )
         result = await print_pdf(
-            pdf, backend="file", output_dir=cfg.print_output_dir,
-            label=f"leihschein_{student_id}", pages=pages,
+            pdf,
+            backend="file",
+            output_dir=cfg.print_output_dir,
+            label=f"leihschein_{student_id}",
+            pages=pages,
         )
         result["detail"] = "kein Host-Browser verbunden — " + result.get("detail", "")
         return result
@@ -470,7 +482,9 @@ async def print_loan_slip_for(
     )
     log.info(
         "Leihschein gedruckt: student_id=%s backend=%s pages=%s",
-        student_id, result.get("backend"), pages or "alle",
+        student_id,
+        result.get("backend"),
+        pages or "alle",
     )
     return result
 
@@ -508,7 +522,9 @@ def release_worker(state: AppState, worker) -> None:
     Pool draußen (bei WORKER_CONTEXTS=2 reicht das zweimal zum stillen Drain).
     """
     pool = state.worker_pool
-    coro = pool.release(worker) if (pool is not None and hasattr(pool, "release")) else worker.close()
+    coro = (
+        pool.release(worker) if (pool is not None and hasattr(pool, "release")) else worker.close()
+    )
     t = asyncio.create_task(coro)
     _release_tasks.add(t)
     t.add_done_callback(_release_tasks.discard)
@@ -534,6 +550,7 @@ def set_worker_session(state: AppState, student_id: int, worker_session) -> None
 # ---------------------------------------------------------------------------
 # Modus-B-Session-Lebenszyklus
 # ---------------------------------------------------------------------------
+
 
 def create_student_session(state: AppState) -> StudentSessionB:
     session = StudentSessionB(
@@ -635,12 +652,16 @@ async def _detach_helper(state: AppState, hub, helper, helper_notify: dict | Non
     # Schüler geladen wird. Die Queue des Helfer-Kontexts (Klasse, an die er
     # gebunden ist) — sonst würde ein Helfer einer anderen Klasse die falsche
     # Warteschlange sehen.
-    await hub.send_scanner(helper.token, helper_notify or {
-        "type": "waiting",
-        "msg": "Warte auf Schüler-Zuweisung",
-        "queue_size": state.pending_count(helper.context_id),
-        "queue": state.pending_queue_as_list(helper.context_id),
-    })
+    await hub.send_scanner(
+        helper.token,
+        helper_notify
+        or {
+            "type": "waiting",
+            "msg": "Warte auf Schüler-Zuweisung",
+            "queue_size": state.pending_count(helper.context_id),
+            "queue": state.pending_queue_as_list(helper.context_id),
+        },
+    )
 
 
 async def end_student(
@@ -749,7 +770,8 @@ async def load_and_push_helper_student(state: AppState, hub, student, helper) ->
             log.info(
                 "Stale load_and_push_helper_student für %d — Helfer nicht mehr "
                 "zugewiesen (helper.student_id=%r), Context zurück.",
-                assigned_student_id, helper.student_id,
+                assigned_student_id,
+                helper.student_id,
             )
             try:
                 await worker_session.close()
@@ -779,8 +801,11 @@ async def advance_helper(state: AppState, hub, helper, context_id: str | None = 
     """
     if helper.student_id is not None:
         await end_student(
-            state, hub, helper.student_id,
-            queue_status="done", session_state="completed",
+            state,
+            hub,
+            helper.student_id,
+            queue_status="done",
+            session_state="completed",
             helper_notify={"type": "loading"},  # Queue verbergen — nächster wird geladen
         )
 
@@ -801,7 +826,15 @@ async def assign_next_pending_to_helper(state: AppState, hub, helper) -> dict:
     """
     student = state.next_pending(helper.context_id)
     if not student:
-        await hub.send_scanner(helper.token, {"type": "waiting", "msg": "Warteschlange leer", "queue_size": state.pending_count(helper.context_id), "queue": state.pending_queue_as_list(helper.context_id)})
+        await hub.send_scanner(
+            helper.token,
+            {
+                "type": "waiting",
+                "msg": "Warteschlange leer",
+                "queue_size": state.pending_count(helper.context_id),
+                "queue": state.pending_queue_as_list(helper.context_id),
+            },
+        )
         return {"ok": False, "reason": "empty"}
 
     return await assign_student_to_helper(state, hub, helper, student)
@@ -906,7 +939,9 @@ async def load_and_push_paired_student(
             log.info(
                 "Stale load_and_push_paired_student für %d — Session nicht mehr "
                 "paired (state=%r, student_id=%r), Context zurück.",
-                paired_student_id, session.state, session.student_id,
+                paired_student_id,
+                session.state,
+                session.student_id,
             )
             try:
                 await worker_session.close()
@@ -929,6 +964,7 @@ async def load_and_push_paired_student(
 # ---------------------------------------------------------------------------
 # iPad-Display
 # ---------------------------------------------------------------------------
+
 
 async def send_display_update(state: AppState, display: DisplaySession) -> None:
     """Aktuellen Zustand an ein Display schicken: Reg-Code, QR oder 'geschlossen'."""
@@ -958,6 +994,7 @@ async def broadcast_displays(state: AppState) -> None:
 # ---------------------------------------------------------------------------
 # Timeout-Sweeper (harter Zugriffsentzug bei Inaktivität)
 # ---------------------------------------------------------------------------
+
 
 async def sweep_expired_sessions() -> None:
     """Hintergrund-Loop: pending/paired Sessions nach TTL hart entwerten."""
@@ -989,8 +1026,11 @@ async def sweep_expired_sessions() -> None:
                 sid = session.student_id
                 if sid is not None:
                     await end_student(
-                        state, hub, sid,
-                        queue_status="pending", session_state="expired",
+                        state,
+                        hub,
+                        sid,
+                        queue_status="pending",
+                        session_state="expired",
                         broadcast=False,
                     )
                 else:

@@ -10,6 +10,7 @@ Source bleibt und Schreibfehler nie den Endpoint crashen.
 `normalize_book_order` + `hidden & catalog` (s. routes/api.py); diese Datei
 ergänzt allein die Persistenz über Serverneustarts hinweg.
 """
+
 from __future__ import annotations
 
 import json

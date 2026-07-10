@@ -9,6 +9,7 @@ Rein logisch / tmp-Datei, kein IServ/HTTP. STORE_PATH wird per monkeypatch
 in ein tmp-Verzeichnis umgebogen, sodass die Tests die echte `data/` nicht
 anfassen.
 """
+
 from __future__ import annotations
 
 import json
@@ -76,9 +77,9 @@ def test_new_catalog_books_appended_visible_at_end():
     """Eigentliche Anforderung: gespeicherter Stand + neuer Katalog → neue
     ISBNs sichtbar ans Ende, unbekannte raus, ausgeblendete neue ISBNs bleiben
     sichtbar (hidden ist nur der Schnitt mit dem Katalog)."""
-    catalog = ["A", "B", "N1", "N2"]           # N1/N2 = neu, X im Store existiert nicht mehr
-    stored = ["X", "B", "A"]                   # gespeicherte Reihenfolge
-    hidden = {"X"}                              # X nicht mehr im Katalog -> irrelevant
+    catalog = ["A", "B", "N1", "N2"]  # N1/N2 = neu, X im Store existiert nicht mehr
+    stored = ["X", "B", "A"]  # gespeicherte Reihenfolge
+    hidden = {"X"}  # X nicht mehr im Katalog -> irrelevant
 
     order = normalize_book_order(catalog, stored)
     # X gedroppt, B/A in gespeicherter Folge, N1/N2 hinten in Katalogreihenfolge
@@ -92,10 +93,15 @@ def test_new_catalog_books_appended_visible_at_end():
 def test_load_drops_non_string_entries(monkeypatch, tmp_path):
     _use_tmp_store(monkeypatch, tmp_path)
     booklist_store.STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    booklist_store.STORE_PATH.write_text(json.dumps({
-        "orders": {"9": ["A", 123, "B"], "bad": ["Z"], "11": "keine-liste"},
-        "hidden": {"9": ["A", 7, "B"], "bad": ["Q"]},
-    }), encoding="utf-8")
+    booklist_store.STORE_PATH.write_text(
+        json.dumps(
+            {
+                "orders": {"9": ["A", 123, "B"], "bad": ["Z"], "11": "keine-liste"},
+                "hidden": {"9": ["A", 7, "B"], "bad": ["Q"]},
+            }
+        ),
+        encoding="utf-8",
+    )
     orders, hidden = booklist_store.load()
     assert orders == {9: ["A", "B"]}  # "bad"/"11" (keine Liste) übersprungen
     assert hidden == {9: {"A", "B"}}

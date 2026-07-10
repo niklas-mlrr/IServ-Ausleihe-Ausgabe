@@ -22,18 +22,18 @@ class Config:
     # Playwright sichtbar machen (Debug). Default headless. Auf headless-Servern
     # braucht headful ein Display (z. B. xvfb-run).
     headless: bool = True
-    slow_mo_ms: int = 0                 # >0 verlangsamt Playwright-Aktionen (Debug)
+    slow_mo_ms: int = 0  # >0 verlangsamt Playwright-Aktionen (Debug)
     tls_cert: Path = field(default_factory=lambda: Path("certs/server.crt"))
     tls_key: Path = field(default_factory=lambda: Path("certs/server.key"))
     # Modus B: harte Zugriffsentzug-Schwellen (Sekunden).
-    pending_pairing_ttl_s: int = 300   # QR gescannt, aber nicht gepairt → verfällt
-    paired_idle_ttl_s: int = 900       # gepairt, aber inaktiv → verfällt
+    pending_pairing_ttl_s: int = 300  # QR gescannt, aber nicht gepairt → verfällt
+    paired_idle_ttl_s: int = 900  # gepairt, aber inaktiv → verfällt
     # Host-Login: gleitendes Timeout (verlängert sich bei jeder Anfrage).
-    host_session_ttl_s: int = 43200    # 12 h — deckt einen Ausgabetag ab
+    host_session_ttl_s: int = 43200  # 12 h — deckt einen Ausgabetag ab
     # Leihschein-Druck (siehe server/printing.py).
-    print_backend: str = "auto"        # auto|file|lp|sumatra|win-default
-    printer_name: str | None = None    # leer = Standarddrucker
-    sumatra_path: str | None = None    # optionaler expliziter SumatraPDF-Pfad
+    print_backend: str = "auto"  # auto|file|lp|sumatra|win-default
+    printer_name: str | None = None  # leer = Standarddrucker
+    sumatra_path: str | None = None  # optionaler expliziter SumatraPDF-Pfad
     print_output_dir: Path = field(default_factory=lambda: Path("automation/out/loan_slips"))
     # Buchung gegen die IServ-Produktion (Enter auf der Counter-Seite).
     # Default AUS — Buchung nur nach expliziter Freigabe Niklas + Lukas (PLAN §6).

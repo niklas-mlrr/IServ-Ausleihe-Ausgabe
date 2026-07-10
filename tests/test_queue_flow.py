@@ -18,6 +18,7 @@ from server.state import AppState, HelperSession, QueueStudent
 # Test-Doubles (keine echten WS/Worker/Hub)
 # ---------------------------------------------------------------------------
 
+
 class _FakeHub:
     """Zählt Broadcasts/Scanner-Pushes, ohne echte WebSockets."""
 
@@ -67,6 +68,7 @@ def _add_student(st: AppState, sid: int, status: str = "pending") -> QueueStuden
 # gen_pairing_code — Eindeutigkeit & Erschöpfung
 # ---------------------------------------------------------------------------
 
+
 def test_pairing_code_skips_codes_in_use(monkeypatch):
     st = AppState()
     # 0123 ist belegt → die Schleife muss ihn überspringen und 0456 nehmen.
@@ -93,6 +95,7 @@ def test_pairing_code_exhausted_raises():
 # end_student — Status, Helfer-Lösung, Session-Invalidierung
 # ---------------------------------------------------------------------------
 
+
 def test_end_student_sets_status_and_releases_helper():
     st = _state_with_iserv()
     hub = _FakeHub()
@@ -105,16 +108,21 @@ def test_end_student_sets_status_and_releases_helper():
 
     assert student.status == "done"
     assert student.assigned_helper is None
-    assert helper.student_id is None       # Helfer wieder frei
+    assert helper.student_id is None  # Helfer wieder frei
     assert hub.host_broadcasts == 1
     # Scanner muss aktiv über die Trennung informiert werden ("Alle
     # Verbindungen trennen" wirkte sonst nur am Host, der Helfer sah nichts).
-    assert hub.scanner_msgs == [("h1", {
-        "type": "waiting",
-        "msg": "Warte auf Schüler-Zuweisung",
-        "queue_size": st.pending_count(),
-        "queue": st.pending_queue_as_list(),
-    })]
+    assert hub.scanner_msgs == [
+        (
+            "h1",
+            {
+                "type": "waiting",
+                "msg": "Warte auf Schüler-Zuweisung",
+                "queue_size": st.pending_count(),
+                "queue": st.pending_queue_as_list(),
+            },
+        )
+    ]
 
 
 def test_end_student_resets_peeking():
@@ -145,8 +153,8 @@ def test_end_student_invalidates_modus_b_session_and_releases_worker():
     asyncio.run(end_student_call(st, hub, 9, "done", "completed"))
 
     assert sess.state == "completed"
-    assert sess.session_token not in st.student_sessions   # Token hart entwertet
-    assert 9 not in st.student_worker_sessions             # Worker freigegeben
+    assert sess.session_token not in st.student_sessions  # Token hart entwertet
+    assert 9 not in st.student_worker_sessions  # Worker freigegeben
     assert worker.closed is True
 
 
@@ -167,6 +175,7 @@ def test_end_student_releases_worker_without_session():
 # ---------------------------------------------------------------------------
 # end_student — In-flight Lade-Task abbrechen (Leak-Fix)
 # ---------------------------------------------------------------------------
+
 
 class _FakeTask:
     """Steht für einen laufenden load_and_push_helper_student-Task.
@@ -234,6 +243,7 @@ def test_invalidate_cancels_inflight_load_task():
 # advance_helper — Helfer auf nächsten Wartenden setzen
 # ---------------------------------------------------------------------------
 
+
 def test_advance_helper_empty_queue():
     st = _state_with_iserv()
     hub = _FakeHub()
@@ -258,8 +268,8 @@ def test_advance_helper_picks_next_and_completes_previous():
     res = asyncio.run(_advance_and_drain(st, hub, helper))
 
     assert res == {"ok": True, "student_id": 2}
-    assert prev.status == "done"            # vorheriger abgeschlossen
-    assert nxt.status == "active"           # nächster aktiv
+    assert prev.status == "done"  # vorheriger abgeschlossen
+    assert nxt.status == "active"  # nächster aktiv
     assert nxt.assigned_helper == "h1"
     # Modus A: Bücher sofort in `student_info`; `worker_ready` (ohne Pool sofort)
     # flippt den Helferclient von „Warten…" auf „Scanner bereit".
@@ -279,6 +289,7 @@ def test_advance_helper_picks_next_and_completes_previous():
 # (Helfer wählt per Button aus der Warteschlange, statt „nächster").
 # ---------------------------------------------------------------------------
 
+
 async def _assign_and_drain(st, hub, helper, student):
     res = await sessions.assign_student_to_helper(st, hub, helper, student)
     await asyncio.sleep(0)  # load_and_push_helper_student-Task abarbeiten
@@ -288,7 +299,7 @@ async def _assign_and_drain(st, hub, helper, student):
 def test_assign_student_to_helper_assigns_specific_student():
     st = _state_with_iserv()
     hub = _FakeHub()
-    first = _add_student(st, 1, status="pending")   # würde von „nächster" gewählt
+    first = _add_student(st, 1, status="pending")  # würde von „nächster" gewählt
     target = _add_student(st, 2, status="pending")  # gezielt aufrufen
     helper = HelperSession(token="h1", name="Helfer")
     st.helper_sessions["h1"] = helper
@@ -328,7 +339,7 @@ def test_rebind_helper_to_context_switches_assigned_class():
 
     assert helper.context_id == ctx_b.id
     nxt = st.next_pending(helper.context_id)
-    assert nxt is not None and nxt.student_id == 9   # aus 10b (neue Klasse)
+    assert nxt is not None and nxt.student_id == 9  # aus 10b (neue Klasse)
 
     # Ungebundener Helfer (context_id None) wird ebenfalls bindbar.
     unbound = HelperSession(token="h2", name="X")
@@ -367,6 +378,7 @@ def test_pending_queue_as_list_returns_only_pending():
 # Lupe-Suche: transiente (nicht in der Queue stehende) Schüler
 # ---------------------------------------------------------------------------
 
+
 def test_end_student_transient_search_student_cleans_helper():
     """Lupe-Suche lädt beliebige IServ-Schüler, die NICHT in einer Queue stehen.
     end_student muss auch solche transienten Schüler beim Helfer aufräumen —
@@ -374,7 +386,7 @@ def test_end_student_transient_search_student_cleans_helper():
     st = _state_with_iserv()
     hub = _FakeHub()
     helper = HelperSession(token="h1", name="Helfer", student_id=77, peeking=True)
-    helper.student_form = "10a"   # war via Lupe zugewiesen → Form am Helfer
+    helper.student_form = "10a"  # war via Lupe zugewiesen → Form am Helfer
     st.helper_sessions["h1"] = helper
     # Bewusst KEIN _add_student → 77 steht in keiner Queue (Schnellsprung).
     worker = _FakeWorker()
@@ -382,11 +394,11 @@ def test_end_student_transient_search_student_cleans_helper():
 
     asyncio.run(end_student_call(st, hub, 77, "done", "completed"))
 
-    assert helper.student_id is None            # Helfer freigegeben (sonst stale)
-    assert helper.student_form is None          # Form aufräumen (sonst stale beim Reconnect)
+    assert helper.student_id is None  # Helfer freigegeben (sonst stale)
+    assert helper.student_form is None  # Form aufräumen (sonst stale beim Reconnect)
     assert helper.peeking is False
-    assert helper.expected_isbns == set()        # ISBN-Sets auch am transienten Pfad leer
-    assert 77 not in st.student_worker_sessions   # Worker freigegeben
+    assert helper.expected_isbns == set()  # ISBN-Sets auch am transienten Pfad leer
+    assert 77 not in st.student_worker_sessions  # Worker freigegeben
     assert worker.closed is True
     # Helfer wurde benachrichtigt (Default waiting), nicht im Dunkeln gelassen.
     assert hub.scanner_msgs and hub.scanner_msgs[0][0] == "h1"
@@ -402,15 +414,19 @@ def test_assign_transient_search_student_loads_without_queue():
     st.helper_sessions["h1"] = helper
     # Transienter Schüler — bewusst NICHT in eine Queue eingetragen.
     student = QueueStudent(
-        student_id=88, lastname="Test", firstname="S", form="10a",
-        status="pending", assigned_helper=None,
+        student_id=88,
+        lastname="Test",
+        firstname="S",
+        form="10a",
+        status="pending",
+        assigned_helper=None,
     )
 
     asyncio.run(_assign_and_drain(st, hub, helper, student))
 
     assert helper.student_id == 88
-    assert helper.student_form == "10a"        # Form am Helfer — Quelle für Reconnect
-    assert helper.peeking is False               # neuer Schüler beendet den Peek
+    assert helper.student_form == "10a"  # Form am Helfer — Quelle für Reconnect
+    assert helper.peeking is False  # neuer Schüler beendet den Peek
     assert student.status == "active"
     assert student.assigned_helper == "h1"
     # Lade-Pipeline hat den Helfer versorgt (kein worker_pool → worker_ready direkt).
@@ -452,6 +468,7 @@ def test_assign_student_to_helper_sets_student_form_for_reconnect():
 # invalidate_session — idempotent & hart
 # ---------------------------------------------------------------------------
 
+
 def test_invalidate_releases_worker_and_clears_token():
     st = AppState()
     sess = sessions.create_student_session(st)
@@ -472,10 +489,9 @@ def test_invalidate_releases_worker_and_clears_token():
 # Helfer für asyncio.create_task-lastige Pfade: laufende Loop + Drain
 # ---------------------------------------------------------------------------
 
+
 async def end_student_call(st, hub, sid, queue_status, session_state):
-    await sessions.end_student(
-        st, hub, sid, queue_status=queue_status, session_state=session_state
-    )
+    await sessions.end_student(st, hub, sid, queue_status=queue_status, session_state=session_state)
     # release_worker plant worker.close() als Task ein → einmal ticken lassen.
     await asyncio.sleep(0)
 

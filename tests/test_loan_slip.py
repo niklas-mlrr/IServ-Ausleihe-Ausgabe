@@ -99,6 +99,7 @@ def _two_page_pdf() -> bytes:
 
 def test_select_pages_first_only():
     from server.loan_slip import select_pages
+
     out = select_pages(_two_page_pdf(), "1")
     doc = fitz.open(stream=out, filetype="pdf")
     assert doc.page_count == 1
@@ -107,6 +108,7 @@ def test_select_pages_first_only():
 
 def test_select_pages_none_and_full_range_are_noop():
     from server.loan_slip import select_pages
+
     original = _two_page_pdf()
     assert select_pages(original, None) == original
     assert select_pages(original, "1-2") == original  # ganzer Bereich → unverändert
@@ -141,13 +143,18 @@ def test_print_loan_slip_applies_class_override(tmp_path, monkeypatch):
             return None
 
     cfg = Config(
-        iserv_domain="example.org", iserv_username="u", iserv_password="p",
-        host_password="secret", print_backend="file", print_output_dir=tmp_path,
+        iserv_domain="example.org",
+        iserv_username="u",
+        iserv_password="p",
+        host_password="secret",
+        print_backend="file",
+        print_output_dir=tmp_path,
     )
     monkeypatch.setattr(sessions, "get_config", lambda: cfg)
     res = asyncio.run(sessions.print_loan_slip_for(FakeState(), 2159))
 
     assert res["ok"] is True and res["backend"] == "file"
     from pathlib import Path
+
     words = _words(Path(res["path"]).read_bytes())
     assert "11b" in words  # echte Klasse des Schülers, nicht der Default „12Slw"

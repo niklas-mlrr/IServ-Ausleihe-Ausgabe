@@ -31,21 +31,25 @@ async def lifespan(app: FastAPI):
     # Bücher-Reihenfolge/Ausblendung aus letzter Sitzung laden (Persistenz):
     # reine Datei-IO, non-fatal — Fehler lässt den State leer wie ohne Persistenz.
     from .booklist_store import load as load_booklist_state
+
     try:
         state.book_orders_by_grade, state.hidden_isbns_by_grade = load_booklist_state()
-        log.info("Bücher-Reihenfolge/Ausblendung geladen: %d Jahrgänge",
-                 len(state.book_orders_by_grade))
+        log.info(
+            "Bücher-Reihenfolge/Ausblendung geladen: %d Jahrgänge", len(state.book_orders_by_grade)
+        )
     except Exception:
         log.exception("Laden der booklist-Persistenz fehlgeschlagen (non-fatal)")
 
     # Liegengebliebene Druck-Temp-PDFs vom letzten Lauf wegräumen (win-default-Leak).
     from .printing import cleanup_stale_print_tempfiles
+
     try:
         cleanup_stale_print_tempfiles()
     except Exception:
         log.exception("Aufräumen alter Druck-Temp-PDFs fehlgeschlagen (non-fatal)")
 
     from automation.worker import WorkerPool
+
     pool = WorkerPool(
         n=cfg.worker_contexts,
         domain=cfg.iserv_domain,
@@ -89,8 +93,10 @@ _CLEAN_PAGES = ("host", "scan", "student", "qr-display")
 
 def _page_handler(path: Path):
     """Handler ohne Parameter (sonst würde FastAPI einen Query-Param ableiten)."""
+
     async def handler() -> FileResponse:
         return FileResponse(path)
+
     return handler
 
 

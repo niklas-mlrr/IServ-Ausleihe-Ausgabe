@@ -97,10 +97,7 @@ class IsServClient:
         (alle Jahre vergangen): `/schoolyears/current`.
         """
         today = date.today()
-        dated = [
-            (y, _sy_date(y.get("begin")), _sy_date(y.get("end")))
-            for y in years
-        ]
+        dated = [(y, _sy_date(y.get("begin")), _sy_date(y.get("end"))) for y in years]
         dated = [(y, b, e) for (y, b, e) in dated if b and e]
 
         running = [y for (y, b, e) in dated if b <= today <= e]
@@ -127,12 +124,9 @@ class IsServClient:
             with self._init_lock:
                 if self._default_sy_id is None or (
                     self._default_sy_at is None
-                    or (datetime.now() - self._default_sy_at).total_seconds()
-                    > _DEFAULT_SY_TTL_S
+                    or (datetime.now() - self._default_sy_at).total_seconds() > _DEFAULT_SY_TTL_S
                 ):
-                    self._default_sy_id = self._pick_default(
-                        self._active_years(client), client
-                    )
+                    self._default_sy_id = self._pick_default(self._active_years(client), client)
                     self._default_sy_at = datetime.now()
         return self._default_sy_id
 
@@ -143,6 +137,7 @@ class IsServClient:
         (genau ein Jahr ist Default: das laufende bzw. – wenn keines läuft –
         das nächste).
         """
+
         def _sync() -> list[dict]:
             client = self._get_client()
             years = self._active_years(client)
@@ -159,6 +154,7 @@ class IsServClient:
             ]
             out.sort(key=lambda y: y["id"], reverse=True)
             return out
+
         return await asyncio.to_thread(_sync)
 
     def _get_series_map(self) -> dict:
@@ -176,6 +172,7 @@ class IsServClient:
 
     async def get_forms(self, schoolyear: str | None = None) -> list[dict]:
         """Alle Klassen des (gewählten oder aktuellen) Schuljahrs mit Members."""
+
         def _sync() -> list[dict]:
             client = self._get_client()
             sy_id = self._resolve_sy(client, schoolyear)
@@ -185,6 +182,7 @@ class IsServClient:
                 [f for f in forms if len(f.get("members", [])) >= 5],
                 key=lambda f: (f["grade"], f["name"]),
             )
+
         return await asyncio.to_thread(_sync)
 
     async def get_class_names(self, schoolyear: str | None = None) -> list[str]:
@@ -195,6 +193,7 @@ class IsServClient:
         self, form_name: str, schoolyear: str | None = None
     ) -> list[dict]:
         """Alphabetisch sortierte Schüler einer Klasse."""
+
         def _sync() -> list[dict]:
             client = self._get_client()
             sy_id = self._resolve_sy(client, schoolyear)
@@ -214,12 +213,12 @@ class IsServClient:
                         key=lambda s: (s["lastname"], s["firstname"]),
                     )
             return []
+
         return await asyncio.to_thread(_sync)
 
-    async def get_student_info(
-        self, student_id: int, schoolyear: str | None = None
-    ) -> dict:
+    async def get_student_info(self, student_id: int, schoolyear: str | None = None) -> dict:
         """Schüler-Daten für die Scanner-UI: Anmeldestatus, Zahlungsstatus, Bücher."""
+
         def _sync() -> dict:
             client = self._get_client()
             series_map = self._get_series_map()
@@ -260,9 +259,15 @@ class IsServClient:
                 amount_open = current_enrollment.get("amountOpen")
                 exemption = current_enrollment.get("exemption_accepted")
                 paid = exemption is True or (amount_open is not None and float(amount_open) <= 0)
-                if current_enrollment.get("remission_request") and current_enrollment.get("remission_accepted") is None:
+                if (
+                    current_enrollment.get("remission_request")
+                    and current_enrollment.get("remission_accepted") is None
+                ):
                     remission_pending = True
-                if current_enrollment.get("exemption_request") and current_enrollment.get("exemption_accepted") is None:
+                if (
+                    current_enrollment.get("exemption_request")
+                    and current_enrollment.get("exemption_accepted") is None
+                ):
                     exemption_pending = True
 
             # Bereits ausgeliehene Bücher — laut `?books=true`-Payload (API-
@@ -277,13 +282,15 @@ class IsServClient:
                 bv = b.get("BookView") or {}
                 isbn = b.get("isbn") or bv.get("isbn", "")
                 dist_at = b.get("distributed_at") or bv.get("distributed_at")
-                current_books.append({
-                    "code": b.get("code") or bv.get("code"),
-                    "isbn": isbn,
-                    "title": _title(isbn),
-                    "subject": _fach(isbn),
-                    "distributed_at": dist_at,
-                })
+                current_books.append(
+                    {
+                        "code": b.get("code") or bv.get("code"),
+                        "isbn": isbn,
+                        "title": _title(isbn),
+                        "subject": _fach(isbn),
+                        "distributed_at": dist_at,
+                    }
+                )
 
             # Bücher die der Schüler laut Anmeldung erhalten soll
             books_to_receive: list[dict] = []
@@ -291,12 +298,14 @@ class IsServClient:
                 for item in current_enrollment.get("booklistItems", []):
                     sd = item.get("series_data", {})
                     isbn = sd.get("isbn") or item.get("series", "")
-                    books_to_receive.append({
-                        "isbn": isbn,
-                        "title": _title(isbn, sd.get("title", "")),
-                        "subject": _fach(isbn),
-                        "fee": item.get("EnrollmentBooklistItem", {}).get("fee"),
-                    })
+                    books_to_receive.append(
+                        {
+                            "isbn": isbn,
+                            "title": _title(isbn, sd.get("title", "")),
+                            "subject": _fach(isbn),
+                            "fee": item.get("EnrollmentBooklistItem", {}).get("fee"),
+                        }
+                    )
 
             # Einheitliche Buchliste für die Scanner-Tabelle:
             # vorgemerkt (noch nicht ausgeliehen) zuerst, ausgeliehen darunter.
@@ -307,37 +316,44 @@ class IsServClient:
             for b in books_to_receive:
                 isbn = b["isbn"]
                 ausgeliehen = isbn in lent_isbns
-                books.append({
-                    "isbn": isbn,
-                    "code": lent_by_isbn.get(isbn, {}).get("code") if ausgeliehen else None,
-                    "title": b["title"],
-                    "subject": b["subject"],
-                    "status": "ausgeliehen" if ausgeliehen else "vorgemerkt",
-                    "distributed_at": lent_by_isbn.get(isbn, {}).get("distributed_at")
-                        if ausgeliehen else None,
-                })
+                books.append(
+                    {
+                        "isbn": isbn,
+                        "code": lent_by_isbn.get(isbn, {}).get("code") if ausgeliehen else None,
+                        "title": b["title"],
+                        "subject": b["subject"],
+                        "status": "ausgeliehen" if ausgeliehen else "vorgemerkt",
+                        "distributed_at": lent_by_isbn.get(isbn, {}).get("distributed_at")
+                        if ausgeliehen
+                        else None,
+                    }
+                )
                 seen_isbns.add(isbn)
             # Ausgeliehene Bücher ohne passende Vormerkung trotzdem zeigen.
             for b in current_books:
                 if b["isbn"] and b["isbn"] in seen_isbns:
                     continue
-                books.append({
-                    "isbn": b["isbn"],
-                    "code": b["code"],
-                    "title": b["title"],
-                    "subject": b["subject"],
-                    "status": "ausgeliehen",
-                    "distributed_at": b.get("distributed_at"),
-                })
+                books.append(
+                    {
+                        "isbn": b["isbn"],
+                        "code": b["code"],
+                        "title": b["title"],
+                        "subject": b["subject"],
+                        "status": "ausgeliehen",
+                        "distributed_at": b.get("distributed_at"),
+                    }
+                )
             # 1. nach Status (vorgemerkt vor ausgeliehen, wie gehabt),
             # 2. nach Ausgabezeit absteigend (jüngste oben; negativer Timestamp),
             # 3. alphabetisch als stabiler Fallback (z. B. für vorgemerkte ohne Zeit).
-            books.sort(key=lambda x: (
-                0 if x["status"] == "vorgemerkt" else 1,
-                -_sort_ts(x.get("distributed_at")),
-                x["subject"],
-                x["title"],
-            ))
+            books.sort(
+                key=lambda x: (
+                    0 if x["status"] == "vorgemerkt" else 1,
+                    -_sort_ts(x.get("distributed_at")),
+                    x["subject"],
+                    x["title"],
+                )
+            )
 
             return {
                 "student_id": student_id,
@@ -352,6 +368,7 @@ class IsServClient:
                 "books_to_receive": books_to_receive,
                 "books": books,
             }
+
         return await asyncio.to_thread(_sync)
 
     def _extract_borrowable_catalog(self, full: dict, series_map: dict) -> list[dict]:
@@ -378,9 +395,7 @@ class IsServClient:
                     s = series_map.get(isbn)
                     title = sd.get("title") or (s.title if s else "") or isbn
                     subject = ", ".join(
-                        sd.get("subjectsFlat")
-                        or (s.subjects_flat or s.subjects if s else [])
-                        or []
+                        sd.get("subjectsFlat") or (s.subjects_flat or s.subjects if s else []) or []
                     )
                     catalog.append({"isbn": isbn, "title": title, "subject": subject})
         catalog.sort(key=lambda b: (b["subject"], b["title"]))
@@ -405,15 +420,14 @@ class IsServClient:
         Klasse nicht gefunden wird; der Katalog ist leer, wenn der Jahrgang keine
         Booklist hat. Nur GETs.
         """
+
         def _sync() -> tuple[int | None, list[dict]]:
             client = self._get_client()
             series_map = self._get_series_map()
 
             sy_id = self._resolve_sy(client, schoolyear)
             forms = client.get(f"/schoolyears/{_enc(sy_id)}/forms")
-            form_grade = next(
-                (f.get("grade") for f in forms if f["name"] == form_name), None
-            )
+            form_grade = next((f.get("grade") for f in forms if f["name"] == form_name), None)
             if form_grade is None:
                 return None, []
 
@@ -424,16 +438,16 @@ class IsServClient:
                 return form_grade, []
             full = client.schoolyears.get_booklist(sy_id, bl["id"])
             return form_grade, self._extract_borrowable_catalog(full, series_map)
+
         return await asyncio.to_thread(_sync)
 
-    async def get_booklists_overview(
-        self, schoolyear: str | None = None
-    ) -> list[dict]:
+    async def get_booklists_overview(self, schoolyear: str | None = None) -> list[dict]:
         """Alle Bücherlisten (Jahrgänge) des Schuljahrs — read-only.
 
         Liefert `[{id, grade, title}]` nach Jahrgang sortiert. Grundlage für die
         Jahrgangs-Auswahl (Reiter) im Einstellungen-Dialog. Nur ein GET.
         """
+
         def _sync() -> list[dict]:
             client = self._get_client()
             sy_id = self._resolve_sy(client, schoolyear)
@@ -443,13 +457,16 @@ class IsServClient:
                 grade = b.get("grade")
                 if not isinstance(grade, int):
                     continue
-                out.append({
-                    "id": b.get("id"),
-                    "grade": grade,
-                    "title": b.get("title") or f"Jahrgang {grade}",
-                })
+                out.append(
+                    {
+                        "id": b.get("id"),
+                        "grade": grade,
+                        "title": b.get("title") or f"Jahrgang {grade}",
+                    }
+                )
             out.sort(key=lambda b: b["grade"])
             return out
+
         return await asyncio.to_thread(_sync)
 
     async def get_booklist_catalog_by_grade(
@@ -461,6 +478,7 @@ class IsServClient:
         Klasse). Liefert `[{isbn, title, subject}]`; leer, wenn der Jahrgang keine
         Booklist hat. Nur GETs.
         """
+
         def _sync() -> list[dict]:
             client = self._get_client()
             series_map = self._get_series_map()
@@ -472,6 +490,7 @@ class IsServClient:
                 return []
             full = client.schoolyears.get_booklist(sy_id, bl["id"])
             return self._extract_borrowable_catalog(full, series_map)
+
         return await asyncio.to_thread(_sync)
 
     async def get_book_by_code(self, code: str) -> dict | None:
@@ -495,6 +514,7 @@ class IsServClient:
         Lager-Prüfung bleibt davon unberührt). Namen werden NUR an die UI
         durchgereicht, nie geloggt (PLAN §3.7).
         """
+
         def _sync() -> dict | None:
             client = self._get_client()
             series_map = self._get_series_map()
@@ -519,6 +539,7 @@ class IsServClient:
                 "loaned_to": loaned_to,
                 "loaned_to_id": loaned_to_id,
             }
+
         return await asyncio.to_thread(_sync)
 
     @staticmethod
@@ -555,7 +576,9 @@ class IsServClient:
         `variant="student-always_school-auto"` → 2 Seiten (Schüler + Schule),
         identisch zum Webseiten-Download.
         """
+
         def _sync() -> bytes:
             client = self._get_client()
             return client.get_loan_slip_pdf(student_id=student_id, variant=variant)
+
         return await asyncio.to_thread(_sync)

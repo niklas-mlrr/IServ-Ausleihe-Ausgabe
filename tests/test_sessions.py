@@ -38,7 +38,7 @@ def test_invalidate_is_hard_and_idempotent():
     token = s.session_token
     asyncio.run(sessions.invalidate_session(st, s, "revoked", reason="test"))
     assert s.state == "revoked"
-    assert token not in st.student_sessions          # Token entwertet (kein Datenzugang mehr)
+    assert token not in st.student_sessions  # Token entwertet (kein Datenzugang mehr)
     assert st.find_session_by_code(s.pairing_code) is None
     # Erneuter Aufruf ändert den terminalen Zustand nicht.
     asyncio.run(sessions.invalidate_session(st, s, "completed"))

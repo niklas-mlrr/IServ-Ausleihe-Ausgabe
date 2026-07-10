@@ -13,10 +13,10 @@ if TYPE_CHECKING:
 # Modus-B-Lebenszyklus einer Schüler-Session.
 StudentSessionState = Literal[
     "pending_pairing",  # QR gescannt, Code angezeigt, wartet auf Host-Zuordnung
-    "paired",           # vom Host einem Schüler zugeordnet → Daten/Scan frei
-    "completed",        # regulär abgeschlossen
-    "expired",          # Timeout
-    "revoked",          # vom Host abgebrochen / Ausgabe geschlossen
+    "paired",  # vom Host einem Schüler zugeordnet → Daten/Scan frei
+    "completed",  # regulär abgeschlossen
+    "expired",  # Timeout
+    "revoked",  # vom Host abgebrochen / Ausgabe geschlossen
 ]
 
 
@@ -216,7 +216,7 @@ class AppState:
         self.modus_b_join_url: str | None = None
         self.modus_b_join_qr: str | None = None  # PNG-Data-URL für iPad/Host
         self.student_sessions: dict[str, StudentSessionB] = {}  # session_token -> Session
-        self.displays: dict[str, DisplaySession] = {}           # display_id -> Display
+        self.displays: dict[str, DisplaySession] = {}  # display_id -> Display
         # Header-Toggle „Tailscale-IP": erzwingt die Tailscale/CGNAT-IP in
         # QR-/Join-URLs statt der Auto-Auswahl (LAN-first). False = Auto.
         self.force_tailscale_ip: bool = False
@@ -412,9 +412,11 @@ class AppState:
 
     def state_snapshot(self) -> dict:
         from .config import get_config
+
         pool = self.worker_pool
         worker_stats = (
-            pool.stats() if pool is not None and hasattr(pool, "stats")
+            pool.stats()
+            if pool is not None and hasattr(pool, "stats")
             else {"total": 0, "available": 0, "in_use": 0}
         )
         ctx = self.active_context

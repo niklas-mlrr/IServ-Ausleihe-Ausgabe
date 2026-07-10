@@ -144,7 +144,9 @@ async def student_join(body: StudentJoinRequest, request: Request) -> dict:
         session = create_student_session(state)
     except RuntimeError:
         # Pairing-Code-Raum (4-stellig) erschöpft — sehr viele gleichzeitig Wartende.
-        raise HTTPException(503, "Zu viele gleichzeitige Wartende — bitte gleich erneut scannen") from None
+        raise HTTPException(
+            503, "Zu viele gleichzeitige Wartende — bitte gleich erneut scannen"
+        ) from None
     await get_hub().broadcast_host(state.state_snapshot())
     return {"session_token": session.session_token, "pairing_code": session.pairing_code}
 
@@ -201,11 +203,13 @@ async def student_pair(body: StudentPairRequest) -> dict:
         if not info.get("paid"):
             blockers.append({"kind": "unpaid", "amount_open": info.get("amount_open")})
         if info.get("remission_pending") or info.get("exemption_pending"):
-            blockers.append({
-                "kind": "nachweis",
-                "remission": bool(info.get("remission_pending")),
-                "exemption": bool(info.get("exemption_pending")),
-            })
+            blockers.append(
+                {
+                    "kind": "nachweis",
+                    "remission": bool(info.get("remission_pending")),
+                    "exemption": bool(info.get("exemption_pending")),
+                }
+            )
     if blockers and not override:
         raise HTTPException(
             409,

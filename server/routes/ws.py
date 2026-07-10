@@ -62,8 +62,11 @@ async def _deferred_end(state, hub, helper, student_id: int) -> None:
                 await helper.load_task
             helper.load_task = None
         await end_student(
-            state, hub, student_id,
-            queue_status="pending", session_state="revoked",
+            state,
+            hub,
+            student_id,
+            queue_status="pending",
+            session_state="revoked",
         )
     except Exception:  # noqa: BLE001 — Sweeper-Loop-artige Robustheit: ein fehlgeschlagener Teardown darf den Task nicht crashen
         log.exception("deferred end_student für %d fehlgeschlagen", student_id)
@@ -77,6 +80,7 @@ async def _deferred_end(state, hub, helper, student_id: int) -> None:
 async def ws_host(websocket: WebSocket, session_id: str | None = Cookie(default=None)) -> None:
     state = get_state()
     from ..config import get_config
+
     if not state.is_host_session_valid(session_id, get_config().host_session_ttl_s):
         await websocket.close(code=4003, reason="Nicht authentifiziert")
         return
@@ -171,7 +175,9 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                     await ws_ref.reload()
                     reload_ok = state.student_worker_sessions.get(helper.student_id) is ws_ref
                 except Exception as e:  # noqa: BLE001
-                    log.warning("Worker-Reload (Reconnect) für %d fehlgeschlagen: %s", helper.student_id, e)
+                    log.warning(
+                        "Worker-Reload (Reconnect) für %d fehlgeschlagen: %s", helper.student_id, e
+                    )
                     reload_ok = False
                 if reload_ok:
                     await hub.send_websocket(websocket, {"type": "worker_ready"})
@@ -194,22 +200,36 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
         except Exception as e:
             await hub.send_websocket(websocket, {"type": "error", "msg": str(e)})
     else:
-        await hub.send_websocket(websocket, {"type": "waiting", "msg": "Warte auf Schüler-Zuweisung", "queue_size": state.pending_count(helper.context_id), "queue": state.pending_queue_as_list(helper.context_id)})
+        await hub.send_websocket(
+            websocket,
+            {
+                "type": "waiting",
+                "msg": "Warte auf Schüler-Zuweisung",
+                "queue_size": state.pending_count(helper.context_id),
+                "queue": state.pending_queue_as_list(helper.context_id),
+            },
+        )
 
     # Host-Default „Schüler-Leihschein" (Druck-Dialog) + Bücher-Reihenfolge.
-    await hub.send_websocket(websocket, {
-        "type": "settings",
-        "slip_second_page": state.slip_second_page_default,
-        "book_order": book_order,
-    })
+    await hub.send_websocket(
+        websocket,
+        {
+            "type": "settings",
+            "slip_second_page": state.slip_second_page_default,
+            "book_order": book_order,
+        },
+    )
 
     # Kontext-Übersicht (alle offenen Klassen + eigene Klasse) schicken, damit
     # ein Idle-Helfer sofort die Klassen-Reiter der Warteschlangen-Ansicht hat.
-    await hub.send_websocket(websocket, {
-        "type": "contexts_update",
-        "contexts": state.real_contexts_summary(),
-        "own_context_id": helper.context_id,
-    })
+    await hub.send_websocket(
+        websocket,
+        {
+            "type": "contexts_update",
+            "contexts": state.real_contexts_summary(),
+            "own_context_id": helper.context_id,
+        },
+    )
 
     await hub.broadcast_host(state.state_snapshot())
 
@@ -247,10 +267,12 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                 target_pair = state.find_student_with_ctx(sid) if sid is not None else None
                 target = target_pair[1] if target_pair else None
                 if target is None or target.status != "pending":
-                    await websocket.send_json({
-                        "type": "error",
-                        "msg": "Schüler nicht (mehr) in der Warteschlange",
-                    })
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "msg": "Schüler nicht (mehr) in der Warteschlange",
+                        }
+                    )
                     # Queue sofort nachpushen, damit der Client die aktuelle
                     # Liste sieht (z. B. zwischenzeitlich von anderem Helfer
                     # aufgerufen) — statt auf den nächsten Broadcast zu warten.
@@ -273,8 +295,11 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                     # (`_deferred_end`). Der „Weiter"-Button (`next`) dagegen
                     # schließt den Schüler als 'done' ab (s. advance_helper).
                     await end_student(
-                        state, hub, helper.student_id,
-                        queue_status="pending", session_state="revoked",
+                        state,
+                        hub,
+                        helper.student_id,
+                        queue_status="pending",
+                        session_state="revoked",
                         helper_notify={"type": "loading"},  # Queue verbergen — neuer wird geladen
                     )
                 await assign_student_to_helper(state, hub, helper, target)
@@ -351,13 +376,20 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                     continue
                 if helper.student_id is not None:
                     await end_student(
-                        state, hub, helper.student_id,
-                        queue_status="pending", session_state="revoked",
+                        state,
+                        hub,
+                        helper.student_id,
+                        queue_status="pending",
+                        session_state="revoked",
                         helper_notify={"type": "loading"},  # Queue verbergen — neuer wird geladen
                     )
                 student = QueueStudent(
-                    student_id=sid, lastname=lastname, firstname=firstname,
-                    form=form, status="active", assigned_helper=helper.token,
+                    student_id=sid,
+                    lastname=lastname,
+                    firstname=firstname,
+                    form=form,
+                    status="active",
+                    assigned_helper=helper.token,
                 )
                 await assign_student_to_helper(state, hub, helper, student)
                 continue
@@ -371,22 +403,28 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                 # unmittelbares Rendern, ohne auf den nächsten Broadcast zu
                 # warten).
                 helper.peeking = True
-                await hub.send_scanner(token, {
-                    "type": "queue_update",
-                    "queue_size": state.pending_count(helper.context_id),
-                    "queue": state.pending_queue_as_list(helper.context_id),
-                })
+                await hub.send_scanner(
+                    token,
+                    {
+                        "type": "queue_update",
+                        "queue_size": state.pending_count(helper.context_id),
+                        "queue": state.pending_queue_as_list(helper.context_id),
+                    },
+                )
                 # Frische Kontext-Übersicht (alle offenen Klassen + eigene) für
                 # die Klassen-Reiter — ein Helfer mit aktivem Schüler bekommt
                 # sonst keine Live-contexts_update (broadcast_queue_size erreicht
                 # ihn nur, weil hier gerade peeking=True gesetzt wurde; das eigene
                 # peek_queue sendet sie aber bewusst sofort, ohne auf den nächsten
                 # Broadcast zu warten).
-                await hub.send_scanner(token, {
-                    "type": "contexts_update",
-                    "contexts": state.real_contexts_summary(),
-                    "own_context_id": helper.context_id,
-                })
+                await hub.send_scanner(
+                    token,
+                    {
+                        "type": "contexts_update",
+                        "contexts": state.real_contexts_summary(),
+                        "own_context_id": helper.context_id,
+                    },
+                )
                 continue
 
             if mtype == "peek_close":
@@ -402,18 +440,22 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                 # kein IServ-/DB-Zugriff; nur ein Host-Broadcast.
                 sid = helper.student_id
                 if sid is not None:
-                    await hub.broadcast_host({
-                        "type": "book_alert",
-                        "student_id": sid,
-                        "cleared": True,
-                    })
+                    await hub.broadcast_host(
+                        {
+                            "type": "book_alert",
+                            "student_id": sid,
+                            "cleared": True,
+                        }
+                    )
                 continue
 
             if mtype == "print":
                 # Leihschein des aktuell zugewiesenen Schülers drucken.
                 # Read-only PDF-Abruf + lokaler Druck (kein IServ-Submit).
                 if helper.student_id is None:
-                    await websocket.send_json({"type": "print_result", "ok": False, "msg": "Kein Schüler zugewiesen"})
+                    await websocket.send_json(
+                        {"type": "print_result", "ok": False, "msg": "Kein Schüler zugewiesen"}
+                    )
                     continue
                 # Seite 1 wird immer gedruckt; Seite 2 (Schüler-Leihschein) nur,
                 # wenn der Helfer sie im Druck-Dialog aktiviert hat.
@@ -439,19 +481,25 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
 
             student_id = helper.student_id
             if student_id is None:
-                await websocket.send_json({
-                    "type": "scan_result",
-                    "barcode": barcode,
-                    "status": "error",
-                    "msg": "Kein Schüler zugewiesen",
-                })
+                await websocket.send_json(
+                    {
+                        "type": "scan_result",
+                        "barcode": barcode,
+                        "status": "error",
+                        "msg": "Kein Schüler zugewiesen",
+                    }
+                )
                 continue
 
             # Scan verarbeiten: Buchungs-Vorabprüfung (im Lager? bestellt? Reihe
             # noch nicht ausgeliehen?) → buchen (Enter) oder — Gate aus — stagen.
             # Nicht erfüllt → Feld wird NICHT berührt.
             result = await process_scan(
-                state, student_id, helper.vormerk_isbns, helper.lent_isbns, barcode,
+                state,
+                student_id,
+                helper.vormerk_isbns,
+                helper.lent_isbns,
+                barcode,
                 source="helper",
             )
             # ISBN mitgeben, damit der Helferclient das gescannte Buch in seiner
@@ -499,13 +547,16 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
 # Modus B — iPad-Display (nur QR, keine Schülerdaten)
 # ---------------------------------------------------------------------------
 
+
 @router.websocket("/ws/display")
 async def ws_display(websocket: WebSocket) -> None:
     state = get_state()
     hub = get_hub()
 
     await websocket.accept()
-    display = DisplaySession(display_id=uuid.uuid4().hex[:12], registration_code=gen_registration_code())
+    display = DisplaySession(
+        display_id=uuid.uuid4().hex[:12], registration_code=gen_registration_code()
+    )
     state.displays[display.display_id] = display
     display.ws = websocket
     await send_display_update(state, display)  # zeigt zunächst den Registrierungscode
@@ -528,6 +579,7 @@ async def ws_display(websocket: WebSocket) -> None:
 # ---------------------------------------------------------------------------
 # Modus B — Schüler-Session (Pairing-Gate + Scan)
 # ---------------------------------------------------------------------------
+
 
 @router.websocket("/ws/student/{session_token}")
 async def ws_student(websocket: WebSocket, session_token: str) -> None:
@@ -565,11 +617,13 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
             qs = state.find_student(session.student_id)
             info = await hydrate_student_info(state, info, qs.form if qs else "", session)
             books = info.get("books", [])
-            await websocket.send_json({
-                "type": "student_info",
-                "student": {**info, "books": []},
-                "payment_overridden": session.payment_overridden,
-            })
+            await websocket.send_json(
+                {
+                    "type": "student_info",
+                    "student": {**info, "books": []},
+                    "payment_overridden": session.payment_overridden,
+                }
+            )
             load_inflight = session.load_task is not None and not session.load_task.done()
             worker_present = state.student_worker_sessions.get(session.student_id) is not None
             if not load_inflight or worker_present:
@@ -592,8 +646,10 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
             except json.JSONDecodeError:
                 # Malformedes Frame — loggen und weiterlauschen, statt die
                 # Schleife mit Traceback sterben zu lassen.
-                log.warning("Ungültiges JSON-Frame vom Schüler-WS (session=%s) — ignoriert",
-                            getattr(session, "session_token", "?"))
+                log.warning(
+                    "Ungültiges JSON-Frame vom Schüler-WS (session=%s) — ignoriert",
+                    getattr(session, "session_token", "?"),
+                )
                 continue
             session.last_activity = datetime.now()
             mtype = raw.get("type")
@@ -603,12 +659,14 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
                 if not barcode:
                     continue
                 if session.state != "paired" or session.student_id is None:
-                    await websocket.send_json({
-                        "type": "scan_result",
-                        "barcode": barcode,
-                        "status": "error",
-                        "msg": "Noch nicht freigegeben",
-                    })
+                    await websocket.send_json(
+                        {
+                            "type": "scan_result",
+                            "barcode": barcode,
+                            "status": "error",
+                            "msg": "Noch nicht freigegeben",
+                        }
+                    )
                     continue
                 if session.book_alert_open:
                     # Blockierendes Hinweis-Modal (ausgemustertes Buch) noch offen —
@@ -636,11 +694,15 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
                 # Schüler schließt selbst ab → harter Zugriffsentzug.
                 if session.student_id is not None:
                     await end_student(
-                        state, hub, session.student_id,
-                        queue_status="done", session_state="completed",
+                        state,
+                        hub,
+                        session.student_id,
+                        queue_status="done",
+                        session_state="completed",
                     )
                 else:
                     from ..sessions import invalidate_session
+
                     await invalidate_session(state, session, "completed", reason="self-finish")
                 break
 

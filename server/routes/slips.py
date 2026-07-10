@@ -20,6 +20,7 @@ log = logging.getLogger(__name__)
 # Leihschein-Druck (read-only PDF-Abruf + lokaler Druck)
 # ---------------------------------------------------------------------------
 
+
 @host_router.post("/api/print-loan-slip")
 async def print_loan_slip(body: PrintLoanSlipRequest) -> dict:
     """Leihschein eines Schülers holen (read-only) und lokal drucken.
@@ -78,6 +79,7 @@ async def set_printer(body: PrinterRequest) -> dict:
 # Buchung (GATED — nur freigegebener Buchungstest, PLAN §6)
 # ---------------------------------------------------------------------------
 
+
 def _last_scan_for(state, student_id: int) -> str:
     """Zuletzt gestageter Barcode des Schülers (Modus B Session oder Modus A Helfer)."""
     sess = state.find_session_by_student(student_id)
@@ -110,9 +112,9 @@ async def commit_book(body: CommitBookRequest) -> dict:
     # host_router) — FastAPI löst Dependencies immer vor dem Funktionskörper
     # auf, die Reihenfolge Gate2 -> Gate1 -> Gate3 bleibt damit erhalten.
     cfg = get_config()
-    if not cfg.allow_booking:                   # Gate 1: Server-Flag
+    if not cfg.allow_booking:  # Gate 1: Server-Flag
         raise HTTPException(403, "Buchung gesperrt (ALLOW_BOOKING=false)")
-    if not body.confirm:                        # Gate 3: bewusster Extra-Schritt
+    if not body.confirm:  # Gate 3: bewusster Extra-Schritt
         raise HTTPException(400, "confirm:true erforderlich")
 
     if body.student_id is None:

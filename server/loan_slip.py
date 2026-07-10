@@ -103,17 +103,19 @@ def override_class_on_slip(pdf_bytes: bytes, form: str) -> bytes:
                     code_x = x0 + font.text_length(prefix, size)
                     top = baseline - _CAP * size - 0.2
                     bottom = baseline + _DESC * size
-                    right = max(
-                        span["bbox"][2], code_x + font.text_length(new_text, size)
-                    ) + 2
+                    right = max(span["bbox"][2], code_x + font.text_length(new_text, size)) + 2
                     # Alten Wert verdecken (weiß) und echte Klasse neu setzen.
                     page.draw_rect(
                         fitz.Rect(code_x - 0.5, top, right, bottom),
-                        color=None, fill=(1, 1, 1),
+                        color=None,
+                        fill=(1, 1, 1),
                     )
                     page.insert_text(
-                        (code_x, baseline), new_text,
-                        fontname="hebo", fontsize=size, color=0,
+                        (code_x, baseline),
+                        new_text,
+                        fontname="hebo",
+                        fontsize=size,
+                        color=0,
                     )
                     changed += 1
         if not changed:

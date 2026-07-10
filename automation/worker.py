@@ -143,7 +143,9 @@ class StudentSession:
             self._card_loaded = True
             log.info("Kartei für Schüler %d reloaded (direkte Schüler-Route)", self._student_id)
         except Exception as e:  # noqa: BLE001 — direkter Reload gescheitert (z. B. Login ohne relogin) → sicherer Fallback
-            log.warning("Direkter Reload für %d fehlgeschlagen (%s) — full load_card()", self._student_id, e)
+            log.warning(
+                "Direkter Reload für %d fehlgeschlagen (%s) — full load_card()", self._student_id, e
+            )
             await self.load_card()
 
     # Selektor des Counter-Eingabefeldes nach Schülerauswahl (Spike A).
@@ -210,8 +212,9 @@ class StudentSession:
         try:
             await field.fill(barcode)
             await field.press("Enter")  # löst die Buchung aus (ng-submit)
-            log.warning("Barcode '%s' GEBUCHT (Enter gedrückt) für Schüler %d",
-                        barcode, self._student_id)
+            log.warning(
+                "Barcode '%s' GEBUCHT (Enter gedrückt) für Schüler %d", barcode, self._student_id
+            )
         except PlaywrightTimeout:
             return {"status": "error", "msg": "Buchung: Barcode-Feld nicht erreichbar"}
         await self._page.wait_for_timeout(1500)
@@ -251,7 +254,7 @@ class StudentSession:
         # Barcode sonst wieder mitgelesen.
         try:
             # Eingabefeld + Typeahead-Suggestions, die den Barcode abbilden:
-            input_scope = page.locator('input.tt-input, .tt-dropdown-menu, .tt-hint')
+            input_scope = page.locator("input.tt-input, .tt-dropdown-menu, .tt-hint")
             # Bücherliste der Schülerkartei. Beide Selektoren treffen dieselben
             # `<tr ng-repeat="book in bl.books">`-Zeilen (das ng-repeat sitzt auf
             # dem <tr>) und sind gegen einen DOM-Dump der geladenen Kartei
@@ -259,7 +262,7 @@ class StudentSession:
             # zu weiter Selektor würde die Erfolgs-Erkennung auf Container
             # ausdehnen, die den Barcode aus anderer Quelle enthalten können.
             list_selectors = [
-                'table tbody tr',
+                "table tbody tr",
                 '[ng-repeat*="book"]',
             ]
             for sel in list_selectors:
@@ -274,15 +277,17 @@ class StudentSession:
                     except Exception:  # noqa: BLE001
                         continue
                     if barcode in row_text:
-                        return {"status": "booked",
-                                "msg": "Buchung im DOM bestätigt (best-effort)",
-                                "raw": barcode}
+                        return {
+                            "status": "booked",
+                            "msg": "Buchung im DOM bestätigt (best-effort)",
+                            "raw": barcode,
+                        }
         except Exception:  # noqa: BLE001
             pass
         return {
             "status": "unknown",
             "msg": "Buchung ausgelöst, Ergebnis nicht eindeutig erkennbar "
-                   "(Selektoren unverifiziert — freigegebener Test nötig)",
+            "(Selektoren unverifiziert — freigegebener Test nötig)",
         }
 
     async def close(self) -> None:
@@ -295,18 +300,25 @@ class StudentSession:
 class WorkerPool:
     """Pool von N Browser-Contexts — je eigener Login, je eigener Cookie-Jar."""
 
-    def __init__(self, n: int, domain: str, username: str, password: str,
-                 headless: bool = True, slow_mo_ms: int = 0) -> None:
+    def __init__(
+        self,
+        n: int,
+        domain: str,
+        username: str,
+        password: str,
+        headless: bool = True,
+        slow_mo_ms: int = 0,
+    ) -> None:
         self._n = n
         self._domain = domain
         self._username = username
         self._password = password
         self._headless = headless
         self._slow_mo_ms = slow_mo_ms
-        self._pw = None       # Playwright-Instanz
+        self._pw = None  # Playwright-Instanz
         self._browser = None
         self._contexts: list = []
-        self._total = 0       # erfolgreich eingeloggte Contexts (für stats())
+        self._total = 0  # erfolgreich eingeloggte Contexts (für stats())
         # Condition (wrapt ein Lock) — open_student kann damit kurz auf einen
         # freigewordenen Context warten, wenn eine release()-Task noch läuft.
         # Verhindert das „Kein freier Worker-Context"-Rennen, wenn am Helfer
@@ -384,8 +396,9 @@ class WorkerPool:
         if cancelled:
             # Abbruch: aufgebaute Contexts nicht im Pool behalten (Pool wird
             # ohnehin nicht genutzt), sondern deterministisch schließen.
-            log.info("start() abgebrochen — schließe %d bereits erstellte Contexts",
-                     len(self._contexts))
+            log.info(
+                "start() abgebrochen — schließe %d bereits erstellte Contexts", len(self._contexts)
+            )
             for ctx in self._contexts:
                 try:
                     await ctx.close()
@@ -440,7 +453,9 @@ class WorkerPool:
         try:
             await page.goto(f"https://ausleihe.{self._domain}/", wait_until="domcontentloaded")
             await page.wait_for_timeout(4000)
-            await page.goto(f"https://ausleihe.{self._domain}/#/counter", wait_until="domcontentloaded")
+            await page.goto(
+                f"https://ausleihe.{self._domain}/#/counter", wait_until="domcontentloaded"
+            )
             await page.wait_for_timeout(2000)
             try:
                 await page.locator(sel).wait_for(state="visible", timeout=10_000)
@@ -449,7 +464,8 @@ class WorkerPool:
             except PlaywrightTimeout:
                 log.warning(
                     "Selektor-Canary FEHLGESCHLAGEN: '%s' nicht gefunden — "
-                    "IServ-DOM evtl. geändert, Write-Pfad prüfen!", sel
+                    "IServ-DOM evtl. geändert, Write-Pfad prüfen!",
+                    sel,
                 )
                 return {"ok": False, "selector": sel, "msg": "Selektor nicht gefunden"}
         finally:
@@ -490,7 +506,8 @@ class WorkerPool:
             if not self._contexts:
                 log.info(
                     "Worker-Pool leer für Schüler %d — warte bis %.1fs auf freien Context",
-                    student_id, wait_timeout,
+                    student_id,
+                    wait_timeout,
                 )
                 try:
                     await asyncio.wait_for(

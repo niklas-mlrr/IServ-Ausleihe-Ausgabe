@@ -39,8 +39,11 @@ async def next_student(body: NextStudentRequest) -> dict:
     # der Schüler geladen wird) zentral in `assign_student_to_helper`.
     await assign_student_to_helper(state, hub, helper, student)
 
-    return {"ok": True, "student_id": student.student_id,
-            "name": f"{student.lastname}, {student.firstname}"}
+    return {
+        "ok": True,
+        "student_id": student.student_id,
+        "name": f"{student.lastname}, {student.firstname}",
+    }
 
 
 @host_router.post("/api/skip")
@@ -97,8 +100,9 @@ async def disconnect_all(body: ContextIdBody = _EMPTY_CONTEXT_BODY) -> dict:
         return {"ok": True, "count": 0}
     active_ids = [s.student_id for s in ctx.queue if s.status == "active"]
     for sid in active_ids:
-        await end_student(state, hub, sid, queue_status="pending",
-                          session_state="revoked", broadcast=False)
+        await end_student(
+            state, hub, sid, queue_status="pending", session_state="revoked", broadcast=False
+        )
     # Einmal am Ende broadcasten statt pro Schüler (sonst N Snapshots).
     if active_ids:
         await hub.broadcast_host(state.state_snapshot())
@@ -122,8 +126,9 @@ async def reset_queue(body: ContextIdBody = _EMPTY_CONTEXT_BODY) -> dict:
         return {"ok": True, "count": 0}
     changed = [s.student_id for s in ctx.queue if s.status != "pending"]
     for sid in changed:
-        await end_student(state, hub, sid, queue_status="pending",
-                          session_state="revoked", broadcast=False)
+        await end_student(
+            state, hub, sid, queue_status="pending", session_state="revoked", broadcast=False
+        )
     # Einmal am Ende broadcasten statt pro Schüler (sonst N Snapshots).
     if changed:
         await hub.broadcast_host(state.state_snapshot())
@@ -202,5 +207,7 @@ async def clear_book_alert(body: StudentRef) -> dict:
             except Exception:
                 pass
 
-    await get_hub().broadcast_host({"type": "book_alert", "student_id": student_id, "cleared": True})
+    await get_hub().broadcast_host(
+        {"type": "book_alert", "student_id": student_id, "cleared": True}
+    )
     return {"ok": True}

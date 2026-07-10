@@ -7,6 +7,7 @@ direkt).
 
 Aufruf: `uv run python -m automation.recovery_test`
 """
+
 from __future__ import annotations
 
 import asyncio

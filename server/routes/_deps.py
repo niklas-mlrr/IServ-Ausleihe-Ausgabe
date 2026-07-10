@@ -34,6 +34,7 @@ router = APIRouter()
 # Auth helpers
 # ---------------------------------------------------------------------------
 
+
 def require_host(session_id: str | None = Cookie(default=None)) -> str:
     state = get_state()
     if not state.is_host_session_valid(session_id, get_config().host_session_ttl_s):
@@ -71,6 +72,7 @@ host_router = APIRouter(dependencies=[Depends(require_host)])
 # Pflichtfeld), die 400-Prüfung bleibt im Funktionsrumpf NACH den anderen
 # beiden Gates.
 
+
 class StudentRef(BaseModel):
     """Gemeinsames Body-Model für alle Endpunkte, die nur eine `student_id`
     brauchen (skip/disconnect/finish/clear-book-alert/…). Bewusst
@@ -78,6 +80,7 @@ class StudentRef(BaseModel):
     die 400-Meldung ("student_id fehlt") aus dem Funktionsrumpf; nur ein
     falscher Werttyp lässt Pydantic vorab mit 422 abbrechen (siehe
     Abschnittskommentar oben)."""
+
     student_id: int | None = None
 
 
@@ -105,6 +108,7 @@ class CloseClassRequest(BaseModel):
 class ContextIdBody(BaseModel):
     """`context_id` optional, auch der ganze Body optional (kein Body im
     Request → Default-Instanz, `context_id=None` → aktiver Kontext)."""
+
     context_id: str | None = None
 
 
@@ -137,6 +141,7 @@ class BoolToggleRequest(BaseModel):
     Endpoint (siehe `_BOOL_SETTINGS`-Kommentar in routes/settings.py), daher
     ein eigenes (wenn auch identisch aussehendes) Model statt
     `SettingsToggleRequest`."""
+
     enabled: bool = False
 
 
@@ -147,6 +152,7 @@ class SettingsToggleRequest(BaseModel):
     — `web/host.js` bleibt bewusst unverändert, nur die URL wandert auf
     `/api/settings/<key>`. Welches Feld tatsächlich gelesen wird, bestimmt
     `_BOOL_SETTINGS[key]`."""
+
     enabled: bool | None = None
     second_page: bool | None = None
 

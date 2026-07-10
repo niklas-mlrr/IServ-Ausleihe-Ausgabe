@@ -7,6 +7,7 @@ Read-only gegenueber IServ: laedt nur eine Schuelerkartei (kein Submit/Enter).
 Liest HOST_PASSWORD aus .env. Keine Schuelernamen in dauerhaften Logs
 (PLAN 3.7) — der Name erscheint nur fluechtig in der Test-Ausgabe.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -36,7 +37,14 @@ async def main():
         browser = await p.chromium.launch(headless=True)
         ctx = await browser.new_context(ignore_https_errors=True)
         page = await ctx.new_page()
-        page.on("console", lambda m: console_errors.append(f"[host:{m.type}] {m.text}") if m.type in ("error", "warning") else None)
+        page.on(
+            "console",
+            lambda m: (
+                console_errors.append(f"[host:{m.type}] {m.text}")
+                if m.type in ("error", "warning")
+                else None
+            ),
+        )
         page.on("pageerror", lambda e: console_errors.append(f"[host:pageerror] {e}"))
 
         # 1. Login
@@ -47,12 +55,18 @@ async def main():
         log("OK  Login -> main-view sichtbar")
 
         # 2. Host-WS verbunden?
-        await page.wait_for_function("document.getElementById('ws-dot').className.includes('ok')", timeout=10_000)
+        await page.wait_for_function(
+            "document.getElementById('ws-dot').className.includes('ok')", timeout=10_000
+        )
         log("OK  Host-WS verbunden")
 
         # 3. Klassen geladen, Queue aufbauen
-        await page.wait_for_function("document.querySelectorAll('#class-select option').length > 1", timeout=15_000)
-        opts = await page.eval_on_selector_all("#class-select option", "els => els.map(e => e.value).filter(Boolean)")
+        await page.wait_for_function(
+            "document.querySelectorAll('#class-select option').length > 1", timeout=15_000
+        )
+        opts = await page.eval_on_selector_all(
+            "#class-select option", "els => els.map(e => e.value).filter(Boolean)"
+        )
         log(f"OK  {len(opts)} Klassen geladen")
         assert opts, "keine Klassen"
 
@@ -81,10 +95,17 @@ async def main():
         # 5. Scanner-Seite in separatem Context (= anderes Geraet)
         sctx = await browser.new_context(ignore_https_errors=True)
         spage = await sctx.new_page()
-        spage.on("console", lambda m: console_errors.append(f"[scan:{m.type}] {m.text}") if m.type == "error" else None)
+        spage.on(
+            "console",
+            lambda m: (
+                console_errors.append(f"[scan:{m.type}] {m.text}") if m.type == "error" else None
+            ),
+        )
         spage.on("pageerror", lambda e: console_errors.append(f"[scan:pageerror] {e}"))
         await spage.goto(f"{BASE}/scan.html?token={token}", wait_until="domcontentloaded")
-        await spage.wait_for_function("document.getElementById('dot').className.includes('ok')", timeout=10_000)
+        await spage.wait_for_function(
+            "document.getElementById('dot').className.includes('ok')", timeout=10_000
+        )
         log("OK  Scanner-WS verbunden")
 
         await page.wait_for_function(
@@ -108,10 +129,14 @@ async def main():
         log("OK  Queue: 1 Schueler 'Aktiv'")
 
         # 7. Simulierter Scan -> staged (kein Enter)
-        await spage.evaluate("() => ws.send(JSON.stringify({type:'scan', value:'TEST-BARCODE-0000'}))")
+        await spage.evaluate(
+            "() => ws.send(JSON.stringify({type:'scan', value:'TEST-BARCODE-0000'}))"
+        )
         await spage.wait_for_selector("#scan-results .scan-item", timeout=15_000)
         res = await spage.inner_text("#scan-results .scan-item")
-        assert "staged" in (await spage.get_attribute("#scan-results .scan-item", "class")), f"nicht staged: {res}"
+        assert "staged" in (await spage.get_attribute("#scan-results .scan-item", "class")), (
+            f"nicht staged: {res}"
+        )
         log(f"OK  Scan staged (kein Submit): '{res}'")
 
         await browser.close()

@@ -19,14 +19,18 @@ from server.state import AppState
 # get_class_book_catalog — mit gefälschter Jahrgangs-Bücherliste
 # ---------------------------------------------------------------------------
 
+
 def _item(isbn, title, subject, borrowable=True, multi=False, grades=None):
     """Ein Booklist-Item mit `series_data` (wie der /booklists/:id-Endpunkt liefert)."""
     return {
         "borrowable": borrowable,
         "series": isbn,
         "series_data": {
-            "isbn": isbn, "title": title, "subjectsFlat": [subject],
-            "isMultiYear": multi, "gradesFlat": grades or [],
+            "isbn": isbn,
+            "title": title,
+            "subjectsFlat": [subject],
+            "isMultiYear": multi,
+            "gradesFlat": grades or [],
         },
     }
 
@@ -38,7 +42,7 @@ def _booklist(items):
 class _FakeSchoolyears:
     def __init__(self, booklists, full):
         self._booklists = booklists
-        self._full = full   # booklist_id -> full booklist
+        self._full = full  # booklist_id -> full booklist
 
     def get_booklists(self, sy):
         return self._booklists
@@ -59,7 +63,7 @@ class _FakeClient:
 def _catalog_with_grade(forms, booklists, full, form="9a", sy="2025/2026"):
     c = IsServClient("d", "u", "p")
     c._client = _FakeClient(forms, booklists, full)  # _get_client()
-    c._series_map = {}                               # series_data reicht → kein Fetch
+    c._series_map = {}  # series_data reicht → kein Fetch
     return asyncio.run(c.get_class_book_catalog(form, sy))  # (grade, catalog)
 
 
@@ -74,7 +78,7 @@ def test_catalog_from_booklist_filters_borrowable_dedupes_sorts():
         _item("A", "Mathe", "Mathematik"),
         _item("B", "Deutsch Arbeitsheft", "Deutsch", borrowable=False),  # raus
         _item("C", "Bio", "Biologie"),
-        _item("A", "Mathe", "Mathematik"),                               # Dublette
+        _item("A", "Mathe", "Mathematik"),  # Dublette
     ]
     cat = _catalog(forms, [{"grade": 9, "id": 100}], {100: _booklist(items)})
     # borrowable + dedupe, sortiert nach (subject, title): Biologie(C), Mathematik(A)
@@ -87,13 +91,21 @@ def test_catalog_includes_multiyear_in_every_grade():
     # gezeigt — der Band erscheint in BEIDEN Jahrgängen (kein min-grade-Filter).
     m = _item("M", "Bioskop 7/8", "Biologie", multi=True, grades=[8, 7])
 
-    cat7 = _catalog([{"name": "7a", "grade": 7}], [{"grade": 7, "id": 7}],
-                    {7: _booklist([_item("N", "Normal", "Deutsch"), m])}, form="7a")
+    cat7 = _catalog(
+        [{"name": "7a", "grade": 7}],
+        [{"grade": 7, "id": 7}],
+        {7: _booklist([_item("N", "Normal", "Deutsch"), m])},
+        form="7a",
+    )
     assert {b["isbn"] for b in cat7} == {"N", "M"}
 
-    cat8 = _catalog([{"name": "8a", "grade": 8}], [{"grade": 8, "id": 8}],
-                    {8: _booklist([_item("P", "Physik", "Physik"), m])}, form="8a")
-    assert {b["isbn"] for b in cat8} == {"P", "M"}   # oberer Jg. → Band bleibt drin
+    cat8 = _catalog(
+        [{"name": "8a", "grade": 8}],
+        [{"grade": 8, "id": 8}],
+        {8: _booklist([_item("P", "Physik", "Physik"), m])},
+        form="8a",
+    )
+    assert {b["isbn"] for b in cat8} == {"P", "M"}  # oberer Jg. → Band bleibt drin
 
 
 def test_catalog_empty_when_no_booklist_for_grade():
@@ -103,8 +115,12 @@ def test_catalog_empty_when_no_booklist_for_grade():
 
 
 def test_catalog_empty_when_form_unknown():
-    cat = _catalog([{"name": "8a", "grade": 8}], [{"grade": 8, "id": 8}],
-                   {8: _booklist([_item("A", "X", "Y")])}, form="9z")
+    cat = _catalog(
+        [{"name": "8a", "grade": 8}],
+        [{"grade": 8, "id": 8}],
+        {8: _booklist([_item("A", "X", "Y")])},
+        form="9z",
+    )
     assert cat == []
 
 
@@ -112,7 +128,8 @@ def test_catalog_returns_grade_alongside_books():
     # (grade, catalog): der Jahrgang der Klasse wird zum Seeden der jahrgangs-
     # weiten Reihenfolge mitgeliefert.
     grade, cat = _catalog_with_grade(
-        [{"name": "9a", "grade": 9}], [{"grade": 9, "id": 100}],
+        [{"name": "9a", "grade": 9}],
+        [{"grade": 9, "id": 100}],
         {100: _booklist([_item("A", "Mathe", "Mathematik")])},
     )
     assert grade == 9 and [b["isbn"] for b in cat] == ["A"]
@@ -120,8 +137,10 @@ def test_catalog_returns_grade_alongside_books():
 
 def test_catalog_grade_none_when_form_unknown():
     grade, cat = _catalog_with_grade(
-        [{"name": "8a", "grade": 8}], [{"grade": 8, "id": 8}],
-        {8: _booklist([_item("A", "X", "Y")])}, form="9z",
+        [{"name": "8a", "grade": 8}],
+        [{"grade": 8, "id": 8}],
+        {8: _booklist([_item("A", "X", "Y")])},
+        form="9z",
     )
     assert grade is None and cat == []
 
@@ -129,6 +148,7 @@ def test_catalog_grade_none_when_form_unknown():
 # ---------------------------------------------------------------------------
 # normalize_book_order — Beschränkung auf Katalog + Anhängen fehlender
 # ---------------------------------------------------------------------------
+
 
 def test_normalize_keeps_requested_order_within_catalog():
     catalog = ["A", "B", "C"]
@@ -148,6 +168,7 @@ def test_normalize_empty_request_yields_catalog_order():
 # ---------------------------------------------------------------------------
 # State-Reset
 # ---------------------------------------------------------------------------
+
 
 def test_reset_clears_order_and_catalog():
     st = AppState()
@@ -196,12 +217,15 @@ def test_reset_booklist_orders_clears_hidden_too():
 # Ausgeblendete Buchreihen (Einstellungen-Dialog, „Ausblenden"-Button je Buch)
 # ---------------------------------------------------------------------------
 
+
 def test_apply_hidden_books_removes_hidden_isbns_from_info():
-    info = {"books": [
-        {"isbn": "A", "status": "vorgemerkt"},
-        {"isbn": "B", "status": "vorgemerkt"},
-        {"isbn": "C", "status": "ausgeliehen"},
-    ]}
+    info = {
+        "books": [
+            {"isbn": "A", "status": "vorgemerkt"},
+            {"isbn": "B", "status": "vorgemerkt"},
+            {"isbn": "C", "status": "ausgeliehen"},
+        ]
+    }
     apply_hidden_books(info, {"B"})
     assert [b["isbn"] for b in info["books"]] == ["A", "C"]
 
@@ -228,8 +252,11 @@ def test_get_hidden_isbns_for_form_resolves_grade_via_class_catalog():
 
 def test_get_hidden_isbns_for_form_empty_when_grade_unresolvable():
     c = IsServClient("d", "u", "p")
-    c._client = _FakeClient([{"name": "8a", "grade": 8}], [{"grade": 8, "id": 8}],
-                             {8: _booklist([_item("A", "X", "Y")])})
+    c._client = _FakeClient(
+        [{"name": "8a", "grade": 8}],
+        [{"grade": 8, "id": 8}],
+        {8: _booklist([_item("A", "X", "Y")])},
+    )
     c._series_map = {}
     st = AppState()
     st.iserv = c

@@ -134,12 +134,16 @@ def explore(student: str | None) -> None:
                     snap(page, "06_counter_schueler")
                     dump_links(page, "06_counter_schueler")
                 else:
-                    print("  [warn] Kein Typeahead-Vorschlag erschienen — Selektor/Wartezeit anpassen.")
+                    print(
+                        "  [warn] Kein Typeahead-Vorschlag erschienen — Selektor/Wartezeit anpassen."
+                    )
             else:
                 print("  [warn] Counter-Eingabefeld nicht gefunden — Selektor anpassen.")
 
         browser.close()
-    print(f"Fertig. Ergebnisse in {OUT_DIR}/ — Auswertung in docs/spikes/spike_a_protokoll.md eintragen.")
+    print(
+        f"Fertig. Ergebnisse in {OUT_DIR}/ — Auswertung in docs/spikes/spike_a_protokoll.md eintragen."
+    )
 
 
 def issue_or_return(action: str, code: str) -> None:
@@ -154,11 +158,15 @@ def issue_or_return(action: str, code: str) -> None:
 
 def main() -> None:
     load_dotenv(Path(__file__).parent.parent / ".env")
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--explore", action="store_true", help="read-only Erkundung (keine Buchung)")
     group.add_argument("--issue", metavar="CODE", help="Buch ausgeben (Gerüst, gesperrt)")
-    group.add_argument("--return", dest="return_", metavar="CODE", help="Buch zurücknehmen (Gerüst, gesperrt)")
+    group.add_argument(
+        "--return", dest="return_", metavar="CODE", help="Buch zurücknehmen (Gerüst, gesperrt)"
+    )
     parser.add_argument("--student", help="Nachname für die Typeahead-Suche im Explore-Modus")
     args = parser.parse_args()
 

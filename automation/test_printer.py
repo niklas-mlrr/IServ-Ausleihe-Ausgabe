@@ -51,9 +51,14 @@ def list_printers() -> list[str]:
     names: list[str] = []
     try:
         out = subprocess.check_output(
-            ["powershell", "-NoProfile", "-Command",
-             "Get-Printer | Select-Object Name, PrinterStatus, Default | Format-Table -AutoSize"],
-            text=True, timeout=10,
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                "Get-Printer | Select-Object Name, PrinterStatus, Default | Format-Table -AutoSize",
+            ],
+            text=True,
+            timeout=10,
         )
         print(out.strip())
         # Namen aus der Tabelle extrahieren (Zeile 3+, erste Spalte)
@@ -66,7 +71,8 @@ def list_printers() -> list[str]:
         try:
             out = subprocess.check_output(
                 ["wmic", "printer", "get", "Name,Default,PrinterStatus"],
-                text=True, timeout=10,
+                text=True,
+                timeout=10,
             )
             print(out.strip())
         except Exception as e2:
@@ -77,6 +83,7 @@ def list_printers() -> list[str]:
 
 def _find_sumatra() -> str | None:
     import shutil
+
     local = os.environ.get("LOCALAPPDATA", "")
     candidates = (
         r"C:\Program Files\SumatraPDF\SumatraPDF.exe",
@@ -97,8 +104,12 @@ async def _install_sumatra_winget() -> str | None:
     """SumatraPDF via winget installieren; gibt Pfad zurück wenn erfolgreich."""
     print("  -> Installiere SumatraPDF via winget ...")
     proc = await asyncio.create_subprocess_exec(
-        "winget", "install", "SumatraPDF.SumatraPDF",
-        "--silent", "--accept-package-agreements", "--accept-source-agreements",
+        "winget",
+        "install",
+        "SumatraPDF.SumatraPDF",
+        "--silent",
+        "--accept-package-agreements",
+        "--accept-source-agreements",
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
     )
@@ -156,7 +167,10 @@ async def _test_powershell(pdf_path: Path, printer_name: str | None) -> bool:
     else:
         ps = f"Start-Process -FilePath '{pdf_path}' -Verb Print -Wait"
     proc = await asyncio.create_subprocess_exec(
-        "powershell", "-NoProfile", "-Command", ps,
+        "powershell",
+        "-NoProfile",
+        "-Command",
+        ps,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
     )
@@ -190,7 +204,7 @@ async def main() -> None:
         print(f"Druckername aus Argument: {printer_name!r}")
     else:
         print("Kein Druckername angegeben → Standarddrucker wird verwendet.")
-        print("Tipp: uv run python automation/test_printer.py \"HP LaserJet Pro P1102\"")
+        print('Tipp: uv run python automation/test_printer.py "HP LaserJet Pro P1102"')
 
     known_printers = list_printers()
 

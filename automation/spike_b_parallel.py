@@ -114,7 +114,9 @@ async def check_counter_accessible(page: Page, domain: str, label: str) -> bool:
     return ok
 
 
-async def scenario_1(domain: str, username: str, password: str, student: str | None, count: int) -> None:
+async def scenario_1(
+    domain: str, username: str, password: str, student: str | None, count: int
+) -> None:
     """Szenario 1: N unabhängige Logins gleichzeitig."""
     print(f"\n=== Szenario 1: {count} unabhängige Logins ===")
 
@@ -126,22 +128,22 @@ async def scenario_1(domain: str, username: str, password: str, student: str | N
         # Alle Logins parallel
         t_start = time.monotonic()
         login_tasks = [
-            async_login(pages[i], domain, username, password, f"s1_ctx{i}")
-            for i in range(count)
+            async_login(pages[i], domain, username, password, f"s1_ctx{i}") for i in range(count)
         ]
         login_results = await asyncio.gather(*login_tasks, return_exceptions=True)
         t_login = (time.monotonic() - t_start) * 1000
 
         failed_logins = [r for r in login_results if isinstance(r, Exception)]
-        print(f"  Logins: {count - len(failed_logins)}/{count} OK  (parallel, gesamt {t_login:.0f} ms)")
+        print(
+            f"  Logins: {count - len(failed_logins)}/{count} OK  (parallel, gesamt {t_login:.0f} ms)"
+        )
         for e in failed_logins:
             print(f"  FEHLER: {e}")
 
         # Counter-Seite in allen Contexts prüfen (immer, auch ohne Student-Name)
         t_start = time.monotonic()
         counter_tasks = [
-            check_counter_accessible(pages[i], domain, f"s1_ctx{i}")
-            for i in range(count)
+            check_counter_accessible(pages[i], domain, f"s1_ctx{i}") for i in range(count)
         ]
         counter_results = await asyncio.gather(*counter_tasks, return_exceptions=True)
         t_counter = (time.monotonic() - t_start) * 1000
@@ -152,8 +154,7 @@ async def scenario_1(domain: str, username: str, password: str, student: str | N
         if student:
             t_start = time.monotonic()
             card_tasks = [
-                load_student_card(pages[i], domain, student, f"s1_ctx{i}")
-                for i in range(count)
+                load_student_card(pages[i], domain, student, f"s1_ctx{i}") for i in range(count)
             ]
             card_results = await asyncio.gather(*card_tasks, return_exceptions=True)
             t_cards = (time.monotonic() - t_start) * 1000
@@ -174,7 +175,9 @@ async def scenario_1(domain: str, username: str, password: str, student: str | N
         await browser.close()
 
 
-async def scenario_2(domain: str, username: str, password: str, student: str | None, count: int) -> None:
+async def scenario_2(
+    domain: str, username: str, password: str, student: str | None, count: int
+) -> None:
     """Szenario 2: 1 Login, Storage-State auf N Contexts teilen."""
     print(f"\n=== Szenario 2: Cookie-Sharing auf {count} Contexts ===")
 
@@ -201,8 +204,7 @@ async def scenario_2(domain: str, username: str, password: str, student: str | N
         # Counter-Seite in allen Contexts prüfen
         t_start = time.monotonic()
         counter_tasks = [
-            check_counter_accessible(pages[i], domain, f"s2_ctx{i}")
-            for i in range(count)
+            check_counter_accessible(pages[i], domain, f"s2_ctx{i}") for i in range(count)
         ]
         counter_results = await asyncio.gather(*counter_tasks, return_exceptions=True)
         t_counter = (time.monotonic() - t_start) * 1000
@@ -213,8 +215,7 @@ async def scenario_2(domain: str, username: str, password: str, student: str | N
         if student:
             t_start = time.monotonic()
             card_tasks = [
-                load_student_card(pages[i], domain, student, f"s2_ctx{i}")
-                for i in range(count)
+                load_student_card(pages[i], domain, student, f"s2_ctx{i}") for i in range(count)
             ]
             card_results = await asyncio.gather(*card_tasks, return_exceptions=True)
             t_cards = (time.monotonic() - t_start) * 1000
@@ -249,10 +250,20 @@ async def main_async(args: argparse.Namespace) -> None:
 
 def main() -> None:
     load_dotenv(Path(__file__).parent.parent / ".env")
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--student", default=None, help="Nachname für Typeahead-Suche (optional; ohne: nur Login + Counter-Check)")
-    parser.add_argument("--count", type=int, default=3, help="Anzahl paralleler Contexts (default: 3)")
-    parser.add_argument("--scenarios", default="1,2", help="Komma-getrennt: 1, 2 oder 1,2 (default: 1,2)")
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--student",
+        default=None,
+        help="Nachname für Typeahead-Suche (optional; ohne: nur Login + Counter-Check)",
+    )
+    parser.add_argument(
+        "--count", type=int, default=3, help="Anzahl paralleler Contexts (default: 3)"
+    )
+    parser.add_argument(
+        "--scenarios", default="1,2", help="Komma-getrennt: 1, 2 oder 1,2 (default: 1,2)"
+    )
     args = parser.parse_args()
 
     asyncio.run(main_async(args))

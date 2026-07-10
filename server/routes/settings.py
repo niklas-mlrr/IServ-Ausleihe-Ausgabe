@@ -18,15 +18,14 @@ from ._deps import BoolToggleRequest, SettingsToggleRequest, _base_url, host_rou
 # State
 # ---------------------------------------------------------------------------
 
+
 @host_router.get("/api/state")
 async def get_state_endpoint() -> dict:
     return get_state().state_snapshot()
 
 
 @host_router.post("/api/force-tailscale-ip")
-async def set_force_tailscale_ip(
-    body: BoolToggleRequest, request: Request
-) -> dict:
+async def set_force_tailscale_ip(body: BoolToggleRequest, request: Request) -> dict:
     """Header-Toggle „Tailscale-IP": Auto-Auswahl (LAN-first) ↔ erzwungene Tailscale-IP.
 
     Beeinflusst alle QR-/Join-URLs (Helfer-, Schüler-Join-, iPad-Display-QR).
@@ -38,9 +37,7 @@ async def set_force_tailscale_ip(
     state.force_tailscale_ip = body.enabled
 
     if state.modus_b_open and state.modus_b_join_secret:
-        state.modus_b_join_url = (
-            f"{_base_url(request)}/student?j={state.modus_b_join_secret}"
-        )
+        state.modus_b_join_url = f"{_base_url(request)}/student?j={state.modus_b_join_secret}"
         state.modus_b_join_qr = make_qr_data_url(state.modus_b_join_url)
         await broadcast_displays(state)
 

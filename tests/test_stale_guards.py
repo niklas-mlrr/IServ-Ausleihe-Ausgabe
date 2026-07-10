@@ -72,6 +72,7 @@ def _state_with_iserv() -> AppState:
 # Helfer während open_student.
 # ---------------------------------------------------------------------------
 
+
 def test_load_and_push_helper_student_stale_guard_closes_orphan_context(monkeypatch):
     st = _state_with_iserv()
     hub = _FakeHub()
@@ -82,9 +83,7 @@ def test_load_and_push_helper_student_stale_guard_closes_orphan_context(monkeypa
     student = QueueStudent(student_id=42, lastname="M", firstname="N", form="")
 
     async def run():
-        task = asyncio.create_task(
-            load_and_push_helper_student(st, hub, student, helper)
-        )
+        task = asyncio.create_task(load_and_push_helper_student(st, hub, student, helper))
         # Bis open_student() den Context anfordert laufen lassen (er hängt
         # dort auf dem Gate).
         for _ in range(20):
@@ -114,9 +113,7 @@ def test_load_and_push_helper_student_happy_path_registers_worker(monkeypatch):
     student = QueueStudent(student_id=42, lastname="M", firstname="N", form="")
 
     async def run():
-        task = asyncio.create_task(
-            load_and_push_helper_student(st, hub, student, helper)
-        )
+        task = asyncio.create_task(load_and_push_helper_student(st, hub, student, helper))
         for _ in range(20):
             await asyncio.sleep(0)
         pool.gate.set()
@@ -134,6 +131,7 @@ def test_load_and_push_helper_student_happy_path_registers_worker(monkeypatch):
 # Session während open_student.
 # ---------------------------------------------------------------------------
 
+
 class _FakeWS:
     def __init__(self) -> None:
         self.sent: list[dict] = []
@@ -147,16 +145,16 @@ def test_load_and_push_paired_student_stale_guard_closes_orphan_context():
     hub = _FakeHub()
     pool = _FakeWorkerPool()
     st.worker_pool = pool
-    session = StudentSessionB(session_token="tok", pairing_code="1234", student_id=42, state="paired")
+    session = StudentSessionB(
+        session_token="tok", pairing_code="1234", student_id=42, state="paired"
+    )
     session.ws = _FakeWS()
     st.student_sessions["tok"] = session
     student = QueueStudent(student_id=42, lastname="M", firstname="N", form="")
     info = {"student_id": 42, "books": []}
 
     async def run():
-        task = asyncio.create_task(
-            load_and_push_paired_student(st, hub, session, student, info)
-        )
+        task = asyncio.create_task(load_and_push_paired_student(st, hub, session, student, info))
         for _ in range(20):
             await asyncio.sleep(0)
         assert pool.opened == [42]
@@ -178,16 +176,16 @@ def test_load_and_push_paired_student_happy_path_registers_worker():
     hub = _FakeHub()
     pool = _FakeWorkerPool()
     st.worker_pool = pool
-    session = StudentSessionB(session_token="tok", pairing_code="1234", student_id=42, state="paired")
+    session = StudentSessionB(
+        session_token="tok", pairing_code="1234", student_id=42, state="paired"
+    )
     session.ws = _FakeWS()
     st.student_sessions["tok"] = session
     student = QueueStudent(student_id=42, lastname="M", firstname="N", form="")
     info = {"student_id": 42, "books": []}
 
     async def run():
-        task = asyncio.create_task(
-            load_and_push_paired_student(st, hub, session, student, info)
-        )
+        task = asyncio.create_task(load_and_push_paired_student(st, hub, session, student, info))
         for _ in range(20):
             await asyncio.sleep(0)
         pool.gate.set()

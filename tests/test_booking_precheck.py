@@ -42,8 +42,13 @@ class _State:
 
 def _book(isbn="978-1", available=True, distributed=False, deleted=False):
     return {
-        "code": "B1", "isbn": isbn, "title": "Mathe 5", "subject": "Mathematik",
-        "available": available, "distributed": distributed, "deleted": deleted,
+        "code": "B1",
+        "isbn": isbn,
+        "title": "Mathe 5",
+        "subject": "Mathematik",
+        "available": available,
+        "distributed": distributed,
+        "deleted": deleted,
         "student_id": None,
         "loaned_to": None,
         "loaned_to_id": None,
@@ -55,6 +60,7 @@ def _eval(state, vormerk, lent, barcode="B1"):
 
 
 # --- evaluate_scan_for_booking -------------------------------------------------
+
 
 def test_bookable_when_ordered_and_in_stock():
     res = _eval(_State(_FakeIserv(_book())), {"978-1"}, set())
@@ -193,12 +199,15 @@ def test_reject_on_lookup_error():
 
 # --- booking_isbn_sets_from_info ----------------------------------------------
 
+
 def test_sets_split_by_status():
-    info = {"books": [
-        {"isbn": "A", "status": "vorgemerkt"},
-        {"isbn": "B", "status": "ausgeliehen"},
-        {"isbn": "", "status": "vorgemerkt"},   # leere ISBN wird ignoriert
-    ]}
+    info = {
+        "books": [
+            {"isbn": "A", "status": "vorgemerkt"},
+            {"isbn": "B", "status": "ausgeliehen"},
+            {"isbn": "", "status": "vorgemerkt"},  # leere ISBN wird ignoriert
+        ]
+    }
     vormerk, lent = sessions.booking_isbn_sets_from_info(info)
     assert vormerk == {"A"} and lent == {"B"}
 
@@ -217,10 +226,11 @@ def test_lent_from_current_books_ignores_hidden_filter():
     }
     vormerk, lent = sessions.booking_isbn_sets_from_info(info)
     assert vormerk == {"A"}
-    assert lent == {"X", "B"}   # X bleibt trotz Ausblendung in lent
+    assert lent == {"X", "B"}  # X bleibt trotz Ausblendung in lent
 
 
 # --- process_scan (Gate-Verhalten) --------------------------------------------
+
 
 class _SpyWorker:
     def __init__(self):
@@ -259,9 +269,11 @@ def test_process_scan_booked_isbn_moves_to_lent(monkeypatch):
     state = _State(_FakeIserv(_book(isbn="978-1", available=True, distributed=False)), _SpyWorker())
     res = asyncio.run(sessions.process_scan(state, 42, vormerk, lent, "B1", source="helper"))
     assert res["status"] == "booked"
-    assert "978-1" in lent and "978-1" not in vormerk   # ISBN umgehängt
+    assert "978-1" in lent and "978-1" not in vormerk  # ISBN umgehängt
     # 2. Scan: Exemplar jetzt an den Schüler selbst verliehen (distributed).
-    state2 = _State(_FakeIserv(_book(isbn="978-1", available=False, distributed=True)), _SpyWorker())
+    state2 = _State(
+        _FakeIserv(_book(isbn="978-1", available=False, distributed=True)), _SpyWorker()
+    )
     res2 = asyncio.run(sessions.process_scan(state2, 42, vormerk, lent, "B1", source="helper"))
     assert res2["status"] == "series_already_lent"
 

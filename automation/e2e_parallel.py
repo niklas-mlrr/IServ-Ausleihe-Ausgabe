@@ -8,6 +8,7 @@ WORKER_CONTEXTS >= 2. Read-only gegenüber IServ (kein Submit/Enter).
 
 Aufruf: `uv run python -m automation.e2e_parallel`
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -43,7 +44,9 @@ async def open_scanner(browser, token: str):
     ctx = await browser.new_context(ignore_https_errors=True)
     page = await ctx.new_page()
     await page.goto(f"{BASE}/scan.html?token={token}", wait_until="domcontentloaded")
-    await page.wait_for_function("document.getElementById('dot').className.includes('ok')", timeout=10_000)
+    await page.wait_for_function(
+        "document.getElementById('dot').className.includes('ok')", timeout=10_000
+    )
     return page
 
 
@@ -61,8 +64,12 @@ async def main():
         await page.fill("#pw-input", pw)
         await page.click("#login-btn")
         await page.wait_for_selector("#main-view", state="visible", timeout=10_000)
-        await page.wait_for_function("document.querySelectorAll('#class-select option').length > 1", timeout=15_000)
-        opts = await page.eval_on_selector_all("#class-select option", "els => els.map(e => e.value).filter(Boolean)")
+        await page.wait_for_function(
+            "document.querySelectorAll('#class-select option').length > 1", timeout=15_000
+        )
+        opts = await page.eval_on_selector_all(
+            "#class-select option", "els => els.map(e => e.value).filter(Boolean)"
+        )
         await page.select_option("#class-select", opts[0])
         await page.click("text=Queue aufbauen")
         await page.wait_for_function(
@@ -104,15 +111,21 @@ async def main():
         log("OK  Host: 2 Schüler 'Aktiv'")
 
         # Beide scannen parallel -> beide staged, unabhängig
-        await scan_a.evaluate("() => ws.send(JSON.stringify({type:'scan', value:'PARALLEL-A-0001'}))")
-        await scan_b.evaluate("() => ws.send(JSON.stringify({type:'scan', value:'PARALLEL-B-0002'}))")
+        await scan_a.evaluate(
+            "() => ws.send(JSON.stringify({type:'scan', value:'PARALLEL-A-0001'}))"
+        )
+        await scan_b.evaluate(
+            "() => ws.send(JSON.stringify({type:'scan', value:'PARALLEL-B-0002'}))"
+        )
         await asyncio.gather(
             scan_a.wait_for_selector("#scan-results .scan-item.staged", timeout=15_000),
             scan_b.wait_for_selector("#scan-results .scan-item.staged", timeout=15_000),
         )
         res_a = await scan_a.inner_text("#scan-results .scan-item")
         res_b = await scan_b.inner_text("#scan-results .scan-item")
-        assert "PARALLEL-A-0001" in res_a and "PARALLEL-B-0002" in res_b, f"Barcodes vertauscht? {res_a!r} {res_b!r}"
+        assert "PARALLEL-A-0001" in res_a and "PARALLEL-B-0002" in res_b, (
+            f"Barcodes vertauscht? {res_a!r} {res_b!r}"
+        )
         log("OK  Beide Barcodes unabhängig gestaged (kein Submit, keine Vermischung)")
 
         await browser.close()

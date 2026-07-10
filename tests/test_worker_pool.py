@@ -31,6 +31,7 @@ def test_stats_tracks_checkout():
 # (Regression zum Leak bei schnellem „Weiter"-Klicken)
 # ---------------------------------------------------------------------------
 
+
 class _FakePage:
     async def close(self) -> None:
         pass

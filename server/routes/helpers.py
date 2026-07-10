@@ -90,8 +90,11 @@ async def remove_helper(token: str) -> dict:
         helper.end_task = None
     if helper.student_id is not None:
         await end_student(
-            state, hub, helper.student_id,
-            queue_status="pending", session_state="revoked",
+            state,
+            hub,
+            helper.student_id,
+            queue_status="pending",
+            session_state="revoked",
         )
     if helper.ws:
         try:

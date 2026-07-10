@@ -88,6 +88,7 @@ def _drain_handshake(ws) -> None:
 # Ungültiger Token → Verbindung wird abgewiesen (4004).
 # ---------------------------------------------------------------------------
 
+
 def test_scanner_rejects_unknown_token(client, ws_env):
     # Unbekannter Token → ws.close(4004) direkt nach (bzw. statt) accept.
     with pytest.raises(Exception), client.websocket_connect("/ws/scanner/bogus") as ws:  # noqa: B017
@@ -97,6 +98,7 @@ def test_scanner_rejects_unknown_token(client, ws_env):
 # ---------------------------------------------------------------------------
 # 1) scan ohne zugewiesenen Schüler → scan_result mit status "error".
 # ---------------------------------------------------------------------------
+
 
 def test_scan_without_student_yields_error(client, ws_env):
     with client.websocket_connect("/ws/scanner/h1") as ws:
@@ -110,6 +112,7 @@ def test_scan_without_student_yields_error(client, ws_env):
 # ---------------------------------------------------------------------------
 # 2) Malformed JSON-Frame darf die Empfangsschleife NICHT töten.
 # ---------------------------------------------------------------------------
+
 
 def test_malformed_frame_does_not_kill_loop(client, ws_env):
     with client.websocket_connect("/ws/scanner/h1") as ws:
@@ -127,6 +130,7 @@ def test_malformed_frame_does_not_kill_loop(client, ws_env):
 # 3) peek_queue setzt helper.peeking=True + pusht queue_update & contexts_update;
 #    peek_close setzt es zurück.
 # ---------------------------------------------------------------------------
+
 
 def test_peek_queue_and_close_toggle_peeking(client, ws_env):
     state, token = ws_env
@@ -161,6 +165,7 @@ def test_peek_queue_and_close_toggle_peeking(client, ws_env):
 #    „zwei Helfer rufen denselben Schüler auf").
 # ---------------------------------------------------------------------------
 
+
 def test_call_non_pending_student_errors(client, ws_env):
     state, token = ws_env
     ctx = state.open_context("10a")
@@ -186,6 +191,7 @@ def test_call_non_pending_student_errors(client, ws_env):
 # 4b) call aus einem fremden Klassen-Tab → Helfer wird an die Klasse des
 #     aufgerufenen Schülers gebunden (rebind_helper_to_context).
 # ---------------------------------------------------------------------------
+
 
 def test_call_rebinds_helper_to_students_context(client, ws_env):
     state, token = ws_env
@@ -213,19 +219,22 @@ def test_call_rebinds_helper_to_students_context(client, ws_env):
 # 5) search_call baut einen transienten Schüler, der in KEINER Queue landet.
 # ---------------------------------------------------------------------------
 
+
 def test_search_call_loads_transient_student_not_in_queue(client, ws_env):
     state, token = ws_env
     helper = state.helper_sessions[token]
 
     with client.websocket_connect("/ws/scanner/h1") as ws:
         _drain_handshake(ws)
-        ws.send_json({
-            "type": "search_call",
-            "student_id": 4242,
-            "form": "10a",
-            "lastname": "Test",
-            "firstname": "S",
-        })
+        ws.send_json(
+            {
+                "type": "search_call",
+                "student_id": 4242,
+                "form": "10a",
+                "lastname": "Test",
+                "firstname": "S",
+            }
+        )
         _recv_until(ws, "worker_ready")
         assert helper.student_id == 4242
         assert helper.student_form == "10a"

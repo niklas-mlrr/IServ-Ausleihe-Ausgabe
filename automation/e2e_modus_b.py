@@ -12,6 +12,7 @@ Geprueft wird die Kette:
   -> Schuelerinfo+Bestellliste -> Scan (staged) -> finish
   -> harte Invalidierung (alter Token -> neutrale Seite).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -45,9 +46,15 @@ async def main():
         await page.fill("#pw-input", pw)
         await page.click("#login-btn")
         await page.wait_for_selector("#main-view", state="visible", timeout=10_000)
-        await page.wait_for_function("document.getElementById('ws-dot').className.includes('ok')", timeout=10_000)
-        await page.wait_for_function("document.querySelectorAll('#class-select option').length > 1", timeout=15_000)
-        opts = await page.eval_on_selector_all("#class-select option", "els => els.map(e => e.value).filter(Boolean)")
+        await page.wait_for_function(
+            "document.getElementById('ws-dot').className.includes('ok')", timeout=10_000
+        )
+        await page.wait_for_function(
+            "document.querySelectorAll('#class-select option').length > 1", timeout=15_000
+        )
+        opts = await page.eval_on_selector_all(
+            "#class-select option", "els => els.map(e => e.value).filter(Boolean)"
+        )
         chosen = opts[0]
         await page.select_option("#class-select", chosen)
         await page.click("text=Queue aufbauen")
@@ -59,7 +66,9 @@ async def main():
 
         # 2. Modus B oeffnen
         await page.click("#mb-open-btn")
-        await page.wait_for_function("document.getElementById('mb-close-btn').style.display !== 'none'", timeout=10_000)
+        await page.wait_for_function(
+            "document.getElementById('mb-close-btn').style.display !== 'none'", timeout=10_000
+        )
         join_url = await page.evaluate("() => state.modus_b.join_url")
         assert join_url and "/student.html?j=" in join_url, f"join_url falsch: {join_url}"
         secret = join_url.split("j=")[1]
@@ -78,7 +87,9 @@ async def main():
                 const r = await fetch('/api/display/authorize', {method:'POST',
                   headers:{'Content-Type':'application/json'}, body: JSON.stringify({registration_code: code})});
                 return r.ok;
-            }""", reg_code)
+            }""",
+            reg_code,
+        )
         assert r, "Display-Autorisierung fehlgeschlagen"
         await dpage.wait_for_selector("#view-qr.show", timeout=10_000)
         qr_src = await dpage.get_attribute("#qr-img", "src")
@@ -91,7 +102,8 @@ async def main():
         await spage.goto(f"{BASE}/student.html?j={secret}", wait_until="domcontentloaded")
         await spage.wait_for_selector("#view-pending.show", timeout=10_000)
         await spage.wait_for_function(
-            "document.getElementById('pair-code').textContent.trim().length === 4", timeout=10_000)
+            "document.getElementById('pair-code').textContent.trim().length === 4", timeout=10_000
+        )
         pair_code = (await spage.inner_text("#pair-code")).strip()
         token = await spage.evaluate("() => sessionStorage.getItem('mb_token')")
         assert token and len(token) > 20, "session_token fehlt/zu kurz"
@@ -99,12 +111,15 @@ async def main():
 
         # Host sieht offenen Code (ohne Schuelerdaten)
         await page.wait_for_function(
-            "document.getElementById('mb-pending').textContent.includes('Offene Codes: 1')", timeout=10_000)
+            "document.getElementById('mb-pending').textContent.includes('Offene Codes: 1')",
+            timeout=10_000,
+        )
         log("OK  Host zeigt 'Offene Codes: 1' (keine Schuelerdaten vor Pairing)")
 
         # 5. Pairing am Host: Code -> erster pending-Schueler (mit O6-Override-Fallback)
         student_id = await page.evaluate(
-            "() => (state.queue.find(q => q.status === 'pending') || {}).student_id")
+            "() => (state.queue.find(q => q.status === 'pending') || {}).student_id"
+        )
         assert student_id, "kein pending-Schueler"
         pair_status = await page.evaluate(
             """async ({code, sid}) => {
@@ -122,8 +137,12 @@ async def main():
                   return 'conflict';
                 }
                 return r.ok ? 'paired' : 'fail';
-            }""", {"code": pair_code, "sid": student_id})
-        assert pair_status in ("paired", "paired-override"), f"Pairing fehlgeschlagen: {pair_status}"
+            }""",
+            {"code": pair_code, "sid": student_id},
+        )
+        assert pair_status in ("paired", "paired-override"), (
+            f"Pairing fehlgeschlagen: {pair_status}"
+        )
         log(f"OK  Pairing ({pair_status})")
 
         # 6. Schueler-Handy: Worker laedt Kartei (read-only) -> Bestellliste + Scanner
@@ -132,12 +151,15 @@ async def main():
         nbooks = await spage.eval_on_selector_all("#book-items .book", "els => els.length")
         log(f"OK  Schueler-UI aktiv (Bestellliste: {nbooks} Eintraege)")
         active = await page.eval_on_selector_all(
-            "#queue-tbody tr", "els => els.filter(r => r.textContent.includes('Aktiv')).length")
+            "#queue-tbody tr", "els => els.filter(r => r.textContent.includes('Aktiv')).length"
+        )
         assert active == 1, f"erwartet 1 aktiv, war {active}"
         log("OK  Queue: 1 Schueler 'Aktiv'")
 
         # 7. Simulierter Scan -> staged (kein Submit)
-        await spage.evaluate("() => ws.send(JSON.stringify({type:'scan', value:'TEST-BARCODE-MB-0000'}))")
+        await spage.evaluate(
+            "() => ws.send(JSON.stringify({type:'scan', value:'TEST-BARCODE-MB-0000'}))"
+        )
         await spage.wait_for_selector("#scan-results .scan-item", timeout=15_000)
         cls = await spage.get_attribute("#scan-results .scan-item", "class")
         assert "staged" in cls, f"nicht staged: {cls}"
@@ -152,10 +174,14 @@ async def main():
         ictx = await browser.new_context(ignore_https_errors=True)
         await ictx.add_init_script(f"sessionStorage.setItem('mb_token', {token!r});")
         ipage = await ictx.new_page()
-        await ipage.goto(f"{BASE}/student.html", wait_until="domcontentloaded")  # ohne j -> kein Re-Join
+        await ipage.goto(
+            f"{BASE}/student.html", wait_until="domcontentloaded"
+        )  # ohne j -> kein Re-Join
         await ipage.wait_for_selector("#view-done.show", timeout=10_000)
         # sicherstellen, dass keine aktive Ansicht/Schuelerdaten erscheinen
-        active_shown = await ipage.eval_on_selector("#view-active", "el => el.classList.contains('show')")
+        active_shown = await ipage.eval_on_selector(
+            "#view-active", "el => el.classList.contains('show')"
+        )
         assert not active_shown, "Aktive Ansicht trotz entwertetem Token!"
         log("OK  Entwerteter Token -> neutrale Seite (harter Zugriffsentzug bestaetigt)")
 

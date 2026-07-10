@@ -21,6 +21,7 @@ from server.state import AppState, HelperSession, QueueStudent
 # Test-Doubles
 # ---------------------------------------------------------------------------
 
+
 class _FakeHub:
     def __init__(self) -> None:
         self.host_broadcasts = 0
@@ -77,6 +78,7 @@ async def _run_deferred(st, hub, helper, sid):
 # _deferred_end — Re-Check 1: Reconnect während Grace → kein Teardown
 # ---------------------------------------------------------------------------
 
+
 def test_deferred_end_noop_on_reconnect(monkeypatch):
     monkeypatch.setattr(ws_module, "_RECONNECT_GRACE_S", 0.01)
     st = _state_with_iserv()
@@ -107,6 +109,7 @@ def test_deferred_end_noop_on_reconnect(monkeypatch):
 # _deferred_end — Re-Check 2: Schüler zwischenzeitlich gewechselt → kein Teardown
 # ---------------------------------------------------------------------------
 
+
 def test_deferred_end_noop_on_student_changed(monkeypatch):
     monkeypatch.setattr(ws_module, "_RECONNECT_GRACE_S", 0.01)
     st = _state_with_iserv()
@@ -136,6 +139,7 @@ def test_deferred_end_noop_on_student_changed(monkeypatch):
 # ---------------------------------------------------------------------------
 # _deferred_end — echte Trennung → Teardown läuft
 # ---------------------------------------------------------------------------
+
 
 def test_deferred_end_teardowns_on_genuine_disconnect(monkeypatch):
     monkeypatch.setattr(ws_module, "_RECONNECT_GRACE_S", 0.01)
@@ -169,6 +173,7 @@ def test_deferred_end_teardowns_on_genuine_disconnect(monkeypatch):
 # _deferred_end — Cancel (Reconnect im ws_scanner) → kein Teardown
 # ---------------------------------------------------------------------------
 
+
 def test_deferred_end_cancel_is_noop(monkeypatch):
     monkeypatch.setattr(ws_module, "_RECONNECT_GRACE_S", 10.0)  # groß, damit Cancel zuerst kommt
     st = _state_with_iserv()
@@ -196,6 +201,7 @@ def test_deferred_end_cancel_is_noop(monkeypatch):
 # ---------------------------------------------------------------------------
 # StudentSession.reload() — re-navigiert die bestehende Page (read-only GET)
 # ---------------------------------------------------------------------------
+
 
 class _FakeLocator:
     def __init__(self, sel: str) -> None:
@@ -227,8 +233,11 @@ class _FakePage:
 def test_reload_renavigates_existing_page():
     page = _FakePage()
     session = StudentSession(
-        context=None, page=page, domain="example.test",
-        student_id=42, student_name="Test, Tina",
+        context=None,
+        page=page,
+        domain="example.test",
+        student_id=42,
+        student_name="Test, Tina",
     )
 
     asyncio.run(session.reload())
@@ -246,6 +255,7 @@ def test_reload_renavigates_existing_page():
 # ---------------------------------------------------------------------------
 # _deferred_end — In-Flight load_task wird vor dem Teardown gecancelt
 # ---------------------------------------------------------------------------
+
 
 def test_deferred_end_cancels_inflight_load_task(monkeypatch):
     """Der verzögerte Teardown muss einen noch laufenden Lade-Task abbrechen,
@@ -281,6 +291,7 @@ def test_deferred_end_cancels_inflight_load_task(monkeypatch):
 # _deferred_end — schluckt end_student-Ausnahme (Sweeper-Robustheit)
 # ---------------------------------------------------------------------------
 
+
 async def _raising_end(state, hub, sid, *, queue_status, session_state, **kw):
     raise RuntimeError("end_student boom")
 
@@ -314,6 +325,7 @@ def test_deferred_end_swallows_end_student_exception(monkeypatch):
 # ---------------------------------------------------------------------------
 # _deferred_end — schluckt broadcast_host-Ausnahme
 # ---------------------------------------------------------------------------
+
 
 class _BroadcastRaisingHub(_FakeHub):
     async def broadcast_host(self, snapshot) -> None:
@@ -351,6 +363,7 @@ def test_deferred_end_swallows_broadcast_exception(monkeypatch):
 # in der Queue steht (Nur-Worker-Zweig von end_student)
 # ---------------------------------------------------------------------------
 
+
 def test_deferred_end_releases_worker_when_student_missing(monkeypatch):
     """Schüler zwischenzeitlich aus der Queue entfernt (z. B. Queue-Reset
     während Grace, aber helper.student_id noch unverändert): end_student
@@ -379,6 +392,7 @@ def test_deferred_end_releases_worker_when_student_missing(monkeypatch):
 # ---------------------------------------------------------------------------
 # StudentSession.reload() — Re-Login bei abgelaufener Session
 # ---------------------------------------------------------------------------
+
 
 class _ExpiredPage:
     """Simuliert einen abgelaufenen Context: jeder goto landet zunächst auf
@@ -419,8 +433,11 @@ def test_reload_performs_relogin_on_expired_session():
     Page, kein neuer Context, kein App-Root-Load."""
     page = _ExpiredPage()
     session = StudentSession(
-        context=None, page=page, domain="example.test",
-        student_id=42, student_name="Test, Tina",
+        context=None,
+        page=page,
+        domain="example.test",
+        student_id=42,
+        student_name="Test, Tina",
         relogin=_fake_relogin,
     )
 
@@ -446,8 +463,11 @@ def test_reload_raises_when_session_expired_and_no_relogin():
     → RuntimeError propagiert. Beide Gotos wurden protokolliert."""
     page = _ExpiredPage()
     session = StudentSession(
-        context=None, page=page, domain="example.test",
-        student_id=42, student_name="Test, Tina",
+        context=None,
+        page=page,
+        domain="example.test",
+        student_id=42,
+        student_name="Test, Tina",
         relogin=None,  # kein Re-Login verfügbar
     )
 
@@ -472,6 +492,7 @@ def test_reload_raises_when_session_expired_and_no_relogin():
 # _deferred_end — Re-Check 2 mit *neuem* Schüler (nicht nur None): der
 # Originalschüler darf nicht abgebrochen werden.
 # ---------------------------------------------------------------------------
+
 
 def test_deferred_end_noop_when_new_student_assigned(monkeypatch):
     """Während der Grace-Frist bekam der Helfer einen *neuen* Schüler zugewiesen
@@ -505,10 +526,12 @@ def test_deferred_end_noop_when_new_student_assigned(monkeypatch):
 # StudentSession.reload() — Barcode-Feld-Timeout ist nicht fatal
 # ---------------------------------------------------------------------------
 
+
 class _TimeoutLocator(_FakeLocator):
     async def wait_for(self, state=None, timeout=None) -> None:
         # Barcode-Feld erscheint nicht innerhalb der Frist.
         from playwright.async_api import TimeoutError as PlaywrightTimeout
+
         raise PlaywrightTimeout("barcode field timeout")
 
 
@@ -523,8 +546,11 @@ def test_reload_succeeds_when_barcode_field_times_out():
     fatal (warnen + _card_loaded=True) — reload() wirft nicht."""
     page = _TimeoutPage()
     session = StudentSession(
-        context=None, page=page, domain="example.test",
-        student_id=42, student_name="Test, Tina",
+        context=None,
+        page=page,
+        domain="example.test",
+        student_id=42,
+        student_name="Test, Tina",
     )
 
     asyncio.run(session.reload())  # wirft nicht
@@ -543,6 +569,7 @@ def test_reload_succeeds_when_barcode_field_times_out():
 # ---------------------------------------------------------------------------
 # StudentSession.reload() — Re-Login bei Redirect auf der Schüler-Route
 # ---------------------------------------------------------------------------
+
 
 class _StudentRouteExpiredPage(_FakePage):
     """App-Root lädt authed, aber die Schüler-Route leitet auf die Login-Seite
@@ -576,8 +603,11 @@ def test_reload_relogin_on_student_route_redirect():
     Alles auf derselben Page (read-only)."""
     page = _StudentRouteExpiredPage()
     session = StudentSession(
-        context=None, page=page, domain="example.test",
-        student_id=42, student_name="Test, Tina",
+        context=None,
+        page=page,
+        domain="example.test",
+        student_id=42,
+        student_name="Test, Tina",
         relogin=_fake_relogin_student_route,
     )
 

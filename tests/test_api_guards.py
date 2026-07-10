@@ -49,6 +49,7 @@ _ROUTE_MODULES = [
 # Fixtures: frische Singletons pro Test (Host-Login bereits gültig)
 # ---------------------------------------------------------------------------
 
+
 class _FakeHub:
     async def broadcast_host(self, snapshot) -> None:
         pass
@@ -95,6 +96,7 @@ def ctx(monkeypatch):
 # zu werden.
 # ---------------------------------------------------------------------------
 
+
 def test_require_host_rejects_missing_cookie(client, ctx):
     r = client.get("/api/state")
     assert r.status_code == 403
@@ -115,6 +117,7 @@ def test_require_host_accepts_valid_session(client, ctx):
 # Login
 # ---------------------------------------------------------------------------
 
+
 def test_login_wrong_password(client, ctx):
     r = client.post("/api/login", json={"password": "nope"})
     assert r.status_code == 403
@@ -133,6 +136,7 @@ def test_login_correct_password_sets_session(client, ctx):
 # add-student: Validierung & Duplikat-Schutz
 # ---------------------------------------------------------------------------
 
+
 def test_add_student_invalid_id(client, ctx):
     """`student_id` ist ein Pydantic-Feld (`int | None`) — ein Wert vom
     falschen Typ (hier ein nicht-numerischer String) lässt die Body-Validierung
@@ -147,9 +151,7 @@ def test_add_student_invalid_id(client, ctx):
 
 
 def test_add_student_missing_name(client, ctx):
-    r = client.post(
-        "/api/add-student", json={"student_id": 1}, cookies={"session_id": "sid"}
-    )
+    r = client.post("/api/add-student", json={"student_id": 1}, cookies={"session_id": "sid"})
     assert r.status_code == 400
 
 
@@ -175,7 +177,7 @@ def test_add_student_success_then_duplicate(client, ctx):
     )
     assert r.status_code == 200
     assert r.json() == {"ok": True, "count": 1}
-    assert state.active_context.form == "10a"   # erste Klasse übernommen
+    assert state.active_context.form == "10a"  # erste Klasse übernommen
     r2 = client.post(
         "/api/add-student",
         json={"student_id": 1, "lastname": "Müller"},
@@ -189,6 +191,7 @@ def test_add_student_success_then_duplicate(client, ctx):
 # ein bereits in einer Queue stehender Testschüler wird bei erneutem Öffnen
 # nicht doppelt eingefügt (state.find_student-Check in open_test_config).
 # ---------------------------------------------------------------------------
+
 
 def test_open_test_config_idempotent_when_student_already_queued(client, ctx):
     state, _, _ = ctx
@@ -226,6 +229,7 @@ def test_open_test_config_idempotent_when_student_already_queued(client, ctx):
 # open-test-config: dedizierter Tab, sofort befüllt, Wieder-Öffnen reaktiviert
 # ---------------------------------------------------------------------------
 
+
 def test_open_test_config_populates_and_reuses(client, ctx):
     state, _, _ = ctx
     first = client.post("/api/open-test-config", cookies={"session_id": "sid"}).json()
@@ -249,6 +253,7 @@ def test_open_test_config_populates_and_reuses(client, ctx):
 # den aktiven Tab (Bugfix — AppState.active_students() statt nur dem aktiven
 # Kontext).
 # ---------------------------------------------------------------------------
+
 
 def test_select_schoolyear_blocks_on_active_student_in_inactive_context(client, ctx):
     from server.state import QueueStudent
@@ -287,6 +292,7 @@ def test_select_schoolyear_blocks_on_active_student_in_inactive_context(client, 
 # skip / finish: Validierung
 # ---------------------------------------------------------------------------
 
+
 def test_skip_missing_student_id(client, ctx):
     r = client.post("/api/skip", json={}, cookies={"session_id": "sid"})
     assert r.status_code == 400
@@ -305,6 +311,7 @@ def test_finish_unknown_student(client, ctx):
 # ---------------------------------------------------------------------------
 # Buchungs-Gate auf HTTP-Ebene (V10 testet nur handle_commit direkt)
 # ---------------------------------------------------------------------------
+
 
 def test_commit_book_blocked_when_flag_off(client, ctx):
     """Gate 1 (Server-Flag) greift vor confirm/Barcode — Default false."""
@@ -326,9 +333,7 @@ def test_commit_book_flag_off_wins_even_with_missing_confirm(client, ctx):
     erhalten, obwohl `confirm` jetzt ein Pydantic-Feld ist: ein komplett
     fehlendes `confirm` darf NICHT vorab mit 422 abbrechen (das würde Gate 1
     umgehen) — `confirm` hat deshalb bewusst `bool = False` als Default."""
-    r = client.post(
-        "/api/commit-book", json={"student_id": 1}, cookies={"session_id": "sid"}
-    )
+    r = client.post("/api/commit-book", json={"student_id": 1}, cookies={"session_id": "sid"})
     assert r.status_code == 403
     assert "ALLOW_BOOKING" in r.json()["detail"]
 
@@ -339,9 +344,7 @@ def test_commit_book_requires_confirm_when_flag_on(client, ctx, monkeypatch):
     die manuelle Prüfung im Funktionsrumpf rutschen."""
     state, cfg, _ = ctx
     cfg.allow_booking = True
-    r = client.post(
-        "/api/commit-book", json={"student_id": 1}, cookies={"session_id": "sid"}
-    )
+    r = client.post("/api/commit-book", json={"student_id": 1}, cookies={"session_id": "sid"})
     assert r.status_code == 400
     assert "confirm" in r.json()["detail"]
 
@@ -350,8 +353,10 @@ def test_commit_book_requires_confirm_when_flag_on(client, ctx, monkeypatch):
 # Pure Helfer (keine Endpoints — direkter Aufruf bleibt hier angemessen)
 # ---------------------------------------------------------------------------
 
+
 def test_last_scan_for_prefers_session(ctx):
     import server.sessions as sessions
+
     state, _, _ = ctx
     sess = sessions.create_student_session(state)
     sess.student_id = 4
@@ -374,7 +379,7 @@ def test_base_url_ignores_spoofed_host_header_uses_config_ip(ctx):
     """Der Host-Header-Hostname darf NICHT in die QR-URL wandern (trägt join_secret).
     Nur der Port aus dem Host-Header übernommen; Hostname aus cfg.host_ip."""
     _, cfg, _ = ctx
-    cfg.host_ip = "10.0.0.9"   # deterministischer Override
+    cfg.host_ip = "10.0.0.9"  # deterministischer Override
     url = api._base_url(_FakeRequest("evil.example:3443"))
     assert url == "https://10.0.0.9:3443"
     assert "evil.example" not in url
@@ -382,7 +387,7 @@ def test_base_url_ignores_spoofed_host_header_uses_config_ip(ctx):
 
 def test_base_url_rewrites_localhost(ctx, monkeypatch):
     _, cfg, _ = ctx
-    cfg.host_ip = "10.0.0.9"   # expliziter Override → deterministisch
+    cfg.host_ip = "10.0.0.9"  # expliziter Override → deterministisch
     url = api._base_url(_FakeRequest("localhost"))
     assert url == f"https://10.0.0.9:{cfg.port}"
 
@@ -394,6 +399,7 @@ def test_base_url_rewrites_localhost(ctx, monkeypatch):
 # (enabled vs. second_page) und unter dem jeweiligen State-Attributnamen
 # antwortet.
 # ---------------------------------------------------------------------------
+
 
 def test_settings_unknown_key_404(client, ctx):
     r = client.post(
@@ -444,6 +450,7 @@ def test_settings_requires_auth(client, ctx):
 # Helfer-Lösung + Kontext-Wechsel), set-active-context (unbekannte ID → 404).
 # ---------------------------------------------------------------------------
 
+
 class _FakeIServForClasses:
     """Minimaler IServ-Stub für open-class: liefert zwei Schüler."""
 
@@ -473,7 +480,9 @@ def test_open_class_reused_no_second_queue(client, ctx):
     (reused: true) — es entsteht KEINE zweite Queue."""
     state, _, _ = ctx
     state.iserv = _FakeIServForClasses()
-    first = client.post("/api/open-class", json={"form": "10a"}, cookies={"session_id": "sid"}).json()
+    first = client.post(
+        "/api/open-class", json={"form": "10a"}, cookies={"session_id": "sid"}
+    ).json()
     ctx_id = first["context_id"]
 
     # Aktiven Kontext umschalten, damit der zweite Aufruf ihn nachweislich
@@ -498,7 +507,14 @@ def test_close_class_ends_students_and_releases_helper_bindings(client, ctx):
     state, _, _ = ctx
     class_ctx = state.open_context("10a")
     class_ctx.queue.append(
-        QueueStudent(student_id=1, lastname="A", firstname="a", form="10a", status="active", assigned_helper="h1")
+        QueueStudent(
+            student_id=1,
+            lastname="A",
+            firstname="a",
+            form="10a",
+            status="active",
+            assigned_helper="h1",
+        )
     )
     class_ctx.queue.append(
         QueueStudent(student_id=2, lastname="B", firstname="b", form="10a", status="pending")
@@ -533,12 +549,18 @@ def test_close_class_switches_active_context_when_active_one_closed(client, ctx)
 
 
 def test_close_class_unknown_context_404(client, ctx):
-    r = client.post("/api/close-class", json={"context_id": "does-not-exist"}, cookies={"session_id": "sid"})
+    r = client.post(
+        "/api/close-class", json={"context_id": "does-not-exist"}, cookies={"session_id": "sid"}
+    )
     assert r.status_code == 404
 
 
 def test_set_active_context_unknown_id_404(client, ctx):
-    r = client.post("/api/set-active-context", json={"context_id": "does-not-exist"}, cookies={"session_id": "sid"})
+    r = client.post(
+        "/api/set-active-context",
+        json={"context_id": "does-not-exist"},
+        cookies={"session_id": "sid"},
+    )
     assert r.status_code == 404
 
 
@@ -548,7 +570,9 @@ def test_set_active_context_switches(client, ctx):
     b = state.open_context("10b")
     assert state.active_context_id == b.id
 
-    r = client.post("/api/set-active-context", json={"context_id": a.id}, cookies={"session_id": "sid"})
+    r = client.post(
+        "/api/set-active-context", json={"context_id": a.id}, cookies={"session_id": "sid"}
+    )
     assert r.status_code == 200
     assert r.json() == {"ok": True, "active_context_id": a.id}
     assert state.active_context_id == a.id
@@ -561,6 +585,7 @@ def test_set_active_context_switches(client, ctx):
 # ändern (Code neu vergeben, Session entwertet, Schüler nicht mehr pending) —
 # der Endpoint MUSS dann 409 liefern statt zu binden.
 # ---------------------------------------------------------------------------
+
 
 class _FakeIServInfo:
     """get_student_info liefert normale Info UND führt dabei eine vom Test

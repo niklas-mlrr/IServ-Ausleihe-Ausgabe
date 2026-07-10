@@ -57,14 +57,16 @@ def test_broadcast_host_pushes_queue_size_to_unassigned_scanners() -> None:
     unassigned = _FakeWS()
     assigned = _FakeWS()
     s.helper_sessions["t1"] = HelperSession(token="t1", name="A", ws=unassigned)
-    s.helper_sessions["t2"] = HelperSession(
-        token="t2", name="B", student_id=42, ws=assigned
-    )
+    s.helper_sessions["t2"] = HelperSession(token="t2", name="B", student_id=42, ws=assigned)
 
     asyncio.run(Hub().broadcast_host({"type": "state"}, s))
 
     # Nur der unzugewiesene Scanner bekommt die Queue-Größe.
-    assert {"type": "queue_update", "queue_size": 3, "queue": s.pending_queue_as_list()} in unassigned.sent
+    assert {
+        "type": "queue_update",
+        "queue_size": 3,
+        "queue": s.pending_queue_as_list(),
+    } in unassigned.sent
     assert assigned.sent == []
 
 
@@ -77,13 +79,15 @@ def test_broadcast_queue_size_reaches_assigned_helper_while_peeking() -> None:
     s.helper_sessions["t1"] = HelperSession(
         token="t1", name="A", student_id=7, ws=peeking, peeking=True
     )
-    s.helper_sessions["t2"] = HelperSession(
-        token="t2", name="B", student_id=8, ws=assigned
-    )
+    s.helper_sessions["t2"] = HelperSession(token="t2", name="B", student_id=8, ws=assigned)
 
     asyncio.run(Hub().broadcast_queue_size(s))
 
-    assert {"type": "queue_update", "queue_size": 2, "queue": s.pending_queue_as_list()} in peeking.sent
+    assert {
+        "type": "queue_update",
+        "queue_size": 2,
+        "queue": s.pending_queue_as_list(),
+    } in peeking.sent
     assert assigned.sent == []
 
 
@@ -96,7 +100,9 @@ def test_broadcast_queue_size_sends_contexts_update_with_open_classes() -> None:
     ctx_a = s.open_context("10a")
     ctx_b = s.open_context("10b")
     ctx_a.queue.append(QueueStudent(student_id=1, lastname="A", firstname="a", form="10a"))
-    ctx_b.queue.append(QueueStudent(student_id=2, lastname="B", firstname="b", form="10b", status="active"))
+    ctx_b.queue.append(
+        QueueStudent(student_id=2, lastname="B", firstname="b", form="10b", status="active")
+    )
     helper = HelperSession(token="t1", name="A", ws=_FakeWS(), context_id=ctx_a.id)
     s.helper_sessions["t1"] = helper
 
@@ -104,8 +110,8 @@ def test_broadcast_queue_size_sends_contexts_update_with_open_classes() -> None:
 
     upd = next(m for m in helper.ws.sent if m.get("type") == "contexts_update")
     summary = {(c["id"], c["form"], len(c["queue"])) for c in upd["contexts"]}
-    assert (ctx_a.id, "10a", 1) in summary   # 1 wartend
-    assert (ctx_b.id, "10b", 0) in summary   # active zählt nicht als wartend
+    assert (ctx_a.id, "10a", 1) in summary  # 1 wartend
+    assert (ctx_b.id, "10b", 0) in summary  # active zählt nicht als wartend
     assert upd["own_context_id"] == ctx_a.id
     # queue_update wird weiterhin geliefert (Kompatibilität).
     assert any(m.get("type") == "queue_update" for m in helper.ws.sent)

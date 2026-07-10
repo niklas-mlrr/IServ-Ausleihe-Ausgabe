@@ -25,6 +25,7 @@ log = logging.getLogger(__name__)
 # noch der Katalog-Aufbau für die aktive Klasse (`select_class` ruft ihn auf).
 # ---------------------------------------------------------------------------
 
+
 def _persist_booklist_settings(state) -> None:
     """Aktuellen jahrgangsweiten Reihenfolge-/Ausblendungs-Stand auf die
     Server-Persistenz (`data/booklist_settings.json`) wegschreiben. Non-fatal —
@@ -48,9 +49,7 @@ async def _ensure_class_catalog(state, context_id: str | None = None) -> None:
         return
     if ctx.class_catalog_form == ctx.form and ctx.class_catalog:
         return
-    grade, catalog = await state.iserv.get_class_book_catalog(
-        ctx.form, state.selected_schoolyear
-    )
+    grade, catalog = await state.iserv.get_class_book_catalog(ctx.form, state.selected_schoolyear)
     ctx.class_catalog = catalog
     ctx.class_catalog_form = ctx.form
     ctx.class_catalog_grade = grade
@@ -78,16 +77,12 @@ async def list_booklists() -> dict:
 
 
 @host_router.get("/api/booklist-order")
-async def get_booklist_order(
-    grade: int
-) -> dict:
+async def get_booklist_order(grade: int) -> dict:
     """Ausleihbare Bücher eines Jahrgangs + aktuelle (ggf. vorkonfigurierte)
     Reihenfolge. Read-only, kein DB-Write."""
     state = get_state()
     try:
-        catalog = await state.iserv.get_booklist_catalog_by_grade(
-            grade, state.selected_schoolyear
-        )
+        catalog = await state.iserv.get_booklist_catalog_by_grade(grade, state.selected_schoolyear)
     except Exception as e:
         log.exception("Jahrgangs-Bücherliste konnte nicht geladen werden")
         raise HTTPException(502, f"IServ-Fehler: {e}") from e
@@ -117,9 +112,7 @@ async def set_booklist_order(body: BooklistOrderRequest) -> dict:
     if grade is None or requested is None:
         raise HTTPException(400, "grade (int) und order (Liste) erforderlich")
     try:
-        catalog = await state.iserv.get_booklist_catalog_by_grade(
-            grade, state.selected_schoolyear
-        )
+        catalog = await state.iserv.get_booklist_catalog_by_grade(grade, state.selected_schoolyear)
     except Exception as e:
         log.exception("Jahrgangs-Bücherliste konnte nicht geladen werden")
         raise HTTPException(502, f"IServ-Fehler: {e}") from e
@@ -160,9 +153,7 @@ async def set_booklist_hidden(body: BooklistHiddenRequest) -> dict:
     if grade is None or requested is None:
         raise HTTPException(400, "grade (int) und hidden (Liste) erforderlich")
     try:
-        catalog = await state.iserv.get_booklist_catalog_by_grade(
-            grade, state.selected_schoolyear
-        )
+        catalog = await state.iserv.get_booklist_catalog_by_grade(grade, state.selected_schoolyear)
     except Exception as e:
         log.exception("Jahrgangs-Bücherliste konnte nicht geladen werden")
         raise HTTPException(502, f"IServ-Fehler: {e}") from e

@@ -22,7 +22,9 @@ class Hub:
         # zugrunde liegenden ASGI-Sends interleaven oder in falscher
         # Reihenfolge beim Client ankommen. `WeakKeyDictionary`, damit Locks
         # toter Verbindungen nicht dauerhaft im Speicher bleiben.
-        self._ws_locks: weakref.WeakKeyDictionary[object, asyncio.Lock] = weakref.WeakKeyDictionary()
+        self._ws_locks: weakref.WeakKeyDictionary[object, asyncio.Lock] = (
+            weakref.WeakKeyDictionary()
+        )
 
     def _lock_for(self, ws: object) -> asyncio.Lock:
         lock = self._ws_locks.get(ws)
@@ -97,11 +99,14 @@ class Hub:
                 ):
                     helper.ws = None
                     continue
-                if not await self._safe_send(helper.ws, {
-                    "type": "contexts_update",
-                    "contexts": contexts,
-                    "own_context_id": helper.context_id,
-                }):
+                if not await self._safe_send(
+                    helper.ws,
+                    {
+                        "type": "contexts_update",
+                        "contexts": contexts,
+                        "own_context_id": helper.context_id,
+                    },
+                ):
                     helper.ws = None
 
     async def broadcast_settings(self, state: AppState | None = None) -> None:

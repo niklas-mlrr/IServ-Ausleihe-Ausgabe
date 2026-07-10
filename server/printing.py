@@ -102,9 +102,7 @@ async def _run(cmd: list[str]) -> tuple[int, str]:
     return proc.returncode or 0, (out or b"").decode("utf-8", errors="replace").strip()
 
 
-async def _print_lp(
-    tmp_pdf: Path, printer_name: str | None, pages: str | None = None
-) -> dict:
+async def _print_lp(tmp_pdf: Path, printer_name: str | None, pages: str | None = None) -> dict:
     if not shutil.which("lp"):
         raise RuntimeError("lp (CUPS) nicht gefunden — Backend 'lp' nicht verfügbar")
     cmd = ["lp"]
@@ -120,7 +118,9 @@ async def _print_lp(
 
 
 async def _print_sumatra(
-    tmp_pdf: Path, printer_name: str | None, sumatra_path: str | None,
+    tmp_pdf: Path,
+    printer_name: str | None,
+    sumatra_path: str | None,
     pages: str | None = None,
 ) -> dict:
     exe = _find_sumatra(sumatra_path)
@@ -153,16 +153,26 @@ async def list_printers(backend: str = "auto") -> dict:
     default: str | None = None
     try:
         if resolved in ("sumatra", "win-default"):
-            rc, out = await _run([
-                "powershell", "-NoProfile", "-NonInteractive", "-Command",
-                _PS_UTF8_PREFIX + "Get-Printer | Select-Object -ExpandProperty Name",
-            ])
+            rc, out = await _run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    _PS_UTF8_PREFIX + "Get-Printer | Select-Object -ExpandProperty Name",
+                ]
+            )
             if rc == 0:
                 printers = [ln.strip() for ln in out.splitlines() if ln.strip()]
-            rc, out = await _run([
-                "powershell", "-NoProfile", "-NonInteractive", "-Command",
-                _PS_UTF8_PREFIX + "(Get-CimInstance Win32_Printer -Filter 'Default=TRUE').Name",
-            ])
+            rc, out = await _run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    _PS_UTF8_PREFIX + "(Get-CimInstance Win32_Printer -Filter 'Default=TRUE').Name",
+                ]
+            )
             if rc == 0 and out.strip():
                 default = out.strip().splitlines()[0].strip()
         elif resolved == "lp" and shutil.which("lpstat"):
@@ -264,7 +274,8 @@ async def print_pdf(
             if pages:
                 log.warning(
                     "Backend 'win-default' kann keinen Seitenbereich (%s) wählen — "
-                    "es werden alle Seiten gedruckt", pages,
+                    "es werden alle Seiten gedruckt",
+                    pages,
                 )
             # `os.startfile` ist synchron und kann das Event-Loop für hunderte
             # ms blockieren (Windows-PDF-Handler-Aufruf) → in einen Thread

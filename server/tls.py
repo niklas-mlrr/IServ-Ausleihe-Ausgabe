@@ -77,7 +77,9 @@ def _route_src_ip(target: str) -> str | None:
 
 def _hostname_ipv4s() -> list[str]:
     try:
-        return [info[4][0] for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET)]
+        return [
+            info[4][0] for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET)
+        ]
     except Exception:
         return []
 
@@ -94,7 +96,7 @@ def _candidate_ipv4s() -> list[str]:
     ordered: list[str] = []
     seen: set[str] = set()
     probes = (
-        _route_src_ip("10.255.255.255"),   # LAN/Internet-Default-Route
+        _route_src_ip("10.255.255.255"),  # LAN/Internet-Default-Route
         _route_src_ip("100.100.100.100"),  # Tailscale (MagicDNS), falls aktiv
     )
     for ip in (*probes, *_hostname_ipv4s()):
@@ -174,7 +176,9 @@ def generate_selfsigned_cert(cert_path: Path, key_path: Path, cn: str = "localho
     if cert_path.exists() and key_path.exists():
         if not _cert_expired_or_expiring(cert_path):
             return
-        log.info("TLS-Zertifikat läuft bald ab oder ist abgelaufen — wird neu erzeugt: %s", cert_path)
+        log.info(
+            "TLS-Zertifikat läuft bald ab oder ist abgelaufen — wird neu erzeugt: %s", cert_path
+        )
     cert_path.parent.mkdir(parents=True, exist_ok=True)
 
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -204,9 +208,7 @@ def generate_selfsigned_cert(cert_path: Path, key_path: Path, cn: str = "localho
         .not_valid_after(now + dt.timedelta(days=825))  # max. von vielen Clients akzeptiert
         .add_extension(x509.SubjectAlternativeName(san), critical=False)
         .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
-        .add_extension(
-            x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False
-        )
+        .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
         .sign(key, hashes.SHA256())
     )
 

@@ -73,14 +73,20 @@ def test_print_loan_slip_for_reads_and_prints(tmp_path, monkeypatch):
 
 def _cfg(tmp_path, **kw):
     from server.config import Config
+
     return Config(
-        iserv_domain="example.org", iserv_username="u", iserv_password="p",
-        host_password="secret", print_output_dir=tmp_path, **kw,
+        iserv_domain="example.org",
+        iserv_username="u",
+        iserv_password="p",
+        host_password="secret",
+        print_output_dir=tmp_path,
+        **kw,
     )
 
 
 class _FakeHostWS:
     """Minimaler Host-WebSocket-Stub, der gesendete JSON-Nachrichten sammelt."""
+
     def __init__(self):
         self.sent = []
 

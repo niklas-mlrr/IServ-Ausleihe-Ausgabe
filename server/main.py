@@ -2,6 +2,7 @@
 
 Aufruf: uv run python -m server.main
 """
+
 from __future__ import annotations
 
 import logging

@@ -55,8 +55,13 @@ class _FakeElement:
 
 
 class _FakeLocator:
-    def __init__(self, elements: list[_FakeElement], *, raise_on_count: bool = False,
-                 query_set: set[str] | None = None) -> None:
+    def __init__(
+        self,
+        elements: list[_FakeElement],
+        *,
+        raise_on_count: bool = False,
+        query_set: set[str] | None = None,
+    ) -> None:
         self._elements = elements
         self._raise_on_count = raise_on_count
         self._query_set = query_set or set()
@@ -93,7 +98,9 @@ class _FakePage:
     (kein echter CSS-Parser — die Elemente tragen einfach die exakten
     Selektor-Strings, die ``_read_booking_result`` verwendet, als Etikett)."""
 
-    def __init__(self, elements: list[_FakeElement], *, raise_on_selectors: set[str] | None = None) -> None:
+    def __init__(
+        self, elements: list[_FakeElement], *, raise_on_selectors: set[str] | None = None
+    ) -> None:
         self._elements = elements
         self._raise_on_selectors = raise_on_selectors or set()
 
@@ -105,13 +112,15 @@ class _FakePage:
 
 
 def _session(page: _FakePage) -> StudentSession:
-    return StudentSession(context=None, page=page, domain="example.test",
-                           student_id=42, student_name="Test, Tina")
+    return StudentSession(
+        context=None, page=page, domain="example.test", student_id=42, student_name="Test, Tina"
+    )
 
 
 # ---------------------------------------------------------------------------
 # 1) Sichtbarer Fehlerhinweis → status "error", Text auf 200 Zeichen gekürzt.
 # ---------------------------------------------------------------------------
+
 
 def test_visible_error_alert_yields_error_status_truncated():
     long_msg = "Buch bereits verliehen an jemand anderes. " * 10  # > 200 Zeichen
@@ -140,6 +149,7 @@ def test_invisible_error_alert_is_ignored():
 # 2) Barcode taucht in einer echten Bücherzeile auf → status "booked".
 # ---------------------------------------------------------------------------
 
+
 def test_barcode_in_book_row_yields_booked():
     barcode = "0017798"
     row = _FakeElement(
@@ -163,6 +173,7 @@ def test_barcode_in_book_row_yields_booked():
 # Erwartung: "unknown", NICHT "booked".
 # ---------------------------------------------------------------------------
 
+
 def test_barcode_only_in_typeahead_input_does_not_count_as_booked():
     barcode = "0017798"
     tt_input = _FakeElement({"input.tt-input"}, text=barcode, visible=True)
@@ -172,7 +183,9 @@ def test_barcode_only_in_typeahead_input_does_not_count_as_booked():
     # trifft) — genau der Fall, den has_not=input_scope abfangen muss.
     fragile_row = _FakeElement(
         {"table tbody tr", '[ng-repeat*="book"]'},
-        text=barcode, visible=True, children=[tt_input],
+        text=barcode,
+        visible=True,
+        children=[tt_input],
     )
     page = _FakePage([tt_input, fragile_row])
     session = _session(page)
@@ -189,6 +202,7 @@ def test_barcode_only_in_typeahead_input_does_not_count_as_booked():
 # 4) Weder Fehlermeldung noch Barcode auffindbar → status "unknown".
 # ---------------------------------------------------------------------------
 
+
 def test_nothing_found_yields_unknown():
     page = _FakePage([])
     session = _session(page)
@@ -201,6 +215,7 @@ def test_nothing_found_yields_unknown():
 # ---------------------------------------------------------------------------
 # 5) Eine Locator-Exception (count() wirft) darf nicht durchschlagen.
 # ---------------------------------------------------------------------------
+
 
 def test_locator_exception_does_not_propagate_and_yields_unknown():
     page = _FakePage([], raise_on_selectors={"table tbody tr"})
