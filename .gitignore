@@ -39,3 +39,6 @@ tests/test_students.local.json
 # macOS Metadata
 .DS_Store
 ._*
+
+# Claude-Code-Session-Artefakte (lokale Konfiguration/Worktrees, nicht projektspezifisch)
+.claude/

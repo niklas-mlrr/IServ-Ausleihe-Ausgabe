@@ -35,12 +35,8 @@ exclude = ["automation/out", ".venv"]
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM"]
 ignore = [
-    # E501: line-length is already capped at 100 (vs. ruff's usual 88), but ~70
-    # existing lines across nearly every module (deutsche Bezeichner, IServ-URLs,
-    # WS-payload dicts, Playwright-Selektoren) still exceed it by a few chars.
-    # Rewrapping all of them is a pure formatting churn that belongs in a
-    # dedicated formatting wave, not the Welle-0 linter bootstrap. Revisit once
-    # `ruff format` is introduced.
+    # E501: 10 sites remain after `ruff format`, all in automation/ (Playwright
+    # JS/CSS selector strings and long German print/log messages).
     "E501",
     # SIM105: `except Exception: pass` -> `contextlib.suppress(Exception)` is
     # stylistic and touches ~26 call sites, several inside the IServ read-path
