@@ -91,7 +91,8 @@ function handleServerMessage(msg) {
     statusEl.textContent = 'Scanner bereit — Buch scannen';
   } else if (msg.type === 'scan_result') {
     const statusTextEl = document.getElementById('status-text');
-    statusTextEl.textContent = `${escapeHtml(msg.barcode)} — ${escapeHtml(msg.msg || msg.status)}`;
+    // Plain text (kein HTML) — textContent interpretiert keine Entities.
+    statusTextEl.textContent = `${msg.barcode} — ${msg.msg || msg.status}`;
     // Jeder nicht-verbuchbare Scan → Hinweis-Modal (wie bisher bei
     // ausgemustert / verliehen / an-sich-selbst, jetzt auch für „nicht
     // bestellt", „unbekannt", „noch nicht geladen", Prüf-Fehler).
