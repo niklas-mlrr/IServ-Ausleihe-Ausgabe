@@ -35,9 +35,6 @@ exclude = ["automation/out", ".venv"]
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM"]
 ignore = [
-    # E501: 10 sites remain after `ruff format`, all in automation/ (Playwright
-    # JS/CSS selector strings and long German print/log messages).
-    "E501",
     # SIM105: `except Exception: pass` -> `contextlib.suppress(Exception)` is
     # stylistic and touches ~26 call sites, several inside the IServ read-path
     # and Playwright worker where the exact except-block shape is deliberate
@@ -46,3 +43,9 @@ ignore = [
     # zero-risk lint bootstrap; revisit in a later refactor wave.
     "SIM105",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# E501: 10 Zeilen in den Spike-/E2E-Skripten sind Playwright-JS/CSS-Selektoren
+# bzw. lange deutsche Log-Texte, die sich nicht sinnvoll umbrechen lassen.
+# server/ und tests/ halten die 100-Zeichen-Grenze vollständig ein.
+"automation/*" = ["E501"]
