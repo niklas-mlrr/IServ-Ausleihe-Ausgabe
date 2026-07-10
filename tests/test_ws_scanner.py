@@ -21,6 +21,9 @@ zurück. Beide MÜSSEN dieselbe frische AppState liefern — daher patchen wir
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+
 import pytest
 
 import server.hub as hub_module
@@ -251,3 +254,90 @@ def test_search_call_missing_form_errors(client, ws_env):
         msg = _recv_until_any(ws, {"error", "loading"})
         assert msg["type"] == "error", f"erwartete error, bekam {msg['type']}"
         assert "Klasse" in msg["msg"] or "fehlt" in msg["msg"]
+
+
+# ---------------------------------------------------------------------------
+# 6) `finally`-Block von ws_scanner: gibt `helper.ws` nur frei, wenn er noch
+#    zur trennenden Verbindung gehört (Reconnect-Schutz, s. Docstring über
+#    `_RECONNECT_GRACE_S` in server/routes/ws.py).
+#
+#    `test_scanner_reconnect.py` prüft `_deferred_end` isoliert; hier geht es
+#    um den Guard selbst (`if helper.ws is websocket:`) im echten ASGI-Pfad
+#    über `TestClient.websocket_connect`.
+# ---------------------------------------------------------------------------
+
+
+def _settle(ws, iters: int = 30) -> None:
+    """Der `TestClient`-WS läuft auf einem eigenen Portal-Thread/Event-Loop.
+    Ein gesendetes `disconnect`-Frame wird nicht synchron verarbeitet — wir
+    geben dem Portal-Loop über ein paar `asyncio.sleep(0)`-Runden (im Portal-
+    Thread selbst, nicht im Testthread) Gelegenheit, die Coroutine bis in den
+    `finally`-Block von `ws_scanner` laufen zu lassen. Kein Wandzeit-Sleep,
+    kein Timing-Flakiness — nur kooperative Scheduling-Runden."""
+    for _ in range(iters):
+        ws.portal.call(asyncio.sleep, 0)
+
+
+async def _cancel_and_await(t) -> None:
+    if t is not None and not t.done():
+        t.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await t
+
+
+def test_finally_releases_owned_ws_and_schedules_teardown(client, ws_env):
+    """A1 — normale Trennung (kein Reconnect hat übernommen): `helper.ws` wird
+    None, und weil ein Schüler zugewiesen war, wird ein Grace-Teardown-Task
+    (`_deferred_end`) angelegt."""
+    state, token = ws_env
+    ctx = state.open_context("10a")
+    ctx.queue.append(
+        QueueStudent(student_id=1, lastname="A", firstname="B", form="10a", status="active")
+    )
+    helper = state.helper_sessions[token]
+    helper.student_id = 1
+    helper.context_id = ctx.id
+
+    with client.websocket_connect("/ws/scanner/h1") as ws:
+        _drain_handshake(ws)
+        assert helper.ws is not None
+        ws.close(code=1000)
+        _settle(ws)
+        assert helper.ws is None, "finally sollte die eigene WS-Referenz freigeben"
+        assert helper.end_task is not None, "Grace-Teardown-Task sollte angelegt worden sein"
+        assert isinstance(helper.end_task, asyncio.Task)
+        # Aufräumen, solange das Portal noch lebt (der Task hängt auf
+        # asyncio.sleep(_RECONNECT_GRACE_S) — cancel statt auf die Frist warten).
+        ws.portal.call(_cancel_and_await, helper.end_task)
+
+
+def test_finally_noop_when_ownership_stolen(client, ws_env):
+    """A2 — Reconnect-Simulation: bevor die alte Verbindung schließt, hat
+    (angeblich) eine neue `helper.ws` bereits übernommen. Wir setzen dazu
+    einen Sentinel statt einen echten zweiten Socket zu öffnen (laut Auftrag
+    zulässig) — einfacher, und prüft exakt den Identitätsvergleich im Guard,
+    ohne die Komplexität eines echten Doppel-Connects über denselben Token."""
+    state, token = ws_env
+    ctx = state.open_context("10a")
+    ctx.queue.append(
+        QueueStudent(student_id=2, lastname="C", firstname="D", form="10a", status="active")
+    )
+    helper = state.helper_sessions[token]
+    helper.student_id = 2
+    helper.context_id = ctx.id
+
+    with client.websocket_connect("/ws/scanner/h1") as ws:
+        _drain_handshake(ws)
+        sentinel = object()
+        # Simuliert: eine neue Verbindung hat synchron helper.ws übernommen,
+        # BEVOR das finally der alten Verbindung läuft (s. ws_scanner: die
+        # neue Verbindung setzt helper.ws = websocket VOR jedem eigenen await).
+        helper.ws = sentinel
+        ws.close(code=1000)
+        _settle(ws)
+        assert helper.ws is sentinel, (
+            "finally darf die WS-Referenz einer neuen Verbindung nicht anfassen"
+        )
+        assert helper.end_task is None, (
+            "finally darf keinen Teardown auslösen, wenn es die WS nicht mehr besitzt"
+        )

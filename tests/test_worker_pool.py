@@ -11,6 +11,44 @@ import pytest
 
 from automation.worker import StudentSession, WorkerPool
 
+# ---------------------------------------------------------------------------
+# WorkerPool.release — Idempotenz (kein Doppel-Append desselben Contexts)
+#
+# Bislang nur im Docstring von WorkerPool.release beschrieben (s.
+# automation/worker.py:552ff): ein zweiter release()-Aufruf auf dieselbe
+# StudentSession (möglich durch eine Race im Server-Code, s. release_worker /
+# set_worker_session) darf den Context NICHT ein zweites Mal in den Pool
+# anhängen — sonst würden zwei open_student-Aufrufe denselben Context poppen,
+# beide Pages auf demselben Context erzeugen, und stats()["available"] über
+# stats()["total"] hinaus wachsen.
+# ---------------------------------------------------------------------------
+
+
+class _FakeReleasePage:
+    async def close(self) -> None:
+        pass
+
+
+def test_release_is_idempotent_no_double_append():
+    p = WorkerPool(n=1, domain="d", username="u", password="p")
+    ctx = _FakeContext("only")
+    p._contexts = [ctx]
+    p._total = 1
+    # Context ausgecheckt (wie open_student es täte).
+    p._contexts.pop()
+    session = StudentSession(ctx, _FakeReleasePage(), "d", 1, "Test, Nina")
+
+    async def run():
+        await p.release(session)
+        await p.release(session)  # zweiter Aufruf — muss no-op sein
+
+    asyncio.run(run())
+
+    assert p._contexts.count(ctx) == 1, "Context darf nach Doppel-Release nur einmal im Pool sein"
+    assert session._context is None
+    stats = p.stats()
+    assert stats["available"] <= stats["total"]
+
 
 def test_stats_empty_pool():
     p = WorkerPool(n=3, domain="d", username="u", password="p")
