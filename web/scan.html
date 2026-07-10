@@ -219,6 +219,9 @@
       display: flex; gap: 4px; overflow-x: auto; scroll-behavior: smooth;
       scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch;
       padding-bottom: 4px; border-bottom: 1px solid var(--border);
+      /* Gleicher Abstand zur ersten Warteschlangen-Zeile wie zwischen den
+         Steuer-Elementen der Kamera-Zeile (--gap/7px), s. .top-bar. */
+      margin-bottom: 7px;
     }
     .queue-tabs::-webkit-scrollbar { height: 4px; }
     .queue-tabs::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 2px; }
@@ -236,12 +239,18 @@
       font-size: .75rem; background: var(--info-bg, #0a3d6b); color: var(--info, #5ac8fa);
       padding: 1px 7px; border-radius: 10px; font-weight: 600;
     }
+    /* Vorschlags-Reiter: eigene Klasse leer, dieser Reiter (weiter rechts) hat
+       noch Wartende — „Weiter" springt bei Klick dorthin (s. scan.js,
+       suggestedQueueContext). Farbig hervorgehoben statt nur eines Badges,
+       damit der Sprung nicht überraschend wirkt. */
+    .qtab-suggested { border-color: var(--info, #5ac8fa); color: var(--info, #5ac8fa); }
+    .qtab-suggested:hover { background: var(--info-bg, #0a3d6b); }
 
     /* ---- Bücher-Tabelle (einziger Scroll-Bereich) ---- */
     .book-table-wrap { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
     .book-row {
       display: grid; grid-template-columns: 5rem 1fr 1.8rem; align-items: center;
-      gap: 8px; padding: 8px 10px; margin-bottom: 6px; color: var(--fg);
+      gap: 8px; padding: 8px 10px; margin-bottom: 7px; color: var(--fg);
       border-radius: 8px; border: 2px solid transparent; font-size: .9rem;
       /* FLIP-Animation: nach einem erfolgreichen Scan wandern die Zeilen an
          ihre neue Position, statt sofort zu springen. transform wird nur
@@ -261,7 +270,10 @@
     /* Warteschlangen-Anzeige (kein Schüler zugewiesen): gleiche Zeilenform
        wie die Bücherliste, aber ohne Farbgebung — transparenter Hintergrund
        und Rand, dafür mit „Aufrufen"-Button statt des Status-Icons. */
-    .book-row.queue-row { grid-template-columns: 4.5rem 1fr auto; background: transparent; border-color: transparent; }
+    /* Kein Innenabstand oben/unten: der Button ist das höchste Element der
+       Zeile, daher entspricht der Zeilen-margin-bottom (7px) direkt dem
+       sichtbaren Abstand zwischen den Rändern zweier "Aufrufen"-Buttons. */
+    .book-row.queue-row { grid-template-columns: 4.5rem 1fr auto; background: transparent; border-color: transparent; padding-top: 0; padding-bottom: 0; }
     .book-row.queue-row .b-call { display: flex; justify-content: flex-end; align-items: center; }
     .call-btn { padding: 7px 14px; font-size: .85rem; font-weight: 600; border-radius: 8px;
       background: var(--surface-2); color: var(--fg); border: 1px solid var(--border); cursor: pointer; transition: background .2s; }

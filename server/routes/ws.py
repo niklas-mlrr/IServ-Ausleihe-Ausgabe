@@ -229,8 +229,11 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
 
             if mtype == "next":
                 # Aktuellen Schüler abschließen (kein Browser-Submit) und
-                # nächsten Wartenden auf diesen Helfer setzen.
-                await advance_helper(state, hub, helper)
+                # nächsten Wartenden auf diesen Helfer setzen. `context_id`
+                # (optional): Client hat vorgeschlagen, auf eine andere
+                # (nicht-leere) Klasse umzuspringen, weil die eigene
+                # Warteschlange leer ist — s. advance_helper.
+                await advance_helper(state, hub, helper, context_id=raw.get("context_id"))
                 continue
 
             if mtype == "call":

@@ -8,6 +8,43 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-10 — Host: Sofort-fertig-Filter beim Klassen-Öffnen
+
+Im „Neue Klasse öffnen"-Reiter vier Umschalter ergänzt: Schüler ohne aktuelle
+Anmeldung, nicht bezahlt, Ermäßigungsantrag ohne Nachweis, Befreiungsantrag
+ohne Nachweis. Beim Laden einer neuen Klasse (nicht beim Wieder-Aktivieren
+eines bereits offenen Tabs) prüft `_apply_auto_done` (`server/routes/
+classes.py`) jeden Schüler parallel per `get_student_info` (read-only,
+schuljahrbezogen) gegen die gewählten Bedingungen und setzt Treffer sofort auf
+Status `done` — nicht angemeldete Schüler zählen dabei ausschließlich für den
+„Nicht angemeldet"-Filter (ohne Anmeldung liefert IServ keinen sinnvollen
+Zahl-/Nachweis-Status). Die Auswahl wird im Browser (`localStorage`) gemerkt
+und beim nächsten Öffnen vorbelegt (`OpenClassRequest.auto_done`).
+
+## 2026-07-10 — Helferclient: Weiter-Button wandert ins Menü, Lupe zieht in die Warteschlangen-Kopfzeile
+
+`#next-btn` ist jetzt in und außerhalb des Menüs dieselbe, immer sichtbare
+Schaltfläche (kein Verschwinden bei leerer Warteschlange mehr): außerhalb
+Kind von `.status-bar` wie bisher, im Menü per JS in `.top-section` umgehängt
+und dort an die Stelle gesetzt, an der zuvor die Lupe saß (`grid-area: next`,
+ersetzt die alte `search`-Spalte). Die Lupe (`#search-btn`) sitzt im Gegenzug
+jetzt fest in der „Warteschlange"-Kopfzeile (rechts neben dem Titel) und
+blendet dort rein per CSS-Opacity ein/aus, ohne Reparenting. Dazu einheitlicher
+7px-Abstand zwischen dieser Kopfzeile und ihren Nachbarn (Statuszeile/Lupen-
+Dropdown oben, Klassen-Reiter unten) — passend zum Abstand zwischen Statuszeile
+und Menü-/Weiter-Button.
+
+Beim Umbau zwei FLIP-Animations-Bugs behoben: (1) die alte Button-Position
+wurde nach statt vor dem Klassen-Toggle gemessen, wodurch der Button ohne
+sichtbare Bewegung an sein Ziel sprang; (2) da der Button beim Schließen des
+Menüs Kind eines selbst FLIP-animierten Elements (`.status-bar`) wird, addierte
+sich sein eigener Transform zum ererbten — er schoss weit über die Zielposition
+hinaus statt sanft mitzuwandern. Details + wiederverwendbare Faustregel:
+`~/cc/_logs/2026-07-10_sba_helfer_weiter_lupe_swap.md`.
+
+Reiner UI-Fix im Helferclient (`web/scan.html`, `web/scan.js`), kein
+Verhaltenseingriff auf dem Buchungspfad. Commit `de59af6`.
+
 ## 2026-07-10 — Scan-Client: Alert-Farbe der Statuszeile bleibt am Alert-Text
 
 `web/scan.js` toggelte `status-book-deleted` (rot/fett) auf `#status-text`

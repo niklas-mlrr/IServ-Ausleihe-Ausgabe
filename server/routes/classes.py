@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -10,7 +11,7 @@ from fastapi import HTTPException
 
 from ..hub import get_hub
 from ..sessions import end_student, invalidate_session
-from ..state import QueueStudent, get_state
+from ..state import AppState, ClassContext, QueueStudent, get_state
 from ._deps import (
     AddStudentRequest,
     CloseClassRequest,
@@ -22,6 +23,45 @@ from ._deps import (
 from .booklists import _ensure_class_catalog
 
 log = logging.getLogger(__name__)
+
+# Beim Klassen-Laden wählbare Sofort-fertig-Filter, s. `_apply_auto_done`.
+_AUTO_DONE_FILTERS = {"not_enrolled", "unpaid", "remission_pending", "exemption_pending"}
+
+
+async def _apply_auto_done(state: AppState, ctx: ClassContext, auto_done: list[str]) -> None:
+    """Schüler, auf die eine der gewählten Bedingungen zutrifft, direkt beim
+    Klassen-Laden auf 'done' setzen (nicht angemeldet / nicht bezahlt /
+    Ermäßigungs- bzw. Befreiungsantrag ohne Nachweis) — parallele read-only
+    IServ-GETs pro Schüler (`get_student_info`, wie in der Scanner-Anzeige).
+    Fehler pro Schüler sind nicht fatal (Schüler bleibt 'pending'), damit ein
+    einzelner IServ-Fehler nicht das ganze Klassen-Laden blockiert.
+
+    'nicht angemeldet' schließt die übrigen Filter aus — ohne Anmeldung liefert
+    IServ keinen Zahl-/Nachweis-Status, also wären `unpaid` u. a. sonst
+    bedeutungslose Platzhalterwerte, die einen unangemeldeten Schüler
+    fälschlich träfen, selbst wenn nur z. B. `unpaid` gewählt wurde."""
+    filters = set(auto_done) & _AUTO_DONE_FILTERS
+    if not filters:
+        return
+
+    async def _check(student: QueueStudent) -> None:
+        try:
+            info = await state.iserv.get_student_info(student.student_id, state.selected_schoolyear)
+        except Exception:
+            log.exception("Anmelde-/Zahlstatus für Schüler %s konnte nicht geladen werden", student.student_id)
+            return
+        if not info.get("enrolled"):
+            if "not_enrolled" in filters:
+                student.status = "done"
+            return
+        if (
+            ("unpaid" in filters and not info.get("paid"))
+            or ("remission_pending" in filters and info.get("remission_pending"))
+            or ("exemption_pending" in filters and info.get("exemption_pending"))
+        ):
+            student.status = "done"
+
+    await asyncio.gather(*(_check(s) for s in ctx.queue))
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +179,8 @@ async def open_class(body: OpenClassRequest) -> dict:
 
     ctx = state.open_context(form)
     ctx.queue = [QueueStudent.from_iserv(s, form=form) for s in students]
+    if body.auto_done:
+        await _apply_auto_done(state, ctx, body.auto_done)
     # Katalog + Bücher-Reihenfolge sofort aufbauen (übernimmt eine im
     # Einstellungen-Dialog vorkonfigurierte Reihenfolge automatisch für den
     # Scanner) — Fehler hier sind nicht fatal, die Klasse bleibt trotzdem geladen.

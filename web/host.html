@@ -96,6 +96,30 @@
         <button id="open-class-btn" style="padding-top:12px;padding-bottom:12px">Öffnen</button>
       </div>
       <p class="hint">Öffnet einen neuen Reiter für die gewählte Klasse — eigene Queue und eigenes Now-Serving. Mehrere Klassen lassen sich parallel bedienen.</p>
+      <div style="font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;opacity:.7;border-top:1px solid var(--border);padding-top:12px;margin-top:4px">Automatisch als fertig markieren</div>
+      <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px">
+        <label class="switch" title="Schüler ohne aktuelle Anmeldung werden beim Laden sofort auf 'fertig' gesetzt.">
+          <input type="checkbox" id="auto-done-not_enrolled">
+          <span class="track"></span>
+          Nicht angemeldet
+        </label>
+        <label class="switch" title="Schüler mit offenem Zahlbetrag werden beim Laden sofort auf 'fertig' gesetzt.">
+          <input type="checkbox" id="auto-done-unpaid">
+          <span class="track"></span>
+          Nicht bezahlt
+        </label>
+        <label class="switch" title="Schüler mit gestelltem, aber noch nicht entschiedenem Ermäßigungsantrag werden beim Laden sofort auf 'fertig' gesetzt.">
+          <input type="checkbox" id="auto-done-remission_pending">
+          <span class="track"></span>
+          Ermäßigungsantrag fehlt
+        </label>
+        <label class="switch" title="Schüler mit gestelltem, aber noch nicht entschiedenem Befreiungsantrag werden beim Laden sofort auf 'fertig' gesetzt.">
+          <input type="checkbox" id="auto-done-exemption_pending">
+          <span class="track"></span>
+          Befreiungsantrag fehlt
+        </label>
+      </div>
+      <p class="hint">Betrifft nur neu geladene Klassen (nicht bereits geöffnete Reiter). Die Auswahl wird für das nächste Öffnen gemerkt.</p>
     </div>
     <div class="card">
       <h2>Test Config öffnen</h2>

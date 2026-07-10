@@ -130,6 +130,24 @@ function ensureSelectedCtx() {
     : (ids[0] || null);
 }
 
+// Klassen-Vorschlag: ist die eigene Klasse (ownContextId) leer, aber ein
+// Reiter WEITER RECHTS (später in contextsData, gleiche Reihenfolge wie im
+// Host) hat noch Wartende, wird dieser als Vorschlag markiert (s.
+// renderQueueTabs) — „Weiter" springt dann direkt dorthin, statt aus der
+// leeren eigenen Klasse zu ziehen (advanceToNext), und bindet den Helfer
+// serverseitig an diese Klasse um (s. advance_helper in sessions.py).
+function suggestedQueueContext() {
+  if (!contextsData.length || !ownContextId) return null;
+  const idx = contextsData.findIndex(c => c.id === ownContextId);
+  if (idx === -1) return null;
+  const own = contextsData[idx];
+  if (own.queue && own.queue.length) return null;  // eigene Queue nicht leer -> kein Vorschlag
+  for (let i = idx + 1; i < contextsData.length; i++) {
+    if (contextsData[i].queue && contextsData[i].queue.length) return contextsData[i];
+  }
+  return null;
+}
+
 // Queue-Ansicht (Name-row verborgen, Queue-Header mit Klassen-Reitern sichtbar)
 // gilt im Peek (Hintergrund-Schüler) und im Idle (kein Schüler). Während ein
 // Schüler geladen wird (loadingStudent), ist sie aus — dann steht „wird geladen"
@@ -244,8 +262,15 @@ function renderQueue() {
   if (!list.length) {
     // Keine Klasse offen: der Hinweis steht bereits an Stelle der Klassen-Reiter
     // (renderQueueTabs); darunter in der eigentlichen Warteschlange bleibt die
-    // Liste leer, statt den Text zu wiederholen.
-    bookRowsEl.innerHTML = contextsData.length ? '<div class="book-empty">Warteschlange leer</div>' : '';
+    // Liste leer, statt den Text zu wiederholen. Ist die eigene Klasse leer,
+    // aber eine andere (rechts daneben) hat noch Wartende, wird die als
+    // Vorschlag genannt — der Reiter selbst ist zusätzlich markiert (s.
+    // renderQueueTabs, .qtab-suggested).
+    if (!contextsData.length) { bookRowsEl.innerHTML = ''; return; }
+    const suggested = selectedCtxId === ownContextId ? suggestedQueueContext() : null;
+    bookRowsEl.innerHTML = suggested
+      ? `<div class="book-empty">Warteschlange leer — weiter mit „${escapeHtml((suggested.form || 'Klasse').replace(/^Klasse\s+/i, ''))}"?</div>`
+      : '<div class="book-empty">Warteschlange leer</div>';
     return;
   }
   bookRowsEl.innerHTML = list.map(s => {
@@ -302,10 +327,12 @@ function renderQueueTabs() {
     queueTabsEl.innerHTML = '<span class="book-empty" style="padding:4px 0">Keine Klasse offen</span>';
     return;
   }
+  const suggested = suggestedQueueContext();
   queueTabsEl.innerHTML = contextsData.map(c => {
     const n = (c.queue && c.queue.length) || 0;
     const badge = n ? ` <span class="qcount">${n}</span>` : '';
-    return `<button class="qtab${c.id === selectedCtxId ? ' active' : ''}" data-ctx="${escapeHtml(c.id)}">${escapeHtml(c.form || 'Klasse')}${badge}</button>`;
+    const isSuggested = !!(suggested && c.id === suggested.id);
+    return `<button class="qtab${c.id === selectedCtxId ? ' active' : ''}${isSuggested ? ' qtab-suggested' : ''}" data-ctx="${escapeHtml(c.id)}">${escapeHtml(c.form || 'Klasse')}${badge}</button>`;
   }).join('');
 }
 
@@ -383,7 +410,14 @@ function handleServerMessage(msg) {
     studentActive = false;
     workerPending = true;
     loadingStudent = true;
+    // Ein Schüler wird aufgerufen (Aufrufen/Weiter/Nächster/Lupen-Suche) →
+    // ein offenes Menü (Peek MIT Hintergrund-Schüler wie Idle OHNE) schließt
+    // dabei immer, damit sofort scannbar ist, statt dass der Helfer manuell
+    // zurückwechseln muss.
+    const menuWasOpen = peeking || idleMenuOpen || searchOpen;
     peeking = false;          // Schülerwechsel beendet den Peek
+    idleMenuOpen = false;     // ... und ein ggf. offenes Idle-Menü
+    resetSearchPanel();       // ... und ein ggf. offenes Such-Panel (ohne Animation)
     setMenuTitle();
     syncQueueView();
     sNameEl.textContent = '';
@@ -398,15 +432,7 @@ function handleServerMessage(msg) {
     heldScanValue = null;
     closeLendModal();
     setStatusText('Warten…');
-    // Ursprung Lupe-Suche: Panel + Menü bewusst schließen (zurück zur
-    // Scanner-Ansicht), damit der geladene Schüler sofort scannbar ist.
-    // `call`/`next` aus dem Peek lassen das Menü weiter offen (bestehendes
-    // Verhalten) — nur der Such-Pfad schließt gezielt.
-    if (searchSubmitted) { searchSubmitted = false; closeSearchAndMenu(); }
-    // Wurde der Schüler aus dem Idle-Menü heraus aufgerufen (Queue-„Aufrufen",
-    // ohne Such-Pfad), das Menü ebenfalls schließen — zurück zur Scanner-Ansicht.
-    // (Der Such-Pfad hat idleMenuOpen oben bereits zurückgesetzt.)
-    if (idleMenuOpen) { idleMenuOpen = false; setMenuTitle(); animateMenu(false); }
+    if (menuWasOpen) animateMenu(false, true);
   } else if (msg.type === 'scan_result') {
     if (pendingScans > 0) pendingScans--;
     // Erfolgreicher Scan → Buch in der Liste als „erledigt" markieren:
@@ -602,7 +628,13 @@ function advanceToNext() {
   workerPending = true;
   loadingStudent = true;  // nächste Schülerzugewiesen, wird gerade geladen → Queue verbergen
   setStatusText('Warten…');
-  ws.send(JSON.stringify({ type: 'next' }));
+  // Eigene Klasse leer, aber ein Reiter weiter hinten hat noch Wartende
+  // (s. suggestedQueueContext): direkt dorthin springen, statt aus der
+  // leeren eigenen Queue zu ziehen. Der Server bindet den Helfer dabei an
+  // die neue Klasse um (s. advance_helper in sessions.py).
+  const suggested = suggestedQueueContext();
+  if (suggested) selectedCtxId = suggested.id;
+  ws.send(JSON.stringify({ type: 'next', context_id: suggested ? suggested.id : undefined }));
 }
 
 function closeNextModal() { nextModal.classList.remove('show'); }
@@ -1145,19 +1177,6 @@ function animateSearchPanel(open) {
     searchPanel.classList.remove('open');
     flipSearchTargets(firsts);
   }
-}
-
-// Panel + Menü schließen (ohne Animation am Panel) — beim Such-Laden, damit der
-// neue Schüler im Scanner-Layout scannbar ist. animateMenu(false) übernimmt
-// die Rückkehr der Steuer-Elemente; das Panel muss vorher weg (sonst verfälscht
-// es die FLIP-Messung des Menü-Schließens).
-function closeSearchAndMenu() {
-  searchOpen = false;
-  idleMenuOpen = false;   // ggf. offenes Idle-Menü mit schließen (Such-Pfad)
-  searchPanel.classList.remove('open');
-  searchPanel.style.maxHeight = '';
-  searchPanel.style.transition = '';
-  animateMenu(false);
 }
 
 // Such-Panel sofort (ohne Animation) zurücksetzen — beim Peek-Öffnen/Schließen,

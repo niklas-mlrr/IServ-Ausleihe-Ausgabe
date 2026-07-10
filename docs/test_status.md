@@ -37,6 +37,26 @@
 
 ## Offen / zu testen
 
+### Offen 2026-07-10 (Host: Sofort-fertig-Filter beim Klassen-Öffnen)
+
+`OpenClassRequest.auto_done` + `_apply_auto_done()` (`server/routes/classes.py`)
+setzen Schüler beim Laden einer neuen Klasse sofort auf `done`, wenn eine
+gewählte Bedingung zutrifft (nicht angemeldet / nicht bezahlt / Ermäßigungs-
+bzw. Befreiungsantrag ohne Nachweis). Nur ad-hoc mit einem temporären
+Testfall verifiziert (Fake-IServ-Stub analog `_FakeIServForClasses`, danach
+wieder entfernt) — **kein dauerhafter Unit-Test ergänzt**, Suite bleibt bei
+187 Tests.
+
+- [ ] Dauerhaften Test in `tests/test_api_guards.py` ergänzen:
+      `_FakeIServForClasses` um eine `get_student_info`-Methode erweitern,
+      die je nach `student_id` `enrolled`/`paid`/`remission_pending`/
+      `exemption_pending` variiert, dann `open-class` mit `auto_done`
+      aufrufen und die resultierenden Queue-Status prüfen.
+- [ ] Am echten Gerät/Klasse verifizieren, dass die Filter-Checkbox-Auswahl
+      korrekt aus `localStorage` vorbelegt wird und die IServ-Parallelabfrage
+      (`asyncio.gather` über alle Klassenmitglieder) bei einer echten,
+      größeren Klasse (~30 Schüler) performant bleibt.
+
 ### Offen 2026-07-09 (Worker: Robustheit der Erfolgs-Erkennung in `_read_booking_result`)
 
 **Vorgeschichte, geklärt:** Ein früherer Eintrag hier vermutete einen

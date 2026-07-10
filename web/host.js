@@ -101,6 +101,7 @@
       document.getElementById('main-view').style.display = '';
       loadSchoolyears();
       loadClasses();
+      loadAutoDoneSelection();
       connectWs();
       // Dev-Toggles (PDF-lokal / Klasse-korrigieren / Schüler-Leihschein) werden
       // NICHT mehr vom Browser an den Server gepusht — der Server-State ist die
@@ -277,11 +278,29 @@
   }
 
   // ---- Klassen öffnen/schließen ----
+  const AUTO_DONE_KEYS = ['not_enrolled', 'unpaid', 'remission_pending', 'exemption_pending'];
+  const AUTO_DONE_STORAGE_KEY = 'autoDoneFilters';
+
+  function getAutoDoneSelection() {
+    return AUTO_DONE_KEYS.filter(k => document.getElementById(`auto-done-${k}`)?.checked);
+  }
+
+  function loadAutoDoneSelection() {
+    let saved = [];
+    try { saved = JSON.parse(localStorage.getItem(AUTO_DONE_STORAGE_KEY) || '[]'); } catch { saved = []; }
+    AUTO_DONE_KEYS.forEach(k => {
+      const el = document.getElementById(`auto-done-${k}`);
+      if (el) el.checked = saved.includes(k);
+    });
+  }
+
   async function openClass(force = false) {
     const form = document.getElementById('new-class-select').value;
     if (!form) return;
+    const auto_done = getAutoDoneSelection();
+    localStorage.setItem(AUTO_DONE_STORAGE_KEY, JSON.stringify(auto_done));
     showMsg('Lade Schüler…');
-    const r = await fetch('/api/open-class', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ form, force }) });
+    const r = await fetch('/api/open-class', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ form, force, auto_done }) });
     const d = await r.json();
     if (r.status === 409 && d.detail && d.detail.reason === 'active_sessions') {
       if (await confirmDialog(`${d.detail.msg}\n\nTrotzdem öffnen?`, 'Öffnen')) return openClass(true);
@@ -1509,6 +1528,7 @@
       r.json().then(s => { applyState(s); });
       loadSchoolyears();
       loadClasses();
+      loadAutoDoneSelection();
       connectWs();
       // Dev-Toggles kommen via WS vom Server (globale Quelle), kein Browser-Push
       // beim Auto-Login mehr. Theme bleibt pro Browser (localStorage).

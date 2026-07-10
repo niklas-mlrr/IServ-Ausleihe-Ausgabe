@@ -762,7 +762,7 @@ async def load_and_push_helper_student(state: AppState, hub, student, helper) ->
     await hub.send_scanner(helper.token, {"type": "worker_ready"})
 
 
-async def advance_helper(state: AppState, hub, helper) -> dict:
+async def advance_helper(state: AppState, hub, helper, context_id: str | None = None) -> dict:
     """Helfer auf den nächsten Wartenden setzen.
 
     Zwei klar getrennte Schritte (analog zur Cleanup-Reihenfolge in
@@ -771,6 +771,11 @@ async def advance_helper(state: AppState, hub, helper) -> dict:
       1. Aktuellen Schüler abschließen (`end_student` → Worker-Context zu,
          KEIN Browser-Submit/keine Buchung).
       2. Nächsten Pending aus der Queue diesem Helfer zuweisen.
+
+    `context_id` (optional): Client-Vorschlag „eigene Warteschlange ist leer,
+    aber ein Reiter weiter hinten hat noch Wartende" (s. scan.js,
+    `suggestedQueueContext`) — der Helfer wird dabei auf diese Klasse
+    umgebunden, statt aus seiner (leeren) eigenen Klasse zu ziehen.
     """
     if helper.student_id is not None:
         await end_student(
@@ -778,6 +783,9 @@ async def advance_helper(state: AppState, hub, helper) -> dict:
             queue_status="done", session_state="completed",
             helper_notify={"type": "loading"},  # Queue verbergen — nächster wird geladen
         )
+
+    if context_id is not None and context_id in state.contexts and context_id != helper.context_id:
+        rebind_helper_to_context(helper, context_id)
 
     return await assign_next_pending_to_helper(state, hub, helper)
 

@@ -25,6 +25,15 @@ async def add_helper(body: AddHelperRequest, request: Request) -> dict:
     context_id = str(body.context_id or "").strip() or None
     if context_id is not None and context_id not in state.contexts:
         raise HTTPException(404, "Kontext unbekannt")
+    if context_id is None:
+        # Kein Kontext explizit gewählt: erster Reiter (Host-Reihenfolge,
+        # also am weitesten links) mit tatsächlich Wartenden — ein neuer
+        # Helfer soll dort einsteigen, wo schon gestaut ist, statt unbenutzt
+        # in einer leeren Klasse zu landen.
+        context_id = next(
+            (cid for cid in state.contexts if state.pending_count(cid) > 0),
+            None,
+        )
     state.helper_sessions[token] = HelperSession(token=token, name=name, context_id=context_id)
     url = f"{_base_url(request)}/scan?token={token}"
     qr_data_url = make_qr_data_url(url)
