@@ -96,7 +96,14 @@ class _FakePoolWithGatedRelease:
 
 def test_release_worker_holds_task_in_flight_and_discards_after(monkeypatch):
     """B1: solange release() hängt, ist der Task in `_release_tasks` — nach
-    Abschluss ist er wieder draußen (done_callback via `.discard`)."""
+    Abschluss ist er wieder draußen (done_callback via `.discard`).
+
+    GRENZE DIESES TESTS: geprüft wird die Buchführung (add/discard), NICHT die
+    GC-Sicherheit selbst. Dass ein Task ohne starke Referenz tatsächlich
+    mid-coroutine eingesammelt wird, ist nicht deterministisch reproduzierbar.
+    Der Test schlägt fehl, sobald `_release_tasks.add(t)` entfällt — er belegt
+    also, dass die Referenz gehalten wird, nicht, was ohne sie passieren würde.
+    """
     st = AppState()
     pool = _FakePoolWithGatedRelease()
     st.worker_pool = pool
