@@ -8,6 +8,18 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-11 — Auto-fertig-Filter „Alle Bücher bereits ausgeliehen"
+
+Fünfter Sofort-fertig-Filter beim Klassen-Öffnen (`_AUTO_DONE_FILTERS` in
+`server/routes/classes.py`, ergänzt neben `not_enrolled`/`unpaid`/
+`remission_pending`/`exemption_pending`): `all_lent` setzt einen Schüler direkt
+auf `done`, wenn seine vorgemerkten Buchreihen — nach Anwendung der
+ausgeblendeten ISBNs (`get_hidden_isbns_for_form`) — bereits vollständig
+ausgeliehen sind (`booking_isbn_sets_from_info` liefert kein `vormerk` mehr).
+UI-Checkbox in `web/host.html`, Persistenz in `web/host-state.js`
+(`AUTO_DONE_KEYS`). Spart manuelles Durchklicken von Schülern, die schon
+komplett versorgt sind.
+
 ## 2026-07-11 — Wartbarkeits-Welle 7 (Subagent-Refactoring)
 
 Neun Verbesserungspunkte aus einem Codebase-Review, ausgeführt von Sonnet-5-
