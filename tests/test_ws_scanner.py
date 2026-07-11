@@ -245,40 +245,128 @@ def test_search_call_loads_transient_student_not_in_queue(client, ws_env):
         assert state.find_student(4242) is None
 
 
-def test_search_call_blocks_student_active_on_other_helper(client, ws_env):
-    """Lupe darf keinen Schüler öffnen, der gerade bei einem ANDEREN Helfer
-    aktiv ist (Queue-`call` oder ebenfalls Lupe) — sonst liefe derselbe
-    Schüler auf zwei Clients gleichzeitig. Statt zu laden: `error` mit
-    `busy: True` und der Statuszeilen-Text „Warte bis Schüler frei…"."""
+def test_call_second_helper_becomes_spectator_of_active_queue_student(client, ws_env):
+    """`call` auf einen Schüler, der gerade bei einem ANDEREN Helfer aktiv
+    ist (Queue-Schüler): statt eines Fehlers wird der zweite Helfer
+    Zuschauer (Bücherliste read-only, kein `worker_ready`) und in die
+    Warteliste des Schülers eingetragen (s. spectate_student)."""
     state, token = ws_env
     ctx = state.open_context("10a")
-    other = QueueStudent(
-        student_id=4242, lastname="Test", firstname="S", form="10a",
-        status="active", assigned_helper="h2",
-    )
-    ctx.queue.append(other)
-    helper = state.helper_sessions[token]
+    student = QueueStudent(student_id=4242, lastname="Test", firstname="S", form="10a")
+    ctx.queue.append(student)
+    state.helper_sessions["h2"] = HelperSession(token="h2", name="Helfer 2")
 
-    with client.websocket_connect("/ws/scanner/h1") as ws:
-        _drain_handshake(ws)
-        ws.send_json(
-            {
-                "type": "search_call",
-                "student_id": 4242,
-                "form": "10a",
-                "lastname": "Test",
-                "firstname": "S",
-            }
-        )
-        msg = _recv_until_any(ws, {"error", "loading"})
-        assert msg["type"] == "error", f"erwartete error, bekam {msg['type']}"
-        assert msg.get("busy") is True
-        assert msg["msg"] == "Warte bis Schüler frei…"
-        # Helfer bleibt unverändert (kein neuer Schüler geladen), der andere
-        # Schüler bleibt unangetastet bei h2.
-        assert helper.student_id is None
-        assert other.status == "active"
-        assert other.assigned_helper == "h2"
+    with client.websocket_connect("/ws/scanner/h1") as ws1:
+        _drain_handshake(ws1)
+        ws1.send_json({"type": "call", "student_id": 4242})
+        _recv_until(ws1, "worker_ready")
+        assert student.status == "active"
+        assert student.assigned_helper == "h1"
+
+        with client.websocket_connect("/ws/scanner/h2") as ws2:
+            _drain_handshake(ws2)
+            ws2.send_json({"type": "call", "student_id": 4242})
+            msg = _recv_until_any(ws2, {"student_info", "error"})
+            assert msg["type"] == "student_info", f"erwartete student_info, bekam {msg}"
+            assert msg.get("spectator") is True
+            h2 = state.helper_sessions["h2"]
+            assert h2.student_id is None  # kein eigener Worker
+            assert h2.spectating_student_id == 4242
+            assert state.student_spectators.get(4242) and (
+                state.student_spectators[4242][0].token == "h2"
+            )
+            # Der aktive Helfer bleibt unangetastet.
+            assert student.status == "active"
+            assert student.assigned_helper == "h1"
+
+
+def test_search_call_second_helper_becomes_spectator_of_transient_target(client, ws_env):
+    """Lupe auf einen Schüler, der bei einem ANDEREN Helfer bereits (ebenfalls
+    via Lupe, also transient — steht in KEINER Queue) aktiv ist: der zweite
+    Helfer wird Zuschauer statt eines Fehlers zu bekommen. `find_student`
+    würde diesen Fall NICHT erkennen (transient) — der Guard nutzt darum
+    `find_helper_for_student`."""
+    state, token = ws_env
+    state.helper_sessions["h2"] = HelperSession(token="h2", name="Helfer 2")
+    search_call = {
+        "type": "search_call",
+        "student_id": 4242,
+        "form": "10a",
+        "lastname": "Test",
+        "firstname": "S",
+    }
+
+    with client.websocket_connect("/ws/scanner/h1") as ws1:
+        _drain_handshake(ws1)
+        ws1.send_json(search_call)
+        _recv_until(ws1, "worker_ready")
+        assert state.find_student(4242) is None  # weiterhin transient
+
+        with client.websocket_connect("/ws/scanner/h2") as ws2:
+            _drain_handshake(ws2)
+            ws2.send_json(search_call)
+            msg = _recv_until_any(ws2, {"student_info", "error"})
+            assert msg["type"] == "student_info", f"erwartete student_info, bekam {msg}"
+            assert msg.get("spectator") is True
+            h2 = state.helper_sessions["h2"]
+            assert h2.student_id is None
+            assert h2.spectating_student_id == 4242
+
+
+def test_scan_fans_out_to_spectator(client, ws_env):
+    """Ein Scan des aktiven Helfers wird an alle Spectators dieses Schülers
+    gespiegelt (`spectator: True`) — die Bücherliste bleibt so live
+    synchron, auch ohne eigenen Worker."""
+    state, token = ws_env
+    ctx = state.open_context("10a")
+    student = QueueStudent(student_id=4242, lastname="Test", firstname="S", form="10a")
+    ctx.queue.append(student)
+    state.helper_sessions["h2"] = HelperSession(token="h2", name="Helfer 2")
+
+    with client.websocket_connect("/ws/scanner/h1") as ws1:
+        _drain_handshake(ws1)
+        ws1.send_json({"type": "call", "student_id": 4242})
+        _recv_until(ws1, "worker_ready")
+
+        with client.websocket_connect("/ws/scanner/h2") as ws2:
+            _drain_handshake(ws2)
+            ws2.send_json({"type": "call", "student_id": 4242})
+            _recv_until(ws2, "student_info")
+
+            ws1.send_json({"type": "scan", "value": "123456"})
+            scan1 = _recv_until(ws1, "scan_result")
+            assert not scan1.get("spectator")
+
+            scan2 = _recv_until(ws2, "scan_result")
+            assert scan2.get("spectator") is True
+            assert scan2["barcode"] == scan1["barcode"]
+            assert scan2["status"] == scan1["status"]
+
+
+def test_spectator_disconnect_removed_from_waitlist(client, ws_env):
+    """Trennt sich ein Zuschauer, wird er sofort (ohne Gnadenfrist — er hält
+    keine exklusive Ressource) aus der Warteliste entfernt."""
+    state, token = ws_env
+    ctx = state.open_context("10a")
+    student = QueueStudent(student_id=4242, lastname="Test", firstname="S", form="10a")
+    ctx.queue.append(student)
+    state.helper_sessions["h2"] = HelperSession(token="h2", name="Helfer 2")
+
+    with client.websocket_connect("/ws/scanner/h1") as ws1:
+        _drain_handshake(ws1)
+        ws1.send_json({"type": "call", "student_id": 4242})
+        _recv_until(ws1, "worker_ready")
+
+        with client.websocket_connect("/ws/scanner/h2") as ws2:
+            _drain_handshake(ws2)
+            ws2.send_json({"type": "call", "student_id": 4242})
+            _recv_until(ws2, "student_info")
+            assert 4242 in state.student_spectators
+
+        # ws2 ist jetzt geschlossen (with-Block verlassen) — finally-Block
+        # von ws_scanner muss die Warteliste aufgeräumt haben.
+        assert 4242 not in state.student_spectators
+        assert state.helper_sessions["h2"].spectating_student_id is None
 
 
 def test_search_call_missing_form_errors(client, ws_env):

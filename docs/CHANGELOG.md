@@ -8,6 +8,51 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-11 — Spectator-Modus + Warteliste statt Doppel-Öffnen-Fehler
+
+Ersetzt den vorherigen reinen Busy-Fehler (Eintrag darunter) durch einen
+vollen Zuschauer-/Wartelisten-Mechanismus: versucht ein zweiter Helfer
+(Queue-`call` oder Lupe-`search_call`), einen bereits bei einem ANDEREN
+Helfer aktiven Schüler zu laden, bekommt er sofort dessen Bücherliste
+read-only angezeigt (live mit jedem Scan des aktiven Helfers mitaktualisiert)
+— aber KEINEN eigenen Playwright-Worker (es gibt ohnehin nur einen Worker pro
+`student_id`). Statuszeile: „Warten bis Schüler frei…". Erst wenn der aktive
+Helfer den Schüler beendet, wird der am längsten Wartende automatisch
+befördert (jetzt MIT Worker); ein dritter Wartender bleibt entsprechend in
+der Liste, bis auch der neu beförderte fertig ist (FIFO-Handoff-Kette).
+
+Neu: `HelperSession.spectating_student_id` (getrennt von `student_id` — das
+bleibt strikt „ich besitze Worker + Queue-Slot"), `SpectatorWaiter`-Dataclass
+und `AppState.student_spectators`/`add_spectator`/`remove_spectator`/
+`pop_next_spectator` (`server/state.py`). `sessions.spectate_student()`
+registriert den Zuschauer (räumt vorherige eigene/andere Zuschauer-
+Registrierung zuerst auf) und pusht `student_info` mit `spectator: true` —
+kein `worker_pool.open_student`. `assign_student_to_helper()` räumt am Anfang
+automatisch eine noch offene Zuschauer-Registrierung des Helfers ab (jeder
+Pfad, der einen Helfer wirklich einen Schüler zuweist, egal ob „Nächster",
+„Aufrufen" oder die neue Beförderung, läuft darüber). `end_student()` bekommt
+dafür einen Beförderungs-Zweig (für echte Queue-Schüler UND transiente
+Lupe-Ziele, die redundant im `SpectatorWaiter` gespeicherte lastname/
+firstname/form nutzen) — bewusst synchron ohne Await zwischen
+`pop_next_spectator` und dem Aufruf von `assign_student_to_helper`, damit
+kein Zeitfenster entsteht, in dem ein dritter Helfer den Schüler regulär
+„callen" könnte, bevor die Beförderung feststeht. `_handle_scan`
+(`server/routes/ws.py`) spiegelt jeden Scan des aktiven Helfers zusätzlich an
+alle Spectator-Tokens (`spectator: true`). Disconnect eines Zuschauers
+räumt ihn sofort (keine Reconnect-Gnadenfrist — er hält keine exklusive
+Ressource) aus der Warteliste.
+
+Der neue Guard erkennt jetzt auch belegte TRANSIENTE Lupe-Ziele (über
+`find_helper_for_student` statt `find_student`), was der vorherige Fix noch
+verpasste (transiente Schüler stehen in keiner Queue). Frontend
+(`web/scan-ws.js`): `student_info`/`scan_result` mit `spectator: true` zeigen
+die Bücherliste read-only, ohne Statuszeile/Alert-Modal zu überschreiben;
+`workerPending` bleibt dauerhaft `true` (sperrt Scans über den bestehenden
+Client-Gate). Tests: `tests/test_ws_scanner.py` (Spectate über echte
+Websockets, Scan-Fan-out, Disconnect-Aufräumung),
+`tests/test_queue_flow.py` (Beförderung + FIFO-Kette, low-level über
+`end_student`).
+
 ## 2026-07-11 — Guard gegen Doppel-Öffnen desselben Schülers (Lupe)
 
 `_handle_search_call` (`server/routes/ws.py`) prüfte bislang nicht, ob der per

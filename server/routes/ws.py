@@ -20,6 +20,7 @@ from ..sessions import (
     process_scan,
     rebind_helper_to_context,
     send_display_update,
+    spectate_student,
 )
 from ..state import DisplaySession, QueueStudent, get_state
 
@@ -147,6 +148,23 @@ async def _handle_call(state, hub, helper, websocket, raw) -> None:
     sid = raw.get("student_id")
     target_pair = state.find_student_with_ctx(sid) if sid is not None else None
     target = target_pair[1] if target_pair else None
+    if target is not None and target.status == "active":
+        # Schüler ist gerade bei einem ANDEREN Helfer aktiv (Queue-`call` oder
+        # Lupe) — statt eines Fehlers wird der Aufrufer Zuschauer (read-only
+        # Bücherliste, live mitaktualisiert) und automatisch befördert,
+        # sobald der aktive Helfer den Schüler beendet (s. spectate_student).
+        owner = state.find_helper_for_student(sid)
+        if owner is not None and owner.token != helper.token:
+            await spectate_student(
+                state,
+                hub,
+                helper,
+                student_id=sid,
+                lastname=target.lastname,
+                firstname=target.firstname,
+                form=target.form,
+            )
+            return
     if target is None or target.status not in ("pending", "done"):
         await hub.send_websocket(
             websocket,
@@ -263,18 +281,16 @@ async def _handle_search_call(state, hub, helper, websocket, raw) -> None:
     # Guard gegen Doppel-Öffnen: anders als `call` (nur pending/done aus der
     # eigenen Queue) kann die Lupe JEDEN Schüler treffen — auch einen, der
     # gerade bei einem ANDEREN Helfer/Client aktiv ist (Queue-`call` oder
-    # ebenfalls Lupe). Ohne diesen Check würde hier unten einfach ein zweiter
-    # transienter QueueStudent für dieselbe student_id erzeugt → derselbe
-    # Schüler liefe auf zwei Clients gleichzeitig (zwei Worker-Sessions).
-    existing = state.find_student(sid)
-    if (
-        existing is not None
-        and existing.status == "active"
-        and existing.assigned_helper != helper.token
-    ):
-        await hub.send_websocket(
-            websocket,
-            {"type": "error", "msg": "Warte bis Schüler frei…", "busy": True},
+    # ebenfalls Lupe). `find_helper_for_student` erkennt das unabhängig davon,
+    # ob der Ziel-Schüler ein echter Queue-Eintrag oder selbst ein transienter
+    # Lupe-Schüler ist (der steht in KEINER Queue, `find_student` würde ihn
+    # also nicht als „belegt" erkennen). Statt eines Fehlers wird der
+    # Aufrufer Zuschauer (s. spectate_student) und automatisch befördert,
+    # sobald der aktive Helfer den Schüler beendet.
+    owner = state.find_helper_for_student(sid)
+    if owner is not None and owner.token != helper.token:
+        await spectate_student(
+            state, hub, helper, student_id=sid, lastname=lastname, firstname=firstname, form=form
         )
         return
     if helper.student_id is not None:
@@ -410,6 +426,15 @@ async def _handle_scan(state, hub, helper, websocket, raw) -> None:
     # Liste markieren kann.
     await hub.send_websocket(websocket, {"type": "scan_result", "barcode": barcode, **result})
     await hub.broadcast_host(state.state_snapshot())
+    # Zuschauer (Spectator, s. spectate_student) bekommen denselben Scan
+    # gespiegelt, damit ihre Bücherliste live mit dem aktiven Helfer
+    # mitläuft — `spectator: True` unterdrückt clientseitig Statuszeile/
+    # Alert-Modal (die bleiben „Warten bis Schüler frei…").
+    spectators = state.student_spectators.get(student_id)
+    if spectators:
+        spectator_payload = {"type": "scan_result", "barcode": barcode, **result, "spectator": True}
+        for waiter in list(spectators):
+            await hub.send_scanner(waiter.token, spectator_payload)
 
 
 _SCANNER_HANDLERS = {
@@ -589,6 +614,13 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                 helper.end_task = asyncio.create_task(
                     _deferred_end(state, hub, helper, helper.student_id)
                 )
+            if helper.spectating_student_id is not None:
+                # Spectator hält keine exklusive Ressource (kein Worker) —
+                # anders als beim aktiven Helfer keine Gnadenfrist nötig,
+                # sofort aus der Warteliste entfernen. Nach Reconnect muss er
+                # call/search_call erneut auslösen.
+                state.remove_spectator(helper.spectating_student_id, helper.token)
+                helper.spectating_student_id = None
         # else: Reconnect hat übernommen — nichts tun.
         await safe_broadcast(hub, state)
 
