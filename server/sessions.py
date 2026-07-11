@@ -943,6 +943,10 @@ async def spectate_student(
     if helper.spectating_student_id is not None:
         state.remove_spectator(helper.spectating_student_id, helper.token)
     helper.spectating_student_id = student_id
+    # Form am Helfer hinterlegen — symmetrisch zu `helper.student_form` beim
+    # echten Besitzer, für den Reconnect-Wiederherstellungs-Zweig in
+    # ws_scanner (dort steht sonst keine Form zur Verfügung).
+    helper.student_form = form
     state.add_spectator(student_id, SpectatorWaiter(helper.token, lastname, firstname, form))
     await hub.send_scanner(helper.token, {"type": "loading"})
     try:
@@ -957,6 +961,58 @@ async def spectate_student(
     await hub.send_scanner(
         helper.token, {"type": "student_info", "student": info, "spectator": True}
     )
+
+
+async def broadcast_student_info_to_spectators(
+    state: AppState, hub, student_id: int, info: dict
+) -> None:
+    """Bereits geladenes (hydriertes) `info`-Dict an alle Spectators eines
+    Schülers spiegeln — für Live-Refresh der Bücherliste bei Reconnect/
+    Selbst-Neuaufruf des aktiven Helfers (s. `refresh_active_student`)."""
+    waiters = state.student_spectators.get(student_id)
+    if not waiters:
+        return
+    payload = {"type": "student_info", "student": info, "spectator": True}
+    for waiter in list(waiters):
+        await hub.send_scanner(waiter.token, payload)
+
+
+async def refresh_active_student(state: AppState, hub, helper) -> None:
+    """Bücherliste des Helfers erneut laden, OHNE den Schüler ab-/neu
+    zuzuweisen (kein `end_student`/`assign_student_to_helper`).
+
+    Für den Fall, dass ein Helfer seinen EIGENEN bereits aktiven Schüler
+    erneut aufruft (Queue-`call`/Lupe-`search_call` auf sich selbst) oder
+    seine Seite neu lädt (Reconnect in `ws_scanner`). Ein `end_student` +
+    Neuzuweisung an dieser Stelle würde — falls ein Spectator wartet —
+    dessen Beförderung auslösen (End_student prüft `pop_next_spectator`),
+    den Schüler danach aber trotzdem an denselben Helfer zurückweisen:
+    zwei Clients wären gleichzeitig aktiv. Refresh vermeidet das komplett,
+    indem der Worker/die Zuordnung unangetastet bleiben.
+
+    Aktualisiert zusätzlich alle Spectators desselben Schülers (deren
+    Bücherliste soll live mit dem aktiven Helfer mitziehen — s.
+    `broadcast_student_info_to_spectators`).
+    """
+    student_id = helper.student_id
+    if student_id is None or state.iserv is None:
+        return
+    student = state.find_student(student_id)
+    form = student.form if student is not None else (helper.student_form or "")
+    try:
+        info = await state.iserv.get_student_info(student_id, state.selected_schoolyear)
+    except Exception as e:  # noqa: BLE001 — Fehler dem Client melden
+        log.exception("Refresh der Schülerinfo für %d fehlgeschlagen", student_id)
+        await hub.send_scanner(helper.token, {"type": "error", "msg": f"IServ-Fehler: {e}"})
+        return
+    info = await hydrate_student_info(state, info, form, helper)
+    await hub.send_scanner(helper.token, {"type": "student_info", "student": info})
+    if state.student_worker_sessions.get(student_id) is not None:
+        # Worker war schon bereit (unangetastet) — sofort wieder `worker_ready`
+        # signalisieren, sonst bliebe der Client dauerhaft auf „Warten…"
+        # stehen (kein neuer Lade-Task, der es nachliefern würde).
+        await hub.send_scanner(helper.token, {"type": "worker_ready"})
+    await broadcast_student_info_to_spectators(state, hub, student_id, info)
 
 
 async def load_and_push_paired_student(

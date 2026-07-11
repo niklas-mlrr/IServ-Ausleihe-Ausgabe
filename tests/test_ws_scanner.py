@@ -343,9 +343,119 @@ def test_scan_fans_out_to_spectator(client, ws_env):
             assert scan2["status"] == scan1["status"]
 
 
-def test_spectator_disconnect_removed_from_waitlist(client, ws_env):
-    """Trennt sich ein Zuschauer, wird er sofort (ohne Gnadenfrist — er hält
-    keine exklusive Ressource) aus der Warteliste entfernt."""
+def test_search_call_self_recall_with_waiting_spectator_does_not_dual_assign(client, ws_env):
+    """Kritischer Fall: der aktive Helfer ruft SEINEN EIGENEN Schüler per
+    Lupe erneut auf, während ein anderer Helfer bereits als Spectator
+    wartet. Ohne den Refresh-Kurzschluss würde `end_student` (intern beim
+    Neu-Zuweisen aufgerufen) den wartenden Spectator befördern — UND der
+    Handler würde den Schüler direkt danach trotzdem an den ursprünglichen
+    Helfer zurückgeben: zwei Clients gleichzeitig aktiv. Erwartet: NUR ein
+    Refresh, der Spectator bleibt Spectator, niemand sonst wird befördert."""
+    state, token = ws_env
+    state.helper_sessions["h2"] = HelperSession(token="h2", name="Helfer 2")
+    search_call = {
+        "type": "search_call",
+        "student_id": 4242,
+        "form": "10a",
+        "lastname": "Test",
+        "firstname": "S",
+    }
+
+    with client.websocket_connect("/ws/scanner/h1") as ws1:
+        _drain_handshake(ws1)
+        ws1.send_json(search_call)
+        _recv_until(ws1, "worker_ready")
+        h1 = state.helper_sessions["h1"]
+        assert h1.student_id == 4242
+
+        with client.websocket_connect("/ws/scanner/h2") as ws2:
+            _drain_handshake(ws2)
+            ws2.send_json(search_call)
+            _recv_until(ws2, "student_info")
+            h2 = state.helper_sessions["h2"]
+            assert h2.spectating_student_id == 4242
+
+            # h1 ruft denselben (eigenen) Schüler erneut über die Lupe auf.
+            ws1.send_json(search_call)
+            msg1 = _recv_until(ws1, "student_info")
+            assert not msg1.get("spectator")  # h1 bleibt Besitzer, kein Spectator
+
+            # h2 darf NICHT befördert worden sein — bleibt Spectator, kein
+            # eigener Worker/`worker_ready`.
+            assert h2.student_id is None
+            assert h2.spectating_student_id == 4242
+            assert h1.student_id == 4242  # h1 weiterhin (und einzig) Besitzer
+            assert state.student_spectators.get(4242) and (
+                state.student_spectators[4242][0].token == "h2"
+            )
+
+
+def test_call_self_recall_with_waiting_spectator_does_not_dual_assign(client, ws_env):
+    """Wie oben, aber über den Queue-`call`-Pfad (echter Queue-Schüler) statt
+    der Lupe."""
+    state, token = ws_env
+    ctx = state.open_context("10a")
+    student = QueueStudent(student_id=4242, lastname="Test", firstname="S", form="10a")
+    ctx.queue.append(student)
+    state.helper_sessions["h2"] = HelperSession(token="h2", name="Helfer 2")
+
+    with client.websocket_connect("/ws/scanner/h1") as ws1:
+        _drain_handshake(ws1)
+        ws1.send_json({"type": "call", "student_id": 4242})
+        _recv_until(ws1, "worker_ready")
+
+        with client.websocket_connect("/ws/scanner/h2") as ws2:
+            _drain_handshake(ws2)
+            ws2.send_json({"type": "call", "student_id": 4242})
+            _recv_until(ws2, "student_info")
+            h2 = state.helper_sessions["h2"]
+            assert h2.spectating_student_id == 4242
+
+            ws1.send_json({"type": "call", "student_id": 4242})
+            msg1 = _recv_until(ws1, "student_info")
+            assert not msg1.get("spectator")
+
+            assert h2.student_id is None
+            assert h2.spectating_student_id == 4242
+            assert student.status == "active"
+            assert student.assigned_helper == "h1"
+
+
+def test_active_client_reload_refreshes_spectator_book_list(client, ws_env):
+    """Lädt der AKTIVE Helfer seine Seite neu, muss sich die Bücherliste auch
+    bei allen Spectators dieses Schülers aktualisieren (nicht nur bei ihm
+    selbst)."""
+    state, token = ws_env
+    ctx = state.open_context("10a")
+    student = QueueStudent(student_id=4242, lastname="Test", firstname="S", form="10a")
+    ctx.queue.append(student)
+    state.helper_sessions["h2"] = HelperSession(token="h2", name="Helfer 2")
+
+    with client.websocket_connect("/ws/scanner/h1") as ws1:
+        _drain_handshake(ws1)
+        ws1.send_json({"type": "call", "student_id": 4242})
+        _recv_until(ws1, "worker_ready")
+
+        with client.websocket_connect("/ws/scanner/h2") as ws2:
+            _drain_handshake(ws2)
+            ws2.send_json({"type": "call", "student_id": 4242})
+            _recv_until(ws2, "student_info")
+
+            # h1 lädt seine Seite neu — eine zweite Verbindung auf denselben
+            # Token behandelt der Server als Reconnect (s. _take_over_ws),
+            # unabhängig davon, ob die alte Verbindung schon geschlossen ist.
+            with client.websocket_connect("/ws/scanner/h1") as ws1_reload:
+                _recv_until(ws1_reload, "worker_ready")
+
+                spec_msg = _recv_until(ws2, "student_info")
+                assert spec_msg.get("spectator") is True
+
+
+def test_spectator_reload_preserves_waitlist_position(client, ws_env):
+    """Lädt ein Zuschauer seine Seite neu (Disconnect + Reconnect desselben
+    Tokens), bleibt seine Warteposition erhalten — er stellt sich NICHT
+    hinten an. Die Ansicht (Bücherliste, spectator: true) wird beim
+    Reconnect ohne erneute Registrierung wiederhergestellt."""
     state, token = ws_env
     ctx = state.open_context("10a")
     student = QueueStudent(student_id=4242, lastname="Test", firstname="S", form="10a")
@@ -363,10 +473,22 @@ def test_spectator_disconnect_removed_from_waitlist(client, ws_env):
             _recv_until(ws2, "student_info")
             assert 4242 in state.student_spectators
 
-        # ws2 ist jetzt geschlossen (with-Block verlassen) — finally-Block
-        # von ws_scanner muss die Warteliste aufgeräumt haben.
-        assert 4242 not in state.student_spectators
-        assert state.helper_sessions["h2"].spectating_student_id is None
+        # ws2 ist jetzt geschlossen (with-Block verlassen) — anders als beim
+        # alten Verhalten bleibt der Wartelisten-Eintrag bestehen (kein
+        # sofortiges Aufräumen mehr).
+        assert 4242 in state.student_spectators
+        assert [w.token for w in state.student_spectators[4242]] == ["h2"]
+        h2 = state.helper_sessions["h2"]
+        assert h2.spectating_student_id == 4242
+        assert h2.ws is None
+
+        # Reconnect (Seiten-Reload) — Ansicht wird wiederhergestellt, OHNE
+        # einen zweiten Eintrag in die Warteliste zu schreiben.
+        with client.websocket_connect("/ws/scanner/h2") as ws2b:
+            msg = _recv_until(ws2b, "student_info")
+            assert msg.get("spectator") is True
+            assert [w.token for w in state.student_spectators[4242]] == ["h2"]
+            assert h2.ws is not None
 
 
 def test_search_call_missing_form_errors(client, ws_env):

@@ -8,6 +8,43 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-11 — Spectator-Feinschliff: Live-Refresh, Warteposition über Reload, Selbst-Aufruf-Bug behoben
+
+Drei Nachbesserungen am Spectator-Mechanismus (Eintrag darunter), gemeldet
+nach dem ersten Live-Test:
+
+- **Live-Refresh für Spectators.** Lädt der AKTIVE Helfer seine Seite neu
+  (Reconnect in `ws_scanner`), bekommen jetzt auch alle Spectators dieses
+  Schülers ein aufgefrischtes `student_info` (neue Funktion
+  `sessions.broadcast_student_info_to_spectators`) — vorher blieb ihre
+  Ansicht bis zum nächsten Scan auf altem Stand.
+- **Warteposition bleibt über Reload erhalten.** Der Disconnect-Handler in
+  `ws_scanner` entfernt einen Spectator NICHT mehr sofort aus
+  `state.student_spectators` (das tat er vorher, ohne Gnadenfrist). Lädt ein
+  wartender Client seine Seite neu, bleibt sein Platz in der FIFO-Liste
+  erhalten (Reconnect-Zweig `elif helper.spectating_student_id is not
+  None`); nur echte, dauerhaft verwaiste Einträge werden bei ihrer eigenen
+  Beförderung von `pop_next_spectator` (das tote WS bereits übersprang)
+  verworfen.
+- **Kritischer Bugfix — Doppel-Aktiv bei Selbst-Aufruf.** Rief der AKTIVE
+  Helfer seinen EIGENEN Schüler über Queue-`call` oder Lupe-`search_call`
+  erneut auf, während ein anderer Helfer als Spectator wartete, löste das
+  interne `end_student` (Teil des bisherigen „erst beenden, dann neu
+  zuweisen"-Musters) dessen Beförderung aus — der Handler wies den Schüler
+  aber direkt danach trotzdem wieder dem ursprünglichen Helfer zu: zwei
+  Clients gleichzeitig aktiv, genau die Invariante, die der Spectator-
+  Mechanismus eigentlich verhindern soll. Neue Funktion
+  `sessions.refresh_active_student`: `_handle_call`/`_handle_search_call`
+  erkennen jetzt den Fall „Aufrufer ist bereits selbst der Besitzer"
+  (`find_helper_for_student(sid).token == helper.token`) und laufen
+  stattdessen über einen reinen Info-Refresh (kein `end_student`, keine
+  Neuzuweisung, kein Beförderungsrisiko) — inklusive Spectator-Fan-out wie
+  oben.
+
+Tests: `tests/test_ws_scanner.py` (Selbst-Aufruf via `call` und
+`search_call` je mit wartendem Spectator, Reload-Fan-out, Reload-mit-
+erhaltener-Warteposition). 206 → 209 Tests.
+
 ## 2026-07-11 — Spectator-Modus + Warteliste statt Doppel-Öffnen-Fehler
 
 Ersetzt den vorherigen reinen Busy-Fehler (Eintrag darunter) durch einen

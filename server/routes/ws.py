@@ -13,12 +13,14 @@ from ..hub import get_hub
 from ..sessions import (
     advance_helper,
     assign_student_to_helper,
+    broadcast_student_info_to_spectators,
     end_student,
     gen_registration_code,
     hydrate_student_info,
     print_loan_slip_for,
     process_scan,
     rebind_helper_to_context,
+    refresh_active_student,
     send_display_update,
     spectate_student,
 )
@@ -149,12 +151,22 @@ async def _handle_call(state, hub, helper, websocket, raw) -> None:
     target_pair = state.find_student_with_ctx(sid) if sid is not None else None
     target = target_pair[1] if target_pair else None
     if target is not None and target.status == "active":
+        owner = state.find_helper_for_student(sid)
+        if owner is not None and owner.token == helper.token:
+            # Helfer ruft SEINEN EIGENEN aktiven Schüler erneut auf (z. B. um
+            # die Bücherliste aufzufrischen). NICHT über end_student+Reassign
+            # laufen lassen: wartet ein Spectator auf genau diesen Schüler,
+            # würde end_student ihn befördern — und der Code hier würde den
+            # Schüler direkt danach trotzdem an diesen Helfer zurückweisen,
+            # wodurch zwei Clients gleichzeitig aktiv wären. Reiner Refresh
+            # umgeht das (kein Ab-/Neuzuweisen).
+            await refresh_active_student(state, hub, helper)
+            return
         # Schüler ist gerade bei einem ANDEREN Helfer aktiv (Queue-`call` oder
         # Lupe) — statt eines Fehlers wird der Aufrufer Zuschauer (read-only
         # Bücherliste, live mitaktualisiert) und automatisch befördert,
         # sobald der aktive Helfer den Schüler beendet (s. spectate_student).
-        owner = state.find_helper_for_student(sid)
-        if owner is not None and owner.token != helper.token:
+        if owner is not None:
             await spectate_student(
                 state,
                 hub,
@@ -288,7 +300,15 @@ async def _handle_search_call(state, hub, helper, websocket, raw) -> None:
     # Aufrufer Zuschauer (s. spectate_student) und automatisch befördert,
     # sobald der aktive Helfer den Schüler beendet.
     owner = state.find_helper_for_student(sid)
-    if owner is not None and owner.token != helper.token:
+    if owner is not None and owner.token == helper.token:
+        # Helfer sucht/ruft SEINEN EIGENEN aktiven Schüler per Lupe erneut auf
+        # — nur auffrischen, nicht über end_student+Reassign (s. Kommentar in
+        # _handle_call: würde bei wartendem Spectator dessen Beförderung
+        # auslösen und den Schüler trotzdem an denselben Helfer zurückgeben —
+        # zwei aktive Clients gleichzeitig).
+        await refresh_active_student(state, hub, helper)
+        return
+    if owner is not None:
         await spectate_student(
             state, hub, helper, student_id=sid, lastname=lastname, firstname=firstname, form=form
         )
@@ -500,6 +520,11 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
             # (send_websocket), damit sie nicht mit den Sends des In-Flight-
             # Lade-Tasks (send_scanner auf denselben neuen WS) interleaven.
             await hub.send_websocket(websocket, {"type": "student_info", "student": info})
+            # Lädt der aktive Helfer seine Seite neu, soll sich die
+            # Bücherliste auch bei allen Spectators dieses Schülers
+            # aktualisieren (deren Ansicht läuft sonst mit einem veralteten
+            # Stand weiter, bis der nächste Scan kommt).
+            await broadcast_student_info_to_spectators(state, hub, helper.student_id, info)
             load_inflight = helper.load_task is not None and not helper.load_task.done()
             worker_session = state.student_worker_sessions.get(helper.student_id)
             worker_present = worker_session is not None
@@ -537,6 +562,23 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                 # Degraded-Modus (kein worker_pool) oder Worker nie
                 # bereit: sofort `worker_ready` senden.
                 await hub.send_websocket(websocket, {"type": "worker_ready"})
+        except Exception as e:
+            await hub.send_websocket(websocket, {"type": "error", "msg": str(e)})
+    elif helper.spectating_student_id is not None and state.iserv is not None:
+        # Zuschauer (Spectator) lädt seine Seite neu: Warteposition bleibt
+        # erhalten (die Disconnect-Behandlung entfernt ihn NICHT aus
+        # `state.student_spectators` — er wartet also mit seiner bisherigen
+        # Wartezeit weiter, statt sich hinten anzustellen). Nur die Ansicht
+        # wiederherstellen, kein neuer Eintrag in der Warteliste.
+        try:
+            info = await state.iserv.get_student_info(
+                helper.spectating_student_id, state.selected_schoolyear
+            )
+            info = await hydrate_student_info(state, info, helper.student_form or "", helper)
+            book_order = info["book_order"]
+            await hub.send_websocket(
+                websocket, {"type": "student_info", "student": info, "spectator": True}
+            )
         except Exception as e:
             await hub.send_websocket(websocket, {"type": "error", "msg": str(e)})
     else:
@@ -614,13 +656,14 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                 helper.end_task = asyncio.create_task(
                     _deferred_end(state, hub, helper, helper.student_id)
                 )
-            if helper.spectating_student_id is not None:
-                # Spectator hält keine exklusive Ressource (kein Worker) —
-                # anders als beim aktiven Helfer keine Gnadenfrist nötig,
-                # sofort aus der Warteliste entfernen. Nach Reconnect muss er
-                # call/search_call erneut auslösen.
-                state.remove_spectator(helper.spectating_student_id, helper.token)
-                helper.spectating_student_id = None
+            # Absichtlich KEIN Aufräumen von `spectating_student_id`/
+            # `student_spectators` hier: ein Zuschauer soll seine Warteposition
+            # über einen Reconnect (Seiten-Reload) hinweg behalten (nicht
+            # hinten anstellen). `pop_next_spectator` überspringt tote
+            # Einträge (ws is None) bei der Beförderung ohnehin defensiv —
+            # ein endgültig verlassener Spectator räumt sich so spätestens
+            # bei seiner eigenen Beförderung selbst auf, ohne den Platz eines
+            # echten Reconnects vorzeitig freizugeben.
         # else: Reconnect hat übernommen — nichts tun.
         await safe_broadcast(hub, state)
 
