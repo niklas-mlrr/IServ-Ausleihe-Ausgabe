@@ -8,6 +8,33 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-11 — Selbst-Aufruf zählt jetzt als neuer Zugriff (Menü-Schließen-Fix + Rückstellungspflicht)
+
+Nachbesserung am `refresh_active_student`-Kurzschluss aus dem Eintrag
+darunter: der reine Info-Refresh bei Selbst-Aufruf (Helfer ruft seinen
+EIGENEN aktiven Schüler per Queue-`call`/Lupe erneut auf) sendete bewusst
+kein `loading` — dadurch blieb im Helferclient das Menü/Such-Panel offen
+(kein Trigger zum Schließen). Niklas wollte zusätzlich eine
+Verhaltensänderung: ein Selbst-Aufruf soll wie ein neuer Zugriff zählen,
+nicht wie ein bloßer Refresh — existiert eine Warteliste für den Schüler,
+muss sich der Aufrufer hinten anstellen (der bisher Wartende übernimmt
+sofort), statt sich die Aktivität direkt zurückzuholen.
+
+`refresh_active_student` wieder entfernt (kein Aufrufer mehr). Neue Logik in
+`_handle_call`/`_handle_search_call`: Selbst-Aufruf + existierende
+Warteliste → regulärer `end_student` (befördert den Ersten in der Liste
+automatisch, wie beim normalen Beenden) gefolgt von `spectate_student` für
+den bisherigen Besitzer (stellt sich hinten an — KEIN Zurückholen, sonst
+wieder zwei aktive Clients). Selbst-Aufruf OHNE Warteliste → fällt in den
+unveränderten Standard-Pfad (`end_student` + `assign_student_to_helper` an
+denselben Helfer) durch, der ohnehin `loading` sendet und damit auch das
+Menü schließt — ein vollständiger Reload statt eines Teil-Refreshs, exakt
+wie bei jedem anderen Aufruf.
+
+Tests umbenannt/angepasst (`test_..._does_not_dual_assign` →
+`test_..._demotes_caller_to_back_of_queue`) + ein neuer Test für den
+No-Queue-Reload-Pfad (`loading` wird gesendet). 209 → 210 Tests.
+
 ## 2026-07-11 — Spectator-Feinschliff: Live-Refresh, Warteposition über Reload, Selbst-Aufruf-Bug behoben
 
 Drei Nachbesserungen am Spectator-Mechanismus (Eintrag darunter), gemeldet

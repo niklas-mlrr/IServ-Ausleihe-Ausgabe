@@ -36,18 +36,21 @@
 | V17 | **`_read_booking_result`** gegen Fake-Locator — `has_not`-Filter (Schutz gegen Selektor-Drift, s. u.), sichtbarer/unsichtbarer Error-Alert, `nothing_found`, Locator-Exception schluckt statt zu propagieren | `tests/test_booking_result.py` (6 Tests) | 2026-07-09 | grün; ohne den `has_not`-Filter wird `test_barcode_only_in_typeahead_input_does_not_count_as_booked` rot (selbst nachgefahren). **Der getestete False-Positive kann im heutigen DOM nicht auftreten** (Feld liegt in keiner `<tr>`, `inner_text()` liefert keine Input-Werte) — der Test sichert den Filter gegen Selektor-Drift, s. „Offen" unten |
 | V18 | **Spectator-/Wartelisten-Mechanismus** — zweiter Helfer (Queue-`call`/Lupe-`search_call`) auf einen bereits aktiven Schüler wird Zuschauer (`student_info` mit `spectator: true`, kein `worker_ready`) statt Fehler/Doppel-Worker; Scan-Fan-out an Spectators; Beförderung des am längsten Wartenden bei `end_student` (echter Queue-Schüler UND transienter Lupe-Schüler); FIFO-Kette bei mehreren Wartenden; Disconnect-Aufräumung der Warteliste | `tests/test_ws_scanner.py` (4 neue Tests, echte Zwei-Client-`websocket_connect`) + `tests/test_queue_flow.py` (3 neue Tests, Beförderung low-level über `end_student`) | 2026-07-11 | grün, 199 → 206 Tests |
 | V19 | **Spectator-Feinschliff** — Live-Refresh an Spectators bei Reload des aktiven Helfers (`broadcast_student_info_to_spectators`); Warteposition bleibt über einen Spectator-eigenen Reload erhalten (kein Aufräumen mehr im Disconnect-Handler, Reconnect-Zweig stellt die Ansicht ohne neuen Wartelisten-Eintrag wieder her); **kritischer Bugfix**: Selbst-Aufruf des aktiven Helfers auf seinen EIGENEN Schüler (Queue-`call`/Lupe) bei wartendem Spectator führte vorher zu zwei gleichzeitig aktiven Clients (End_student beförderte den Spectator, der Handler wies den Schüler danach trotzdem wieder dem Aufrufer zu) — behoben durch `refresh_active_student` (reiner Info-Refresh statt End_student+Reassign) | `tests/test_ws_scanner.py` (3 neue Tests: Selbst-Aufruf via `call`/`search_call` je mit wartendem Spectator, Reload-Fan-out) | 2026-07-11 | grün, 206 → 209 Tests |
+| V20 | **Selbst-Aufruf zählt als neuer Zugriff** — `refresh_active_student` (V19) wieder entfernt: Selbst-Aufruf MIT Warteliste stellt den Aufrufer jetzt hinten an (der bisher Wartende übernimmt sofort, inkl. Worker) statt nur aufzufrischen; Selbst-Aufruf OHNE Warteliste fällt in den normalen `end_student`+`assign_student_to_helper`-Pfad (voller Reload, sendet `loading` → schließt clientseitig Menü/Such-Panel, was beim reinen Refresh vorher unterblieb) | `tests/test_ws_scanner.py` (2 umbenannte Tests: `..._demotes_caller_to_back_of_queue`, 1 neuer Test für den No-Queue-Reload-Pfad) | 2026-07-11 | grün, 209 → 210 Tests |
 
 ## Offen / zu testen
 
 ### Offen 2026-07-11 (Spectator-Modus: Verifizierung am echten Zwei-Client-Setup)
 
-Der Spectator-/Wartelisten-Mechanismus (V18+V19) ist per Unit-/WS-Test
+Der Spectator-/Wartelisten-Mechanismus (V18–V20) ist per Unit-/WS-Test
 abgesichert, aber noch **nicht am echten Gerät mit zwei Handys/Browsern**
 gegen einen laufenden Server verifiziert worden. Ein erster Live-Test schlug
 fehl, weil der getestete Server-Prozess aus einem separaten, nicht
 aktualisierten Checkout lief (kein Code-Bug, reines Deployment-Gotcha —
 s. `docs/CHANGELOG.md` 2026-07-11 und Wiki-`lessons_learned.md`). Ein
-zweiter Live-Test deckte danach den in V19 behobenen Selbst-Aufruf-Bug auf.
+zweiter Live-Test deckte danach den in V19 behobenen Selbst-Aufruf-Bug auf
+sowie zwei Feinheiten (Menü schließt nicht bei Selbst-Aufruf; Selbst-Aufruf
+sollte wie ein neuer Zugriff zählen), die V20 behebt.
 
 - [ ] Nach Neustart des richtigen (aktualisierten) Prozesses: zwei
       Helfer-Clients denselben Schüler öffnen lassen (einmal aus der Queue,
@@ -60,9 +63,11 @@ zweiter Live-Test deckte danach den in V19 behobenen Selbst-Aufruf-Bug auf.
 - [ ] Wartender Client lädt seine Seite neu → bleibt weiterhin Zuschauer an
       derselben Wartelisten-Position, kein Zurücksetzen (V19).
 - [ ] Aktiver Client ruft seinen EIGENEN Schüler erneut auf (Queue-`call`
-      oder Lupe), während ein anderer Client wartet → nur Refresh beim
-      Aufrufer, wartender Client bleibt Zuschauer, KEIN zweiter aktiver
-      Client (V19-Bugfix).
+      oder Lupe), während ein anderer Client wartet → der Aufrufer wird
+      selbst Zuschauer (hinten in der Warteliste), der bisher Wartende
+      übernimmt sofort mit Worker — KEIN zweiter aktiver Client (V20).
+- [ ] Aktiver Client ruft seinen EIGENEN Schüler erneut auf OHNE
+      Warteliste → Menü/Such-Panel schließt sich, voller Reload (V20).
 - [ ] Aktiver Client schließt/wechselt den Schüler → wartender Client wird
       automatisch befördert (Worker lädt, „Scanner bereit").
 - [ ] Bei drei Wartenden: FIFO-Reihenfolge der Beförderung am echten Gerät

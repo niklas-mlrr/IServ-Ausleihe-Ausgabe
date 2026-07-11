@@ -343,14 +343,15 @@ def test_scan_fans_out_to_spectator(client, ws_env):
             assert scan2["status"] == scan1["status"]
 
 
-def test_search_call_self_recall_with_waiting_spectator_does_not_dual_assign(client, ws_env):
-    """Kritischer Fall: der aktive Helfer ruft SEINEN EIGENEN Schüler per
-    Lupe erneut auf, während ein anderer Helfer bereits als Spectator
-    wartet. Ohne den Refresh-Kurzschluss würde `end_student` (intern beim
-    Neu-Zuweisen aufgerufen) den wartenden Spectator befördern — UND der
-    Handler würde den Schüler direkt danach trotzdem an den ursprünglichen
-    Helfer zurückgeben: zwei Clients gleichzeitig aktiv. Erwartet: NUR ein
-    Refresh, der Spectator bleibt Spectator, niemand sonst wird befördert."""
+def test_search_call_self_recall_with_waiting_spectator_demotes_caller_to_back_of_queue(
+    client, ws_env
+):
+    """Ruft der aktive Helfer SEINEN EIGENEN Schüler per Lupe erneut auf,
+    während ein anderer Helfer bereits als Spectator wartet, zählt das wie
+    ein neuer Zugriff: der Aufrufer gibt seine Aktivität ab (der Wartende
+    übernimmt sofort, inkl. Worker) und stellt sich selbst hinten in der
+    Warteliste an — statt sich (fehlerhaft) direkt zurückzuholen, was zu
+    zwei gleichzeitig aktiven Clients führen würde."""
     state, token = ws_env
     state.helper_sessions["h2"] = HelperSession(token="h2", name="Helfer 2")
     search_call = {
@@ -378,19 +379,20 @@ def test_search_call_self_recall_with_waiting_spectator_does_not_dual_assign(cli
             # h1 ruft denselben (eigenen) Schüler erneut über die Lupe auf.
             ws1.send_json(search_call)
             msg1 = _recv_until(ws1, "student_info")
-            assert not msg1.get("spectator")  # h1 bleibt Besitzer, kein Spectator
+            assert msg1.get("spectator") is True  # h1 ist jetzt selbst Zuschauer
 
-            # h2 darf NICHT befördert worden sein — bleibt Spectator, kein
-            # eigener Worker/`worker_ready`.
-            assert h2.student_id is None
-            assert h2.spectating_student_id == 4242
-            assert h1.student_id == 4242  # h1 weiterhin (und einzig) Besitzer
-            assert state.student_spectators.get(4242) and (
-                state.student_spectators[4242][0].token == "h2"
-            )
+            # h2 wurde befördert — echter Besitzer mit Worker.
+            _recv_until(ws2, "worker_ready")
+            assert h2.student_id == 4242
+            assert h2.spectating_student_id is None
+
+            # h1 steht jetzt (einzig) in der Warteliste.
+            assert h1.student_id is None
+            assert h1.spectating_student_id == 4242
+            assert [w.token for w in state.student_spectators[4242]] == ["h1"]
 
 
-def test_call_self_recall_with_waiting_spectator_does_not_dual_assign(client, ws_env):
+def test_call_self_recall_with_waiting_spectator_demotes_caller_to_back_of_queue(client, ws_env):
     """Wie oben, aber über den Queue-`call`-Pfad (echter Queue-Schüler) statt
     der Lupe."""
     state, token = ws_env
@@ -413,12 +415,45 @@ def test_call_self_recall_with_waiting_spectator_does_not_dual_assign(client, ws
 
             ws1.send_json({"type": "call", "student_id": 4242})
             msg1 = _recv_until(ws1, "student_info")
-            assert not msg1.get("spectator")
+            assert msg1.get("spectator") is True
 
-            assert h2.student_id is None
-            assert h2.spectating_student_id == 4242
+            _recv_until(ws2, "worker_ready")
+            h1 = state.helper_sessions["h1"]
+            assert h2.student_id == 4242
+            assert h2.spectating_student_id is None
+            assert h1.student_id is None
+            assert h1.spectating_student_id == 4242
             assert student.status == "active"
-            assert student.assigned_helper == "h1"
+            assert student.assigned_helper == "h2"
+
+
+def test_call_self_recall_without_queue_sends_loading_and_reloads_fully(client, ws_env):
+    """Ohne wartende Spectators zählt der Selbst-Aufruf trotzdem als neuer
+    Zugriff (voller Reload statt reinem Refresh): der Handler läuft in den
+    normalen `end_student` + `assign_student_to_helper`-Pfad, der `loading`
+    sendet — das schließt clientseitig Menü/Such-Panel (vorher blieb es
+    offen, weil kein `loading` kam)."""
+    state, token = ws_env
+    ctx = state.open_context("10a")
+    student = QueueStudent(student_id=4242, lastname="Test", firstname="S", form="10a")
+    ctx.queue.append(student)
+
+    with client.websocket_connect("/ws/scanner/h1") as ws1:
+        _drain_handshake(ws1)
+        ws1.send_json({"type": "call", "student_id": 4242})
+        _recv_until(ws1, "worker_ready")
+
+        ws1.send_json({"type": "call", "student_id": 4242})
+        loading_msg = _recv_until(ws1, "loading")
+        assert loading_msg["type"] == "loading"
+        student_info_msg = _recv_until(ws1, "student_info")
+        assert not student_info_msg.get("spectator")
+        _recv_until(ws1, "worker_ready")
+
+        helper = state.helper_sessions["h1"]
+        assert helper.student_id == 4242
+        assert student.status == "active"
+        assert student.assigned_helper == "h1"
 
 
 def test_active_client_reload_refreshes_spectator_book_list(client, ws_env):

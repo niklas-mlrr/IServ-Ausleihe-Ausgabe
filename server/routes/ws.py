@@ -20,7 +20,6 @@ from ..sessions import (
     print_loan_slip_for,
     process_scan,
     rebind_helper_to_context,
-    refresh_active_student,
     send_display_update,
     spectate_student,
 )
@@ -150,23 +149,44 @@ async def _handle_call(state, hub, helper, websocket, raw) -> None:
     sid = raw.get("student_id")
     target_pair = state.find_student_with_ctx(sid) if sid is not None else None
     target = target_pair[1] if target_pair else None
+    # Selbst-Aufruf (Helfer ruft SEINEN EIGENEN aktiven Schüler erneut auf):
+    # zählt bewusst wie ein neuer Zugriff, nicht wie ein reiner Refresh. Gibt
+    # es eine Warteliste für diesen Schüler, gibt der Aufrufer seine
+    # Aktivität ab (der Erste in der Liste wird per end_student-Beförderung
+    # übernehmen) und stellt sich selbst hinten an — statt sich direkt
+    # zurückzuholen (das wäre wieder ein Doppel-Aktiv-Fall). Ohne Warteliste
+    # fällt dieser Fall unten in den normalen Reload-Pfad (end_student +
+    # Neuzuweisen an denselben Helfer), der `loading` sendet und so auch das
+    # Menü/Such-Panel schließt.
+    self_recall_reload = False
     if target is not None and target.status == "active":
         owner = state.find_helper_for_student(sid)
         if owner is not None and owner.token == helper.token:
-            # Helfer ruft SEINEN EIGENEN aktiven Schüler erneut auf (z. B. um
-            # die Bücherliste aufzufrischen). NICHT über end_student+Reassign
-            # laufen lassen: wartet ein Spectator auf genau diesen Schüler,
-            # würde end_student ihn befördern — und der Code hier würde den
-            # Schüler direkt danach trotzdem an diesen Helfer zurückweisen,
-            # wodurch zwei Clients gleichzeitig aktiv wären. Reiner Refresh
-            # umgeht das (kein Ab-/Neuzuweisen).
-            await refresh_active_student(state, hub, helper)
-            return
-        # Schüler ist gerade bei einem ANDEREN Helfer aktiv (Queue-`call` oder
-        # Lupe) — statt eines Fehlers wird der Aufrufer Zuschauer (read-only
-        # Bücherliste, live mitaktualisiert) und automatisch befördert,
-        # sobald der aktive Helfer den Schüler beendet (s. spectate_student).
-        if owner is not None:
+            if state.student_spectators.get(sid):
+                await end_student(
+                    state,
+                    hub,
+                    helper.student_id,
+                    queue_status="pending",
+                    session_state="revoked",
+                    helper_notify={"type": "loading"},
+                )
+                await spectate_student(
+                    state,
+                    hub,
+                    helper,
+                    student_id=sid,
+                    lastname=target.lastname,
+                    firstname=target.firstname,
+                    form=target.form,
+                )
+                return
+            self_recall_reload = True
+        elif owner is not None:
+            # Schüler ist gerade bei einem ANDEREN Helfer aktiv (Queue-`call`
+            # oder Lupe) — statt eines Fehlers wird der Aufrufer Zuschauer
+            # (read-only Bücherliste, live mitaktualisiert) und automatisch
+            # befördert, sobald der aktive Helfer den Schüler beendet.
             await spectate_student(
                 state,
                 hub,
@@ -177,7 +197,7 @@ async def _handle_call(state, hub, helper, websocket, raw) -> None:
                 form=target.form,
             )
             return
-    if target is None or target.status not in ("pending", "done"):
+    if not self_recall_reload and (target is None or target.status not in ("pending", "done")):
         await hub.send_websocket(
             websocket,
             {
@@ -301,14 +321,31 @@ async def _handle_search_call(state, hub, helper, websocket, raw) -> None:
     # sobald der aktive Helfer den Schüler beendet.
     owner = state.find_helper_for_student(sid)
     if owner is not None and owner.token == helper.token:
-        # Helfer sucht/ruft SEINEN EIGENEN aktiven Schüler per Lupe erneut auf
-        # — nur auffrischen, nicht über end_student+Reassign (s. Kommentar in
-        # _handle_call: würde bei wartendem Spectator dessen Beförderung
-        # auslösen und den Schüler trotzdem an denselben Helfer zurückgeben —
-        # zwei aktive Clients gleichzeitig).
-        await refresh_active_student(state, hub, helper)
-        return
-    if owner is not None:
+        # Selbst-Aufruf (Helfer sucht/ruft SEINEN EIGENEN aktiven Schüler per
+        # Lupe erneut auf): zählt wie ein neuer Zugriff, s. Kommentar in
+        # _handle_call. Gibt es eine Warteliste, gibt der Aufrufer seine
+        # Aktivität ab (Erster in der Liste übernimmt) und stellt sich selbst
+        # hinten an; sonst fällt der Fall unten in den normalen Reload-Pfad.
+        if state.student_spectators.get(sid):
+            await end_student(
+                state,
+                hub,
+                helper.student_id,
+                queue_status="pending",
+                session_state="revoked",
+                helper_notify={"type": "loading"},
+            )
+            await spectate_student(
+                state,
+                hub,
+                helper,
+                student_id=sid,
+                lastname=lastname,
+                firstname=firstname,
+                form=form,
+            )
+            return
+    elif owner is not None:
         await spectate_student(
             state, hub, helper, student_id=sid, lastname=lastname, firstname=firstname, form=form
         )
