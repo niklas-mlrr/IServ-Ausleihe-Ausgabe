@@ -97,7 +97,7 @@ class OpenClassRequest(BaseModel):
     form: str = ""
     # Filter, die beim Laden der Klasse sofort auf "fertig" gesetzt werden
     # sollen — Werte aus {"not_enrolled", "unpaid", "remission_pending",
-    # "exemption_pending"}, s. classes.py `_AUTO_DONE_FILTERS`.
+    # "exemption_pending", "all_lent"}, s. classes.py `_AUTO_DONE_FILTERS`.
     auto_done: list[str] | None = None
 
 

@@ -9,8 +9,14 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
+from ..book_order import get_hidden_isbns_for_form
 from ..hub import get_hub
-from ..sessions import end_student, invalidate_session
+from ..sessions import (
+    apply_hidden_books,
+    booking_isbn_sets_from_info,
+    end_student,
+    invalidate_session,
+)
 from ..state import AppState, ClassContext, QueueStudent, get_state
 from ._deps import (
     AddStudentRequest,
@@ -25,19 +31,20 @@ from .booklists import _ensure_class_catalog
 log = logging.getLogger(__name__)
 
 # Beim Klassen-Laden wählbare Sofort-fertig-Filter, s. `_apply_auto_done`.
-_AUTO_DONE_FILTERS = {"not_enrolled", "unpaid", "remission_pending", "exemption_pending"}
+_AUTO_DONE_FILTERS = {"not_enrolled", "unpaid", "remission_pending", "exemption_pending", "all_lent"}
 
 
 async def _apply_auto_done(state: AppState, ctx: ClassContext, auto_done: list[str]) -> None:
     """Schüler, auf die eine der gewählten Bedingungen zutrifft, direkt beim
     Klassen-Laden auf 'done' setzen (nicht angemeldet / nicht bezahlt /
-    Ermäßigungs- bzw. Befreiungsantrag ohne Nachweis) — parallele read-only
-    IServ-GETs pro Schüler (`get_student_info`, wie in der Scanner-Anzeige).
-    Fehler pro Schüler sind nicht fatal (Schüler bleibt 'pending'), damit ein
-    einzelner IServ-Fehler nicht das ganze Klassen-Laden blockiert.
+    Ermäßigungs- bzw. Befreiungsantrag ohne Nachweis / alle vorgemerkten Bücher
+    bereits ausgeliehen) — parallele read-only IServ-GETs pro Schüler
+    (`get_student_info`, wie in der Scanner-Anzeige). Fehler pro Schüler sind
+    nicht fatal (Schüler bleibt 'pending'), damit ein einzelner IServ-Fehler
+    nicht das ganze Klassen-Laden blockiert.
 
     'nicht angemeldet' schließt die übrigen Filter aus — ohne Anmeldung liefert
-    IServ keinen Zahl-/Nachweis-Status, also wären `unpaid` u. a. sonst
+    IServ keinen Zahl-/Nachweis-/Bücher-Status, also wären `unpaid` u. a. sonst
     bedeutungslose Platzhalterwerte, die einen unangemeldeten Schüler
     fälschlich träfen, selbst wenn nur z. B. `unpaid` gewählt wurde."""
     filters = set(auto_done) & _AUTO_DONE_FILTERS
@@ -62,6 +69,13 @@ async def _apply_auto_done(state: AppState, ctx: ClassContext, auto_done: list[s
             or ("exemption_pending" in filters and info.get("exemption_pending"))
         ):
             student.status = "done"
+            return
+        if "all_lent" in filters:
+            hidden = await get_hidden_isbns_for_form(state, student.form)
+            apply_hidden_books(info, hidden)
+            vormerk, _lent = booking_isbn_sets_from_info(info)
+            if not vormerk:
+                student.status = "done"
 
     await asyncio.gather(*(_check(s) for s in ctx.queue))
 

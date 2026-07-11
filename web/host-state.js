@@ -48,7 +48,7 @@ window.__host = window.__host || {};
     return null;
   }
 
-  const AUTO_DONE_KEYS = ['not_enrolled', 'unpaid', 'remission_pending', 'exemption_pending'];
+  const AUTO_DONE_KEYS = ['not_enrolled', 'unpaid', 'remission_pending', 'exemption_pending', 'all_lent'];
   const AUTO_DONE_STORAGE_KEY = 'autoDoneFilters';
   // ---- Bücherlisten ordnen (Einstellungen-Dialog, Reiter je Jahrgang) ----
   // Analog zur Klassen-Bücher-Reihenfolge, aber jahrgangsweit und vorab: pro
