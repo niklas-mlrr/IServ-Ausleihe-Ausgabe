@@ -75,7 +75,7 @@ async def set_bool_setting(key: str, body: SettingsToggleRequest) -> dict:
     attr, field = entry
     value = bool(getattr(body, field))
     state = get_state()
-    setattr(state, attr, value)
+    setattr(state.settings, attr, value)
     hub = get_hub()
     if key == "slip-default":
         # `slip_second_page_default` ist zusätzlich für die Helfer relevant

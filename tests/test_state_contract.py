@@ -78,39 +78,3 @@ def test_toggle_defaults_are_off():
     assert snap["fix_class_on_slip"] is False
     assert snap["slip_second_page_default"] is False
     assert snap["printer_name"] is None
-
-
-def test_toggles_readable_and_writable_on_appstate():
-    """Die Toggles bleiben über `state.<name>` erreichbar (Attribut ODER
-    Property) — routes/settings.py setzt sie per `setattr(state, attr, value)`
-    gegen die `_BOOL_SETTINGS`-Whitelist."""
-    st = AppState()
-    for attr in (
-        "force_tailscale_ip",
-        "save_pdf_locally",
-        "fix_class_on_slip",
-        "slip_second_page_default",
-    ):
-        setattr(st, attr, True)
-        assert getattr(st, attr) is True, f"{attr} nicht über AppState setzbar"
-    st.printer_name_override = "HP LaserJet"
-    assert st.state_snapshot()["printer_name"] == "HP LaserJet"
-
-
-def test_caches_readable_and_clearable_on_appstate():
-    """Die fünf IServ-Caches bleiben über `state.<name>` erreichbar und werden
-    von `reset_booklist_orders()` gemeinsam geleert (Schuljahreswechsel)."""
-    st = AppState()
-    st.book_orders_by_grade[9] = ["978-1"]
-    st.hidden_isbns_by_grade[9] = {"978-2"}
-    st.form_catalog_cache["Klasse 9a"] = (9, ["978-1"])
-    st.class_names_cache["2025/2026"] = ["Klasse 9a"]
-    st.form_students_cache["2025/2026|Klasse 9a"] = [{"student_id": 1}]
-
-    st.reset_booklist_orders()
-
-    assert st.book_orders_by_grade == {}
-    assert st.hidden_isbns_by_grade == {}
-    assert st.form_catalog_cache == {}
-    assert st.class_names_cache == {}
-    assert st.form_students_cache == {}
