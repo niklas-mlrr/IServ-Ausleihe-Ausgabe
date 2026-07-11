@@ -92,6 +92,16 @@ sicherheitsseitig unkritisch, aber unbequem im Betrieb:
       langsamer, meldet die Methode `unknown` obwohl gebucht wurde. Beim ersten
       scharfen Lauf beobachten, ob 1500 ms reichen; sonst auf ein
       `wait_for`-Prädikat auf die neue Zeile umstellen.
+- [ ] **Erfolgs-/Fehler-Selektoren unverifiziert** (Code-TODO
+      `automation/worker.py::commit_barcode`, ~Z. 205, verweist auf
+      `_read_booking_result`): die Buchungs-Erfolgs- und Fehler-Selektoren sind
+      nach Spike-A-Doku nur best-effort und bis zum ersten freigegebenen
+      Realtest **nicht am scharfen DOM bestätigt**. Sicherheitsseitig unkritisch
+      (nur ein eindeutiges `booked` im DOM gilt als Erfolg; bei Unsicherheit
+      `unknown`, das `/api/commit-book` nicht als Buchung wertet), aber im
+      Produktions-Schreibpfad → jede Änderung/Verifikation **nur mit Freigabe
+      Niklas + Lukas an einem ausgemusterten Buch** (PLAN §6). TODO im Code
+      bewusst stehengelassen, bis der Realtest die Selektoren bestätigt.
 
 ### Offen 2026-07-09 (Scanner: Reconnect stellt auch Lupe-Schüler wieder her + schneller Worker-Reload)
 

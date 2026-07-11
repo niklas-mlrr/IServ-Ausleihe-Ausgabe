@@ -58,46 +58,30 @@ class HelperSession:
     token: str
     name: str
     student_id: int | None = None
-    # Klasse (form) des aktuell zugewiesenen Schülers. Quelle für book_order +
-    # info["form"] beim Reconnect, falls der Schüler NICHT in einer Queue steht
-    # (Helfer-Lupe / search_call — dort gibt es keinen QueueStudent, an dem die
-    # Form hing; s. ws_scanner-Reconnect). Invariant: nur relevant, wenn
-    # student_id is not None; gesetzt ausschließlich in assign_student_to_helper.
+    # Klasse (form) des zugew. Schülers; Quelle für book_order/info["form"] beim
+    # Reconnect ohne QueueStudent. Rationale: docs/PLAN.md § State-Feld-Rationale
     student_form: str | None = None
     ws: object | None = None  # WebSocket (avoid import cycle)
     created_at: datetime = field(default_factory=datetime.now)
     last_scan: str | None = None
-    # Klasse (Kontext), die dieser Helfer bedient. „Nächster"/„Aufrufen" zieht
-    # aus der Queue dieses Kontexts; `None` = noch keiner Klasse zugewiesen
-    # (Fallback auf den aktiven Kontext, s. next_pending). Rein transient — kein
-    # IServ-/DB-Zustand. Umbindbar per /api/helper/{token}/class.
+    # Klasse (Kontext), die dieser Helfer bedient; None = keiner zugewiesen.
+    # Rationale: docs/PLAN.md § State-Feld-Rationale
     context_id: str | None = None
     # ISBNs des aktuell zugewiesenen Schülers (Anmeldung + bereits ausgeliehen),
     # für die Scan-Vorabprüfung (analog Modus B).
     expected_isbns: set[str] = field(default_factory=set)
-    # Buchungs-Vorabprüfung: vorgemerkt = bestellt UND Reihe
-    # noch nicht auf den Schüler ausgeliehen (= buchbar); lent = Reihe bereits
-    # ausgeliehen (für klare Fehlermeldung). Getrennt gehalten, weil `expected_isbns`
-    # beides vereint und die Buchbarkeit nicht unterscheiden kann.
+    # Buchungs-Vorabprüfung: vormerk = buchbar, lent = Reihe schon ausgeliehen.
+    # Rationale: docs/PLAN.md § State-Feld-Rationale
     vormerk_isbns: set[str] = field(default_factory=set)
     lent_isbns: set[str] = field(default_factory=set)
-    # In-flight Lade-Task (load_and_push_helper_student). Wird beim Abbruch
-    # des Schülers (end_student) cancel'd, damit ein noch laufendes open_student
-    # seinen Worker-Context zurückgibt — sonst leakt der Context, weil er erst
-    # nach open_student in student_worker_sessions registriert wird.
+    # In-flight Lade-Task (load_and_push_helper_student); cancel bei end_student,
+    # sonst leakt der Worker-Context. Rationale: docs/PLAN.md § State-Feld-Rationale
     load_task: object | None = None
-    # Verzögerter Disconnect-Teardown („Grace"): beim Trennen des Scanner-WS
-    # wird end_student nicht sofort, sondern nach _RECONNECT_GRACE_S als Task
-    # angestoßen. Lädt der Helfer die Seite neu (Reconnect innerhalb der Frist),
-    # wird dieser Task cancel't und der Schüler stattdessen neugeladen
-    # (s. ws_scanner). Ohne Reconnect → echte Trennung → Schüler zurück auf
-    # 'pending', Worker zu.
+    # Verzögerter Disconnect-Teardown („Grace"): end_student erst nach
+    # _RECONNECT_GRACE_S. Rationale: docs/PLAN.md § State-Feld-Rationale
     end_task: object | None = None
-    # View-Toggle „Menü": Helfer hat per Menü-Button die Warteschlangen-Ansicht
-    # geöffnet, während sein zugewiesener Schüler im Hintergrund verbunden
-    # bleibt. Solange True bekommt dieser Helfer Live-`queue_update`s (wie ein
-    # unzugewiesener), damit die Queue-Ansicht aktuell bleibt. Rein transient —
-    # kein Schüler-/IServ-/DB-Zustand. Reset bei Schülerwechsel/ende/Reconnect.
+    # View-Toggle „Menü": Queue-Ansicht offen, Schüler bleibt im Hintergrund →
+    # weiter Live-queue_updates. Rationale: docs/PLAN.md § State-Feld-Rationale
     peeking: bool = False
 
     def as_dict(self) -> dict:
@@ -134,9 +118,8 @@ class StudentSessionB:
     # Buchungs-Vorabprüfung — s. HelperSession.
     vormerk_isbns: set[str] = field(default_factory=set)
     lent_isbns: set[str] = field(default_factory=set)
-    # Ausgemustertes/verliehenes Buch gescannt → Client zeigt ein blockierendes
-    # Hinweis-Modal ohne eigenen Schließen-Button; erst der Host darf es per
-    # `/api/clear-book-alert` wieder freigeben. Solange True: Scans ignorieren.
+    # Ausgemustertes/verliehenes Buch gescannt → blockierendes Hinweis-Modal,
+    # nur Host gibt frei. Rationale: docs/PLAN.md § State-Feld-Rationale
     book_alert_open: bool = False
     book_alert_payload: dict | None = None  # letztes scan_result-Payload (für Reconnect)
     # In-flight Lade-Task (load_and_push_paired_student) — cancel bei
@@ -176,22 +159,17 @@ class DisplaySession:
 class RuntimeSettings:
     """Die fünf Host-/Entwickler-Toggles + der Drucker-Override — im
     Einstellungen-Dialog gesetzt, gemeinsam in `routes/settings.py::_BOOL_SETTINGS`
-    (die vier Bool-Toggles) verwaltet. `AppState` behält dünne Forwarding-
-    Properties (siehe dort), damit `setattr(state, name, value)` (routes/settings.py)
-    und direkte Attributzugriffe weiter funktionieren."""
+    (die vier Bool-Toggles) verwaltet. Zugriff ausschließlich über
+    `state.settings.<name>`."""
 
     # Header-Toggle „Tailscale-IP": erzwingt die Tailscale/CGNAT-IP in
     # QR-/Join-URLs statt der Auto-Auswahl (LAN-first). False = Auto.
     force_tailscale_ip: bool = False
-    # Entwickler-Toggle „PDF lokal speichern": erzwingt beim Drucken das
-    # `file`-Backend (Leihschein wird ins Ausgabeverzeichnis geschrieben
-    # statt an den Drucker geschickt) — unabhängig von PRINT_BACKEND. Für
-    # Tests ohne physischen Drucker. False = normaler Druckweg.
+    # Entwickler-Toggle „PDF lokal speichern": erzwingt das `file`-Druck-Backend.
+    # Rationale: docs/PLAN.md § State-Feld-Rationale
     save_pdf_locally: bool = False
-    # Experimenteller Entwickler-Toggle „Klasse auf Leihschein korrigieren":
-    # ersetzt beim Drucken den (teils falschen) Klassen-Code hinter „Klasse "
-    # auf dem IServ-Leihschein durch die echte Klasse des Schülers aus dem
-    # Serverstate. Rein lokale PDF-Bearbeitung, kein IServ-Write. False = aus.
+    # Entwickler-Toggle „Klasse auf Leihschein korrigieren" (lokale PDF-Bearbeitung,
+    # kein IServ-Write). Rationale: docs/PLAN.md § State-Feld-Rationale
     fix_class_on_slip: bool = False
     # Host-Toggle „Schüler-Leihschein" (2. Seite): Default für den Druck-
     # Dialog im Helferclient. Wird vom Host gesetzt und an Helfer gesynct.
@@ -205,30 +183,19 @@ class RuntimeSettings:
 class IservCaches:
     """Die fünf jahrgangs-/schuljahrbezogenen IServ-Caches — gemeinsam von
     `AppState.reset_booklist_orders()` beim Schuljahreswechsel geleert
-    (`clear_all()`). `AppState` behält dünne Forwarding-Properties (siehe dort)."""
+    (`clear_all()`). Zugriff ausschließlich über `state.caches.<name>`."""
 
-    # Jahrgangsweite Bücher-Reihenfolgen (im Einstellungen-Dialog vorab pro
-    # Bücherliste gesetzt). grade -> ISBN-Sequenz. Speist beim Klassenladen
-    # den Kontext-`book_order` (Jahrgang der Klasse). Reiner In-Memory-State,
-    # kein DB-/IServ-Write. Wird erst beim Schuljahreswechsel geleert.
+    # Jahrgangsweite Bücher-Reihenfolgen (grade -> ISBN-Sequenz), speist den
+    # Kontext-book_order. Rationale: docs/PLAN.md § State-Feld-Rationale
     book_orders_by_grade: dict[int, list[str]] = field(default_factory=dict)
-    # Ausgeblendete Buchreihen pro Jahrgang (Einstellungen-Dialog, „Ausblenden"-
-    # Button je Buch). Ausgeblendete ISBNs werden beim Scannen nicht mehr als
-    # „vorgemerkt" geführt/angezeigt (weder Scanner- noch Handy-Anzeige) und
-    # sind daher auch nicht buchbar. Reiner In-Memory-State, kein DB-/IServ-
-    # Write — betrifft nur die lokale Anzeige/Buchungsprüfung. Wird wie
-    # `book_orders_by_grade` erst beim Schuljahreswechsel geleert.
+    # Ausgeblendete Buchreihen pro Jahrgang (nicht vorgemerkt/buchbar).
+    # Rationale: docs/PLAN.md § State-Feld-Rationale
     hidden_isbns_by_grade: dict[int, set[str]] = field(default_factory=dict)
-    # Katalog-Cache für klassenübergreifende Warteschlangen (einzeln
-    # hinzugefügte Schüler/„Test Config", ggf. aus verschiedenen Jahrgängen):
-    # form-Name -> (grade, catalog_isbns). Erspart einen IServ-Roundtrip pro
-    # Schüler-Zuweisung; wird wie `book_orders_by_grade` erst beim
-    # Schuljahreswechsel geleert.
+    # Katalog-Cache für klassenübergreifende Warteschlangen
+    # (form -> (grade, catalog_isbns)). Rationale: docs/PLAN.md § State-Feld-Rationale
     form_catalog_cache: dict[str, tuple[int | None, list[str]]] = field(default_factory=dict)
-    # Caches für die Helfer-Lupensuche (read-only IServ-GETs, schuljahr-
-    # bezogen): Klassennamen + Schüler pro Klasse. Sparen IServ-Roundtrips
-    # beim wiederholten Öffnen der Suche. Werden wie die anderen Caches
-    # beim Schuljahreswechsel geleert. Keys: schoolyear bzw. "schoolyear|form".
+    # Caches der Helfer-Lupensuche (Klassennamen + Schüler pro Klasse).
+    # Rationale: docs/PLAN.md § State-Feld-Rationale
     class_names_cache: dict[str, list[str]] = field(default_factory=dict)
     form_students_cache: dict[str, list[dict]] = field(default_factory=dict)
 
@@ -280,13 +247,11 @@ class AppState:
         self.student_worker_sessions: dict[int, StudentSession] = {}  # student_id -> Session
         # Die fünf Host-/Entwickler-Toggles + Drucker-Override (früher einzelne
         # Felder auf AppState) — siehe RuntimeSettings. Über state.settings.*
-        # ansprechbar; Forwarding-Properties unten halten `setattr(state, name,
-        # value)` (routes/settings.py) und direkte Attributzugriffe kompatibel.
+        # ansprechbar.
         self.settings = RuntimeSettings()
         # Die fünf jahrgangs-/schuljahrbezogenen IServ-Caches (früher einzelne
         # Felder auf AppState) — siehe IservCaches. Über state.caches.*
-        # ansprechbar; Forwarding-Properties unten halten direkte
-        # Attributzugriffe kompatibel.
+        # ansprechbar.
         self.caches = IservCaches()
         # --- Modus B (Live-Ausgabe) ---
         self.modus_b_open: bool = False
@@ -297,107 +262,6 @@ class AppState:
         self.modus_b_join_qr: str | None = None  # PNG-Data-URL für iPad/Host
         self.student_sessions: dict[str, StudentSessionB] = {}  # session_token -> Session
         self.displays: dict[str, DisplaySession] = {}  # display_id -> Display
-
-    # -----------------------------------------------------------------
-    # Forwarding-Properties: RuntimeSettings
-    # -----------------------------------------------------------------
-    # `state.settings.<name>` ist die eigentliche Heimat; diese dünnen
-    # Properties halten zwei bestehende Zugriffspfade kompatibel, ohne die
-    # Dataclass zu duplizieren:
-    #   1. `routes/settings.py::set_bool_setting` ruft `setattr(state, attr,
-    #      value)` gegen die `_BOOL_SETTINGS`-Whitelist auf — das braucht ein
-    #      echtes Attribut/Property auf AppState, kein verschachteltes.
-    #   2. Bestehende direkte Zugriffe (`state.printer_name_override = ...`)
-    #      bleiben funktionsfähig.
-
-    @property
-    def force_tailscale_ip(self) -> bool:
-        return self.settings.force_tailscale_ip
-
-    @force_tailscale_ip.setter
-    def force_tailscale_ip(self, value: bool) -> None:
-        self.settings.force_tailscale_ip = value
-
-    @property
-    def save_pdf_locally(self) -> bool:
-        return self.settings.save_pdf_locally
-
-    @save_pdf_locally.setter
-    def save_pdf_locally(self, value: bool) -> None:
-        self.settings.save_pdf_locally = value
-
-    @property
-    def fix_class_on_slip(self) -> bool:
-        return self.settings.fix_class_on_slip
-
-    @fix_class_on_slip.setter
-    def fix_class_on_slip(self, value: bool) -> None:
-        self.settings.fix_class_on_slip = value
-
-    @property
-    def slip_second_page_default(self) -> bool:
-        return self.settings.slip_second_page_default
-
-    @slip_second_page_default.setter
-    def slip_second_page_default(self, value: bool) -> None:
-        self.settings.slip_second_page_default = value
-
-    @property
-    def printer_name_override(self) -> str | None:
-        return self.settings.printer_name_override
-
-    @printer_name_override.setter
-    def printer_name_override(self, value: str | None) -> None:
-        self.settings.printer_name_override = value
-
-    # -----------------------------------------------------------------
-    # Forwarding-Properties: IservCaches
-    # -----------------------------------------------------------------
-    # Gibt jeweils das echte Dict/Set aus `state.caches` zurück (kein Kopieren)
-    # — `st.book_orders_by_grade[9] = [...]` mutiert also den echten Cache.
-    # Der Setter erlaubt zusätzlich die komplette Neuzuweisung
-    # (`st.book_orders_by_grade = {...}`), wie sie u. a. `server/app.py` beim
-    # Laden der Persistenz und einzelne Tests nutzen.
-
-    @property
-    def book_orders_by_grade(self) -> dict[int, list[str]]:
-        return self.caches.book_orders_by_grade
-
-    @book_orders_by_grade.setter
-    def book_orders_by_grade(self, value: dict[int, list[str]]) -> None:
-        self.caches.book_orders_by_grade = value
-
-    @property
-    def hidden_isbns_by_grade(self) -> dict[int, set[str]]:
-        return self.caches.hidden_isbns_by_grade
-
-    @hidden_isbns_by_grade.setter
-    def hidden_isbns_by_grade(self, value: dict[int, set[str]]) -> None:
-        self.caches.hidden_isbns_by_grade = value
-
-    @property
-    def form_catalog_cache(self) -> dict[str, tuple[int | None, list[str]]]:
-        return self.caches.form_catalog_cache
-
-    @form_catalog_cache.setter
-    def form_catalog_cache(self, value: dict[str, tuple[int | None, list[str]]]) -> None:
-        self.caches.form_catalog_cache = value
-
-    @property
-    def class_names_cache(self) -> dict[str, list[str]]:
-        return self.caches.class_names_cache
-
-    @class_names_cache.setter
-    def class_names_cache(self, value: dict[str, list[str]]) -> None:
-        self.caches.class_names_cache = value
-
-    @property
-    def form_students_cache(self) -> dict[str, list[dict]]:
-        return self.caches.form_students_cache
-
-    @form_students_cache.setter
-    def form_students_cache(self, value: dict[str, list[dict]]) -> None:
-        self.caches.form_students_cache = value
 
     # -----------------------------------------------------------------
     # Kontext-Verwaltung

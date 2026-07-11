@@ -691,3 +691,83 @@ der Client den Zustand nicht selbst initiiert hat — ein Client-Flag greift
 nur bei selbst getätigten Aktionen. Tests: `test_queue_flow.py` +Assertion
 (`advance_helper` sendet `loading`, kein `waiting`; `assign_student_to_helper`
 sendet `loading`), Suite 105 grün.
+
+## § State-Feld-Rationale
+
+Ausgelagerte Detail-Begründungen für einzelne Felder der Dataclasses in
+`server/state.py`. Ziel: die Typdefinitionen bleiben überfliegbar (nur eine
+Zeile Zusammenfassung + Verweis am Feld), das „Warum" lebt hier. Kurze 1–2-
+Zeilen-Kommentare und alle `# Abgesichert: tests/…`-Zeiger bleiben am Code.
+
+### `RuntimeSettings`
+
+- **`save_pdf_locally`** — Entwickler-Toggle „PDF lokal speichern": erzwingt beim
+  Drucken das `file`-Backend (Leihschein wird ins Ausgabeverzeichnis geschrieben
+  statt an den Drucker geschickt) — unabhängig von `PRINT_BACKEND`. Für Tests
+  ohne physischen Drucker. `False` = normaler Druckweg.
+- **`fix_class_on_slip`** — experimenteller Entwickler-Toggle „Klasse auf
+  Leihschein korrigieren": ersetzt beim Drucken den (teils falschen) Klassen-Code
+  hinter „Klasse " auf dem IServ-Leihschein durch die echte Klasse des Schülers
+  aus dem Serverstate. Rein lokale PDF-Bearbeitung, kein IServ-Write. `False` = aus.
+
+### `IservCaches`
+
+- **`book_orders_by_grade`** — jahrgangsweite Bücher-Reihenfolgen (im
+  Einstellungen-Dialog vorab pro Bücherliste gesetzt). `grade -> ISBN-Sequenz`.
+  Speist beim Klassenladen den Kontext-`book_order` (Jahrgang der Klasse). Reiner
+  In-Memory-State, kein DB-/IServ-Write. Wird erst beim Schuljahreswechsel geleert.
+- **`hidden_isbns_by_grade`** — ausgeblendete Buchreihen pro Jahrgang
+  (Einstellungen-Dialog, „Ausblenden"-Button je Buch). Ausgeblendete ISBNs werden
+  beim Scannen nicht mehr als „vorgemerkt" geführt/angezeigt (weder Scanner- noch
+  Handy-Anzeige) und sind daher auch nicht buchbar. Reiner In-Memory-State, kein
+  DB-/IServ-Write — betrifft nur die lokale Anzeige/Buchungsprüfung. Wird wie
+  `book_orders_by_grade` erst beim Schuljahreswechsel geleert.
+- **`form_catalog_cache`** — Katalog-Cache für klassenübergreifende
+  Warteschlangen (einzeln hinzugefügte Schüler/„Test Config", ggf. aus
+  verschiedenen Jahrgängen): `form-Name -> (grade, catalog_isbns)`. Erspart einen
+  IServ-Roundtrip pro Schüler-Zuweisung; wird wie `book_orders_by_grade` erst beim
+  Schuljahreswechsel geleert.
+- **`class_names_cache` / `form_students_cache`** — Caches für die Helfer-
+  Lupensuche (read-only IServ-GETs, schuljahrbezogen): Klassennamen + Schüler pro
+  Klasse. Sparen IServ-Roundtrips beim wiederholten Öffnen der Suche. Werden wie
+  die anderen Caches beim Schuljahreswechsel geleert. Keys: `schoolyear` bzw.
+  `"schoolyear|form"`.
+
+### `HelperSession`
+
+- **`student_form`** — Klasse (form) des aktuell zugewiesenen Schülers. Quelle für
+  `book_order` + `info["form"]` beim Reconnect, falls der Schüler NICHT in einer
+  Queue steht (Helfer-Lupe / `search_call` — dort gibt es keinen `QueueStudent`,
+  an dem die Form hing; s. `ws_scanner`-Reconnect). Invariant: nur relevant, wenn
+  `student_id is not None`; gesetzt ausschließlich in `assign_student_to_helper`.
+- **`context_id`** — Klasse (Kontext), die dieser Helfer bedient.
+  „Nächster"/„Aufrufen" zieht aus der Queue dieses Kontexts; `None` = noch keiner
+  Klasse zugewiesen (Fallback auf den aktiven Kontext, s. `next_pending`). Rein
+  transient — kein IServ-/DB-Zustand. Umbindbar per `/api/helper/{token}/class`.
+- **`vormerk_isbns` / `lent_isbns`** — Buchungs-Vorabprüfung: `vormerk` = bestellt
+  UND Reihe noch nicht auf den Schüler ausgeliehen (= buchbar); `lent` = Reihe
+  bereits ausgeliehen (für klare Fehlermeldung). Getrennt gehalten, weil
+  `expected_isbns` beides vereint und die Buchbarkeit nicht unterscheiden kann.
+- **`load_task`** — In-flight Lade-Task (`load_and_push_helper_student`). Wird
+  beim Abbruch des Schülers (`end_student`) gecancelt, damit ein noch laufendes
+  `open_student` seinen Worker-Context zurückgibt — sonst leakt der Context, weil
+  er erst nach `open_student` in `student_worker_sessions` registriert wird.
+- **`end_task`** — verzögerter Disconnect-Teardown („Grace"): beim Trennen des
+  Scanner-WS wird `end_student` nicht sofort, sondern nach `_RECONNECT_GRACE_S`
+  als Task angestoßen. Lädt der Helfer die Seite neu (Reconnect innerhalb der
+  Frist), wird dieser Task gecancelt und der Schüler stattdessen neugeladen
+  (s. `ws_scanner`). Ohne Reconnect → echte Trennung → Schüler zurück auf
+  `pending`, Worker zu.
+- **`peeking`** — View-Toggle „Menü": Helfer hat per Menü-Button die
+  Warteschlangen-Ansicht geöffnet, während sein zugewiesener Schüler im
+  Hintergrund verbunden bleibt. Solange `True` bekommt dieser Helfer Live-
+  `queue_update`s (wie ein unzugewiesener), damit die Queue-Ansicht aktuell
+  bleibt. Rein transient — kein Schüler-/IServ-/DB-Zustand. Reset bei
+  Schülerwechsel/-ende/Reconnect.
+
+### `StudentSessionB`
+
+- **`book_alert_open`** — ausgemustertes/verliehenes Buch gescannt → Client zeigt
+  ein blockierendes Hinweis-Modal ohne eigenen Schließen-Button; erst der Host
+  darf es per `/api/clear-book-alert` wieder freigeben. Solange `True`: Scans
+  ignorieren.
