@@ -245,6 +245,42 @@ def test_search_call_loads_transient_student_not_in_queue(client, ws_env):
         assert state.find_student(4242) is None
 
 
+def test_search_call_blocks_student_active_on_other_helper(client, ws_env):
+    """Lupe darf keinen Schüler öffnen, der gerade bei einem ANDEREN Helfer
+    aktiv ist (Queue-`call` oder ebenfalls Lupe) — sonst liefe derselbe
+    Schüler auf zwei Clients gleichzeitig. Statt zu laden: `error` mit
+    `busy: True` und der Statuszeilen-Text „Warte bis Schüler frei…"."""
+    state, token = ws_env
+    ctx = state.open_context("10a")
+    other = QueueStudent(
+        student_id=4242, lastname="Test", firstname="S", form="10a",
+        status="active", assigned_helper="h2",
+    )
+    ctx.queue.append(other)
+    helper = state.helper_sessions[token]
+
+    with client.websocket_connect("/ws/scanner/h1") as ws:
+        _drain_handshake(ws)
+        ws.send_json(
+            {
+                "type": "search_call",
+                "student_id": 4242,
+                "form": "10a",
+                "lastname": "Test",
+                "firstname": "S",
+            }
+        )
+        msg = _recv_until_any(ws, {"error", "loading"})
+        assert msg["type"] == "error", f"erwartete error, bekam {msg['type']}"
+        assert msg.get("busy") is True
+        assert msg["msg"] == "Warte bis Schüler frei…"
+        # Helfer bleibt unverändert (kein neuer Schüler geladen), der andere
+        # Schüler bleibt unangetastet bei h2.
+        assert helper.student_id is None
+        assert other.status == "active"
+        assert other.assigned_helper == "h2"
+
+
 def test_search_call_missing_form_errors(client, ws_env):
     with client.websocket_connect("/ws/scanner/h1") as ws:
         _drain_handshake(ws)
