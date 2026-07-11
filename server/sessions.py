@@ -25,7 +25,14 @@ from .book_order import get_book_order_for_form, get_hidden_isbns_for_form
 from .config import get_config
 from .hub import get_hub
 from .ratelimit import join_limiter
-from .state import AppState, DisplaySession, StudentSessionB, get_state
+from .state import (
+    AppState,
+    DisplaySession,
+    QueueStudent,
+    SpectatorWaiter,
+    StudentSessionB,
+    get_state,
+)
 
 log = logging.getLogger(__name__)
 
@@ -679,9 +686,21 @@ async def end_student(
     """
     student = state.find_student(student_id)
     if student:
-        student.status = queue_status  # type: ignore[assignment]
         old_helper = student.assigned_helper
-        student.assigned_helper = None
+        # Beförderung: wartet ein Spectator auf genau diesen Schüler, übernimmt
+        # er ihn sofort statt ihn wirklich frei zu geben. Reihenfolge bewusst
+        # synchron (kein Await zwischen `pop_next_spectator` und dem Aufruf von
+        # `assign_student_to_helper`, dessen Mutationen selbst VOR ihrem ersten
+        # Await laufen) — sonst könnte ein dritter Helfer den Schüler in der
+        # Lücke regulär „callen", bevor die Beförderung feststeht.
+        waiter = state.pop_next_spectator(student_id)
+        promoted = state.helper_sessions.get(waiter.token) if waiter else None
+        if promoted is not None:
+            student.assigned_helper = None
+            await assign_student_to_helper(state, hub, promoted, student)
+        else:
+            student.status = queue_status  # type: ignore[assignment]
+            student.assigned_helper = None
         if old_helper and old_helper in state.helper_sessions:
             h = state.helper_sessions[old_helper]
             await _detach_helper(state, hub, h, helper_notify)
@@ -692,9 +711,21 @@ async def end_student(
         # nicht → ohne diesen Zweig bliebe `helper.student_id` stale und ein
         # noch laufendes `open_student` (load_task) leakte den Worker-Context.
         # Gleiche Aufräumung wie oben, nur Helfer via find_helper_for_student.
-        helper = state.find_helper_for_student(student_id)
-        if helper is not None and helper.student_id == student_id:
-            await _detach_helper(state, hub, helper, helper_notify)
+        old_transient_helper = state.find_helper_for_student(student_id)
+        waiter = state.pop_next_spectator(student_id)
+        promoted = state.helper_sessions.get(waiter.token) if waiter else None
+        if promoted is not None:
+            transient = QueueStudent(
+                student_id=student_id,
+                lastname=waiter.lastname,
+                firstname=waiter.firstname,
+                form=waiter.form,
+                status="active",
+                assigned_helper=promoted.token,
+            )
+            await assign_student_to_helper(state, hub, promoted, transient)
+        if old_transient_helper is not None and old_transient_helper.student_id == student_id:
+            await _detach_helper(state, hub, old_transient_helper, helper_notify)
 
     session = state.find_session_by_student(student_id)
     if session:
@@ -848,6 +879,13 @@ async def assign_student_to_helper(state: AppState, hub, helper, student) -> dic
     `'done'` ist (erneutes Aufrufen eines fertigen Schülers) und der Helfer
     keinen aktiven Schüler mehr hat.
     """
+    if helper.spectating_student_id is not None:
+        # Helfer bekommt jetzt einen ECHTEN (Worker-)Schüler zugewiesen — eine
+        # noch offene Zuschauer-Registrierung (anderer Schüler) wäre sonst eine
+        # Karteileiche in dessen Warteliste (z. B. Spectator klickt „Nächster"
+        # statt weiter zu warten, oder wird selbst befördert).
+        state.remove_spectator(helper.spectating_student_id, helper.token)
+        helper.spectating_student_id = None
     student.status = "active"
     student.assigned_helper = helper.token
     helper.student_id = student.student_id
@@ -864,6 +902,61 @@ async def assign_student_to_helper(state: AppState, hub, helper, student) -> dic
         load_and_push_helper_student(state, hub, student, helper)
     )
     return {"ok": True, "student_id": student.student_id}
+
+
+async def spectate_student(
+    state: AppState,
+    hub,
+    helper,
+    *,
+    student_id: int,
+    lastname: str,
+    firstname: str,
+    form: str,
+) -> None:
+    """Helfer als Zuschauer (Spectator) auf einen bei einem ANDEREN Helfer
+    bereits aktiven Schüler registrieren: Bücherliste read-only anzeigen
+    (live mitaktualisiert — s. `_handle_scan`s Fan-out an Spectator-Tokens in
+    ws.py), aber KEIN eigener Worker-Context — der bleibt exklusiv beim
+    aktiven Helfer (es gibt ohnehin nur einen Worker pro `student_id`).
+    FIFO-Warteliste je Schüler (`state.student_spectators`); endet der
+    Schüler beim aktiven Helfer, übernimmt automatisch der am längsten
+    Wartende (`end_student`s Beförderungs-Zweig, ruft dafür wieder
+    `assign_student_to_helper` auf — das räumt die Zuschauer-Registrierung
+    dann selbst ab).
+
+    Aufgerufen aus `_handle_call`/`_handle_search_call` in ws.py, sobald
+    `state.find_helper_for_student(student_id)` einen ANDEREN Helfer als
+    aktuellen Besitzer liefert.
+    """
+    if helper.student_id is not None:
+        # Helfer hatte selbst noch einen aktiven Schüler — wie beim direkten
+        # `call`/`search_call` erst regulär beenden, bevor er zuschaut.
+        await end_student(
+            state,
+            hub,
+            helper.student_id,
+            queue_status="pending",
+            session_state="revoked",
+            helper_notify={"type": "loading"},
+        )
+    if helper.spectating_student_id is not None:
+        state.remove_spectator(helper.spectating_student_id, helper.token)
+    helper.spectating_student_id = student_id
+    state.add_spectator(student_id, SpectatorWaiter(helper.token, lastname, firstname, form))
+    await hub.send_scanner(helper.token, {"type": "loading"})
+    try:
+        info = await state.iserv.get_student_info(student_id, state.selected_schoolyear)
+    except Exception as e:  # noqa: BLE001 — Fehler dem Client melden
+        log.exception("Spectator-Schülerinfo für %d konnte nicht geladen werden", student_id)
+        state.remove_spectator(student_id, helper.token)
+        helper.spectating_student_id = None
+        await hub.send_scanner(helper.token, {"type": "error", "msg": f"IServ-Fehler: {e}"})
+        return
+    info = await hydrate_student_info(state, info, form, helper)
+    await hub.send_scanner(
+        helper.token, {"type": "student_info", "student": info, "spectator": True}
+    )
 
 
 async def load_and_push_paired_student(

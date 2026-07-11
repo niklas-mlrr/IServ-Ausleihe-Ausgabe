@@ -12,7 +12,7 @@ import asyncio
 import pytest
 
 import server.sessions as sessions
-from server.state import AppState, HelperSession, QueueStudent
+from server.state import AppState, HelperSession, QueueStudent, SpectatorWaiter
 
 # ---------------------------------------------------------------------------
 # Test-Doubles (keine echten WS/Worker/Hub)
@@ -171,6 +171,94 @@ def test_end_student_releases_worker_without_session():
 
     assert 5 not in st.student_worker_sessions
     assert worker.closed is True
+
+
+# ---------------------------------------------------------------------------
+# end_student — Beförderung eines wartenden Spectators (Warteliste, s.
+# sessions.spectate_student). Endet der aktive Helfer den Schüler, übernimmt
+# der am längsten Wartende automatisch (Worker öffnet erst jetzt für ihn).
+# ---------------------------------------------------------------------------
+
+
+def test_end_student_promotes_next_spectator_for_real_queue_student():
+    st = _state_with_iserv()
+    hub = _FakeHub()
+    student = _add_student(st, 7, status="active")
+    student.assigned_helper = "h1"
+    h1 = HelperSession(token="h1", name="Helfer 1", student_id=7)
+    h2 = HelperSession(token="h2", name="Helfer 2", ws=object(), spectating_student_id=7)
+    st.helper_sessions["h1"] = h1
+    st.helper_sessions["h2"] = h2
+    st.student_spectators[7] = [SpectatorWaiter("h2", "N7", "V", "10a")]
+
+    asyncio.run(end_student_call(st, hub, 7, "done", "completed"))
+
+    # Schüler bleibt "active" — nicht wirklich beendet, sondern an h2 übergeben.
+    assert student.status == "active"
+    assert student.assigned_helper == "h2"
+    assert h1.student_id is None  # alter Helfer sauber abgeräumt
+    assert h2.student_id == 7  # neuer Besitzer — jetzt MIT Worker-Ladepfad
+    assert h2.spectating_student_id is None  # Warteliste verlassen
+    assert 7 not in st.student_spectators  # Liste war danach leer → gelöscht
+    types = [m["type"] for _, m in hub.scanner_msgs if m.get("type")]
+    assert "loading" in types  # assign_student_to_helper hat h2 neu geladen
+
+
+def test_end_student_promotion_chain_third_waiter_still_waits():
+    """Zwei Wartende (h2, h3): endet der aktive Helfer, übernimmt NUR h2 —
+    h3 bleibt in der Warteliste, bis auch h2 fertig ist."""
+    st = _state_with_iserv()
+    hub = _FakeHub()
+    student = _add_student(st, 7, status="active")
+    student.assigned_helper = "h1"
+    h1 = HelperSession(token="h1", name="Helfer 1", student_id=7)
+    h2 = HelperSession(token="h2", name="Helfer 2", ws=object(), spectating_student_id=7)
+    h3 = HelperSession(token="h3", name="Helfer 3", ws=object(), spectating_student_id=7)
+    st.helper_sessions["h1"] = h1
+    st.helper_sessions["h2"] = h2
+    st.helper_sessions["h3"] = h3
+    st.student_spectators[7] = [
+        SpectatorWaiter("h2", "N7", "V", "10a"),
+        SpectatorWaiter("h3", "N7", "V", "10a"),
+    ]
+
+    asyncio.run(end_student_call(st, hub, 7, "done", "completed"))
+
+    assert h2.student_id == 7
+    assert h3.student_id is None  # noch nicht befördert
+    assert h3.spectating_student_id == 7  # wartet weiterhin
+    assert [w.token for w in st.student_spectators[7]] == ["h3"]
+
+    # h2 (jetzt aktiver Besitzer) beendet seinerseits — h3 rückt nach.
+    hub2 = _FakeHub()
+    asyncio.run(end_student_call(st, hub2, 7, "done", "completed"))
+    assert h2.student_id is None
+    assert h3.student_id == 7
+    assert h3.spectating_student_id is None
+    assert 7 not in st.student_spectators
+
+
+def test_end_student_promotes_next_spectator_for_transient_search_student():
+    """Wie oben, aber der Schüler ist ein transienter Lupe-Treffer (steht in
+    KEINER Queue) — die Beförderung muss ihn aus dem SpectatorWaiter (lastname/
+    firstname/form) neu aufbauen, statt einen QueueStudent nachzuschlagen."""
+    st = _state_with_iserv()
+    hub = _FakeHub()
+    h1 = HelperSession(token="h1", name="Helfer 1", student_id=77)
+    h1.student_form = "10a"
+    h2 = HelperSession(token="h2", name="Helfer 2", ws=object(), spectating_student_id=77)
+    st.helper_sessions["h1"] = h1
+    st.helper_sessions["h2"] = h2
+    # Bewusst KEIN _add_student → 77 steht in keiner Queue (Schnellsprung).
+    st.student_spectators[77] = [SpectatorWaiter("h2", "Test", "S", "10a")]
+
+    asyncio.run(end_student_call(st, hub, 77, "done", "completed"))
+
+    assert h1.student_id is None
+    assert h2.student_id == 77
+    assert h2.student_form == "10a"
+    assert 77 not in st.student_spectators
+    assert st.find_student(77) is None  # weiterhin transient, keine Queue
 
 
 # ---------------------------------------------------------------------------

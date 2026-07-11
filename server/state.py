@@ -54,6 +54,21 @@ class QueueStudent:
 
 
 @dataclass
+class SpectatorWaiter:
+    """FIFO-Warteintrag für einen Helfer, der einen bei einem ANDEREN Helfer
+    aktiven Schüler nur zuschaut (s. `sessions.spectate_student`). Trägt
+    lastname/firstname/form redundant zum QueueStudent, damit auch ein
+    transienter Lupe-Ziel-Schüler (steht in KEINER Queue) beim Freiwerden ohne
+    erneuten IServ-Katalog-Lookup als neuer QueueStudent wiederaufgebaut
+    werden kann (s. `end_student`s Beförderungs-Zweig)."""
+
+    token: str
+    lastname: str
+    firstname: str
+    form: str
+
+
+@dataclass
 class HelperSession:
     token: str
     name: str
@@ -61,6 +76,11 @@ class HelperSession:
     # Klasse (form) des zugew. Schülers; Quelle für book_order/info["form"] beim
     # Reconnect ohne QueueStudent. Rationale: docs/PLAN.md § State-Feld-Rationale
     student_form: str | None = None
+    # Schüler, den dieser Helfer nur ZUSCHAUT (read-only, kein eigener Worker),
+    # weil er bei einem ANDEREN Helfer aktiv ist — getrennt von `student_id`
+    # (das bleibt strikt „ich besitze Worker + Queue-Slot"). Niemals
+    # `student_id` für einen Spectator setzen, s. `sessions.spectate_student`.
+    spectating_student_id: int | None = None
     ws: object | None = None  # WebSocket (avoid import cycle)
     created_at: datetime = field(default_factory=datetime.now)
     last_scan: str | None = None
@@ -245,6 +265,10 @@ class AppState:
         self.worker_pool: WorkerPool | None = None
         self.iserv: IsServClient | None = None
         self.student_worker_sessions: dict[int, StudentSession] = {}  # student_id -> Session
+        # FIFO-Warteliste je Schüler: Helfer, die einen bei einem ANDEREN
+        # Helfer aktiven Schüler nur zuschauen (spectate_student in
+        # sessions.py), geordnet nach Anmeldereihenfolge.
+        self.student_spectators: dict[int, list[SpectatorWaiter]] = {}
         # Die fünf Host-/Entwickler-Toggles + Drucker-Override (früher einzelne
         # Felder auf AppState) — siehe RuntimeSettings. Über state.settings.*
         # ansprechbar.
@@ -507,6 +531,46 @@ class AppState:
             (h for h in self.helper_sessions.values() if h.student_id == student_id),
             None,
         )
+
+    # --- Spectator-Warteliste (s. sessions.spectate_student) ---
+
+    def add_spectator(self, student_id: int, waiter: SpectatorWaiter) -> None:
+        """Helfer ans Ende der Warteliste eines Schülers anhängen (FIFO).
+        Dubletten (gleicher Token, z. B. doppelter Klick) werden ignoriert."""
+        waiters = self.student_spectators.setdefault(student_id, [])
+        if not any(w.token == waiter.token for w in waiters):
+            waiters.append(waiter)
+
+    def remove_spectator(self, student_id: int, token: str) -> None:
+        """Helfer aus der Warteliste eines Schülers entfernen (Disconnect,
+        Wechsel zu einem anderen Ziel, oder er bekommt selbst einen Schüler
+        zugewiesen). Leere Listen werden aus dem Dict gelöscht."""
+        waiters = self.student_spectators.get(student_id)
+        if not waiters:
+            return
+        remaining = [w for w in waiters if w.token != token]
+        if remaining:
+            self.student_spectators[student_id] = remaining
+        else:
+            self.student_spectators.pop(student_id, None)
+
+    def pop_next_spectator(self, student_id: int) -> SpectatorWaiter | None:
+        """Ältesten wartenden Helfer mit noch verbundenem WS entfernen und
+        zurückgeben (FIFO) — für die Beförderung in `end_student`. Tote
+        Einträge (Spectator hat sich zwischenzeitlich getrennt) werden dabei
+        übersprungen und verworfen."""
+        waiters = self.student_spectators.get(student_id)
+        if not waiters:
+            return None
+        while waiters:
+            waiter = waiters.pop(0)
+            helper = self.helper_sessions.get(waiter.token)
+            if helper is not None and helper.ws is not None:
+                if not waiters:
+                    self.student_spectators.pop(student_id, None)
+                return waiter
+        self.student_spectators.pop(student_id, None)
+        return None
 
     # --- Host-Login-Sessions (gleitendes TTL) ---
 

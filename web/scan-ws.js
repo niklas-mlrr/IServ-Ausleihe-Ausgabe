@@ -49,7 +49,16 @@ function handleServerMessage(msg) {
     // Bücher sofort sichtbar; Scans+„Scanner bereit"-Status aber erst, sobald
     // der Worker bereit ist (`worker_ready`). Bis dahin „Warten…" + Scans ignor.
     workerPending = true;
-    setReadyStatus();
+    if (msg.spectator) {
+      // Zuschauer (spectate_student, server-seitig): Schüler ist bei einem
+      // ANDEREN Helfer aktiv, dieser Client bekommt nie ein `worker_ready` —
+      // `workerPending` bleibt dauerhaft true (sperrt Scans clientseitig
+      // bereits über den bestehenden Gate in onScanSuccess), Statuszeile
+      // zeigt dauerhaft den Wartehinweis statt „Warten…"/„Scanner bereit".
+      setStatusText('Warten bis Schüler frei…');
+    } else {
+      setReadyStatus();
+    }
   } else if (msg.type === 'worker_ready') {
     workerPending = false;
     setReadyStatus();
@@ -85,6 +94,18 @@ function handleServerMessage(msg) {
     setStatusText('Warten…');
     if (menuWasOpen) animateMenu(false, true);
   } else if (msg.type === 'scan_result') {
+    if (msg.spectator) {
+      // Gespiegelter Scan des aktiven Helfers (s. spectate_student/Fan-out in
+      // ws.py) — nur die Bücherliste mitziehen, kein eigener Scan-Vorgang
+      // (pendingScans/drainScanWaiters) und keine Statuszeile/Alert-Modal:
+      // die bleiben „Warten bis Schüler frei…".
+      if ((msg.status === 'staged' || msg.status === 'booked') && msg.isbn) {
+        scannedIsbns.add(msg.isbn);
+        scanOrder.set(msg.isbn, ++scanSeq);
+        renderBooks(currentBooks, true);
+      }
+      return;
+    }
     if (pendingScans > 0) pendingScans--;
     // Erfolgreicher Scan → Buch in der Liste als „erledigt" markieren:
     // 'booked' = tatsächlich gebucht (ALLOW_BOOKING an), 'staged' = nur ins
@@ -189,11 +210,7 @@ function handleServerMessage(msg) {
     // gekommen → Menü/Panel offen lassen zum erneuten Versuch, Flag aber
     // zurücksetzen, damit ein späteres fremdes `loading` sie nicht doch schließt.
     searchSubmitted = false;
-    // Lupe-Suche auf einen Schüler, der gerade auf einem ANDEREN Client aktiv
-    // ist (Queue-`call` oder ebenfalls Lupe): server sendet `busy` statt eines
-    // echten Fehlers — Statuszeile ohne „Fehler:"-Prefix, Panel bleibt offen
-    // (s. u.) zum erneuten Versuch, sobald der Schüler frei ist.
-    setStatusText(msg.busy ? (msg.msg || '') : 'Fehler: ' + (msg.msg || ''));
+    setStatusText('Fehler: ' + (msg.msg || ''));
     dotEl.className = 'dot err';
     heldScanValue = null;
     closeLendModal();
