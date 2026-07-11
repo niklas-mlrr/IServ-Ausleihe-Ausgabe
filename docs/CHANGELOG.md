@@ -8,6 +8,46 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-11 — Wartbarkeits-Welle 7 (Subagent-Refactoring)
+
+Neun Verbesserungspunkte aus einem Codebase-Review, ausgeführt von Sonnet-5-
+Subagents (Fortsetzung der Wellen 0–6). Alles verhaltenserhaltend; Baseline
+`ccdcbd9`, Ergebnis auf `main` (`84497cb`):
+
+- **`routes/ws.py`** — `safe_broadcast()` und `_take_over_ws()` extrahiert
+  (ersetzen den ~4× wiederholten `try/except: pass`-Broadcast bzw. den
+  Reconnect-Ownership-Swap). `ws_scanner`-Empfangsschleife (`if mtype==…`-Kette)
+  auf eine Dispatch-Table `_SCANNER_HANDLERS` (10 kleine `_handle_*`) umgestellt.
+  `ws_student`-Reconnect auf dieselbe „Swap vor `await close()`"-Ordnung wie
+  `ws_scanner` vereinheitlicht (strikt sicherer gegen den Finally-Race).
+- **`web/host.js`/`web/scan.js`** (je ~1500 Z.) in `*-state.js`/`*-ws.js`/
+  `*-render.js` gesplittet (geordnete `<script>`-Tags, geteilter Top-Level-
+  Scope, additive `window.__host`/`__scan`-Introspektion). `student.js` in eine
+  IIFE gewrappt. Verhalten browser-verifiziert (headless-Chromium-Smoke: alle
+  drei Seiten laden ohne uncaught JS/ReferenceError/TypeError).
+- **`server/state.py`** — die toten `AppState`-Forwarding-Shims (`RuntimeSettings`/
+  `IservCaches`, ~110 Z.) entfernt; einziger verbliebener Consumer war
+  `setattr(state, …)` in `routes/settings.py` → auf `state.settings` umgebogen.
+  Lange Feld-Rationale-Kommentare nach neuem `docs/PLAN.md § State-Feld-Rationale`
+  ausgelagert (Typdefinitionen wieder skimmbar).
+- **`server/iserv_client.py`** — doppelte TTL-Staleness-Prüfung in `_resolve_sy`
+  in einen `_sy_cache_stale()`-Helper faktorisiert (Double-Checked-Locking
+  erhalten).
+- **`docs/test_status.md`** — fragile Buchungs-Erfolgs-/Fehler-Selektoren
+  (`automation/worker.py::_read_booking_result`, Code-TODO) als offener Punkt
+  getrackt (Produktions-Schreibpfad).
+- Verwaiste, gelockte Worktree `queue-status-boxes` entfernt.
+
+**Tests:** 201 → **199** — zwei Tests in `tests/test_state_contract.py`, die
+ausschließlich die entfernten Forwarding-Shims prüften, wurden gelöscht; alle
+`state_snapshot()`-Wire-Format-Assertions bleiben unangetastet. `ruff` clean.
+
+**Prozess-Gotcha** (s. `_logs/2026-07-11_…` im Wiki): die parallelen
+Isolation-Worktrees wurden von `547cb6a` (First-Parent von `ccdcbd9`) statt vom
+Session-HEAD angelegt → zwei Agents refactorten veraltete Dateien und hätten
+`queue_all` still gelöscht. Beim Merge via Feature-Marker-Grep erkannt, betroffene
+Agents (ws/frontend) im Haupt-Baum neu ausgeführt.
+
 ## 2026-07-10 — Helferclient: aktive/fertige Schüler als Gruppen-Boxen unter der Warteschlange
 
 Die Warteschlangen-Ansicht im Helferclient (`web/scan.js`, `renderQueue`)
