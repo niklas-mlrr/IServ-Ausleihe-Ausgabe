@@ -260,6 +260,23 @@ async def _handle_search_call(state, hub, helper, websocket, raw) -> None:
     except (TypeError, ValueError):
         await hub.send_websocket(websocket, {"type": "error", "msg": "Ungültige Schüler-ID"})
         return
+    # Guard gegen Doppel-Öffnen: anders als `call` (nur pending/done aus der
+    # eigenen Queue) kann die Lupe JEDEN Schüler treffen — auch einen, der
+    # gerade bei einem ANDEREN Helfer/Client aktiv ist (Queue-`call` oder
+    # ebenfalls Lupe). Ohne diesen Check würde hier unten einfach ein zweiter
+    # transienter QueueStudent für dieselbe student_id erzeugt → derselbe
+    # Schüler liefe auf zwei Clients gleichzeitig (zwei Worker-Sessions).
+    existing = state.find_student(sid)
+    if (
+        existing is not None
+        and existing.status == "active"
+        and existing.assigned_helper != helper.token
+    ):
+        await hub.send_websocket(
+            websocket,
+            {"type": "error", "msg": "Warte bis Schüler frei…", "busy": True},
+        )
+        return
     if helper.student_id is not None:
         await end_student(
             state,

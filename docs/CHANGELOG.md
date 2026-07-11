@@ -8,6 +8,34 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-11 — Guard gegen Doppel-Öffnen desselben Schülers (Lupe)
+
+`_handle_search_call` (`server/routes/ws.py`) prüfte bislang nicht, ob der per
+Lupe angesprungene Schüler bereits bei einem ANDEREN Helfer aktiv ist — anders
+als `_handle_call` (Queue-Aufruf), das `status not in (pending, done)` bereits
+abfängt. Da die Lupe gezielt JEDEN Schüler laden kann (auch außerhalb der
+eigenen Queue), konnte so derselbe Schüler auf zwei Clients gleichzeitig
+geöffnet werden (zwei parallele Worker-Sessions). Neuer Guard: `state.
+find_student(sid)` vor dem Laden prüfen — ist der Treffer `status == "active"`
+und `assigned_helper != helper.token`, wird nichts geladen, stattdessen
+`{"type": "error", "busy": true, "msg": "Warte bis Schüler frei…"}` gesendet.
+Frontend (`web/scan-ws.js`) zeigt bei `busy: true` den Text unverändert in der
+Statuszeile (ohne den sonstigen `"Fehler: "`-Prefix); das Such-Panel bleibt
+offen für einen erneuten Versuch. Test: `tests/test_ws_scanner.py::
+test_search_call_blocks_student_active_on_other_helper`.
+
+## 2026-07-11 — Auto-fertig-Filter „Alle Bücher bereits ausgeliehen"
+
+Fünfter Sofort-fertig-Filter beim Klassen-Öffnen (`_AUTO_DONE_FILTERS` in
+`server/routes/classes.py`, ergänzt neben `not_enrolled`/`unpaid`/
+`remission_pending`/`exemption_pending`): `all_lent` setzt einen Schüler direkt
+auf `done`, wenn seine vorgemerkten Buchreihen — nach Anwendung der
+ausgeblendeten ISBNs (`get_hidden_isbns_for_form`) — bereits vollständig
+ausgeliehen sind (`booking_isbn_sets_from_info` liefert kein `vormerk` mehr).
+UI-Checkbox in `web/host.html`, Persistenz in `web/host-state.js`
+(`AUTO_DONE_KEYS`). Spart manuelles Durchklicken von Schülern, die schon
+komplett versorgt sind.
+
 ## 2026-07-11 — Wartbarkeits-Welle 7 (Subagent-Refactoring)
 
 Neun Verbesserungspunkte aus einem Codebase-Review, ausgeführt von Sonnet-5-

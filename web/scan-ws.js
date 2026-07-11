@@ -189,7 +189,11 @@ function handleServerMessage(msg) {
     // gekommen → Menü/Panel offen lassen zum erneuten Versuch, Flag aber
     // zurücksetzen, damit ein späteres fremdes `loading` sie nicht doch schließt.
     searchSubmitted = false;
-    setStatusText('Fehler: ' + (msg.msg || ''));
+    // Lupe-Suche auf einen Schüler, der gerade auf einem ANDEREN Client aktiv
+    // ist (Queue-`call` oder ebenfalls Lupe): server sendet `busy` statt eines
+    // echten Fehlers — Statuszeile ohne „Fehler:"-Prefix, Panel bleibt offen
+    // (s. u.) zum erneuten Versuch, sobald der Schüler frei ist.
+    setStatusText(msg.busy ? (msg.msg || '') : 'Fehler: ' + (msg.msg || ''));
     dotEl.className = 'dot err';
     heldScanValue = null;
     closeLendModal();
