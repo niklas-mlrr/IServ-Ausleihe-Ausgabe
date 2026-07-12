@@ -47,7 +47,8 @@ function scanResultStatusText(msg, books) {
   }
   if (msg.status === 'book_deleted' && msg.loaned_to) {
     const last = msg.loaned_to_lastname, first = msg.loaned_to_firstname;
-    const name = (last || first) ? `${last || ''}, ${first || ''}${msg.loaned_to_form ? ` (${msg.loaned_to_form})` : ''}` : msg.loaned_to;
+    const form = (msg.loaned_to_form || '').replace(/^Klasse\s+/i, '');
+    const name = (last || first) ? `${last || ''}, ${first || ''}${form ? ` (${form})` : ''}` : msg.loaned_to;
     return `${msg.barcode} Ersatzanspruch an ${name} — ${msg.title || ''}`;
   }
   if (msg.status === 'book_deleted' && !msg.loaned_to) {

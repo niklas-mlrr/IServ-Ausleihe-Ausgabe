@@ -8,6 +8,24 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-12 — Nachbesserung: Klasse ohne "Klasse "-Präfix, Warten-Hinweis "dieses Buch" statt "dein Buch"
+
+Zwei kleine Textkorrekturen an den beiden vorherigen Einträgen:
+
+- **Ersatzanspruch-Klasse ohne Präfix.** `loaned_to_form` kommt roh aus der
+  IServ-API mit "Klasse "-Präfix (z. B. "Klasse 6a"), wie `s.form` überall
+  sonst im Frontend auch — und wird dort jeweils client-seitig gestrippt
+  (`student.js`, `scan-render.js`, `scan-ws.js`). Dieselbe
+  `.replace(/^Klasse\s+/i, '')`-Behandlung fehlte bisher bei der neuen
+  Ersatzanspruch-Notiz/Statuszeile; ergänzt in `web/scan-render.js`
+  (`borrowerNameHtml()`) und `web/common.js` (`scanResultStatusText()`) —
+  zeigt jetzt "6a" statt "Klasse 6a".
+- **Schüler-Warten-Hinweis.** "Bitte warte, bis ein Helfer dein Buch
+  einsammelt und dich freigibt." → "… bis ein Helfer **dieses** Buch
+  einsammelt …" (`web/student.js`) — gilt für beide `book_deleted`-Fälle
+  (mit/ohne Ersatzanspruch), da der Hinweis für alle blockierenden Status
+  gemeinsam ist.
+
 ## 2026-07-12 — Ersatzanspruch-Meldung: Schüler-Client wie „nur ausgemustert", Helfer-Client mit Name+Klasse
 
 Ausgemustertes Buch MIT Ersatzanspruch (`loaned_to` gesetzt) bekam bisher

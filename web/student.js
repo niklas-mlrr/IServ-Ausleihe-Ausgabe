@@ -202,7 +202,7 @@ function showBookAlertModal(msg, dismissible) {
     bookAlertHintEl.textContent = 'Du kannst diese Meldung selbst schließen.';
     bookAlertActionsEl.style.display = '';
   } else {
-    bookAlertHintEl.textContent = 'Bitte warte, bis ein Helfer dein Buch einsammelt und dich freigibt.';
+    bookAlertHintEl.textContent = 'Bitte warte, bis ein Helfer dieses Buch einsammelt und dich freigibt.';
     bookAlertActionsEl.style.display = 'none';
   }
   bookAlertModalEl.classList.add('show');

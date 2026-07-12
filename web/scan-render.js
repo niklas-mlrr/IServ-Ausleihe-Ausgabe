@@ -363,11 +363,13 @@ function showBookAlertModal(msg) {
 }
 // "Nachname, Vorname (Klasse)" für die Ersatzanspruch-Notiz — HTML-escaped,
 // mit Fallback auf das vorformatierte `loaned_to` ("Vorname Nachname"),
-// falls Vor-/Nachname aus irgendeinem Grund fehlen (Lookup-Fehler).
+// falls Vor-/Nachname aus irgendeinem Grund fehlen (Lookup-Fehler). Klasse
+// ohne "Klasse "-Präfix (z. B. "6a" statt "Klasse 6a"), wie überall sonst
+// im Frontend (s. z. B. renderQueueList()).
 function borrowerNameHtml(msg) {
   const last = msg.loaned_to_lastname, first = msg.loaned_to_firstname;
   if (!last && !first) return escapeHtml(msg.loaned_to || '');
-  const form = msg.loaned_to_form;
+  const form = (msg.loaned_to_form || '').replace(/^Klasse\s+/i, '');
   return escapeHtml(`${last || ''}, ${first || ''}${form ? ` (${form})` : ''}`);
 }
 function closeBookAlertModal() { bookAlertModal.classList.remove('show'); }
