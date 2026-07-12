@@ -340,9 +340,9 @@ function showBookAlertModal(msg) {
     bookAlertNoteEl.hidden = false;
   } else if (deletedWithReplacement) {
     bookAlertTextEl.textContent = `${msg.barcode} — ${msg.title || meta.title}`;
-    // Name/Klasse fett, Klammern um die Klasse NICHT fett — innerHTML mit
-    // escapeHtml()-ten Werten, damit keine rohen IServ-Strings ungefiltert
-    // eingesetzt werden (s. common.js).
+    // Name/Klasse inkl. Klammern fett — innerHTML mit escapeHtml()-ten
+    // Werten, damit keine rohen IServ-Strings ungefiltert eingesetzt werden
+    // (s. common.js).
     bookAlertNoteEl.innerHTML =
       `Für dieses Buch liegt ein Ersatzanspruch an ${borrowerNameHtml(msg)} vor. ` +
       'Es kann derzeit nicht ausgeliehen werden.';

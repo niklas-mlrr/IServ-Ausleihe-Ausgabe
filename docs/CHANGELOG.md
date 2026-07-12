@@ -8,6 +8,23 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-12 — Schüler-Client: "Du kannst diese Meldung selbst schließen." entfernt
+
+Nachbesserung am Eintrag darunter: die Hinweiszeile „Du kannst diese
+Meldung selbst schließen." existiert bei selbst schließbaren Meldungen
+nicht mehr (`#book-alert-hint` ist dort jetzt `hidden`) — der Schließen-
+Button spricht für sich. Bei blockierenden Meldungen (`book_deleted`,
+`not_in_stock`) bleibt „Bitte warte, bis ein Helfer dieses Buch einsammelt
+und dich freigibt." unverändert stehen.
+
+Da die Notiz-Zeile (`#book-alert-note`) bei selbst schließbaren Meldungen
+jetzt keine Hinweiszeile mehr darunter hat, wäre die bisherige gedämpfte
+Schrift (`opacity:.6`) dort zu unauffällig — sie ist jetzt NUR noch bei
+blockierenden Meldungen gedämpft, sonst normal. Dafür neue CSS-Klasse
+`.book-alert-dim` (statt der bisherigen statischen Inline-Styles auf
+`#book-alert-note`), per JS getoggelt (`classList.toggle('book-alert-dim',
+!dismissible)`) — `web/student.html`, `web/student.js`.
+
 ## 2026-07-12 — Schüler-Client: Betreuer-Hinweis bei selbst schließbaren Meldungen
 
 Selbst schließbare Hinweis-Meldungen (`dismissible` — alles außer den

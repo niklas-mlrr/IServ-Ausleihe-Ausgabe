@@ -107,6 +107,12 @@
     /* Orange Alert-Status (bereits an dich verliehen, nicht bestellt,
        Buchliste noch nicht geladen) — dieselbe Farbe wie die Modal-Überschrift. */
     #status-text.status-alert-orange { color: #e69500; font-weight: 700; }
+    /* Gedämpfte Notiz-Schrift im Buch-Hinweis-Modal — nur bei blockierenden
+       Meldungen (book_deleted/not_in_stock, Host muss freigeben), s.
+       showBookAlertModal() in student.js. Bei selbst schließbaren Meldungen
+       bleibt die Notiz normal, da dort keine „Bitte warte…"-Hinweiszeile
+       mehr steht (die stattdessen unauffällig wäre). */
+    #book-alert-note.book-alert-dim { opacity:.6; font-size:.85rem; }
 
     /* ---- Name (groß, ohne Box) + Klasse/Bezahlstatus rechtsbündig ---- */
     .name-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin: 12px 2px 8px; width: 100%; }
@@ -223,8 +229,8 @@
     <div class="modal-box">
       <h3 id="book-alert-title">Buch-Hinweis</h3>
       <p id="book-alert-text" style="opacity:.6;font-size:.85rem"></p>
-      <p id="book-alert-note" hidden style="opacity:.6;font-size:.85rem"></p>
-      <p id="book-alert-hint"></p>
+      <p id="book-alert-note" hidden></p>
+      <p id="book-alert-hint" hidden></p>
       <p id="book-alert-support" hidden style="opacity:.6;font-size:.85rem"></p>
       <div class="modal-actions" id="book-alert-actions" style="display:none">
         <button id="book-alert-close">Schließen</button>

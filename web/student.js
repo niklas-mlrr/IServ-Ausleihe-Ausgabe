@@ -207,16 +207,23 @@ function showBookAlertModal(msg, dismissible) {
     bookAlertNoteEl.textContent = '';
     bookAlertNoteEl.hidden = true;
   }
+  // Gedämpfte Notiz-Schrift NUR bei blockierenden Meldungen (dort steht
+  // darunter die „Bitte warte…"-Hinweiszeile) — bei selbst schließbaren
+  // Meldungen gibt es keine Hinweiszeile mehr, die Notiz bleibt normal.
+  bookAlertNoteEl.classList.toggle('book-alert-dim', !dismissible);
   if (dismissible) {
-    bookAlertHintEl.textContent = 'Du kannst diese Meldung selbst schließen.';
+    // „Du kannst diese Meldung selbst schließen." existiert bewusst nicht
+    // mehr — der Schließen-Button spricht für sich.
+    bookAlertHintEl.textContent = '';
+    bookAlertHintEl.hidden = true;
     bookAlertActionsEl.style.display = '';
-    // Selbst schließbare Meldungen bekommen zusätzlich, in unscheinbarer
-    // Schrift (wie Code/Titel oben), einen Hinweis auf den Betreuer, falls
-    // der Fehler unerwartet wiederholt auftritt.
+    // Zusätzlich, in unscheinbarer Schrift (wie Code/Titel oben), ein
+    // Hinweis auf den Betreuer, falls der Fehler unerwartet wiederholt auftritt.
     bookAlertSupportEl.textContent = 'Falls dieser Fehler unerwartet weiterhin auftritt, melde dich bitte beim Betreuer.';
     bookAlertSupportEl.hidden = false;
   } else {
     bookAlertHintEl.textContent = 'Bitte warte, bis ein Helfer dieses Buch einsammelt und dich freigibt.';
+    bookAlertHintEl.hidden = false;
     bookAlertActionsEl.style.display = 'none';
     bookAlertSupportEl.textContent = '';
     bookAlertSupportEl.hidden = true;
