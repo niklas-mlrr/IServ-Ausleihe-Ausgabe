@@ -16,6 +16,19 @@ function isBookDone(b, scannedIsbns) {
   return b.status === 'ausgeliehen' || !!(b.isbn && scannedIsbns.has(b.isbn));
 }
 
+// Statuszeilen-Text für einen scan_result: bei tatsächlicher Buchung
+// ('booked', ALLOW_BOOKING an) zeigen wir nicht die technische DOM-Best-
+// effort-Meldung des Workers, sondern Fach + Titel aus der Bücherliste des
+// Schülers. `books` ist die aktuelle Bücherliste (student_info/currentBooks)
+// der aufrufenden Seite.
+function scanResultStatusText(msg, books) {
+  if (msg.status === 'booked') {
+    const book = (books || []).find(b => b.isbn === msg.isbn);
+    return book ? `ausgegeben — ${book.subject} — ${book.title}` : 'ausgegeben';
+  }
+  return msg.msg || msg.status;
+}
+
 // ---- Beeper: Scan-Ton, kapselt AudioContext/-Buffer als Closure-State ----
 // Gemeinsam für scan.js/student.html. Aufrufer prüfen weiterhin SELBST
 // `soundEnabled`, AUSSERHALB von playBeep() — Beeper entscheidet nicht,
