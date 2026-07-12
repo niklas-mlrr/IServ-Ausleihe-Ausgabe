@@ -93,7 +93,7 @@ function handleServerMessage(msg) {
   } else if (msg.type === 'scan_result') {
     const statusTextEl = document.getElementById('status-text');
     // Plain text (kein HTML) — textContent interpretiert keine Entities.
-    statusTextEl.textContent = `${msg.barcode} — ${scanResultStatusText(msg, currentBooks)}`;
+    statusTextEl.textContent = scanResultStatusText(msg, currentBooks);
     // Jeder nicht-verbuchbare Scan → Hinweis-Modal (wie bisher bei
     // ausgemustert / verliehen / an-sich-selbst, jetzt auch für „nicht
     // bestellt", „unbekannt", „noch nicht geladen", Prüf-Fehler).
@@ -106,6 +106,7 @@ function handleServerMessage(msg) {
     const blocking = BLOCKING_STATUSES_STUDENT.has(msg.status);
     const dismissible = !ok && !blocking;
     statusTextEl.classList.toggle('status-book-deleted', !ok);
+    statusTextEl.classList.toggle('status-book-issued', msg.status === 'booked');
     if (blocking) { bookAlertOpen = true; showBookAlertModal(msg, false); }
     else if (dismissible) { showBookAlertModal(msg, true); }
     // Erfolgreicher Scan → Buch als „erledigt" markieren (sinkt nach unten).

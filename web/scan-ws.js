@@ -124,7 +124,7 @@ function handleServerMessage(msg) {
     // bestellt, unbekannt, noch nicht geladen, Prüf-Fehler, an sich selbst
     // verliehen) war der Host nie informiert → Clear ist dort ein No-op.
     const isAlert = !OK_STATUSES.has(msg.status);
-    setStatusText(`${msg.barcode} — ${scanResultStatusText(msg, currentBooks)}`, isAlert);
+    setStatusText(scanResultStatusText(msg, currentBooks), isAlert, msg.status === 'booked');
     if (isAlert) showBookAlertModal(msg);
   } else if (msg.type === 'settings') {
     slipSecondPageDefault = !!msg.slip_second_page;

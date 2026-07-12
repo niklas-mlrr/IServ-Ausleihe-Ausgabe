@@ -13,9 +13,10 @@ const statusEl = document.getElementById('status-text');
 // gesendet") setzt automatisch wieder die normale Schrift.
 // Nimmt PLAIN TEXT entgegen (kein HTML) — schreibt auf textContent, das
 // Entities nicht interpretiert; escapeHtml()-te Strings hier wären falsch.
-function setStatusText(text, isAlert = false) {
+function setStatusText(text, isAlert = false, isIssued = false) {
   statusEl.textContent = text;
   statusEl.classList.toggle('status-book-deleted', isAlert);
+  statusEl.classList.toggle('status-book-issued', isIssued);
 }
 const dotEl = document.getElementById('dot');
 const sNameEl = document.getElementById('s-name');
