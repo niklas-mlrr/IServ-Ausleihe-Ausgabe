@@ -8,6 +8,36 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-12 — Statuszeile und Fenster-Überschrift strukturell auf dieselbe Farbe festgelegt
+
+Bisher entschied die Statuszeile ihre Farbe über eigene, hart codierte
+Bool-Flags (`isAlert`/`isAlreadyLent`), während die Fenster-Überschrift ihre
+Farbe aus `ALERT_META`/`ALERT_META_STUDENT` bezog — beide Quellen konnten
+auseinanderlaufen. Sichtbar wurde das bei `not_ready`/`not_enrolled`: Fenster
+orange, Statuszeile aber rot. Niklas wollte beides synchron UND festgelegt,
+welche Fälle rot sein müssen: die, bei denen am Schüler-Client der Host auf
+„Freigeben" drücken muss (`book_deleted` — beide Ausgemustert-Fälle — und
+`not_in_stock`), analog auch am Helfer-Client.
+
+- **Strukturelle Lösung statt Einzel-Patch.** `setStatusText(text,
+  alertClass)` nimmt jetzt direkt den Ziel-CSS-Klassennamen entgegen (statt
+  drei Bool-Parametern). Neue Funktion `statusAlertClass(status)`
+  (`web/scan-state.js`, `web/student.js`) leitet ihn aus DEMSELBEN
+  `ALERT_META`/`ALERT_META_STUDENT` ab, das auch die Modal-Überschrift
+  einfärbt — Statuszeile und Fenster können dadurch strukturell nicht mehr
+  auseinanderlaufen, ganz gleich, welche Status künftig hinzukommen.
+  `'booked'` bleibt grün, `staged`/OK-Status normal.
+- **CSS-Klassen umbenannt** (Farbe statt Bedeutung im Namen, da mehrere
+  fachlich unterschiedliche Status dieselbe Farbe teilen):
+  `status-book-deleted` → `status-alert-red`, `status-already-lent` →
+  `status-alert-orange` (`web/scan.html`, `web/student.html`).
+- **Ergebnis:** `book_deleted` (beide Fälle) und `not_in_stock` sind jetzt
+  in Fenster UND Statuszeile durchgehend rot (die Host-Freigabe-Fälle);
+  `book_already_lent`/`series_already_lent`/`not_enrolled`/`not_ready`
+  jetzt durchgehend orange (vorher Statuszeile fälschlich rot bei
+  `not_enrolled`/`not_ready`); `unknown_book`/`error` bleiben rot
+  (unverändert, waren schon konsistent).
+
 ## 2026-07-12 — Nachbesserung: Klammern um die Klasse doch fett (gesamter Namensbereich)
 
 Korrektur am Eintrag darunter: Niklas wollte die Klammern um die Klasse

@@ -176,12 +176,15 @@
     .dot { display: none; }
     .dot.ok { background: #4caf50; }
     .dot.err { background: #f44336; }
-    /* Ausgemustertes Buch gescannt — deutlich in Rot in der Statuszeile. */
-    #status-text.status-book-deleted { color: #f44336; font-weight: 700; }
+    /* Rote Alert-Status (ausgemustert, anderweitig verliehen, unbekannt,
+       Prüf-Fehler) — dieselbe Farbe wie die jeweilige Modal-Überschrift
+       (s. ALERT_META in scan-state.js / statusAlertClass()). */
+    #status-text.status-alert-red { color: #f44336; font-weight: 700; }
     /* Buch erfolgreich ausgegeben (booked) — grün, nur für diese Meldung. */
     #status-text.status-book-issued { color: #2e7d32; font-weight: 700; }
-    /* Buch bereits an dich selbst verliehen (series_already_lent) — gelb, wie die Modal-Überschrift. */
-    #status-text.status-already-lent { color: #e69500; font-weight: 700; }
+    /* Orange Alert-Status (bereits an dich verliehen, nicht bestellt,
+       Buchliste noch nicht geladen) — dieselbe Farbe wie die Modal-Überschrift. */
+    #status-text.status-alert-orange { color: #e69500; font-weight: 700; }
 
     /* ---- Name (groß, ohne Box) + Klasse/Bezahlstatus rechtsbündig ---- */
     .name-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 12px 2px 8px; }

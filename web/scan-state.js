@@ -8,16 +8,19 @@
 window.__scan = window.__scan || {};
 
 const statusEl = document.getElementById('status-text');
-// Zentraler Setter: hält die Alert-Farbe (Ausgemustert/anderweitig verliehen)
-// strikt an den Alert-Text gebunden — jeder andere Statustext (z.B. "<Code>
-// gesendet") setzt automatisch wieder die normale Schrift.
+// Zentraler Setter: hält die Alert-Farbe strikt an den Alert-Text gebunden —
+// jeder andere Statustext (z.B. "<Code> gesendet") setzt automatisch wieder
+// die normale Schrift. `alertClass` ist eine der drei Farb-CSS-Klassen
+// (`status-alert-red`/`status-alert-orange`/`status-book-issued`) oder
+// `null` für normale Schrift — s. `statusAlertClass()` weiter unten, das sie
+// aus DEMSELBEN `ALERT_META` ableitet, das auch die Fenster-Überschrift
+// einfärbt (Statuszeile und Fenster können dadurch nicht mehr auseinanderlaufen).
 // Nimmt PLAIN TEXT entgegen (kein HTML) — schreibt auf textContent, das
 // Entities nicht interpretiert; escapeHtml()-te Strings hier wären falsch.
-function setStatusText(text, isAlert = false, isIssued = false, isAlreadyLent = false) {
+function setStatusText(text, alertClass = null) {
   statusEl.textContent = text;
-  statusEl.classList.toggle('status-book-deleted', isAlert);
-  statusEl.classList.toggle('status-book-issued', isIssued);
-  statusEl.classList.toggle('status-already-lent', isAlreadyLent);
+  statusEl.classList.remove('status-alert-red', 'status-alert-orange', 'status-book-issued');
+  if (alertClass) statusEl.classList.add(alertClass);
 }
 const dotEl = document.getElementById('dot');
 const sNameEl = document.getElementById('s-name');
@@ -234,6 +237,20 @@ const ALERT_META = {
   not_ready:           { title: 'Buchliste noch nicht geladen',   color: '#e69500' },
   error:               { title: 'Fehler bei der Prüfung',         color: '#f44336' },
 };
+// Statuszeilen-Farbklasse für einen scan_result-Status — abgeleitet aus
+// ALERT_META.color, damit Statuszeile und Fenster-Überschrift IMMER
+// dieselbe Farbe haben. Rot ist reserviert für Status, die am Schüler-
+// Client ein Schließen durch den Host erfordern (book_deleted, not_in_stock)
+// — sowie unknown_book/error (technische Probleme); alle anderen Alert-
+// Status (bereits-an-dich-verliehen, nicht bestellt, Buchliste noch nicht
+// geladen) sind orange, selbst schließbar. 'booked' ist grün, 'staged'/OK
+// normal (kein Klassenname).
+function statusAlertClass(status) {
+  if (status === 'booked') return 'status-book-issued';
+  if (OK_STATUSES.has(status)) return null;
+  const meta = ALERT_META[status];
+  return meta && meta.color === '#e69500' ? 'status-alert-orange' : 'status-alert-red';
+}
 function computeOpenBooks() {
   const vorgemerkt = currentBooks.filter(b => b.status !== 'ausgeliehen');
   const offen = vorgemerkt.filter(b => !(b.isbn && scannedIsbns.has(b.isbn)));
@@ -264,6 +281,7 @@ const LAYOUT_PROPS = ['display','flexDirection','flexWrap','alignItems','justify
 // bare Bezeichner aus der gemeinsamen Skript-Scope, keine funktionale
 // Abhängigkeit von window.__scan).
 window.__scan.setStatusText = setStatusText;
+window.__scan.statusAlertClass = statusAlertClass;
 window.__scan.resetScannedState = resetScannedState;
 window.__scan.drainScanWaiters = drainScanWaiters;
 window.__scan.waitForScans = waitForScans;

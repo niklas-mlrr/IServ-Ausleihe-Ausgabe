@@ -16,13 +16,12 @@ function show(name) {
 // ersetzt (z. B. bleibt eine „ausgemustert"-Meldung rot stehen, bis der
 // nächste Scan eine neue Statuszeile setzt; das Freigeben durch den Host
 // (`book_alert_clear`) ändert den Text NICHT und ruft diesen Helper daher
-// bewusst nicht auf).
-function setStatusText(text, isAlert = false, isIssued = false, isAlreadyLent = false) {
+// bewusst nicht auf). `alertClass` s. `statusAlertClass()` weiter unten.
+function setStatusText(text, alertClass = null) {
   const el = document.getElementById('status-text');
   el.textContent = text;
-  el.classList.toggle('status-book-deleted', isAlert);
-  el.classList.toggle('status-book-issued', isIssued);
-  el.classList.toggle('status-already-lent', isAlreadyLent);
+  el.classList.remove('status-alert-red', 'status-alert-orange', 'status-book-issued');
+  if (alertClass) el.classList.add(alertClass);
 }
 
 const joinSecret = new URLSearchParams(location.search).get('j');
@@ -117,13 +116,7 @@ function handleServerMessage(msg) {
     const ok = OK_STATUSES_STUDENT.has(msg.status);
     const blocking = BLOCKING_STATUSES_STUDENT.has(msg.status);
     const dismissible = !ok && !blocking;
-    const alreadyLent = msg.status === 'book_already_lent' || msg.status === 'series_already_lent';
-    setStatusText(
-      scanResultStatusText(msg, currentBooks),
-      !ok && !alreadyLent,
-      msg.status === 'booked',
-      alreadyLent
-    );
+    setStatusText(scanResultStatusText(msg, currentBooks), statusAlertClass(msg.status));
     if (blocking) { bookAlertOpen = true; showBookAlertModal(msg, false); }
     else if (dismissible) { showBookAlertModal(msg, true); }
     // Erfolgreicher Scan → Buch als „erledigt" markieren (sinkt nach unten).
@@ -173,6 +166,17 @@ const OK_STATUSES_STUDENT = new Set(['staged', 'booked']);
 // Host-geschlossen: ausgemustert (mit/ohne Ersatzanspruch) + an andere
 // Person verliehen → blockierendes Modal, nur der Betreuer gibt frei.
 const BLOCKING_STATUSES_STUDENT = new Set(['book_deleted', 'not_in_stock']);
+// Statuszeilen-Farbklasse — abgeleitet aus ALERT_META_STUDENT.color, damit
+// Statuszeile und Fenster-Überschrift IMMER dieselbe Farbe haben. Rot ist
+// reserviert für Status, bei denen der Host schließen/freigeben muss
+// (book_deleted, not_in_stock) sowie unknown_book/error; alle anderen
+// Alert-Status sind orange (selbst schließbar).
+function statusAlertClass(status) {
+  if (status === 'booked') return 'status-book-issued';
+  if (OK_STATUSES_STUDENT.has(status)) return null;
+  const meta = ALERT_META_STUDENT[status];
+  return meta && meta.color === '#e69500' ? 'status-alert-orange' : 'status-alert-red';
+}
 function showBookAlertModal(msg, dismissible) {
   const meta = ALERT_META_STUDENT[msg.status] || { title: 'Buch-Hinweis', color: '#f44336' };
   // Ausgemustert OHNE Ersatzanspruch: eigene, kürzere Überschrift/Meldung.
