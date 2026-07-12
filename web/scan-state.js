@@ -233,7 +233,7 @@ const ALERT_META = {
   book_already_lent:   { title: 'Buch bereits an den Schüler verliehen', color: '#e69500' },
   series_already_lent: { title: 'Buchreihe bereits an den Schüler verliehen', color: '#e69500' },
   not_enrolled:        { title: 'Buch nicht bestellt',           color: '#e69500' },
-  unknown_book:        { title: 'Buch unbekannt',                color: '#f44336' },
+  unknown_book:        { title: 'Buch unbekannt',                color: '#e69500' },
   not_ready:           { title: 'Buchliste noch nicht geladen',   color: '#e69500' },
   error:               { title: 'Fehler bei der Prüfung',         color: '#f44336' },
 };
@@ -241,10 +241,10 @@ const ALERT_META = {
 // ALERT_META.color, damit Statuszeile und Fenster-Überschrift IMMER
 // dieselbe Farbe haben. Rot ist reserviert für Status, die am Schüler-
 // Client ein Schließen durch den Host erfordern (book_deleted, not_in_stock)
-// — sowie unknown_book/error (technische Probleme); alle anderen Alert-
-// Status (bereits-an-dich-verliehen, nicht bestellt, Buchliste noch nicht
-// geladen) sind orange, selbst schließbar. 'booked' ist grün, 'staged'/OK
-// normal (kein Klassenname).
+// — sowie error (technisches Problem, keine sichere Aussage möglich); alle
+// anderen Alert-Status (bereits-an-dich-verliehen, nicht bestellt,
+// unbekannter Code, Buchliste noch nicht geladen) sind orange, selbst
+// schließbar. 'booked' ist grün, 'staged'/OK normal (kein Klassenname).
 function statusAlertClass(status) {
   if (status === 'booked') return 'status-book-issued';
   if (OK_STATUSES.has(status)) return null;

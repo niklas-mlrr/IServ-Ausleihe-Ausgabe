@@ -355,6 +355,12 @@ function showBookAlertModal(msg) {
       `Dieses Buch ist bereits an ${borrowerNameHtml(msg)} verliehen. ` +
       'Es kann nicht auf den Schüler verliehen werden.';
     bookAlertNoteEl.hidden = false;
+  } else if (msg.status === 'unknown_book') {
+    // Kein Titel/keine ISBN bekannt (Buch existiert laut API nicht) — nur
+    // der gescannte Code, kein Bindestrich/Titel dahinter.
+    bookAlertTextEl.textContent = `${msg.barcode}`;
+    bookAlertNoteEl.textContent = 'Dieser Buchcode ist unbekannt. Das Buch kann nicht verliehen werden.';
+    bookAlertNoteEl.hidden = false;
   } else {
     bookAlertTextEl.textContent = `${msg.barcode} — ${msg.msg || meta.title}`;
     bookAlertNoteEl.textContent = '';

@@ -157,7 +157,7 @@ const ALERT_META_STUDENT = {
   book_already_lent:   { title: 'Buch bereits an dich verliehen', color: '#e69500' },
   series_already_lent: { title: 'Buchreihe bereits an dich verliehen', color: '#e69500' },
   not_enrolled:        { title: 'Buch nicht bestellt',            color: '#e69500' },
-  unknown_book:        { title: 'Buch unbekannt',                 color: '#f44336' },
+  unknown_book:        { title: 'Buch unbekannt',                 color: '#e69500' },
   not_ready:           { title: 'Buchliste noch nicht geladen',   color: '#e69500' },
   error:               { title: 'Fehler bei der Prüfung',         color: '#f44336' },
 };
@@ -170,8 +170,8 @@ const BLOCKING_STATUSES_STUDENT = new Set(['book_deleted', 'not_in_stock']);
 // Statuszeilen-Farbklasse — abgeleitet aus ALERT_META_STUDENT.color, damit
 // Statuszeile und Fenster-Überschrift IMMER dieselbe Farbe haben. Rot ist
 // reserviert für Status, bei denen der Host schließen/freigeben muss
-// (book_deleted, not_in_stock) sowie unknown_book/error; alle anderen
-// Alert-Status sind orange (selbst schließbar).
+// (book_deleted, not_in_stock) sowie error; alle anderen Alert-Status
+// (inkl. unbekannter Code) sind orange (selbst schließbar).
 function statusAlertClass(status) {
   if (status === 'booked') return 'status-book-issued';
   if (OK_STATUSES_STUDENT.has(status)) return null;
@@ -201,6 +201,12 @@ function showBookAlertModal(msg, dismissible) {
   } else if (msg.status === 'not_in_stock') {
     bookAlertTextEl.textContent = `${msg.barcode || ''} — ${msg.title || meta.title}`;
     bookAlertNoteEl.textContent = 'Dieses Buch ist bereits an jemand anders verliehen. Es kann derzeit nicht an dich verliehen werden.';
+    bookAlertNoteEl.hidden = false;
+  } else if (msg.status === 'unknown_book') {
+    // Kein Titel bekannt (Buch existiert laut API nicht) — nur der
+    // gescannte Code, kein Bindestrich/Titel dahinter.
+    bookAlertTextEl.textContent = `${msg.barcode || ''}`;
+    bookAlertNoteEl.textContent = 'Dieser Buchcode ist unbekannt. Das Buch kann nicht verliehen werden.';
     bookAlertNoteEl.hidden = false;
   } else {
     bookAlertTextEl.textContent = `${msg.barcode || ''} — ${msg.msg || meta.title}`;

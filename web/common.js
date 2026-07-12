@@ -37,8 +37,9 @@ function isBookDone(b, scannedIsbns) {
 // "<Buchcode> Ersatzanspruch an <Nachname>, <Vorname> (<Klasse>) — <Titel>"
 // statt der technischen `msg`. „An jemand anderen verliehen" (`not_in_stock`)
 // → "<Buchcode> bereits verliehen — <Titel>" (ohne Name — der Schüler sieht
-// nie WEM, s. process_scan). `books` ist die aktuelle Bücherliste
-// (student_info/currentBooks) der aufrufenden Seite.
+// nie WEM, s. process_scan). Unbekannter Code (`unknown_book`, kein Titel
+// bekannt) → "<Buchcode> unbekannt" (ohne Bindestrich/Titel). `books` ist
+// die aktuelle Bücherliste (student_info/currentBooks) der aufrufenden Seite.
 function scanResultStatusText(msg, books, targetLabel = 'dich') {
   if (msg.status === 'booked') {
     const book = (books || []).find(b => b.isbn === msg.isbn);
@@ -62,6 +63,9 @@ function scanResultStatusText(msg, books, targetLabel = 'dich') {
   }
   if (msg.status === 'not_in_stock') {
     return `${msg.barcode} bereits verliehen — ${msg.title || ''}`;
+  }
+  if (msg.status === 'unknown_book') {
+    return `${msg.barcode} unbekannt`;
   }
   return `${msg.barcode} — ${msg.msg || msg.status}`;
 }

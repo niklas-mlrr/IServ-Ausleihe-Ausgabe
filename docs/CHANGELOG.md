@@ -8,6 +8,33 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-12 — Unbekannter Code (`unknown_book`) bekommt eigene Meldung, jetzt orange
+
+`unknown_book` (gescannter Barcode existiert laut API nicht — kein Titel/
+keine ISBN bekannt) fiel bisher in beiden Clients in den generischen
+Fallback-Zweig (Fenster: nur `<Buchcode> — Buch unbekannt`, keine Notiz;
+Statuszeile: `<Buchcode> — Buch unbekannt`) und war rot. Jetzt:
+
+- **Farbe.** `#f44336` (rot) → `#e69500` (orange/gelb) in `ALERT_META`
+  (`web/scan-state.js`) und `ALERT_META_STUDENT` (`web/student.js`) — die
+  Meldung ist ohnehin selbst schließbar (nicht in `BLOCKING_STATUSES_STUDENT`),
+  Statuszeile und Fenster-Überschrift folgen automatisch (strukturelle
+  Farbkopplung aus den vorherigen Einträgen).
+- **Modal (beide Clients, identisch).** Überschrift „Buch unbekannt" (gelb),
+  darunter nur `<Buchcode>` (kein Titel/Bindestrich — es gibt keinen),
+  darunter „Dieser Buchcode ist unbekannt. Das Buch kann nicht verliehen
+  werden." — neuer eigener Zweig in `showBookAlertModal()`
+  (`web/scan-render.js`, `web/student.js`) statt des bisherigen Fallbacks.
+- **Statuszeile.** "<Buchcode> unbekannt" (ohne Bindestrich/Titel) —
+  `scanResultStatusText()` (`web/common.js`).
+- **Schüler-Client-Formatierung „automatisch mitgekommen":** weil
+  `unknown_book` jetzt einen echten Notiz-Text hat statt eines leeren
+  Fallbacks, greifen die bereits bestehenden Regeln für selbst schließbare
+  Meldungen (normale statt gedämpfte Notiz-Schrift, Betreuer-Hinweis „Falls
+  dieser Fehler unerwartet weiterhin auftritt, melde dich bitte beim
+  Betreuer." über dem Schließen-Button) jetzt auch hier — kein
+  Sonder-Code nötig.
+
 ## 2026-07-12 — Schüler-Client: "Du kannst diese Meldung selbst schließen." entfernt
 
 Nachbesserung am Eintrag darunter: die Hinweiszeile „Du kannst diese
