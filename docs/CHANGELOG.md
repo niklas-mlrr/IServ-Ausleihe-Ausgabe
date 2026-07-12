@@ -8,6 +8,26 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-12 — Statuszeile bei erfolgreicher Buchung: Fach + Titel statt Worker-Rohtext, grün eingefärbt
+
+Zwei Nachbesserungen an der Statuszeile für `scan_result`-Status `'booked'`
+(tatsächliche Ausgabe bei `ALLOW_BOOKING=true`):
+
+- **Fach + Titel statt DOM-Best-effort-Meldung.** Neue Helper-Funktion
+  `scanResultStatusText(msg, books)` in `web/common.js` ersetzt für Status
+  `'booked'` die technische Worker-Meldung ("Buchung im DOM bestätigt
+  (best-effort)") durch Fach + Titel, nachgeschlagen per ISBN aus der
+  Bücherliste des Schülers (`currentBooks`/`student_info`). `scan-ws.js`
+  (Modus A) und `student.js` (Modus B) nutzen den gemeinsamen Helper statt
+  eigener Ad-hoc-Formatierung.
+- **Formatierung + Farbe.** Bei `'booked'` baut der Helper jetzt die
+  komplette Zeile selbst: `"<Buchcode> ausgegeben — <Fach> — <Titel>"` —
+  ohne Bindestrich zwischen Buchcode und "ausgegeben" (anders als bei allen
+  übrigen Status, die weiterhin `"<Buchcode> — <Meldung>"` mit Trenner
+  zeigen). Neue CSS-Klasse `status-book-issued` (`#2e7d32`, fett) in
+  `scan.html`/`student.html` färbt die Zeile grün; `setStatusText()`
+  (`scan-state.js`) bekommt dafür einen dritten Parameter `isIssued`.
+
 ## 2026-07-11 — Selbst-Aufruf zählt jetzt als neuer Zugriff (Menü-Schließen-Fix + Rückstellungspflicht)
 
 Nachbesserung am `refresh_active_student`-Kurzschluss aus dem Eintrag
