@@ -124,7 +124,7 @@ function handleServerMessage(msg) {
     // bestellt, unbekannt, noch nicht geladen, Prüf-Fehler, an sich selbst
     // verliehen) war der Host nie informiert → Clear ist dort ein No-op.
     const isAlert = !OK_STATUSES.has(msg.status);
-    const isAlreadyLent = msg.status === 'series_already_lent';
+    const isAlreadyLent = msg.status === 'book_already_lent' || msg.status === 'series_already_lent';
     setStatusText(scanResultStatusText(msg, currentBooks), isAlert && !isAlreadyLent, msg.status === 'booked', isAlreadyLent);
     if (isAlert) showBookAlertModal(msg);
   } else if (msg.type === 'settings') {

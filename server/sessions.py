@@ -115,7 +115,7 @@ async def hydrate_student_info(state: AppState, info: dict, form: str, target) -
     info["book_order"] = await get_book_order_for_form(state, form)
     apply_hidden_books(info, await get_hidden_isbns_for_form(state, form))
     target.expected_isbns = expected_isbns_from_info(info)
-    target.vormerk_isbns, target.lent_isbns = booking_isbn_sets_from_info(info)
+    target.vormerk_isbns, target.lent_isbns, target.lent_codes = booking_isbn_sets_from_info(info)
     return info
 
 
@@ -135,15 +135,19 @@ def expected_isbns_from_info(info: dict) -> set[str]:
     return {b["isbn"] for b in info.get("books", []) if b.get("isbn")}
 
 
-def booking_isbn_sets_from_info(info: dict) -> tuple[set[str], set[str]]:
-    """Zerlegt die Buchliste in (vorgemerkt, ausgeliehen) — für die Buchungs-
-    Vorabprüfung.
+def booking_isbn_sets_from_info(info: dict) -> tuple[set[str], set[str], set[str]]:
+    """Zerlegt die Buchliste in (vorgemerkt, ausgeliehen, ausgeliehene Codes) —
+    für die Buchungs-Vorabprüfung.
 
     `vorgemerkt` = bestellt UND von der Reihe ist noch KEIN Buch auf den Schüler
     ausgeliehen (genau die buchbaren ISBNs — `get_student_info` setzt den Status
     einer Reihe auf „ausgeliehen", sobald ein Exemplar verliehen ist).
-    `ausgeliehen` = Reihe bereits auf den Schüler ausgeliehen (nur für die
-    Fehlermeldung „Reihe schon ausgeliehen").
+    `ausgeliehen` = Reihe bereits auf den Schüler ausgeliehen (für die
+    Fehlermeldung „Reihe/Buch schon ausgeliehen").
+    `ausgeliehene Codes` = die Barcodes der konkret ausgeliehenen Exemplare —
+    unterscheidet in `evaluate_scan_for_booking` zwischen „genau DIESES
+    Exemplar bereits an dich verliehen" (`book_already_lent`) und „ein ANDERES
+    Exemplar derselben Reihe" (`series_already_lent`).
     """
     vormerk: set[str] = set()
     lent_from_books: set[str] = set()
@@ -158,22 +162,29 @@ def booking_isbn_sets_from_info(info: dict) -> tuple[set[str], set[str]]:
     # `lent` autoritativ aus `info["current_books"]` (UNGEFILTERT —
     # `apply_hidden_books` entfernt nur `info["books"]`): eine ausgeblendete
     # Reihe, die der Schüler bereits hat, muss trotzdem als „an dich selbst
-    # verliehen" (`series_already_lent`) erkannt werden — sonst fällt der Scan
-    # zu `not_in_stock` und deklariert das eigene Exemplar als „verliehen an
-    # jemand anderes". `current_books` ist in echten `info`-Payloads immer
-    # vorhanden (`get_student_info`); fehlt es (Unit-Test), wird auf die
-    # status-basierte Menge aus `info["books"]` zurückgefallen.
+    # verliehen" erkannt werden — sonst fällt der Scan zu `not_in_stock` und
+    # deklariert das eigene Exemplar als „verliehen an jemand anderes".
+    # `current_books` ist in echten `info`-Payloads immer vorhanden
+    # (`get_student_info`); fehlt es (Unit-Test), wird auf die status-basierte
+    # Menge aus `info["books"]` zurückgefallen (dann ohne Code-Info).
     current = info.get("current_books")
     lent: set[str] = (
         {b.get("isbn") for b in current if b.get("isbn")}
         if current is not None
         else lent_from_books
     )
-    return vormerk, lent
+    lent_codes: set[str] = (
+        {b.get("code") for b in current if b.get("code")} if current is not None else set()
+    )
+    return vormerk, lent, lent_codes
 
 
 async def evaluate_scan_for_booking(
-    state: AppState, vormerk_isbns: set[str], lent_isbns: set[str], barcode: str
+    state: AppState,
+    vormerk_isbns: set[str],
+    lent_isbns: set[str],
+    lent_codes: set[str],
+    barcode: str,
 ) -> dict:
     """Buchungs-Vorabprüfung (read-only) VOR jedem Eintippen ins Feld.
 
@@ -186,9 +197,15 @@ async def evaluate_scan_for_booking(
 
     Prüf-Reihenfolge (Bedingung 1 VOR 2, damit ein verliehenes/ausgemustertes
     Buch immer als solches angezeigt wird, auch wenn der Schüler es gar nicht
-    bestellt hat): deleted → series_already_lent → nicht-im-Lager → nicht
-    bestellt. „Reihe bereits an dich ausgeliehen" greift vor der Lager-Prüfung,
-    da das Exemplar an dich selbst verliehen sein kann (distributed).
+    bestellt hat): deleted → book_already_lent/series_already_lent →
+    nicht-im-Lager → nicht bestellt. „Bereits an dich ausgeliehen" greift vor
+    der Lager-Prüfung, da das Exemplar an dich selbst verliehen sein kann
+    (distributed). Zwei Fälle werden unterschieden (`lent_codes` = Barcodes der
+    konkret ausgeliehenen Exemplare): scannt der Schüler genau das Exemplar,
+    das schon auf ihn läuft (Barcode ∈ `lent_codes`) → `book_already_lent`
+    („dieses Buch"). Scannt er ein ANDERES Exemplar derselben Reihe (ISBN ∈
+    `lent_isbns`, Barcode aber nicht in `lent_codes`) → `series_already_lent`
+    („diese Buchreihe").
 
     Streng bei Unsicherheit: fehlender API-Client, noch nicht geladene Buchliste
     oder ein Lookup-Fehler → `ok=False` (NICHT buchen). Bewusst strenger als eine
@@ -237,12 +254,21 @@ async def evaluate_scan_for_booking(
             "loaned_to_id": book.get("loaned_to_id"),
         }
 
-    # „Reihe bereits an dich ausgeliehen": ISBN steht schon auf dem Schüler
-    # als ausgeliehen. VOR der Lager-Prüfung, denn das Buch kann an dich
-    # selbst verliehen (distributed) ODER ein anderweitig lagerndes Exemplar
+    # „Bereits an dich ausgeliehen": ISBN steht schon auf dem Schüler als
+    # ausgeliehen. VOR der Lager-Prüfung, denn das Buch kann an dich selbst
+    # verliehen (distributed) ODER ein anderweitig lagerndes Exemplar
     # derselben ISBN sein — beides „nicht nochmal ausleihen", unabhängig vom
-    # Lager-Status dieses Exemplars.
+    # Lager-Status dieses Exemplars. Barcode-Abgleich gegen `lent_codes`
+    # unterscheidet „dieses Exemplar" von „ein anderes Exemplar der Reihe".
     if isbn in lent_isbns:
+        if book["code"] in lent_codes:
+            return {
+                "ok": False,
+                "status": "book_already_lent",
+                "msg": f"Bereits an dich verliehen: {title}",
+                "isbn": isbn,
+                "title": title,
+            }
         return {
             "ok": False,
             "status": "series_already_lent",
@@ -290,6 +316,7 @@ async def process_scan(
     student_id: int,
     vormerk_isbns: set[str],
     lent_isbns: set[str],
+    lent_codes: set[str],
     barcode: str,
     source: str = "student",
 ) -> dict:
@@ -308,7 +335,9 @@ async def process_scan(
     Helfer das eigene Modal selbst (Button im Client), am Schüler-Client hat
     der Client keinen Schließen-Button → nur der Host darf freigeben.
     """
-    decision = await evaluate_scan_for_booking(state, vormerk_isbns, lent_isbns, barcode)
+    decision = await evaluate_scan_for_booking(
+        state, vormerk_isbns, lent_isbns, lent_codes, barcode
+    )
     if not decision["ok"]:
         # Ausgemustert ODER anderweitig verliehen (nicht im Lager) → am Host
         # sichtbar machen, inkl. student_id für die Zuordnung im „Aktuell in
@@ -356,6 +385,8 @@ async def process_scan(
     if result.get("status") == "booked" and decision.get("isbn"):
         lent_isbns.add(decision["isbn"])
         vormerk_isbns.discard(decision["isbn"])
+        if decision.get("code"):
+            lent_codes.add(decision["code"])
     return result
 
 
@@ -632,6 +663,7 @@ async def _detach_helper(state: AppState, hub, helper, helper_notify: dict | Non
     helper.expected_isbns = set()
     helper.vormerk_isbns = set()
     helper.lent_isbns = set()
+    helper.lent_codes = set()
     helper.peeking = False  # Schüler weg → Queue-Ansicht hinfällig
     if helper.load_task is not None and not helper.load_task.done():
         with contextlib.suppress(asyncio.CancelledError):

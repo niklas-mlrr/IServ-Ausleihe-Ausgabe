@@ -476,6 +476,7 @@ async def _handle_scan(state, hub, helper, websocket, raw) -> None:
         student_id,
         helper.vormerk_isbns,
         helper.lent_isbns,
+        helper.lent_codes,
         barcode,
         source="helper",
     )
@@ -833,14 +834,19 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
                 # Scan verarbeiten: Buchungs-Vorabprüfung → buchen (Enter) oder
                 # — Gate aus — stagen. Nicht erfüllt → Feld wird NICHT berührt.
                 result = await process_scan(
-                    state, session.student_id, session.vormerk_isbns, session.lent_isbns, barcode
+                    state,
+                    session.student_id,
+                    session.vormerk_isbns,
+                    session.lent_isbns,
+                    session.lent_codes,
+                    barcode,
                 )
                 payload = {"type": "scan_result", "barcode": barcode, **result}
                 # Ausgemustert ODER an jemand anderen verliehen → blockierendes
                 # Hinweis-Modal am Schüler-Client (kein eigener Schließen-Button,
                 # Host gibt per /api/clear-book-alert frei). „An sich selbst
-                # verliehen" (series_already_lent) ist nur ein Hinweis und nicht
-                # blockierend — der Schüler schließt ihn selbst.
+                # verliehen" (book_already_lent/series_already_lent) ist nur ein
+                # Hinweis und nicht blockierend — der Schüler schließt ihn selbst.
                 if result.get("status") in ("book_deleted", "not_in_stock"):
                     session.book_alert_open = True
                     session.book_alert_payload = payload

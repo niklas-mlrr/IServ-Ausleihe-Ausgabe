@@ -94,6 +94,11 @@ class HelperSession:
     # Rationale: docs/PLAN.md § State-Feld-Rationale
     vormerk_isbns: set[str] = field(default_factory=set)
     lent_isbns: set[str] = field(default_factory=set)
+    # Codes (Barcodes) der aktuell ausgeliehenen Exemplare — unterscheidet bei
+    # der Vorabprüfung "dieses genaue Exemplar bereits an dich verliehen"
+    # (book_already_lent) von "ein ANDERES Exemplar derselben Reihe" (series_
+    # already_lent). Rationale: docs/PLAN.md § State-Feld-Rationale
+    lent_codes: set[str] = field(default_factory=set)
     # In-flight Lade-Task (load_and_push_helper_student); cancel bei end_student,
     # sonst leakt der Worker-Context. Rationale: docs/PLAN.md § State-Feld-Rationale
     load_task: object | None = None
@@ -138,6 +143,7 @@ class StudentSessionB:
     # Buchungs-Vorabprüfung — s. HelperSession.
     vormerk_isbns: set[str] = field(default_factory=set)
     lent_isbns: set[str] = field(default_factory=set)
+    lent_codes: set[str] = field(default_factory=set)
     # Ausgemustertes/verliehenes Buch gescannt → blockierendes Hinweis-Modal,
     # nur Host gibt frei. Rationale: docs/PLAN.md § State-Feld-Rationale
     book_alert_open: bool = False

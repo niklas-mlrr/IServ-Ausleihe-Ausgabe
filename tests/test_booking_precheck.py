@@ -6,6 +6,11 @@ Gebucht (Enter) wird nur, wenn ALLE Bedingungen erfüllt sind:
      (= ISBN ∈ vorgemerkt).
 Sonst wird der Barcode gar nicht erst ins Feld getippt. Bei Unsicherheit
 (kein Client / Buchliste leer / Lookup-Fehler) wird NICHT gebucht.
+
+Ist die ISBN bereits ausgeliehen (Schüler hat sie schon), wird zusätzlich
+per Barcode-Abgleich (`lent_codes`) unterschieden: `book_already_lent`
+(genau DIESES Exemplar läuft schon auf den Schüler) vs. `series_already_lent`
+(ein ANDERES Exemplar derselben Reihe).
 """
 
 from __future__ import annotations
@@ -40,9 +45,9 @@ class _State:
         return None
 
 
-def _book(isbn="978-1", available=True, distributed=False, deleted=False):
+def _book(isbn="978-1", available=True, distributed=False, deleted=False, code="B1"):
     return {
-        "code": "B1",
+        "code": code,
         "isbn": isbn,
         "title": "Mathe 5",
         "subject": "Mathematik",
@@ -55,8 +60,17 @@ def _book(isbn="978-1", available=True, distributed=False, deleted=False):
     }
 
 
-def _eval(state, vormerk, lent, barcode="B1"):
-    return asyncio.run(sessions.evaluate_scan_for_booking(state, vormerk, lent, barcode))
+def _eval(state, vormerk, lent, barcode="B1", lent_codes=None):
+    return asyncio.run(
+        sessions.evaluate_scan_for_booking(state, vormerk, lent, lent_codes or set(), barcode)
+    )
+
+
+def _process(state, student_id, vormerk, lent, barcode="B1", lent_codes=None, source="student"):
+    codes = lent_codes if lent_codes is not None else set()
+    return asyncio.run(
+        sessions.process_scan(state, student_id, vormerk, lent, codes, barcode, source=source)
+    )
 
 
 # --- evaluate_scan_for_booking -------------------------------------------------
@@ -104,7 +118,30 @@ def test_not_in_stock_without_borrower_stays_silent():
 
 
 def test_reject_series_already_lent():
+    # ISBN schon ausgeliehen, aber der gescannte Barcode ist NICHT das
+    # Exemplar, das auf dem Schüler läuft (lent_codes leer) → series_already_lent.
     res = _eval(_State(_FakeIserv(_book())), set(), {"978-1"})
+    assert res["ok"] is False
+    assert res["status"] == "series_already_lent"
+
+
+def test_reject_book_already_lent_same_code():
+    # ISBN schon ausgeliehen UND der gescannte Barcode ist GENAU das Exemplar,
+    # das schon auf dem Schüler läuft (Barcode ∈ lent_codes) → book_already_lent.
+    res = _eval(
+        _State(_FakeIserv(_book(code="B1"))), set(), {"978-1"}, barcode="B1", lent_codes={"B1"}
+    )
+    assert res["ok"] is False
+    assert res["status"] == "book_already_lent"
+
+
+def test_series_already_lent_when_different_code_of_same_isbn():
+    # ISBN schon ausgeliehen (anderes Exemplar, Code "B2" läuft auf dem
+    # Schüler), gescannt wird ein ANDERES Exemplar derselben ISBN ("B1")
+    # → series_already_lent (nicht book_already_lent).
+    res = _eval(
+        _State(_FakeIserv(_book(code="B1"))), set(), {"978-1"}, barcode="B1", lent_codes={"B2"}
+    )
     assert res["ok"] is False
     assert res["status"] == "series_already_lent"
 
@@ -208,8 +245,9 @@ def test_sets_split_by_status():
             {"isbn": "", "status": "vorgemerkt"},  # leere ISBN wird ignoriert
         ]
     }
-    vormerk, lent = sessions.booking_isbn_sets_from_info(info)
+    vormerk, lent, lent_codes = sessions.booking_isbn_sets_from_info(info)
     assert vormerk == {"A"} and lent == {"B"}
+    assert lent_codes == set()  # kein current_books im Test-Payload
 
 
 def test_lent_from_current_books_ignores_hidden_filter():
@@ -217,16 +255,17 @@ def test_lent_from_current_books_ignores_hidden_filter():
     `lent` stehen — `apply_hidden_books` entfernt sie nur aus `info["books"]`,
     nicht aus `info["current_books"]`. Sonst würde ein Scan des eigenen Exemplars
     als „verliehen an jemand anderes" (`not_in_stock`) statt „an dich selbst
-    verliehen" (`series_already_lent`) deklariert."""
+    verliehen" deklariert. `lent_codes` wird ebenfalls aus `current_books` gebaut."""
     info = {
         # `info["books"]` OHNE ISBN X — simuliert apply_hidden_books (X ausgeblendet)
         "books": [{"isbn": "A", "status": "vorgemerkt"}],
         # `current_books` ist die ungefilterte Quelle: X ist darin (Schüler hat X)
-        "current_books": [{"isbn": "X"}, {"isbn": "B"}],
+        "current_books": [{"isbn": "X", "code": "CX"}, {"isbn": "B", "code": "CB"}],
     }
-    vormerk, lent = sessions.booking_isbn_sets_from_info(info)
+    vormerk, lent, lent_codes = sessions.booking_isbn_sets_from_info(info)
     assert vormerk == {"A"}
     assert lent == {"X", "B"}  # X bleibt trotz Ausblendung in lent
+    assert lent_codes == {"CX", "CB"}
 
 
 # --- process_scan (Gate-Verhalten) --------------------------------------------
@@ -250,7 +289,7 @@ def test_process_scan_books_when_gate_on(monkeypatch):
     monkeypatch.setattr(sessions, "get_config", lambda: _Cfg(True))
     worker = _SpyWorker()
     state = _State(_FakeIserv(_book()), worker)
-    res = asyncio.run(sessions.process_scan(state, 42, {"978-1"}, set(), "B1"))
+    res = _process(state, 42, {"978-1"}, set())
     assert res["status"] == "booked"
     assert worker.committed == "B1" and worker.staged is None
 
@@ -260,29 +299,34 @@ def test_process_scan_booked_isbn_moves_to_lent(monkeypatch):
     lent umgehängt werden — sonst würde ein erneuter Scan (das Exemplar ist
     jetzt `distributed` an den Schüler selbst) als „verliehen an jemand anderes"
     (`not_in_stock`, loaned_to = Schüler selbst) statt als „an dich selbst
-    verliehen" (`series_already_lent`) deklariert, weil `lent_isbns` noch aus
-    der Lade-Zeit stammt. Die übergebenen Sets sind die Session-Mutables."""
+    verliehen" deklariert, weil `lent_isbns` noch aus der Lade-Zeit stammt.
+    Der Code wandert ebenfalls in `lent_codes`, damit der erneute Scan
+    desselben Exemplars als `book_already_lent` (nicht `series_already_lent`)
+    erkannt wird. Die übergebenen Sets sind die Session-Mutables."""
     monkeypatch.setattr(sessions, "get_config", lambda: _Cfg(True))
     vormerk = {"978-1"}
     lent: set[str] = set()
+    lent_codes: set[str] = set()
     # 1. Scan: buchbar (vorgemerkt, im Lager) → wird gebucht.
     state = _State(_FakeIserv(_book(isbn="978-1", available=True, distributed=False)), _SpyWorker())
-    res = asyncio.run(sessions.process_scan(state, 42, vormerk, lent, "B1", source="helper"))
+    res = _process(state, 42, vormerk, lent, lent_codes=lent_codes, source="helper")
     assert res["status"] == "booked"
     assert "978-1" in lent and "978-1" not in vormerk  # ISBN umgehängt
-    # 2. Scan: Exemplar jetzt an den Schüler selbst verliehen (distributed).
+    assert "B1" in lent_codes  # Code ebenfalls gemerkt
+    # 2. Scan: dasselbe Exemplar erneut gescannt (jetzt an den Schüler selbst
+    # verliehen, distributed) → book_already_lent (exakt dieses Exemplar).
     state2 = _State(
         _FakeIserv(_book(isbn="978-1", available=False, distributed=True)), _SpyWorker()
     )
-    res2 = asyncio.run(sessions.process_scan(state2, 42, vormerk, lent, "B1", source="helper"))
-    assert res2["status"] == "series_already_lent"
+    res2 = _process(state2, 42, vormerk, lent, lent_codes=lent_codes, source="helper")
+    assert res2["status"] == "book_already_lent"
 
 
 def test_process_scan_stages_when_gate_off(monkeypatch):
     monkeypatch.setattr(sessions, "get_config", lambda: _Cfg(False))
     worker = _SpyWorker()
     state = _State(_FakeIserv(_book()), worker)
-    res = asyncio.run(sessions.process_scan(state, 42, {"978-1"}, set(), "B1"))
+    res = _process(state, 42, {"978-1"}, set())
     assert res["status"] == "staged"
     assert worker.staged == "B1" and worker.committed is None
 
@@ -292,7 +336,7 @@ def test_process_scan_no_field_touch_when_conditions_fail(monkeypatch):
     monkeypatch.setattr(sessions, "get_config", lambda: _Cfg(True))
     worker = _SpyWorker()
     state = _State(_FakeIserv(_book(distributed=True)), worker)
-    res = asyncio.run(sessions.process_scan(state, 42, {"978-1"}, set(), "B1"))
+    res = _process(state, 42, {"978-1"}, set())
     assert res["status"] == "not_in_stock"
     assert worker.committed is None and worker.staged is None
 
@@ -316,7 +360,7 @@ def test_process_scan_broadcasts_alert_for_not_in_stock(monkeypatch):
     monkeypatch.setattr(sessions, "get_config", lambda: _Cfg(False))
     hub = _patch_hub(monkeypatch)
     state = _State(_FakeIserv(_book(distributed=True)))
-    res = asyncio.run(sessions.process_scan(state, 42, {"978-1"}, set(), "B1", source="helper"))
+    res = _process(state, 42, {"978-1"}, set(), source="helper")
     assert res["status"] == "not_in_stock"
     assert len(hub.broadcasts) == 1
     alert = hub.broadcasts[0]
@@ -327,12 +371,24 @@ def test_process_scan_broadcasts_alert_for_not_in_stock(monkeypatch):
 
 
 def test_process_scan_no_alert_for_series_already_lent(monkeypatch):
-    # „An sich selbst verliehen" → nur Hinweis am Client, kein Host-Alert.
+    # „An sich selbst verliehen" (anderes Exemplar der Reihe) → nur Hinweis am
+    # Client, kein Host-Alert.
     monkeypatch.setattr(sessions, "get_config", lambda: _Cfg(False))
     hub = _patch_hub(monkeypatch)
     state = _State(_FakeIserv(_book()))
-    res = asyncio.run(sessions.process_scan(state, 42, set(), {"978-1"}, "B1", source="helper"))
+    res = _process(state, 42, set(), {"978-1"}, source="helper")
     assert res["status"] == "series_already_lent"
+    assert hub.broadcasts == []
+
+
+def test_process_scan_no_alert_for_book_already_lent(monkeypatch):
+    # „Dieses Buch bereits an dich verliehen" (exakt dasselbe Exemplar) →
+    # ebenfalls nur Hinweis am Client, kein Host-Alert.
+    monkeypatch.setattr(sessions, "get_config", lambda: _Cfg(False))
+    hub = _patch_hub(monkeypatch)
+    state = _State(_FakeIserv(_book(code="B1")))
+    res = _process(state, 42, set(), {"978-1"}, lent_codes={"B1"}, source="helper")
+    assert res["status"] == "book_already_lent"
     assert hub.broadcasts == []
 
 
@@ -349,7 +405,7 @@ def test_process_scan_loaned_to_for_helper(monkeypatch):
     monkeypatch.setattr(sessions, "get_config", lambda: _Cfg(False))
     hub = _patch_hub(monkeypatch)
     state = _State(_FakeIserv(_book_with_borrower()))
-    res = asyncio.run(sessions.process_scan(state, 42, {"978-1"}, set(), "B1", source="helper"))
+    res = _process(state, 42, {"978-1"}, set(), source="helper")
     assert res["status"] == "not_in_stock"
     assert res["loaned_to"] == "Max Mustermann"
     assert res["loaned_to_id"] == 4321
@@ -363,7 +419,7 @@ def test_process_scan_hides_loan_from_student(monkeypatch):
     monkeypatch.setattr(sessions, "get_config", lambda: _Cfg(False))
     hub = _patch_hub(monkeypatch)
     state = _State(_FakeIserv(_book_with_borrower()))
-    res = asyncio.run(sessions.process_scan(state, 42, {"978-1"}, set(), "B1"))
+    res = _process(state, 42, {"978-1"}, set())
     assert res["status"] == "not_in_stock"
     assert res["loaned_to"] is None
     assert res["loaned_to_id"] is None
@@ -385,7 +441,7 @@ def test_process_scan_deleted_alert_with_loaned_to_helper(monkeypatch):
     monkeypatch.setattr(sessions, "get_config", lambda: _Cfg(False))
     hub = _patch_hub(monkeypatch)
     state = _State(_FakeIserv(_deleted_book_with_borrower()))
-    res = asyncio.run(sessions.process_scan(state, 42, {"978-1"}, set(), "B1", source="helper"))
+    res = _process(state, 42, {"978-1"}, set(), source="helper")
     assert res["status"] == "book_deleted"
     assert res["loaned_to"] == "Max Mustermann"
     assert res["loaned_to_id"] == 4321
@@ -404,7 +460,7 @@ def test_process_scan_deleted_hides_loan_from_student(monkeypatch):
     monkeypatch.setattr(sessions, "get_config", lambda: _Cfg(False))
     hub = _patch_hub(monkeypatch)
     state = _State(_FakeIserv(_deleted_book_with_borrower()))
-    res = asyncio.run(sessions.process_scan(state, 42, {"978-1"}, set(), "B1"))
+    res = _process(state, 42, {"978-1"}, set())
     assert res["status"] == "book_deleted"
     assert res["loaned_to"] is None
     assert res["loaned_to_id"] is None

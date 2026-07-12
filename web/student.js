@@ -105,9 +105,10 @@ function handleServerMessage(msg) {
     const ok = OK_STATUSES_STUDENT.has(msg.status);
     const blocking = BLOCKING_STATUSES_STUDENT.has(msg.status);
     const dismissible = !ok && !blocking;
-    statusTextEl.classList.toggle('status-book-deleted', !ok && msg.status !== 'series_already_lent');
+    const alreadyLent = msg.status === 'book_already_lent' || msg.status === 'series_already_lent';
+    statusTextEl.classList.toggle('status-book-deleted', !ok && !alreadyLent);
     statusTextEl.classList.toggle('status-book-issued', msg.status === 'booked');
-    statusTextEl.classList.toggle('status-already-lent', msg.status === 'series_already_lent');
+    statusTextEl.classList.toggle('status-already-lent', alreadyLent);
     if (blocking) { bookAlertOpen = true; showBookAlertModal(msg, false); }
     else if (dismissible) { showBookAlertModal(msg, true); }
     // Erfolgreicher Scan → Buch als „erledigt" markieren (sinkt nach unten).
@@ -142,7 +143,8 @@ const bookAlertCloseBtn = document.getElementById('book-alert-close');
 const ALERT_META_STUDENT = {
   book_deleted:        { title: 'Ausgemustertes Buch gescannt',   color: '#f44336' },
   not_in_stock:        { title: 'Buch noch verliehen',            color: '#f44336' },
-  series_already_lent: { title: 'Buch bereits an dich verliehen', color: '#e69500' },
+  book_already_lent:   { title: 'Buch bereits an dich verliehen', color: '#e69500' },
+  series_already_lent: { title: 'Buchreihe bereits an dich verliehen', color: '#e69500' },
   not_enrolled:        { title: 'Buch nicht bestellt',            color: '#e69500' },
   unknown_book:        { title: 'Buch unbekannt',                 color: '#f44336' },
   not_ready:           { title: 'Buchliste noch nicht geladen',   color: '#e69500' },
@@ -158,9 +160,13 @@ function showBookAlertModal(msg, dismissible) {
   const meta = ALERT_META_STUDENT[msg.status] || { title: 'Buch-Hinweis', color: '#f44336' };
   bookAlertTitleEl.textContent = meta.title;
   bookAlertTitleEl.style.color = meta.color;
-  if (msg.status === 'series_already_lent') {
-    bookAlertTextEl.textContent = `${msg.barcode || ''} - ${msg.title || meta.title}`;
-    bookAlertNoteEl.textContent = 'Dieses Buch ist bereits an dich verliehen.';
+  if (msg.status === 'book_already_lent') {
+    bookAlertTextEl.textContent = `${msg.barcode || ''} — ${msg.title || meta.title}`;
+    bookAlertNoteEl.textContent = 'Dieses Buch ist bereits an dich verliehen. Du musstest es nicht noch einmal scannen.';
+    bookAlertNoteEl.hidden = false;
+  } else if (msg.status === 'series_already_lent') {
+    bookAlertTextEl.textContent = `${msg.barcode || ''} — ${msg.title || meta.title}`;
+    bookAlertNoteEl.textContent = 'Ein Buch dieser Buchreihe ist bereits an dich verliehen. Leg es einfach wieder zurück.';
     bookAlertNoteEl.hidden = false;
   } else {
     bookAlertTextEl.textContent = `${msg.barcode || ''} — ${msg.msg || meta.title}`;

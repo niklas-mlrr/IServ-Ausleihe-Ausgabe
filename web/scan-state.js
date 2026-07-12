@@ -228,7 +228,8 @@ const OK_STATUSES = new Set(['staged', 'booked']);
 const ALERT_META = {
   book_deleted:        { title: 'Ausgemustertes Buch gescannt',  color: '#f44336' },
   not_in_stock:        { title: 'Buch noch verliehen',           color: '#f44336' },
-  series_already_lent: { title: 'Buch bereits an dich verliehen', color: '#e69500' },
+  book_already_lent:   { title: 'Buch bereits an dich verliehen', color: '#e69500' },
+  series_already_lent: { title: 'Buchreihe bereits an dich verliehen', color: '#e69500' },
   not_enrolled:        { title: 'Buch nicht bestellt',           color: '#e69500' },
   unknown_book:        { title: 'Buch unbekannt',                color: '#f44336' },
   not_ready:           { title: 'Buchliste noch nicht geladen',   color: '#e69500' },

@@ -73,7 +73,7 @@ async def _apply_auto_done(state: AppState, ctx: ClassContext, auto_done: list[s
         if "all_lent" in filters:
             hidden = await get_hidden_isbns_for_form(state, student.form)
             apply_hidden_books(info, hidden)
-            vormerk, _lent = booking_isbn_sets_from_info(info)
+            vormerk, _lent, _lent_codes = booking_isbn_sets_from_info(info)
             if not vormerk:
                 student.status = "done"
 

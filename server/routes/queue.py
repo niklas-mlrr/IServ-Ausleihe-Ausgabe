@@ -162,6 +162,7 @@ async def clear_queue(body: ContextIdBody = _EMPTY_CONTEXT_BODY) -> dict:
             helper.expected_isbns = set()
             helper.vormerk_isbns = set()
             helper.lent_isbns = set()
+            helper.lent_codes = set()
             helper.peeking = False
     ctx.queue = []
     # book_order/Katalog bleiben (Klasse/Tab bleibt offen, nur Queue leer).

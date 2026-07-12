@@ -8,6 +8,47 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-12 — Unterscheidung Buch- vs. Buchreihe-bereits-verliehen (`book_already_lent` neu)
+
+Nachbesserung am bisherigen `series_already_lent`-Hinweis (Eintrag darunter):
+Niklas wollte unterscheiden, ob genau DAS gescannte Exemplar schon auf den
+Schüler läuft oder nur ein ANDERES Exemplar derselben Buchreihe. Neuer Status
+`book_already_lent` deckt den ersten Fall ab, `series_already_lent` bleibt für
+den zweiten.
+
+- **Backend (`server/sessions.py`).** `booking_isbn_sets_from_info()` gibt
+  jetzt zusätzlich `lent_codes` zurück (Barcodes der konkret ausgeliehenen
+  Exemplare aus `info["current_books"]`). `evaluate_scan_for_booking()`
+  vergleicht bei ISBN-Treffer den gescannten Barcode gegen `lent_codes`:
+  Treffer → `book_already_lent` ("Bereits an dich verliehen: {title}"),
+  sonst weiterhin `series_already_lent` ("Reihe bereits ausgeliehen: {title}").
+  `process_scan()` trägt den Code nach erfolgreicher Buchung zusätzlich in
+  `lent_codes` nach, damit ein erneuter Scan desselben Exemplars in derselben
+  Session korrekt als `book_already_lent` erkannt wird. Neues Session-Feld
+  `lent_codes: set[str]` auf `HelperSession`/`StudentSessionB`
+  (`server/state.py`), durchgereicht durch `hydrate_student_info` und beide
+  `process_scan`-Aufrufer (`server/routes/ws.py`); Reset an den bestehenden
+  `vormerk_isbns`/`lent_isbns`-Reset-Stellen (`sessions.py`, `routes/queue.py`).
+- **Modal (Helfer- und Schüler-Client).** `book_already_lent`: Überschrift
+  „Buch bereits an dich verliehen" (gelb), darunter `<Buchcode> — <Titel>`,
+  darunter „Dieses Buch ist bereits an dich verliehen. Du musstest es nicht
+  noch einmal scannen." `series_already_lent`: Überschrift „Buchreihe bereits
+  an dich verliehen" (gelb), darunter `<Buchcode> — <Titel>`, darunter „Ein
+  Buch dieser Buchreihe ist bereits an dich verliehen. Leg es einfach wieder
+  zurück." (`web/scan-render.js`, `web/student.js`).
+- **Statuszeile.** `book_already_lent`: "<Buchcode> bereits an dich verliehen
+  — <Titel>". `series_already_lent`: "<Buchcode> Buchreihe bereits an dich
+  verliehen" (ohne Titel). Beide im gleichen Gelb wie die Modal-Überschrift
+  (`status-already-lent`, `#e69500`) — `web/common.js` (`scanResultStatusText`),
+  `web/scan-ws.js`/`web/student.js` (Klassen-Toggle). Alle Trennstriche in den
+  neuen/angepassten Strings sind Halbgeviertstriche ("—"), konsistent mit dem
+  Rest der Statuszeilen.
+- **Tests.** `tests/test_booking_precheck.py` um Fälle für die neue
+  Unterscheidung erweitert (`test_reject_book_already_lent_same_code`,
+  `test_series_already_lent_when_different_code_of_same_isbn`,
+  `test_process_scan_booked_isbn_moves_to_lent` prüft jetzt zusätzlich, dass
+  ein erneuter Scan desselben Exemplars `book_already_lent` liefert).
+
 ## 2026-07-12 — Meldung + Statuszeile bei „Buch bereits an dich verliehen" (`series_already_lent`)
 
 Nachbesserung an der Modal-Meldung und der Statuszeile für den Status
