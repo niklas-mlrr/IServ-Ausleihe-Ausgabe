@@ -124,7 +124,9 @@ function handleServerMessage(msg) {
     // bestellt, unbekannt, noch nicht geladen, Prüf-Fehler, an sich selbst
     // verliehen) war der Host nie informiert → Clear ist dort ein No-op.
     const isAlert = !OK_STATUSES.has(msg.status);
-    setStatusText(scanResultStatusText(msg, currentBooks), statusAlertClass(msg.status));
+    // Helfer scannt für den zugewiesenen Schüler — "den Schüler" statt "dich"
+    // (Default in scanResultStatusText() ist "dich", für den Schüler-Client).
+    setStatusText(scanResultStatusText(msg, currentBooks, 'den Schüler'), statusAlertClass(msg.status));
     if (isAlert) showBookAlertModal(msg);
   } else if (msg.type === 'settings') {
     slipSecondPageDefault = !!msg.slip_second_page;

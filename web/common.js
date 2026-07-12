@@ -24,28 +24,32 @@ function isBookDone(b, scannedIsbns) {
 // Buchtitel hinterm Bindestrich (`msg.title`, vom Server durchgereicht; NICHT
 // `msg.msg`, das ist die technische, längere Server-Meldung):
 // `book_already_lent` (genau dieses Exemplar) →
-// "<Buchcode> bereits an dich verliehen — <Titel>"; `series_already_lent`
-// (ein ANDERES Exemplar derselben Reihe) →
-// "<Buchcode> Buchreihe bereits an dich verliehen — <Titel>". Ausgemustert
-// zerfällt in zwei Fälle (`msg.loaned_to` — am Schüler-Client ohnehin immer
-// null, Privatheit, fällt dort also immer auf den ersten Fall zurück): OHNE
-// Ersatzanspruch → "<Buchcode> ausgemustert — <Titel>"; MIT Ersatzanspruch →
+// "<Buchcode> bereits an <targetLabel> verliehen — <Titel>";
+// `series_already_lent` (ein ANDERES Exemplar derselben Reihe) →
+// "<Buchcode> Buchreihe bereits an <targetLabel> verliehen — <Titel>".
+// `targetLabel` ("dich" am Schüler-Client — Default, der Schüler scannt sein
+// EIGENES Buch — bzw. "den Schüler" am Helfer-Client, s. `scan-ws.js`, wo
+// der Helfer scannt und der Bezug immer der zugewiesene Schüler ist, nie
+// „dich" der Helfer). Ausgemustert zerfällt in zwei Fälle (`msg.loaned_to` —
+// am Schüler-Client ohnehin immer null, Privatheit, fällt dort also immer
+// auf den ersten Fall zurück): OHNE Ersatzanspruch →
+// "<Buchcode> ausgemustert — <Titel>"; MIT Ersatzanspruch →
 // "<Buchcode> Ersatzanspruch an <Nachname>, <Vorname> (<Klasse>) — <Titel>"
 // statt der technischen `msg`. „An jemand anderen verliehen" (`not_in_stock`)
 // → "<Buchcode> bereits verliehen — <Titel>" (ohne Name — der Schüler sieht
 // nie WEM, s. process_scan). `books` ist die aktuelle Bücherliste
 // (student_info/currentBooks) der aufrufenden Seite.
-function scanResultStatusText(msg, books) {
+function scanResultStatusText(msg, books, targetLabel = 'dich') {
   if (msg.status === 'booked') {
     const book = (books || []).find(b => b.isbn === msg.isbn);
     const detail = book ? `${book.subject} — ${book.title}` : '';
     return `${msg.barcode} ausgegeben${detail ? ' — ' + detail : ''}`;
   }
   if (msg.status === 'book_already_lent') {
-    return `${msg.barcode} bereits an dich verliehen — ${msg.title || ''}`;
+    return `${msg.barcode} bereits an ${targetLabel} verliehen — ${msg.title || ''}`;
   }
   if (msg.status === 'series_already_lent') {
-    return `${msg.barcode} Buchreihe bereits an dich verliehen — ${msg.title || ''}`;
+    return `${msg.barcode} Buchreihe bereits an ${targetLabel} verliehen — ${msg.title || ''}`;
   }
   if (msg.status === 'book_deleted' && msg.loaned_to) {
     const last = msg.loaned_to_lastname, first = msg.loaned_to_firstname;

@@ -320,18 +320,19 @@ function showBookAlertModal(msg) {
       : meta.title;
   bookAlertTitleEl.style.color = meta.color;
   // Plain text (kein HTML) — bookAlertTextEl.textContent interpretiert keine Entities.
-  // „An sich selbst verliehen": <Buchcode> — <Titel> + eigene Hinweiszeile
-  // darunter, statt der technischen Server-msg. Zwei Fälle (server-seitig per
-  // Barcode-Abgleich unterschieden): book_already_lent = genau DIESES
-  // Exemplar läuft schon auf dich; series_already_lent = ein ANDERES
-  // Exemplar derselben Reihe.
+  // „An den Schüler selbst verliehen": <Buchcode> — <Titel> + eigene
+  // Hinweiszeile darunter, statt der technischen Server-msg. Zwei Fälle
+  // (server-seitig per Barcode-Abgleich unterschieden): book_already_lent =
+  // genau DIESES Exemplar läuft schon auf den Schüler; series_already_lent =
+  // ein ANDERES Exemplar derselben Reihe. Am Helfer-Client geht es nie um
+  // "dich" (den Helfer) — der Bezug ist immer der zugewiesene Schüler.
   if (msg.status === 'book_already_lent') {
     bookAlertTextEl.textContent = `${msg.barcode} — ${msg.title || meta.title}`;
-    bookAlertNoteEl.textContent = 'Dieses Buch ist bereits an dich verliehen. Du musstest es nicht noch einmal scannen.';
+    bookAlertNoteEl.textContent = 'Dieses Buch ist bereits an den Schüler verliehen. Es musste nicht noch einmal gescannt werden.';
     bookAlertNoteEl.hidden = false;
   } else if (msg.status === 'series_already_lent') {
     bookAlertTextEl.textContent = `${msg.barcode} — ${msg.title || meta.title}`;
-    bookAlertNoteEl.textContent = 'Ein Buch dieser Buchreihe ist bereits an dich verliehen. Leg es einfach wieder zurück.';
+    bookAlertNoteEl.textContent = 'Ein Buch dieser Buchreihe ist bereits an den Schüler verliehen. Es kann einfach wieder zurückgelegt werden.';
     bookAlertNoteEl.hidden = false;
   } else if (deletedNoReplacement) {
     bookAlertTextEl.textContent = `${msg.barcode} — ${msg.title || meta.title}`;

@@ -8,6 +8,28 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-12 — Helfer-Client: "dich" durch "den Schüler" ersetzt
+
+Bei `book_already_lent`/`series_already_lent` sprachen Modal und Statuszeile
+am Helfer-Client (Modus A) bisher von „dich" — falsch, denn der Helfer
+scannt für den zugewiesenen SCHÜLER, nicht für sich selbst. Am
+Schüler-Client (Modus B) bleibt „dich" korrekt (der Schüler scannt sein
+eigenes Buch).
+
+- `scanResultStatusText()` (`web/common.js`) bekommt einen neuen Parameter
+  `targetLabel` (Default `'dich'`). `web/scan-ws.js` (Helfer-Client) ruft
+  sie jetzt mit `'den Schüler'` auf; `web/student.js` (Schüler-Client)
+  unverändert mit dem Default.
+- `ALERT_META` (`web/scan-state.js`, nur Helfer-Client) — Titel
+  „Buch bereits an dich verliehen"/„Buchreihe bereits an dich verliehen" →
+  „… an den Schüler verliehen". `ALERT_META_STUDENT` (`web/student.js`)
+  unverändert.
+- Modal-Notiztexte (`web/scan-render.js`, nur Helfer-Client) auf die dritte
+  Person umformuliert: „Dieses Buch ist bereits an den Schüler verliehen.
+  Es musste nicht noch einmal gescannt werden." bzw. „Ein Buch dieser
+  Buchreihe ist bereits an den Schüler verliehen. Es kann einfach wieder
+  zurückgelegt werden." (statt der bisherigen Du-Form).
+
 ## 2026-07-12 — Statuszeile und Fenster-Überschrift strukturell auf dieselbe Farbe festgelegt
 
 Bisher entschied die Statuszeile ihre Farbe über eigene, hart codierte
