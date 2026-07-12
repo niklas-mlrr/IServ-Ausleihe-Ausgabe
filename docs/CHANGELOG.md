@@ -8,6 +8,26 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-12 — Meldung + Statuszeile bei „Buch bereits an dich verliehen" (`series_already_lent`)
+
+Nachbesserung an der Modal-Meldung und der Statuszeile für den Status
+`series_already_lent` (ein einzelnes Buch — nicht die ganze Reihe — ist
+bereits an den scannenden Schüler ausgeliehen), in `scan-render.js`
+(Modus A) und `student.js` (Modus B):
+
+- **Modal.** Überschrift bleibt wie bisher gelb (`#e69500`, „Buch bereits
+  an dich verliehen"). Darunter weiterhin `<Buchcode> - <Buchtitel>`. Neu
+  darunter, mit Abstand über den bestehenden `.modal-box`-Flex-`gap`, eine
+  eigene Zeile `"Dieses Buch ist bereits an dich verliehen."` statt der
+  technischen Server-`msg` (neues `<p id="book-alert-note">` in
+  `scan.html`/`student.html`).
+- **Statuszeile.** Neuer Helper-Fall in `scanResultStatusText()`
+  (`common.js`) formatiert `"<Buchcode> bereits an dich verliehen -
+  <Titel>"`. Neue CSS-Klasse `status-already-lent` (`#e69500`, fett,
+  gleiches Gelb wie die Modal-Überschrift) in `scan.html`/`student.html`;
+  `setStatusText()` (`scan-state.js`) bekommt dafür einen vierten
+  Parameter `isAlreadyLent`.
+
 ## 2026-07-12 — Statuszeile bei erfolgreicher Buchung: Fach + Titel statt Worker-Rohtext, grün eingefärbt
 
 Zwei Nachbesserungen an der Statuszeile für `scan_result`-Status `'booked'`

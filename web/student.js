@@ -105,8 +105,9 @@ function handleServerMessage(msg) {
     const ok = OK_STATUSES_STUDENT.has(msg.status);
     const blocking = BLOCKING_STATUSES_STUDENT.has(msg.status);
     const dismissible = !ok && !blocking;
-    statusTextEl.classList.toggle('status-book-deleted', !ok);
+    statusTextEl.classList.toggle('status-book-deleted', !ok && msg.status !== 'series_already_lent');
     statusTextEl.classList.toggle('status-book-issued', msg.status === 'booked');
+    statusTextEl.classList.toggle('status-already-lent', msg.status === 'series_already_lent');
     if (blocking) { bookAlertOpen = true; showBookAlertModal(msg, false); }
     else if (dismissible) { showBookAlertModal(msg, true); }
     // Erfolgreicher Scan → Buch als „erledigt" markieren (sinkt nach unten).
@@ -134,6 +135,7 @@ let bookAlertOpen = false;
 const bookAlertModalEl = document.getElementById('book-alert-modal');
 const bookAlertTitleEl = document.getElementById('book-alert-title');
 const bookAlertTextEl = document.getElementById('book-alert-text');
+const bookAlertNoteEl = document.getElementById('book-alert-note');
 const bookAlertHintEl = document.getElementById('book-alert-hint');
 const bookAlertActionsEl = document.getElementById('book-alert-actions');
 const bookAlertCloseBtn = document.getElementById('book-alert-close');
@@ -156,7 +158,15 @@ function showBookAlertModal(msg, dismissible) {
   const meta = ALERT_META_STUDENT[msg.status] || { title: 'Buch-Hinweis', color: '#f44336' };
   bookAlertTitleEl.textContent = meta.title;
   bookAlertTitleEl.style.color = meta.color;
-  bookAlertTextEl.textContent = `${msg.barcode || ''} — ${msg.msg || meta.title}`;
+  if (msg.status === 'series_already_lent') {
+    bookAlertTextEl.textContent = `${msg.barcode || ''} - ${msg.title || meta.title}`;
+    bookAlertNoteEl.textContent = 'Dieses Buch ist bereits an dich verliehen.';
+    bookAlertNoteEl.hidden = false;
+  } else {
+    bookAlertTextEl.textContent = `${msg.barcode || ''} — ${msg.msg || meta.title}`;
+    bookAlertNoteEl.textContent = '';
+    bookAlertNoteEl.hidden = true;
+  }
   if (dismissible) {
     bookAlertHintEl.textContent = 'Du kannst diese Meldung selbst schließen.';
     bookAlertActionsEl.style.display = '';

@@ -20,13 +20,17 @@ function isBookDone(b, scannedIsbns) {
 // ('booked', ALLOW_BOOKING an) nicht die technische DOM-Best-effort-Meldung
 // des Workers, sondern "<Buchcode> ausgegeben — <Fach> — <Titel>" (ohne
 // Bindestrich zwischen Buchcode und "ausgegeben", anders als bei den übrigen
-// Status-Meldungen). `books` ist die aktuelle Bücherliste (student_info/
-// currentBooks) der aufrufenden Seite.
+// Status-Meldungen). Bei „an dich selbst verliehen" (series_already_lent)
+// entsprechend "<Buchcode> bereits an dich verliehen - <Titel>". `books` ist
+// die aktuelle Bücherliste (student_info/currentBooks) der aufrufenden Seite.
 function scanResultStatusText(msg, books) {
   if (msg.status === 'booked') {
     const book = (books || []).find(b => b.isbn === msg.isbn);
     const detail = book ? `${book.subject} — ${book.title}` : '';
     return `${msg.barcode} ausgegeben${detail ? ' — ' + detail : ''}`;
+  }
+  if (msg.status === 'series_already_lent') {
+    return `${msg.barcode} bereits an dich verliehen - ${msg.title || msg.msg || ''}`;
   }
   return `${msg.barcode} — ${msg.msg || msg.status}`;
 }

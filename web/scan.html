@@ -180,6 +180,8 @@
     #status-text.status-book-deleted { color: #f44336; font-weight: 700; }
     /* Buch erfolgreich ausgegeben (booked) — grün, nur für diese Meldung. */
     #status-text.status-book-issued { color: #2e7d32; font-weight: 700; }
+    /* Buch bereits an dich selbst verliehen (series_already_lent) — gelb, wie die Modal-Überschrift. */
+    #status-text.status-already-lent { color: #e69500; font-weight: 700; }
 
     /* ---- Name (groß, ohne Box) + Klasse/Bezahlstatus rechtsbündig ---- */
     .name-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 12px 2px 8px; }
@@ -460,6 +462,7 @@
     <div class="modal-box">
       <h3 id="book-alert-title" style="color:#f44336">Buch-Hinweis</h3>
       <p id="book-alert-text"></p>
+      <p id="book-alert-note" hidden></p>
       <p id="book-alert-borrower" hidden></p>
       <div class="modal-actions">
         <button class="primary" id="book-alert-close">Schließen</button>

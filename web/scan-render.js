@@ -306,7 +306,17 @@ function showBookAlertModal(msg) {
   bookAlertTitleEl.textContent = meta.title;
   bookAlertTitleEl.style.color = meta.color;
   // Plain text (kein HTML) — bookAlertTextEl.textContent interpretiert keine Entities.
-  bookAlertTextEl.textContent = `${msg.barcode} — ${msg.msg || meta.title}`;
+  if (msg.status === 'series_already_lent') {
+    // „An sich selbst verliehen": <Buchcode> - <Titel> + eigene Hinweiszeile
+    // darunter, statt der technischen Server-msg.
+    bookAlertTextEl.textContent = `${msg.barcode} - ${msg.title || meta.title}`;
+    bookAlertNoteEl.textContent = 'Dieses Buch ist bereits an dich verliehen.';
+    bookAlertNoteEl.hidden = false;
+  } else {
+    bookAlertTextEl.textContent = `${msg.barcode} — ${msg.msg || meta.title}`;
+    bookAlertNoteEl.textContent = '';
+    bookAlertNoteEl.hidden = true;
+  }
   // „currently lent to someone else": Name des aktuellen Ausleihers als
   // eigene Zeile (nur bei not_in_stock belegt; read-only aus /books/:code).
   // Bei book_deleted mit loaned_to → Ersatzanspruch-Hinweis statt „verliehen".
