@@ -8,6 +8,49 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-12 — Ersatzanspruch-Meldung: Schüler-Client wie „nur ausgemustert", Helfer-Client mit Name+Klasse
+
+Ausgemustertes Buch MIT Ersatzanspruch (`loaned_to` gesetzt) bekam bisher
+am Helfer-Client noch die alte generische „Ausgemustertes Buch gescannt"-
+Meldung + technische `msg` + separate „Ersatzanspruch: {Name}"-Zeile.
+Niklas wollte: Schüler-Client identisch zum Fall OHNE Ersatzanspruch (war
+bereits so, da `loaned_to` dort aus Privatheitsgründen immer `null` ist —
+keine Code-Änderung nötig, nur verifiziert); Helfer-Client mit eigener
+Meldung inkl. Name **und Klasse** des Ersatzanspruch-Inhabers.
+
+- **Backend (`server/iserv_client.py`).** `get_book_by_code()` liefert neu
+  `loaned_to_firstname`/`loaned_to_lastname` (statt nur des zusammengesetzten
+  `loaned_to`-Strings) sowie `loaned_to_form` (Klasse). Die Klasse wird NUR
+  bei ausgemusterten Büchern mit Schüler-Verknüpfung per zusätzlichem
+  read-only Request (`GET /students/:id?forms=true`) aufgelöst — bei allen
+  anderen Büchern (auch beim normalen „an jemand anderen verliehen") bleibt
+  sie `None`, ohne Extra-Request. Bei mehreren Schuljahren gewinnt das mit
+  der höchsten `schoolyear`-id. Neue statische Helper `_resolve_student_form`
+  (+ `_resolve_current_borrower` liefert jetzt Vor-/Nachname getrennt statt
+  eines zusammengesetzten Strings). `evaluate_scan_for_booking()` und
+  `process_scan()` (`server/sessions.py`) reichen die drei neuen Felder
+  analog zu `loaned_to`/`loaned_to_id` durch (Host-Broadcast immer, Client-
+  Payload nur für den Helfer-Scanner — der Schüler-Client bekommt sie wie
+  bisher `null`, Privatheit).
+- **Modal (Helfer-Client, `web/scan-render.js`).** `book_deleted` MIT
+  `loaned_to`: Überschrift „Für das Buch gibt es einen Ersatzanspruch" (rot,
+  wie bisher), darunter `<Buchcode> — <Titel>`, darunter „Für dieses Buch
+  liegt ein Ersatzanspruch an **<Nachname>, <Vorname> (<Klasse>)** vor. Es
+  kann derzeit nicht ausgeliehen werden." (Name/Klasse fett, `innerHTML` mit
+  `escapeHtml()`-ten Werten). Die bisherige separate Ersatzanspruch-Zeile
+  (`bookAlertBorrowerEl`) entfällt für diesen Fall (Info steckt jetzt in der
+  Notiz) — bleibt nur noch für „an jemand anderen verliehen" (`not_in_stock`).
+- **Statuszeile.** "<Buchcode> Ersatzanspruch an <Nachname>, <Vorname>
+  (<Klasse>) — <Titel>", rot wie beim einfachen „ausgemustert" (gleiche
+  `status-book-deleted`-Klasse, kein Code-Unterschied nötig) — `web/common.js`
+  (`scanResultStatusText`).
+- **Tests.** Neue `tests/test_iserv_client_borrower.py` (6 Tests: Name-Split
+  aus eingebettetem Student, Fallback auf `get_by_id`, `loaned_to_form`
+  bleibt `None` beim normalen Verleih-Fall ohne Extra-Request, Auflösung +
+  aktuellstes-Schuljahr-Sortierung beim Ersatzanspruch-Fall, Fehlertoleranz).
+  `tests/test_booking_precheck.py` um die drei neuen Felder in den
+  bestehenden Ersatzanspruch-Tests ergänzt. 214 → 220 Tests.
+
 ## 2026-07-12 — Fix: Statuszeile am Schüler-Client verlor Aussehen ohne Textwechsel
 
 Niklas meldete, dass die Statuszeile am Schüler-Client (Modus B) ihr

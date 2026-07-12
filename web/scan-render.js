@@ -303,12 +303,20 @@ nextModal.addEventListener('click', (e) => { if (e.target === nextModal) closeNe
 // Host-Meldung auf (No-op für Status ohne Host-Broadcast).
 function showBookAlertModal(msg) {
   const meta = ALERT_META[msg.status] || { title: 'Buch-Hinweis', color: '#f44336' };
-  // Ausgemustert OHNE Ersatzanspruch (kein loaned_to) bekommt eine eigene,
-  // kürzere Überschrift/Meldung statt der generischen „Ausgemustertes Buch
-  // gescannt" + technische msg — MIT Ersatzanspruch bleibt es unverändert
-  // (loaned_to → Ersatzanspruch-Zeile unten).
+  // book_deleted zerfällt in zwei Fälle (server-seitig per loaned_to
+  // unterschieden), beide mit eigener kürzerer Überschrift/Meldung statt der
+  // generischen „Ausgemustertes Buch gescannt" + technischen msg:
+  // OHNE Ersatzanspruch (kein loaned_to) → "Buch ausgemustert"; MIT
+  // Ersatzanspruch (loaned_to gesetzt) → "Für das Buch gibt es einen
+  // Ersatzanspruch", Name/Klasse fett in der Notiz statt eigener Zeile
+  // (bookAlertBorrowerEl bleibt für diesen Fall versteckt).
   const deletedNoReplacement = msg.status === 'book_deleted' && !msg.loaned_to;
-  bookAlertTitleEl.textContent = deletedNoReplacement ? 'Buch ausgemustert' : meta.title;
+  const deletedWithReplacement = msg.status === 'book_deleted' && !!msg.loaned_to;
+  bookAlertTitleEl.textContent = deletedNoReplacement
+    ? 'Buch ausgemustert'
+    : deletedWithReplacement
+      ? 'Für das Buch gibt es einen Ersatzanspruch'
+      : meta.title;
   bookAlertTitleEl.style.color = meta.color;
   // Plain text (kein HTML) — bookAlertTextEl.textContent interpretiert keine Entities.
   // „An sich selbst verliehen": <Buchcode> — <Titel> + eigene Hinweiszeile
@@ -328,24 +336,39 @@ function showBookAlertModal(msg) {
     bookAlertTextEl.textContent = `${msg.barcode} — ${msg.title || meta.title}`;
     bookAlertNoteEl.textContent = 'Dieses Buch ist ausgemustert. Es kann nicht mehr verliehen werden.';
     bookAlertNoteEl.hidden = false;
+  } else if (deletedWithReplacement) {
+    bookAlertTextEl.textContent = `${msg.barcode} — ${msg.title || meta.title}`;
+    // Name/Klasse fett — innerHTML mit escapeHtml()-ten Werten, damit keine
+    // rohen IServ-Strings ungefiltert eingesetzt werden (s. common.js).
+    bookAlertNoteEl.innerHTML =
+      `Für dieses Buch liegt ein Ersatzanspruch an <strong>${borrowerNameHtml(msg)}</strong> vor. ` +
+      'Es kann derzeit nicht ausgeliehen werden.';
+    bookAlertNoteEl.hidden = false;
   } else {
     bookAlertTextEl.textContent = `${msg.barcode} — ${msg.msg || meta.title}`;
     bookAlertNoteEl.textContent = '';
     bookAlertNoteEl.hidden = true;
   }
   // „currently lent to someone else": Name des aktuellen Ausleihers als
-  // eigene Zeile (nur bei not_in_stock belegt; read-only aus /books/:code).
-  // Bei book_deleted mit loaned_to → Ersatzanspruch-Hinweis statt „verliehen".
-  if (msg.loaned_to) {
-    bookAlertBorrowerEl.textContent = msg.status === 'book_deleted'
-      ? `Ersatzanspruch: ${msg.loaned_to}`
-      : `Aktuell verliehen an: ${msg.loaned_to}`;
+  // eigene Zeile — nur bei not_in_stock (bei book_deleted mit Ersatzanspruch
+  // steckt Name/Klasse jetzt in der Notiz oben, keine eigene Zeile mehr).
+  if (msg.loaned_to && msg.status === 'not_in_stock') {
+    bookAlertBorrowerEl.textContent = `Aktuell verliehen an: ${msg.loaned_to}`;
     bookAlertBorrowerEl.hidden = false;
   } else {
     bookAlertBorrowerEl.textContent = '';
     bookAlertBorrowerEl.hidden = true;
   }
   bookAlertModal.classList.add('show');
+}
+// "Nachname, Vorname (Klasse)" für die Ersatzanspruch-Notiz — HTML-escaped,
+// mit Fallback auf das vorformatierte `loaned_to` ("Vorname Nachname"),
+// falls Vor-/Nachname aus irgendeinem Grund fehlen (Lookup-Fehler).
+function borrowerNameHtml(msg) {
+  const last = msg.loaned_to_lastname, first = msg.loaned_to_firstname;
+  if (!last && !first) return escapeHtml(msg.loaned_to || '');
+  const form = msg.loaned_to_form;
+  return escapeHtml(`${last || ''}, ${first || ''}${form ? ` (${form})` : ''}`);
 }
 function closeBookAlertModal() { bookAlertModal.classList.remove('show'); }
 // Bewusstes Schließen durch den Helfer → zusätzlich Host-Meldung aufräumen.

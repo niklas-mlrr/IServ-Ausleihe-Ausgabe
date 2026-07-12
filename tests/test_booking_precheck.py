@@ -446,13 +446,17 @@ def _deleted_book_with_borrower():
     b = _book(isbn="978-9", deleted=True)
     b["loaned_to"] = "Max Mustermann"
     b["loaned_to_id"] = 4321
+    b["loaned_to_firstname"] = "Max"
+    b["loaned_to_lastname"] = "Mustermann"
+    b["loaned_to_form"] = "9a"
     return b
 
 
 def test_process_scan_deleted_alert_with_loaned_to_helper(monkeypatch):
     # Ausgemustert mit Schüler-Verknüpfung → book_alert-Broadcast mit
     # kind=="book_deleted" UND loaned_to (für Ersatzanspruch-Hinweis am Host).
-    # Helfer-Scanner (Modus A) sieht den Namen im scan_result.
+    # Helfer-Scanner (Modus A) sieht Name UND Klasse im scan_result (für die
+    # "Für dieses Buch liegt ein Ersatzanspruch an ..."-Modal-Notiz).
     monkeypatch.setattr(sessions, "get_config", lambda: _Cfg(False))
     hub = _patch_hub(monkeypatch)
     state = _State(_FakeIserv(_deleted_book_with_borrower()))
@@ -460,12 +464,16 @@ def test_process_scan_deleted_alert_with_loaned_to_helper(monkeypatch):
     assert res["status"] == "book_deleted"
     assert res["loaned_to"] == "Max Mustermann"
     assert res["loaned_to_id"] == 4321
+    assert res["loaned_to_firstname"] == "Max"
+    assert res["loaned_to_lastname"] == "Mustermann"
+    assert res["loaned_to_form"] == "9a"
     assert len(hub.broadcasts) == 1
     alert = hub.broadcasts[0]
     assert alert["type"] == "book_alert"
     assert alert["kind"] == "book_deleted"
     assert alert["loaned_to"] == "Max Mustermann"
     assert alert["loaned_to_id"] == 4321
+    assert alert["loaned_to_form"] == "9a"
 
 
 def test_process_scan_deleted_hides_loan_from_student(monkeypatch):
@@ -479,6 +487,9 @@ def test_process_scan_deleted_hides_loan_from_student(monkeypatch):
     assert res["status"] == "book_deleted"
     assert res["loaned_to"] is None
     assert res["loaned_to_id"] is None
+    assert res["loaned_to_firstname"] is None
+    assert res["loaned_to_lastname"] is None
+    assert res["loaned_to_form"] is None
     assert "Max Mustermann" not in (res.get("msg") or "")
     assert hub.broadcasts and hub.broadcasts[0]["loaned_to"] == "Max Mustermann"
     assert hub.broadcasts[0]["kind"] == "book_deleted"

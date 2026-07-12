@@ -512,13 +512,19 @@ class IsServClient:
         Buchungs-Vorabprüfung, PLAN §6).
 
         `loaned_to` („Vorname Nachname") ist der **aktueller Ausleiher**, wenn das
-        Buch verliehen ist (`distributed`); `loaned_to_id` dessen student_id. Die
+        Buch verliehen ist (`distributed`); `loaned_to_id` dessen student_id;
+        `loaned_to_firstname`/`loaned_to_lastname` dieselbe Person in getrennten
+        Feldern (für Formatierungen wie „Nachname, Vorname"). Die
         `/books/:code`-Antwort bettet den Ausleiher bereits als `Student` ein, der
         Normalfall braucht also keinen Extra-Request. Fehlt die Einbettung (oder
         ist anonymisiert), wird per `get_by_id` nachgeladen — read-only
-        `GET /students/:id`. Bei Fehlern bleiben beide Felder `None` (die
-        Lager-Prüfung bleibt davon unberührt). Namen werden NUR an die UI
-        durchgereicht, nie geloggt (PLAN §3.7).
+        `GET /students/:id`. Bei Fehlern bleiben die Felder `None` (die
+        Lager-Prüfung bleibt davon unberührt). `loaned_to_form` (Klasse) wird NUR
+        bei ausgemusterten Büchern mit Schüler-Verknüpfung (Ersatzanspruch-Fall)
+        per zusätzlichem read-only Request (`GET /students/:id?forms=true`)
+        aufgelöst — sonst `None`, um den Normalfall nicht mit einem weiteren
+        Request zu belasten. Namen/Klasse werden NUR an die UI durchgereicht,
+        nie geloggt (PLAN §3.7).
         """
 
         def _sync() -> dict | None:
@@ -532,7 +538,11 @@ class IsServClient:
             s = series_map.get(isbn)
             subject = ", ".join(s.subjects_flat or s.subjects or []) if s else ""
             title = (s.title if s else "") or isbn
-            loaned_to, loaned_to_id = self._resolve_current_borrower(client, book)
+            first, last, loaned_to_id = self._resolve_current_borrower(client, book)
+            loaned_to = f"{first} {last}".strip() if (first or last) else None
+            loaned_to_form = None
+            if book.deleted and loaned_to_id is not None:
+                loaned_to_form = self._resolve_student_form(client, loaned_to_id)
             return {
                 "code": book.code,
                 "isbn": isbn,
@@ -544,6 +554,9 @@ class IsServClient:
                 "student_id": book.student_id,
                 "loaned_to": loaned_to,
                 "loaned_to_id": loaned_to_id,
+                "loaned_to_firstname": first,
+                "loaned_to_lastname": last,
+                "loaned_to_form": loaned_to_form,
             }
 
         return await asyncio.to_thread(_sync)
@@ -551,29 +564,49 @@ class IsServClient:
     @staticmethod
     def _resolve_current_borrower(
         client: AusleiheClient, book: object
-    ) -> tuple[str | None, int | None]:
-        """Name + id des aktuellen Ausleihers eines Buches (read-only).
+    ) -> tuple[str | None, str | None, int | None]:
+        """Vorname, Nachname + id des aktuellen Ausleihers eines Buches (read-only).
 
         Bevorzugt die in `/books/:code` eingebettete `Student`-Struktur (kein
         Extra-GET). Fehlt sie, Nachladen via `GET /students/:id`. Tolerant bei
-        Fehlern/anonymisierten Datensätzen → `(None, student_id)`, sodass die
-        UI nur zeigt, was sicher bekannt ist.
+        Fehlern/anonymisierten Datensätzen → `(None, None, student_id)`, sodass
+        die UI nur zeigt, was sicher bekannt ist.
         """
         sid = getattr(book, "student_id", None)
         student = getattr(book, "student", None)
         if student is not None:
-            name = f"{student.firstname} {student.lastname}".strip()
-            if name:
-                return name, sid
+            first = (getattr(student, "firstname", "") or "").strip() or None
+            last = (getattr(student, "lastname", "") or "").strip() or None
+            if first or last:
+                return first, last, sid
         if sid is None:
-            return None, None
+            return None, None, None
         try:
             st = client.students.get_by_id(sid)
-            name = f"{st.firstname} {st.lastname}".strip()
-            return (name or None), sid
+            first = (getattr(st, "firstname", "") or "").strip() or None
+            last = (getattr(st, "lastname", "") or "").strip() or None
+            return first, last, sid
         except Exception as e:  # noqa: BLE001 — Name ist Kosmetik, nie fatal
             log.warning("Ausleiher zu student_id=%s nicht auflösbar: %s", sid, e)
-            return None, sid
+            return None, None, sid
+
+    @staticmethod
+    def _resolve_student_form(client: AusleiheClient, student_id: int) -> str | None:
+        """Klasse (Formname) eines Schülers — read-only Zusatz-Request
+        (`GET /students/:id?forms=true`), nur für die Ersatzanspruch-Meldung
+        gebraucht. Bei mehreren Schuljahren wird das mit der höchsten
+        `schoolyear`-id (aktuellstes) genommen. Tolerant bei Fehlern → `None`.
+        """
+        try:
+            detail = client.students.get_detail(student_id, forms=True)
+            forms = detail.get("forms") or []
+            if not forms:
+                return None
+            forms_sorted = sorted(forms, key=lambda f: f.get("schoolyear") or 0, reverse=True)
+            return forms_sorted[0].get("name")
+        except Exception as e:  # noqa: BLE001 — Klasse ist Kosmetik, nie fatal
+            log.warning("Klasse zu student_id=%s nicht auflösbar: %s", student_id, e)
+            return None
 
     async def get_loan_slip_pdf(self, student_id: int, variant: str = "student") -> bytes:
         """Leihschein als PDF-Bytes (read-only GET).

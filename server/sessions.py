@@ -252,6 +252,9 @@ async def evaluate_scan_for_booking(
             "title": title,
             "loaned_to": book.get("loaned_to"),
             "loaned_to_id": book.get("loaned_to_id"),
+            "loaned_to_firstname": book.get("loaned_to_firstname"),
+            "loaned_to_lastname": book.get("loaned_to_lastname"),
+            "loaned_to_form": book.get("loaned_to_form"),
         }
 
     # „Bereits an dich ausgeliehen": ISBN steht schon auf dem Schüler als
@@ -355,10 +358,14 @@ async def process_scan(
                     "title": decision.get("title"),
                     "msg": decision.get("msg"),
                     "student": f"{student.lastname}, {student.firstname}" if student else None,
-                    # „currently lent to someone else": Name des aktuellen Ausleihers
-                    # (nur bei not_in_stock belegt; read-only, PLAN §3.7 — nicht loggen).
+                    # „currently lent to someone else"/Ersatzanspruch: Name (+ bei
+                    # book_deleted Klasse) des Ausleihers (read-only, PLAN §3.7 —
+                    # nicht loggen). loaned_to_form nur bei book_deleted belegt.
                     "loaned_to": decision.get("loaned_to"),
                     "loaned_to_id": decision.get("loaned_to_id"),
+                    "loaned_to_firstname": decision.get("loaned_to_firstname"),
+                    "loaned_to_lastname": decision.get("loaned_to_lastname"),
+                    "loaned_to_form": decision.get("loaned_to_form"),
                 }
             )
         return {
@@ -366,12 +373,20 @@ async def process_scan(
             "msg": decision["msg"],
             "isbn": decision.get("isbn"),
             "title": decision.get("title"),
-            # Name des Ausleihers NUR für den Helfer-Scanner (Modus A) — der
-            # Schüler-Client (Modus B) bekommt ihn bewusst nicht (Privatheit:
-            # der Schüler sieht nur „Buch noch verliehen", nicht WEM es gehört).
-            # Der Host erhält den Namen immer über den book_alert-Broadcast.
+            # Name/Klasse des Ausleihers NUR für den Helfer-Scanner (Modus A) —
+            # der Schüler-Client (Modus B) bekommt sie bewusst nicht (Privatheit:
+            # der Schüler sieht nur „Buch noch verliehen"/"ausgemustert", nicht
+            # WEM es gehört). Der Host erhält sie immer über den book_alert-
+            # Broadcast.
             "loaned_to": decision.get("loaned_to") if source != "student" else None,
             "loaned_to_id": decision.get("loaned_to_id") if source != "student" else None,
+            "loaned_to_firstname": (
+                decision.get("loaned_to_firstname") if source != "student" else None
+            ),
+            "loaned_to_lastname": (
+                decision.get("loaned_to_lastname") if source != "student" else None
+            ),
+            "loaned_to_form": decision.get("loaned_to_form") if source != "student" else None,
         }
     if get_config().allow_booking:
         result = await handle_commit(state, student_id, barcode)

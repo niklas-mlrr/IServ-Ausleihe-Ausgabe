@@ -27,10 +27,11 @@ function isBookDone(b, scannedIsbns) {
 // "<Buchcode> bereits an dich verliehen — <Titel>"; `series_already_lent`
 // (ein ANDERES Exemplar derselben Reihe) →
 // "<Buchcode> Buchreihe bereits an dich verliehen — <Titel>". Ausgemustert
-// OHNE Ersatzanspruch (kein `msg.loaned_to` — am Schüler-Client ohnehin
-// immer null, Privatheit) → "<Buchcode> ausgemustert — <Titel>" statt der
-// technischen `msg`; MIT Ersatzanspruch bleibt der generische Fallback
-// unten (technische `msg`). `books` ist die aktuelle Bücherliste
+// zerfällt in zwei Fälle (`msg.loaned_to` — am Schüler-Client ohnehin immer
+// null, Privatheit, fällt dort also immer auf den ersten Fall zurück): OHNE
+// Ersatzanspruch → "<Buchcode> ausgemustert — <Titel>"; MIT Ersatzanspruch →
+// "<Buchcode> Ersatzanspruch an <Nachname>, <Vorname> (<Klasse>) — <Titel>"
+// statt der technischen `msg`. `books` ist die aktuelle Bücherliste
 // (student_info/currentBooks) der aufrufenden Seite.
 function scanResultStatusText(msg, books) {
   if (msg.status === 'booked') {
@@ -43,6 +44,11 @@ function scanResultStatusText(msg, books) {
   }
   if (msg.status === 'series_already_lent') {
     return `${msg.barcode} Buchreihe bereits an dich verliehen — ${msg.title || ''}`;
+  }
+  if (msg.status === 'book_deleted' && msg.loaned_to) {
+    const last = msg.loaned_to_lastname, first = msg.loaned_to_firstname;
+    const name = (last || first) ? `${last || ''}, ${first || ''}${msg.loaned_to_form ? ` (${msg.loaned_to_form})` : ''}` : msg.loaned_to;
+    return `${msg.barcode} Ersatzanspruch an ${name} — ${msg.title || ''}`;
   }
   if (msg.status === 'book_deleted' && !msg.loaned_to) {
     return `${msg.barcode} ausgemustert — ${msg.title || ''}`;
