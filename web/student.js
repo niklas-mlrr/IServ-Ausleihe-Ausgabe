@@ -10,6 +10,21 @@ function show(name) {
 }
 // escapeHtml, isBookDone, initAudio/playBeep (Beeper): siehe common.js.
 
+// Statuszeile IMMER über diesen Helper setzen (nie textContent/classList
+// direkt), damit Text und Aussehen (Farbe) untrennbar zusammen wechseln —
+// die Statuszeile behält ihr Aussehen, bis eine neue Meldung ihren Text
+// ersetzt (z. B. bleibt eine „ausgemustert"-Meldung rot stehen, bis der
+// nächste Scan eine neue Statuszeile setzt; das Freigeben durch den Host
+// (`book_alert_clear`) ändert den Text NICHT und ruft diesen Helper daher
+// bewusst nicht auf).
+function setStatusText(text, isAlert = false, isIssued = false, isAlreadyLent = false) {
+  const el = document.getElementById('status-text');
+  el.textContent = text;
+  el.classList.toggle('status-book-deleted', isAlert);
+  el.classList.toggle('status-book-issued', isIssued);
+  el.classList.toggle('status-already-lent', isAlreadyLent);
+}
+
 const joinSecret = new URLSearchParams(location.search).get('j');
 let token = sessionStorage.getItem('mb_token');
 let ws = null, finished = false, scannerStarted = false;
@@ -68,7 +83,7 @@ function connect() {
         else show('done');
         return;
       }
-      document.getElementById('status-text').textContent = 'Getrennt — neu verbinden…';
+      setStatusText('Getrennt — neu verbinden…');
       reconnect();                                 // Netzproblem → erneut (mit Backoff)
     },
   });
@@ -89,11 +104,8 @@ function handleServerMessage(msg) {
     workerPending = false;
     currentBooks = msg.books || [];
     renderBooks(currentBooks);
-    statusEl.textContent = 'Scanner bereit — Buch scannen';
+    setStatusText('Scanner bereit — Buch scannen');
   } else if (msg.type === 'scan_result') {
-    const statusTextEl = document.getElementById('status-text');
-    // Plain text (kein HTML) — textContent interpretiert keine Entities.
-    statusTextEl.textContent = scanResultStatusText(msg, currentBooks);
     // Jeder nicht-verbuchbare Scan → Hinweis-Modal (wie bisher bei
     // ausgemustert / verliehen / an-sich-selbst, jetzt auch für „nicht
     // bestellt", „unbekannt", „noch nicht geladen", Prüf-Fehler).
@@ -106,9 +118,12 @@ function handleServerMessage(msg) {
     const blocking = BLOCKING_STATUSES_STUDENT.has(msg.status);
     const dismissible = !ok && !blocking;
     const alreadyLent = msg.status === 'book_already_lent' || msg.status === 'series_already_lent';
-    statusTextEl.classList.toggle('status-book-deleted', !ok && !alreadyLent);
-    statusTextEl.classList.toggle('status-book-issued', msg.status === 'booked');
-    statusTextEl.classList.toggle('status-already-lent', alreadyLent);
+    setStatusText(
+      scanResultStatusText(msg, currentBooks),
+      !ok && !alreadyLent,
+      msg.status === 'booked',
+      alreadyLent
+    );
     if (blocking) { bookAlertOpen = true; showBookAlertModal(msg, false); }
     else if (dismissible) { showBookAlertModal(msg, true); }
     // Erfolgreicher Scan → Buch als „erledigt" markieren (sinkt nach unten).
@@ -118,13 +133,15 @@ function handleServerMessage(msg) {
       renderBooks(currentBooks, true);   // FLIP: Zeilen an neue Position fahren
     }
   } else if (msg.type === 'book_alert_clear') {
+    // Der Host gibt frei — nur das Modal schließt. Die Statuszeile behält
+    // Text UND Aussehen (z. B. rot „ausgemustert") bis zur nächsten
+    // scan_result-Meldung; sie ändert sich nur zusammen mit neuem Text.
     bookAlertOpen = false;
-    document.getElementById('status-text').classList.remove('status-book-deleted');
     closeBookAlertModal();
   } else if (msg.type === 'closed') {
     finished = true; clearToken(); show('done');
   } else if (msg.type === 'error') {
-    document.getElementById('status-text').textContent = 'Fehler: ' + (msg.msg || '');
+    setStatusText('Fehler: ' + (msg.msg || ''));
   }
 }
 
@@ -197,7 +214,6 @@ bookAlertCloseBtn.addEventListener('click', closeBookAlertModal);
 function renderStudent(s, overridden) {
   bookAlertOpen = false;
   closeBookAlertModal();
-  document.getElementById('status-text').classList.remove('status-book-deleted');
   document.getElementById('s-name').textContent = `${s.lastname}, ${s.firstname}`;
   document.getElementById('s-form').textContent = (s.form || '').replace(/^Klasse\s+/i, '');
   const pay = document.getElementById('s-pay');
@@ -233,7 +249,7 @@ function renderStudent(s, overridden) {
   scannedIsbns.clear(); scanOrder.clear(); scanSeq = 0;
   document.getElementById('book-rows').innerHTML =
     '<div class="book-empty">Bücher werden geladen…</div>';
-  document.getElementById('status-text').textContent = 'Wird geladen…';
+  setStatusText('Wird geladen…');
 }
 
 function renderBooks(books, animate = false) {
@@ -318,7 +334,6 @@ document.getElementById('finish-btn').addEventListener('click', () => {
 // ================= Scanner (aus scan.html übernommen) =================
 let lastValue = '', cooldown = false, html5QrCode = null, currentCameraId = null,
     isTorchOn = false, isRestarting = false, soundEnabled = false;
-const statusEl = document.getElementById('status-text');
 const cameraSelect = document.getElementById('camera-select');
 const ICON_VOLUME_ON = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>';
 const ICON_VOLUME_OFF = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>';
@@ -380,20 +395,20 @@ async function initScanner(cameraId) {
   isRestarting = true; reloadBtn.disabled = true; reloadBtn.textContent = '…';
   // Während des Ladens („Wird geladen…") Status nicht vom Kamera-Start
   // überschreiben lassen — `worker_ready` setzt danach den Ready-Status.
-  if (!workerPending) statusEl.textContent = 'Kamera startet…';
+  if (!workerPending) setStatusText('Kamera startet…');
   if (html5QrCode) { try { await html5QrCode.stop(); } catch (e) {} try { html5QrCode.clear(); } catch (e) {} html5QrCode = null; }
   html5QrCode = new Html5Qrcode('reader');
   try {
     await html5QrCode.start(cameraId, { fps: 15, aspectRatio: 2.0 }, onScanSuccess, () => {});
     currentCameraId = cameraId; isTorchOn = false;
     torchBtn.classList.remove('torch-on');
-    if (!workerPending) statusEl.textContent = 'Scanner bereit — Buch scannen';
+    if (!workerPending) setStatusText('Scanner bereit — Buch scannen');
     const video = document.querySelector('#reader video');
     if (video && video.srcObject) {
       const caps = video.srcObject.getVideoTracks()[0].getCapabilities?.();
       torchBtn.disabled = !(caps && caps.torch);
     }
-  } catch (err) { if (!workerPending) statusEl.textContent = 'Kamerafehler — neu laden'; document.getElementById('dot').className = 'dot err'; }
+  } catch (err) { if (!workerPending) setStatusText('Kamerafehler — neu laden'); document.getElementById('dot').className = 'dot err'; }
   reloadBtn.innerHTML = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>'; reloadBtn.disabled = false; isRestarting = false;
 }
 

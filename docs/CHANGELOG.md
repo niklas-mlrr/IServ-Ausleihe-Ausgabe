@@ -8,6 +8,30 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-12 — Fix: Statuszeile am Schüler-Client verlor Aussehen ohne Textwechsel
+
+Niklas meldete, dass die Statuszeile am Schüler-Client (Modus B) ihr
+Aussehen (z. B. Rot bei „ausgemustert") verlieren sollte, aber nur wenn
+sich der TEXT ändert — nicht vorher. Ursache: `student.js` setzte
+`#status-text`-Textinhalt und die Alert-CSS-Klassen (`status-book-deleted`
+etc.) an mehreren Stellen unabhängig voneinander (direktes
+`textContent`/`classList` statt eines gemeinsamen Helpers, anders als
+`scan.js`/`scan-ws.js`, die von Anfang an über `setStatusText()` liefen).
+Konkret riss der `book_alert_clear`-Handler (Host gibt eine ausgemustert-/
+verliehen-Meldung frei) `status-book-deleted` sofort weg, OBWOHL der Text
+unverändert blieb — die rote Statuszeile wurde vorzeitig wieder normal,
+obwohl noch dieselbe Meldung dastand. Umgekehrt setzten mehrere Stellen
+(`worker_ready`, Kamera-Neustart, Reconnect, Fehler) neuen Text OHNE die
+Alert-Klassen zurückzusetzen — eine neue neutrale Meldung hätte fälschlich
+in der alten Alert-Farbe erscheinen können.
+
+Fix: neuer gemeinsamer `setStatusText(text, isAlert, isIssued,
+isAlreadyLent)`-Helper in `web/student.js` (analog zu `scan-state.js`),
+JEDE Statuszeilen-Änderung läuft jetzt darüber. Der `book_alert_clear`-
+Handler ruft ihn bewusst NICHT mehr auf — nur das Modal schließt, Text und
+Farbe der Statuszeile bleiben bis zur nächsten `scan_result`-Meldung
+unverändert stehen.
+
 ## 2026-07-12 — Schüler-Client: Warten-Hinweistext + Schrift-Gewichtung im Bereits-verliehen-Modal getauscht
 
 Blockierendes Hinweis-Modal am Schüler-Client (`book_deleted`/`not_in_stock`,
