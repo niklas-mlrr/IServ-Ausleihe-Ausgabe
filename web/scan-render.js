@@ -339,18 +339,20 @@ function showBookAlertModal(msg) {
     bookAlertNoteEl.hidden = false;
   } else if (deletedWithReplacement) {
     bookAlertTextEl.textContent = `${msg.barcode} — ${msg.title || meta.title}`;
-    // Name/Klasse fett — innerHTML mit escapeHtml()-ten Werten, damit keine
-    // rohen IServ-Strings ungefiltert eingesetzt werden (s. common.js).
+    // Name/Klasse fett, Klammern um die Klasse NICHT fett — innerHTML mit
+    // escapeHtml()-ten Werten, damit keine rohen IServ-Strings ungefiltert
+    // eingesetzt werden (s. common.js).
     bookAlertNoteEl.innerHTML =
-      `Für dieses Buch liegt ein Ersatzanspruch an <strong>${borrowerNameHtml(msg)}</strong> vor. ` +
+      `Für dieses Buch liegt ein Ersatzanspruch an ${borrowerNameHtml(msg)} vor. ` +
       'Es kann derzeit nicht ausgeliehen werden.';
     bookAlertNoteEl.hidden = false;
   } else if (msg.status === 'not_in_stock') {
-    // "An jemand anderen verliehen": Name/Klasse (plain, kein Fett verlangt)
-    // direkt in der Notiz statt der bisherigen separaten Zeile.
+    // "An jemand anderen verliehen": Name/Klasse fett (gleiches Format wie
+    // beim Ersatzanspruch) direkt in der Notiz statt einer eigenen Zeile.
     bookAlertTextEl.textContent = `${msg.barcode} — ${msg.title || meta.title}`;
-    bookAlertNoteEl.textContent =
-      `Dieses Buch ist bereits an ${borrowerPlain(msg)} verliehen. Es kann nicht auf den Schüler verliehen werden.`;
+    bookAlertNoteEl.innerHTML =
+      `Dieses Buch ist bereits an ${borrowerNameHtml(msg)} verliehen. ` +
+      'Es kann nicht auf den Schüler verliehen werden.';
     bookAlertNoteEl.hidden = false;
   } else {
     bookAlertTextEl.textContent = `${msg.barcode} — ${msg.msg || meta.title}`;
@@ -364,22 +366,16 @@ function showBookAlertModal(msg) {
 function borrowerForm(msg) {
   return (msg.loaned_to_form || '').replace(/^Klasse\s+/i, '');
 }
-// "Nachname, Vorname (Klasse)" für die Ersatzanspruch-Notiz — HTML-escaped,
-// mit Fallback auf das vorformatierte `loaned_to` ("Vorname Nachname"),
-// falls Vor-/Nachname aus irgendeinem Grund fehlen (Lookup-Fehler).
+// "<strong>Nachname, Vorname</strong> (<strong>Klasse</strong>)" — Name UND
+// Klasse fett, die Klammern selbst bewusst NICHT fett. HTML-escaped, mit
+// Fallback auf das vorformatierte `loaned_to` ("Vorname Nachname"), falls
+// Vor-/Nachname aus irgendeinem Grund fehlen (Lookup-Fehler).
 function borrowerNameHtml(msg) {
   const last = msg.loaned_to_lastname, first = msg.loaned_to_firstname;
-  if (!last && !first) return escapeHtml(msg.loaned_to || '');
+  if (!last && !first) return `<strong>${escapeHtml(msg.loaned_to || '')}</strong>`;
   const form = borrowerForm(msg);
-  return escapeHtml(`${last || ''}, ${first || ''}${form ? ` (${form})` : ''}`);
-}
-// "Nachname, Vorname, Klasse" für die "an jemand anderen verliehen"-Notiz
-// (plain text — textContent escaped selbst, kein escapeHtml() nötig).
-function borrowerPlain(msg) {
-  const last = msg.loaned_to_lastname, first = msg.loaned_to_firstname;
-  if (!last && !first) return msg.loaned_to || '';
-  const form = borrowerForm(msg);
-  return `${last || ''}, ${first || ''}${form ? `, ${form}` : ''}`;
+  const namePart = `<strong>${escapeHtml(`${last || ''}, ${first || ''}`)}</strong>`;
+  return form ? `${namePart} (<strong>${escapeHtml(form)}</strong>)` : namePart;
 }
 function closeBookAlertModal() { bookAlertModal.classList.remove('show'); }
 // Bewusstes Schließen durch den Helfer → zusätzlich Host-Meldung aufräumen.

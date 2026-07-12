@@ -8,6 +8,22 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-12 — Nachbesserung: Name/Klasse auch bei "an jemand anderen verliehen" fett, Klammern selbst nicht fett
+
+Zwei Korrekturen an der Helfer-Client-Notiz aus dem Eintrag darunter:
+
+- Format von "Nachname, Vorname, Klasse" (Komma-getrennt) auf "Nachname,
+  Vorname (Klasse)" (Klammern, wie beim Ersatzanspruch) geändert.
+- Name UND Klasse jetzt fett — Niklas wollte das ursprünglich als "plain"
+  eingestufte `not_in_stock`-Format doch fett, wie beim Ersatzanspruch.
+  Die Klammern selbst bleiben bewusst NICHT fett (nur ihr Inhalt).
+  `borrowerNameHtml()` in `web/scan-render.js` baut jetzt
+  `<strong>Nachname, Vorname</strong> (<strong>Klasse</strong>)` — von
+  BEIDEN Notizen (Ersatzanspruch UND „an jemand anderen verliehen")
+  gemeinsam genutzt, damit die Klammer-Regel an beiden Stellen konsistent
+  ist (vorher umschloss der Ersatzanspruch-Aufruf den gesamten String
+  inkl. Klammern in einem `<strong>`).
+
 ## 2026-07-12 — "An jemand anderen verliehen" (`not_in_stock`) bekommt eigene Meldung analog zu ausgemustert
 
 Bisher zeigte `not_in_stock` ("Buch aktuell an jemand anderen verliehen")
