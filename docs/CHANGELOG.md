@@ -8,6 +8,19 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-12 — Schüler-Client: Betreuer-Hinweis bei selbst schließbaren Meldungen
+
+Selbst schließbare Hinweis-Meldungen (`dismissible` — alles außer den
+Host-blockierten `book_deleted`/`not_in_stock`, z. B. „bereits an dich
+verliehen", „nicht bestellt", „unbekannt") bekommen jetzt einen zusätzlichen
+Satz über dem Schließen-Button, in derselben unscheinbaren Schrift wie die
+Code/Titel-Zeile oben (`opacity:.6; font-size:.85rem`): „Falls dieser Fehler
+unerwartet weiterhin auftritt, melde dich bitte beim Betreuer." Neues
+Element `#book-alert-support` in `web/student.html`, befüllt/versteckt in
+`showBookAlertModal()` (`web/student.js`) je nach `dismissible`. Nur
+Schüler-Client — der Helfer-Client hat kein analoges Element (schließt seine
+Meldungen selbst, ohne Betreuer-Bezug).
+
 ## 2026-07-12 — Helfer-Client: "dich" durch "den Schüler" ersetzt
 
 Bei `book_already_lent`/`series_already_lent` sprachen Modal und Statuszeile

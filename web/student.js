@@ -148,6 +148,7 @@ const bookAlertTitleEl = document.getElementById('book-alert-title');
 const bookAlertTextEl = document.getElementById('book-alert-text');
 const bookAlertNoteEl = document.getElementById('book-alert-note');
 const bookAlertHintEl = document.getElementById('book-alert-hint');
+const bookAlertSupportEl = document.getElementById('book-alert-support');
 const bookAlertActionsEl = document.getElementById('book-alert-actions');
 const bookAlertCloseBtn = document.getElementById('book-alert-close');
 const ALERT_META_STUDENT = {
@@ -209,9 +210,16 @@ function showBookAlertModal(msg, dismissible) {
   if (dismissible) {
     bookAlertHintEl.textContent = 'Du kannst diese Meldung selbst schließen.';
     bookAlertActionsEl.style.display = '';
+    // Selbst schließbare Meldungen bekommen zusätzlich, in unscheinbarer
+    // Schrift (wie Code/Titel oben), einen Hinweis auf den Betreuer, falls
+    // der Fehler unerwartet wiederholt auftritt.
+    bookAlertSupportEl.textContent = 'Falls dieser Fehler unerwartet weiterhin auftritt, melde dich bitte beim Betreuer.';
+    bookAlertSupportEl.hidden = false;
   } else {
     bookAlertHintEl.textContent = 'Bitte warte, bis ein Helfer dieses Buch einsammelt und dich freigibt.';
     bookAlertActionsEl.style.display = 'none';
+    bookAlertSupportEl.textContent = '';
+    bookAlertSupportEl.hidden = true;
   }
   bookAlertModalEl.classList.add('show');
 }
