@@ -8,6 +8,15 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-12 — Nachbesserung: kürzerer Notiztext für unbekannten Code am Schüler-Client
+
+Notiztext bei `unknown_book` am Schüler-Client (`web/student.js`) geändert
+von „Dieser Buchcode ist unbekannt. Das Buch kann nicht verliehen werden."
+zu „Dieser Code ist unbekannt. Bitte nochmal scannen." — reines Wording,
+die Formatierung (Notiz normal, Betreuer-Hinweis darunter gedämpft)
+stimmte bereits mit den Regeln für selbst schließbare Meldungen überein.
+Helfer-Client (`web/scan-render.js`) unverändert.
+
 ## 2026-07-12 — Unbekannter Code (`unknown_book`) bekommt eigene Meldung, jetzt orange
 
 `unknown_book` (gescannter Barcode existiert laut API nicht — kein Titel/
