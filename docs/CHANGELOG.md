@@ -8,6 +8,14 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-12 — Nachbesserung: Klammern um die Klasse doch fett (gesamter Namensbereich)
+
+Korrektur am Eintrag darunter: Niklas wollte die Klammern um die Klasse
+entgegen der vorherigen Nachbesserung DOCH fett — `borrowerNameHtml()`
+(`web/scan-render.js`) umschließt jetzt wieder den gesamten Namensbereich
+inkl. Klammern in einem `<strong>` ("Nachname, Vorname (Klasse)"), statt
+Name/Klasse und Klammern separat zu stylen.
+
 ## 2026-07-12 — Nachbesserung: Name/Klasse auch bei "an jemand anderen verliehen" fett, Klammern selbst nicht fett
 
 Zwei Korrekturen an der Helfer-Client-Notiz aus dem Eintrag darunter:

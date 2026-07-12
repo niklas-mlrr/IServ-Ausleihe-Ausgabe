@@ -366,16 +366,15 @@ function showBookAlertModal(msg) {
 function borrowerForm(msg) {
   return (msg.loaned_to_form || '').replace(/^Klasse\s+/i, '');
 }
-// "<strong>Nachname, Vorname</strong> (<strong>Klasse</strong>)" — Name UND
-// Klasse fett, die Klammern selbst bewusst NICHT fett. HTML-escaped, mit
-// Fallback auf das vorformatierte `loaned_to` ("Vorname Nachname"), falls
-// Vor-/Nachname aus irgendeinem Grund fehlen (Lookup-Fehler).
+// "<strong>Nachname, Vorname (Klasse)</strong>" — der gesamte Namensbereich
+// inkl. Klammern fett. HTML-escaped, mit Fallback auf das vorformatierte
+// `loaned_to` ("Vorname Nachname"), falls Vor-/Nachname aus irgendeinem
+// Grund fehlen (Lookup-Fehler).
 function borrowerNameHtml(msg) {
   const last = msg.loaned_to_lastname, first = msg.loaned_to_firstname;
   if (!last && !first) return `<strong>${escapeHtml(msg.loaned_to || '')}</strong>`;
   const form = borrowerForm(msg);
-  const namePart = `<strong>${escapeHtml(`${last || ''}, ${first || ''}`)}</strong>`;
-  return form ? `${namePart} (<strong>${escapeHtml(form)}</strong>)` : namePart;
+  return `<strong>${escapeHtml(`${last || ''}, ${first || ''}${form ? ` (${form})` : ''}`)}</strong>`;
 }
 function closeBookAlertModal() { bookAlertModal.classList.remove('show'); }
 // Bewusstes Schließen durch den Helfer → zusätzlich Host-Meldung aufräumen.
