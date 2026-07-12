@@ -365,6 +365,7 @@ async def process_scan(
             "status": decision["status"],
             "msg": decision["msg"],
             "isbn": decision.get("isbn"),
+            "title": decision.get("title"),
             # Name des Ausleihers NUR für den Helfer-Scanner (Modus A) — der
             # Schüler-Client (Modus B) bekommt ihn bewusst nicht (Privatheit:
             # der Schüler sieht nur „Buch noch verliehen", nicht WEM es gehört).

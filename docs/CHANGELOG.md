@@ -8,6 +8,22 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-12 — Fix: fehlender Buchtitel im Bereits-verliehen-Modal/Statuszeile
+
+Nachbesserung am Eintrag darunter: `process_scan()` (`server/sessions.py`)
+reichte im `scan_result`-Payload für nicht-buchbare Status (u. a.
+`book_already_lent`/`series_already_lent`) keinen `title` durch — nur
+`msg` (die technische, längere Server-Meldung). Folge: Im Modal stand hinter
+dem Buchcode statt des Titels die Modal-Überschrift (Fallback `meta.title`),
+in der Statuszeile stand hinter dem Bindestrich die ganze technische `msg`
+statt nur des Titels. Fix: `title` (bereits Teil von `decision` in
+`evaluate_scan_for_booking`) wird jetzt mit ins `scan_result`-Payload
+gegeben. Zusätzlich bekommt die Statuszeile für `series_already_lent`
+jetzt ebenfalls " — <Titel>" (fehlte bisher komplett, war nur für
+`book_already_lent` vorhanden) — `web/common.js` (`scanResultStatusText`).
+Neuer Test `test_process_scan_result_carries_title_for_already_lent`
+(`tests/test_booking_precheck.py`).
+
 ## 2026-07-12 — Unterscheidung Buch- vs. Buchreihe-bereits-verliehen (`book_already_lent` neu)
 
 Nachbesserung am bisherigen `series_already_lent`-Hinweis (Eintrag darunter):

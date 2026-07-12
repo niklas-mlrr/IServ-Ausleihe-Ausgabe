@@ -381,6 +381,21 @@ def test_process_scan_no_alert_for_series_already_lent(monkeypatch):
     assert hub.broadcasts == []
 
 
+def test_process_scan_result_carries_title_for_already_lent(monkeypatch):
+    # Client-Statuszeile/-Modal brauchen den Buchtitel (nicht nur `msg`, das
+    # ist die längere technische Server-Meldung) — process_scan muss ihn im
+    # scan_result-Payload durchreichen, für beide already-lent-Fälle.
+    monkeypatch.setattr(sessions, "get_config", lambda: _Cfg(False))
+    _patch_hub(monkeypatch)
+    state = _State(_FakeIserv(_book(code="B1")))
+    res_book = _process(state, 42, set(), {"978-1"}, lent_codes={"B1"}, source="helper")
+    assert res_book["status"] == "book_already_lent"
+    assert res_book["title"] == "Mathe 5"
+    res_series = _process(state, 42, set(), {"978-1"}, source="helper")
+    assert res_series["status"] == "series_already_lent"
+    assert res_series["title"] == "Mathe 5"
+
+
 def test_process_scan_no_alert_for_book_already_lent(monkeypatch):
     # „Dieses Buch bereits an dich verliehen" (exakt dasselbe Exemplar) →
     # ebenfalls nur Hinweis am Client, kein Host-Alert.

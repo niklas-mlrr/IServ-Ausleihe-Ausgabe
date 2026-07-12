@@ -20,10 +20,13 @@ function isBookDone(b, scannedIsbns) {
 // ('booked', ALLOW_BOOKING an) nicht die technische DOM-Best-effort-Meldung
 // des Workers, sondern "<Buchcode> ausgegeben — <Fach> — <Titel>" (ohne
 // Bindestrich zwischen Buchcode und "ausgegeben", anders als bei den übrigen
-// Status-Meldungen). Zwei „an dich selbst verliehen"-Fälle: `book_already_lent`
-// (genau dieses Exemplar) → "<Buchcode> bereits an dich verliehen — <Titel>";
-// `series_already_lent` (ein ANDERES Exemplar derselben Reihe) →
-// "<Buchcode> Buchreihe bereits an dich verliehen" (ohne Titel). `books` ist
+// Status-Meldungen). Zwei „an dich selbst verliehen"-Fälle — jeweils NUR der
+// Buchtitel hinterm Bindestrich (`msg.title`, vom Server durchgereicht; NICHT
+// `msg.msg`, das ist die technische, längere Server-Meldung):
+// `book_already_lent` (genau dieses Exemplar) →
+// "<Buchcode> bereits an dich verliehen — <Titel>"; `series_already_lent`
+// (ein ANDERES Exemplar derselben Reihe) →
+// "<Buchcode> Buchreihe bereits an dich verliehen — <Titel>". `books` ist
 // die aktuelle Bücherliste (student_info/currentBooks) der aufrufenden Seite.
 function scanResultStatusText(msg, books) {
   if (msg.status === 'booked') {
@@ -32,10 +35,10 @@ function scanResultStatusText(msg, books) {
     return `${msg.barcode} ausgegeben${detail ? ' — ' + detail : ''}`;
   }
   if (msg.status === 'book_already_lent') {
-    return `${msg.barcode} bereits an dich verliehen — ${msg.title || msg.msg || ''}`;
+    return `${msg.barcode} bereits an dich verliehen — ${msg.title || ''}`;
   }
   if (msg.status === 'series_already_lent') {
-    return `${msg.barcode} Buchreihe bereits an dich verliehen`;
+    return `${msg.barcode} Buchreihe bereits an dich verliehen — ${msg.title || ''}`;
   }
   return `${msg.barcode} — ${msg.msg || msg.status}`;
 }
