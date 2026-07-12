@@ -8,6 +8,44 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-12 — "An jemand anderen verliehen" (`not_in_stock`) bekommt eigene Meldung analog zu ausgemustert
+
+Bisher zeigte `not_in_stock` ("Buch aktuell an jemand anderen verliehen")
+generisch „Buch noch verliehen" + technische `msg`, am Helfer-Client
+zusätzlich eine separate „Aktuell verliehen an: {Name}"-Zeile ohne Klasse.
+Niklas wollte dieselbe dreiteilige Struktur wie bei den anderen Alerts
+(Titel/Code+Titel/Notiz), am Schüler-Client identisch zum Aufbau von
+„ausgemustert", am Helfer-Client mit Name+Klasse in der Notiz statt der
+separaten Zeile.
+
+- **Backend (`server/iserv_client.py`).** `loaned_to_form` (Klasse) wird
+  jetzt bei JEDEM Buch mit bekanntem Ausleiher aufgelöst (vorher nur bei
+  ausgemusterten Büchern) — sowohl für `not_in_stock` als auch weiterhin für
+  den Ersatzanspruch-Fall. `evaluate_scan_for_booking()`s `not_in_stock`-
+  Zweig (`server/sessions.py`) reicht `loaned_to_firstname`/`loaned_to_lastname`/
+  `loaned_to_form` jetzt ebenfalls durch (Host-Broadcast + Helfer-Payload;
+  Schüler-Client weiterhin `null`, Privatheit — `msg` bleibt namensfrei).
+- **Modal Schüler-Client (`web/student.js`).** Titel „Buch bereits
+  verliehen" (rot, ersetzt „Buch noch verliehen"), darunter
+  `<Buchcode> — <Titel>`, darunter „Dieses Buch ist bereits an jemand
+  anders verliehen. Es kann derzeit nicht an dich verliehen werden."
+- **Modal Helfer-Client (`web/scan-render.js`).** Titel „Buch bereits
+  verliehen" (rot), darunter `<Buchcode> — <Titel>`, darunter „Dieses Buch
+  ist bereits an <Nachname>, <Vorname>, <Klasse> verliehen. Es kann nicht
+  auf den Schüler verliehen werden." (plain, kein Fett — anders als beim
+  Ersatzanspruch). Die alte separate `#book-alert-borrower`-Zeile
+  (`"Aktuell verliehen an: …"`) ist komplett entfernt (HTML+CSS+JS,
+  `scan.html`/`scan-state.js`/`scan-render.js`) — war zuletzt nur noch für
+  `not_in_stock` in Gebrauch und ist jetzt durch die Notiz ersetzt.
+- **Statuszeile.** "<Buchcode> bereits verliehen — <Titel>" (rot, ohne
+  Name — der Schüler sieht nie WEM) — `web/common.js`
+  (`scanResultStatusText`), für beide Clients gleich.
+- **Tests.** `tests/test_iserv_client_borrower.py` angepasst: der bisherige
+  „kein Extra-Request für nicht-ausgemusterte Bücher"-Test ist jetzt ein
+  „Klasse wird auch für normal verliehene Bücher aufgelöst"-Test (die
+  Effizienz-Ausnahme galt nur, solange die Klasse ausschließlich für den
+  Ersatzanspruch gebraucht wurde). Volle Suite grün.
+
 ## 2026-07-12 — Nachbesserung: Klasse ohne "Klasse "-Präfix, Warten-Hinweis "dieses Buch" statt "dein Buch"
 
 Zwei kleine Textkorrekturen an den beiden vorherigen Einträgen:

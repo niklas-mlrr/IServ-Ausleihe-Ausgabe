@@ -299,6 +299,9 @@ async def evaluate_scan_for_booking(
             "title": title,
             "loaned_to": loaned_to,
             "loaned_to_id": loaned_to_id,
+            "loaned_to_firstname": book.get("loaned_to_firstname"),
+            "loaned_to_lastname": book.get("loaned_to_lastname"),
+            "loaned_to_form": book.get("loaned_to_form"),
         }
 
     # Bedingung 2: bestellt UND Reihe noch nicht ausgeliehen.

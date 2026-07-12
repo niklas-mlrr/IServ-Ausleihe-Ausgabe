@@ -514,17 +514,16 @@ class IsServClient:
         `loaned_to` („Vorname Nachname") ist der **aktueller Ausleiher**, wenn das
         Buch verliehen ist (`distributed`); `loaned_to_id` dessen student_id;
         `loaned_to_firstname`/`loaned_to_lastname` dieselbe Person in getrennten
-        Feldern (für Formatierungen wie „Nachname, Vorname"). Die
+        Feldern (für Formatierungen wie „Nachname, Vorname"); `loaned_to_form`
+        dessen Klasse (per zusätzlichem read-only Request `GET
+        /students/:id?forms=true`, sobald ein Ausleiher bekannt ist — für die
+        „an jemand anderen verliehen"- UND die Ersatzanspruch-Meldung). Die
         `/books/:code`-Antwort bettet den Ausleiher bereits als `Student` ein, der
-        Normalfall braucht also keinen Extra-Request. Fehlt die Einbettung (oder
-        ist anonymisiert), wird per `get_by_id` nachgeladen — read-only
-        `GET /students/:id`. Bei Fehlern bleiben die Felder `None` (die
-        Lager-Prüfung bleibt davon unberührt). `loaned_to_form` (Klasse) wird NUR
-        bei ausgemusterten Büchern mit Schüler-Verknüpfung (Ersatzanspruch-Fall)
-        per zusätzlichem read-only Request (`GET /students/:id?forms=true`)
-        aufgelöst — sonst `None`, um den Normalfall nicht mit einem weiteren
-        Request zu belasten. Namen/Klasse werden NUR an die UI durchgereicht,
-        nie geloggt (PLAN §3.7).
+        Normalfall braucht also für Name/Id keinen Extra-Request. Fehlt die
+        Einbettung (oder ist anonymisiert), wird per `get_by_id` nachgeladen —
+        read-only `GET /students/:id`. Bei Fehlern bleiben die Felder `None`
+        (die Lager-Prüfung bleibt davon unberührt). Namen/Klasse werden NUR an
+        die UI durchgereicht, nie geloggt (PLAN §3.7).
         """
 
         def _sync() -> dict | None:
@@ -541,7 +540,7 @@ class IsServClient:
             first, last, loaned_to_id = self._resolve_current_borrower(client, book)
             loaned_to = f"{first} {last}".strip() if (first or last) else None
             loaned_to_form = None
-            if book.deleted and loaned_to_id is not None:
+            if loaned_to_id is not None:
                 loaned_to_form = self._resolve_student_form(client, loaned_to_id)
             return {
                 "code": book.code,

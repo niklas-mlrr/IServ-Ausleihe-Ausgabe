@@ -308,8 +308,9 @@ function showBookAlertModal(msg) {
   // generischen „Ausgemustertes Buch gescannt" + technischen msg:
   // OHNE Ersatzanspruch (kein loaned_to) → "Buch ausgemustert"; MIT
   // Ersatzanspruch (loaned_to gesetzt) → "Für das Buch gibt es einen
-  // Ersatzanspruch", Name/Klasse fett in der Notiz statt eigener Zeile
-  // (bookAlertBorrowerEl bleibt für diesen Fall versteckt).
+  // Ersatzanspruch", Name/Klasse fett in der Notiz. „An jemand anderen
+  // verliehen" (not_in_stock) bekommt Name/Klasse (plain) ebenso in der
+  // Notiz statt einer eigenen Zeile.
   const deletedNoReplacement = msg.status === 'book_deleted' && !msg.loaned_to;
   const deletedWithReplacement = msg.status === 'book_deleted' && !!msg.loaned_to;
   bookAlertTitleEl.textContent = deletedNoReplacement
@@ -344,33 +345,41 @@ function showBookAlertModal(msg) {
       `Für dieses Buch liegt ein Ersatzanspruch an <strong>${borrowerNameHtml(msg)}</strong> vor. ` +
       'Es kann derzeit nicht ausgeliehen werden.';
     bookAlertNoteEl.hidden = false;
+  } else if (msg.status === 'not_in_stock') {
+    // "An jemand anderen verliehen": Name/Klasse (plain, kein Fett verlangt)
+    // direkt in der Notiz statt der bisherigen separaten Zeile.
+    bookAlertTextEl.textContent = `${msg.barcode} — ${msg.title || meta.title}`;
+    bookAlertNoteEl.textContent =
+      `Dieses Buch ist bereits an ${borrowerPlain(msg)} verliehen. Es kann nicht auf den Schüler verliehen werden.`;
+    bookAlertNoteEl.hidden = false;
   } else {
     bookAlertTextEl.textContent = `${msg.barcode} — ${msg.msg || meta.title}`;
     bookAlertNoteEl.textContent = '';
     bookAlertNoteEl.hidden = true;
   }
-  // „currently lent to someone else": Name des aktuellen Ausleihers als
-  // eigene Zeile — nur bei not_in_stock (bei book_deleted mit Ersatzanspruch
-  // steckt Name/Klasse jetzt in der Notiz oben, keine eigene Zeile mehr).
-  if (msg.loaned_to && msg.status === 'not_in_stock') {
-    bookAlertBorrowerEl.textContent = `Aktuell verliehen an: ${msg.loaned_to}`;
-    bookAlertBorrowerEl.hidden = false;
-  } else {
-    bookAlertBorrowerEl.textContent = '';
-    bookAlertBorrowerEl.hidden = true;
-  }
   bookAlertModal.classList.add('show');
+}
+// Klasse ohne "Klasse "-Präfix (z. B. "6a" statt "Klasse 6a"), wie überall
+// sonst im Frontend (s. z. B. renderQueueList()).
+function borrowerForm(msg) {
+  return (msg.loaned_to_form || '').replace(/^Klasse\s+/i, '');
 }
 // "Nachname, Vorname (Klasse)" für die Ersatzanspruch-Notiz — HTML-escaped,
 // mit Fallback auf das vorformatierte `loaned_to` ("Vorname Nachname"),
-// falls Vor-/Nachname aus irgendeinem Grund fehlen (Lookup-Fehler). Klasse
-// ohne "Klasse "-Präfix (z. B. "6a" statt "Klasse 6a"), wie überall sonst
-// im Frontend (s. z. B. renderQueueList()).
+// falls Vor-/Nachname aus irgendeinem Grund fehlen (Lookup-Fehler).
 function borrowerNameHtml(msg) {
   const last = msg.loaned_to_lastname, first = msg.loaned_to_firstname;
   if (!last && !first) return escapeHtml(msg.loaned_to || '');
-  const form = (msg.loaned_to_form || '').replace(/^Klasse\s+/i, '');
+  const form = borrowerForm(msg);
   return escapeHtml(`${last || ''}, ${first || ''}${form ? ` (${form})` : ''}`);
+}
+// "Nachname, Vorname, Klasse" für die "an jemand anderen verliehen"-Notiz
+// (plain text — textContent escaped selbst, kein escapeHtml() nötig).
+function borrowerPlain(msg) {
+  const last = msg.loaned_to_lastname, first = msg.loaned_to_firstname;
+  if (!last && !first) return msg.loaned_to || '';
+  const form = borrowerForm(msg);
+  return `${last || ''}, ${first || ''}${form ? `, ${form}` : ''}`;
 }
 function closeBookAlertModal() { bookAlertModal.classList.remove('show'); }
 // Bewusstes Schließen durch den Helfer → zusätzlich Host-Meldung aufräumen.

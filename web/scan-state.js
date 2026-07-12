@@ -205,7 +205,6 @@ const rightColEl = document.querySelector('.right-col');
 const bookAlertModal = document.getElementById('book-alert-modal');
 const bookAlertTitleEl = document.getElementById('book-alert-title');
 const bookAlertTextEl = document.getElementById('book-alert-text');
-const bookAlertBorrowerEl = document.getElementById('book-alert-borrower');
 const bookAlertNoteEl = document.getElementById('book-alert-note');
 const bookAlertCloseBtn = document.getElementById('book-alert-close');
 const printModal = document.getElementById('print-modal');
@@ -227,7 +226,7 @@ const OK_STATUSES = new Set(['staged', 'booked']);
 // status → {title, color} für das Hinweis-Modal.
 const ALERT_META = {
   book_deleted:        { title: 'Ausgemustertes Buch gescannt',  color: '#f44336' },
-  not_in_stock:        { title: 'Buch noch verliehen',           color: '#f44336' },
+  not_in_stock:        { title: 'Buch bereits verliehen',        color: '#f44336' },
   book_already_lent:   { title: 'Buch bereits an dich verliehen', color: '#e69500' },
   series_already_lent: { title: 'Buchreihe bereits an dich verliehen', color: '#e69500' },
   not_enrolled:        { title: 'Buch nicht bestellt',           color: '#e69500' },

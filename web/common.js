@@ -31,7 +31,9 @@ function isBookDone(b, scannedIsbns) {
 // null, Privatheit, fällt dort also immer auf den ersten Fall zurück): OHNE
 // Ersatzanspruch → "<Buchcode> ausgemustert — <Titel>"; MIT Ersatzanspruch →
 // "<Buchcode> Ersatzanspruch an <Nachname>, <Vorname> (<Klasse>) — <Titel>"
-// statt der technischen `msg`. `books` ist die aktuelle Bücherliste
+// statt der technischen `msg`. „An jemand anderen verliehen" (`not_in_stock`)
+// → "<Buchcode> bereits verliehen — <Titel>" (ohne Name — der Schüler sieht
+// nie WEM, s. process_scan). `books` ist die aktuelle Bücherliste
 // (student_info/currentBooks) der aufrufenden Seite.
 function scanResultStatusText(msg, books) {
   if (msg.status === 'booked') {
@@ -53,6 +55,9 @@ function scanResultStatusText(msg, books) {
   }
   if (msg.status === 'book_deleted' && !msg.loaned_to) {
     return `${msg.barcode} ausgemustert — ${msg.title || ''}`;
+  }
+  if (msg.status === 'not_in_stock') {
+    return `${msg.barcode} bereits verliehen — ${msg.title || ''}`;
   }
   return `${msg.barcode} — ${msg.msg || msg.status}`;
 }

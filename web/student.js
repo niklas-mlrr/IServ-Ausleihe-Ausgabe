@@ -159,7 +159,7 @@ const bookAlertActionsEl = document.getElementById('book-alert-actions');
 const bookAlertCloseBtn = document.getElementById('book-alert-close');
 const ALERT_META_STUDENT = {
   book_deleted:        { title: 'Ausgemustertes Buch gescannt',   color: '#f44336' },
-  not_in_stock:        { title: 'Buch noch verliehen',            color: '#f44336' },
+  not_in_stock:        { title: 'Buch bereits verliehen',         color: '#f44336' },
   book_already_lent:   { title: 'Buch bereits an dich verliehen', color: '#e69500' },
   series_already_lent: { title: 'Buchreihe bereits an dich verliehen', color: '#e69500' },
   not_enrolled:        { title: 'Buch nicht bestellt',            color: '#e69500' },
@@ -192,6 +192,10 @@ function showBookAlertModal(msg, dismissible) {
   } else if (deletedNoReplacement) {
     bookAlertTextEl.textContent = `${msg.barcode || ''} — ${msg.title || meta.title}`;
     bookAlertNoteEl.textContent = 'Dieses Buch ist ausgemustert. Es kann nicht mehr verliehen werden.';
+    bookAlertNoteEl.hidden = false;
+  } else if (msg.status === 'not_in_stock') {
+    bookAlertTextEl.textContent = `${msg.barcode || ''} — ${msg.title || meta.title}`;
+    bookAlertNoteEl.textContent = 'Dieses Buch ist bereits an jemand anders verliehen. Es kann derzeit nicht an dich verliehen werden.';
     bookAlertNoteEl.hidden = false;
   } else {
     bookAlertTextEl.textContent = `${msg.barcode || ''} — ${msg.msg || meta.title}`;

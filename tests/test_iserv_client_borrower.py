@@ -2,10 +2,10 @@
 
 `loaned_to`/`loaned_to_id` gab es schon; hier neu getestet:
 `loaned_to_firstname`/`loaned_to_lastname` (getrennte Felder statt nur des
-zusammengesetzten `loaned_to`-Strings) und `loaned_to_form` (Klasse), die
-NUR bei ausgemusterten Büchern mit Schüler-Verknüpfung (Ersatzanspruch-Fall)
-per zusätzlichem Request aufgelöst wird — bei allen anderen Büchern bleibt
-sie `None`, ohne dass ein Extra-Request feuert (Effizienz-Garantie).
+zusammengesetzten `loaned_to`-Strings) und `loaned_to_form` (Klasse), die per
+zusätzlichem Request aufgelöst wird, sobald ein Ausleiher bekannt ist (sowohl
+„an jemand anderen verliehen" als auch die Ersatzanspruch-Meldung brauchen
+die Klasse) — ohne Ausleiher bleibt sie `None`, ohne Extra-Request.
 """
 
 from __future__ import annotations
@@ -127,19 +127,28 @@ def test_borrower_name_falls_back_to_get_by_id(monkeypatch):
     assert result["loaned_to_lastname"] == "Musterfrau"
 
 
-def test_loaned_to_form_none_for_normal_lent_book(monkeypatch):
-    # Nicht ausgemustert, nur verliehen (not_in_stock-Fall) → loaned_to_form
-    # bleibt None, KEIN Extra-Request für die Klasse (Effizienz-Garantie).
+def test_loaned_to_form_resolved_for_normal_lent_book(monkeypatch):
+    # Nicht ausgemustert, nur verliehen (not_in_stock-Fall, "an jemand
+    # anderen verliehen") → loaned_to_form wird ebenfalls aufgelöst (Helfer-
+    # Client-Meldung braucht die Klasse hier genauso wie beim Ersatzanspruch).
     book = _FakeBook(
         distributed=True, deleted=False, student_id=99,
         student=_FakeEmbeddedStudent("Max", "Mustermann"),
     )
-    # get_detail würde crashen, wenn es aufgerufen würde — beweist, dass es
-    # für den Nicht-ausgemustert-Fall nicht aufgerufen wird.
+    students = _FakeStudentsEndpoint(forms_by_id={99: [{"schoolyear": 1, "name": "6a"}]})
+    client = _make_client(monkeypatch, book, students)
+    result = asyncio.run(client.get_book_by_code("B1"))
+    assert result["loaned_to_form"] == "6a"
+
+
+def test_loaned_to_form_none_without_borrower(monkeypatch):
+    # Kein Ausleiher (Buch im Lager) → kein Extra-Request, loaned_to_form None.
+    book = _FakeBook(available=True, distributed=False, deleted=False, student_id=None)
     students = _FakeStudentsEndpoint(raise_on_detail=True)
     client = _make_client(monkeypatch, book, students)
     result = asyncio.run(client.get_book_by_code("B1"))
     assert result["loaned_to_form"] is None
+    assert result["loaned_to"] is None
 
 
 def test_loaned_to_form_resolved_for_deleted_book_with_student(monkeypatch):
