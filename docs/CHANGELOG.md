@@ -8,6 +8,18 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-12 — Schüler-Client: Warten-Hinweistext + Schrift-Gewichtung im Bereits-verliehen-Modal getauscht
+
+Blockierendes Hinweis-Modal am Schüler-Client (`book_deleted`/`not_in_stock`,
+nicht selbst schließbar, nur der Host gibt frei): Hinweistext geändert von
+„Bitte warte, bis der Betreuer dies freigibt." zu „Bitte warte, bis ein
+Helfer dein Buch einsammelt und dich freigibt." (`web/student.js`). Dazu
+Schrift-Gewichtung getauscht: der Hinweis (`#book-alert-hint`) steht jetzt
+in normaler Schrift, Code-/Titel-Zeile (`#book-alert-text`) und die
+Zusatzmeldung darunter (`#book-alert-note`) bekommen stattdessen das
+gedämpfte Styling, das vorher nur der Hinweis hatte (`opacity:.6;
+font-size:.85rem`) — `web/student.html`.
+
 ## 2026-07-12 — Eigene Meldung für „Buch ausgemustert" ohne Ersatzanspruch
 
 Bisher zeigte `book_deleted` immer die generische Überschrift
