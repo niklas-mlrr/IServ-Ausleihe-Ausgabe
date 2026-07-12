@@ -8,6 +8,28 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-12 — Eigene Meldung für „Buch ausgemustert" ohne Ersatzanspruch
+
+Bisher zeigte `book_deleted` immer die generische Überschrift
+„Ausgemustertes Buch gescannt" + die technische Server-`msg` ("Buch
+ausgemustert: {title}"), egal ob ein Ersatzanspruch (`loaned_to`) vorliegt
+oder nicht. Niklas wollte für den Fall OHNE Ersatzanspruch eine eigene,
+kürzere Meldung — der Ersatzanspruch-Fall (Helfer-Client, `loaned_to`
+gesetzt) bleibt unverändert.
+
+- **Modal (Helfer- und Schüler-Client).** `book_deleted` ohne `loaned_to`:
+  Überschrift „Buch ausgemustert" (rot `#f44336`, wie bisher), darunter
+  `<Buchcode> — <Titel>`, darunter „Dieses Buch ist ausgemustert. Es kann
+  nicht mehr verliehen werden." Mit `loaned_to` (Ersatzanspruch, nur
+  Helfer-Client — am Schüler-Client ist `loaned_to` aus Privatheitsgründen
+  ohnehin immer `null`, der neue Fall greift dort also immer): unverändert
+  generische Überschrift + technische `msg` + Ersatzanspruch-Zeile.
+  (`web/scan-render.js`, `web/student.js`.)
+- **Statuszeile.** Ohne `loaned_to`: "<Buchcode> ausgemustert — <Titel>"
+  (rot, wie bisher über die bestehende `status-book-deleted`-Klasse). Mit
+  `loaned_to`: unverändert der generische Fallback (technische `msg`).
+  (`web/common.js`, `scanResultStatusText`.)
+
 ## 2026-07-12 — Fix: fehlender Buchtitel im Bereits-verliehen-Modal/Statuszeile
 
 Nachbesserung am Eintrag darunter: `process_scan()` (`server/sessions.py`)

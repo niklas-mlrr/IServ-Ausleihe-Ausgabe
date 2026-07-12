@@ -303,7 +303,12 @@ nextModal.addEventListener('click', (e) => { if (e.target === nextModal) closeNe
 // Host-Meldung auf (No-op für Status ohne Host-Broadcast).
 function showBookAlertModal(msg) {
   const meta = ALERT_META[msg.status] || { title: 'Buch-Hinweis', color: '#f44336' };
-  bookAlertTitleEl.textContent = meta.title;
+  // Ausgemustert OHNE Ersatzanspruch (kein loaned_to) bekommt eine eigene,
+  // kürzere Überschrift/Meldung statt der generischen „Ausgemustertes Buch
+  // gescannt" + technische msg — MIT Ersatzanspruch bleibt es unverändert
+  // (loaned_to → Ersatzanspruch-Zeile unten).
+  const deletedNoReplacement = msg.status === 'book_deleted' && !msg.loaned_to;
+  bookAlertTitleEl.textContent = deletedNoReplacement ? 'Buch ausgemustert' : meta.title;
   bookAlertTitleEl.style.color = meta.color;
   // Plain text (kein HTML) — bookAlertTextEl.textContent interpretiert keine Entities.
   // „An sich selbst verliehen": <Buchcode> — <Titel> + eigene Hinweiszeile
@@ -318,6 +323,10 @@ function showBookAlertModal(msg) {
   } else if (msg.status === 'series_already_lent') {
     bookAlertTextEl.textContent = `${msg.barcode} — ${msg.title || meta.title}`;
     bookAlertNoteEl.textContent = 'Ein Buch dieser Buchreihe ist bereits an dich verliehen. Leg es einfach wieder zurück.';
+    bookAlertNoteEl.hidden = false;
+  } else if (deletedNoReplacement) {
+    bookAlertTextEl.textContent = `${msg.barcode} — ${msg.title || meta.title}`;
+    bookAlertNoteEl.textContent = 'Dieses Buch ist ausgemustert. Es kann nicht mehr verliehen werden.';
     bookAlertNoteEl.hidden = false;
   } else {
     bookAlertTextEl.textContent = `${msg.barcode} — ${msg.msg || meta.title}`;

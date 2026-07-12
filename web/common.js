@@ -26,8 +26,12 @@ function isBookDone(b, scannedIsbns) {
 // `book_already_lent` (genau dieses Exemplar) →
 // "<Buchcode> bereits an dich verliehen — <Titel>"; `series_already_lent`
 // (ein ANDERES Exemplar derselben Reihe) →
-// "<Buchcode> Buchreihe bereits an dich verliehen — <Titel>". `books` ist
-// die aktuelle Bücherliste (student_info/currentBooks) der aufrufenden Seite.
+// "<Buchcode> Buchreihe bereits an dich verliehen — <Titel>". Ausgemustert
+// OHNE Ersatzanspruch (kein `msg.loaned_to` — am Schüler-Client ohnehin
+// immer null, Privatheit) → "<Buchcode> ausgemustert — <Titel>" statt der
+// technischen `msg`; MIT Ersatzanspruch bleibt der generische Fallback
+// unten (technische `msg`). `books` ist die aktuelle Bücherliste
+// (student_info/currentBooks) der aufrufenden Seite.
 function scanResultStatusText(msg, books) {
   if (msg.status === 'booked') {
     const book = (books || []).find(b => b.isbn === msg.isbn);
@@ -39,6 +43,9 @@ function scanResultStatusText(msg, books) {
   }
   if (msg.status === 'series_already_lent') {
     return `${msg.barcode} Buchreihe bereits an dich verliehen — ${msg.title || ''}`;
+  }
+  if (msg.status === 'book_deleted' && !msg.loaned_to) {
+    return `${msg.barcode} ausgemustert — ${msg.title || ''}`;
   }
   return `${msg.barcode} — ${msg.msg || msg.status}`;
 }

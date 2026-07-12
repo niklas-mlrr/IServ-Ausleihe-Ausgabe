@@ -158,7 +158,11 @@ const OK_STATUSES_STUDENT = new Set(['staged', 'booked']);
 const BLOCKING_STATUSES_STUDENT = new Set(['book_deleted', 'not_in_stock']);
 function showBookAlertModal(msg, dismissible) {
   const meta = ALERT_META_STUDENT[msg.status] || { title: 'Buch-Hinweis', color: '#f44336' };
-  bookAlertTitleEl.textContent = meta.title;
+  // Ausgemustert OHNE Ersatzanspruch: eigene, kürzere Überschrift/Meldung.
+  // loaned_to ist am Schüler-Client aus Privatheitsgründen ohnehin immer
+  // null (s. process_scan) — dieser Fall greift hier also immer.
+  const deletedNoReplacement = msg.status === 'book_deleted' && !msg.loaned_to;
+  bookAlertTitleEl.textContent = deletedNoReplacement ? 'Buch ausgemustert' : meta.title;
   bookAlertTitleEl.style.color = meta.color;
   if (msg.status === 'book_already_lent') {
     bookAlertTextEl.textContent = `${msg.barcode || ''} — ${msg.title || meta.title}`;
@@ -167,6 +171,10 @@ function showBookAlertModal(msg, dismissible) {
   } else if (msg.status === 'series_already_lent') {
     bookAlertTextEl.textContent = `${msg.barcode || ''} — ${msg.title || meta.title}`;
     bookAlertNoteEl.textContent = 'Ein Buch dieser Buchreihe ist bereits an dich verliehen. Leg es einfach wieder zurück.';
+    bookAlertNoteEl.hidden = false;
+  } else if (deletedNoReplacement) {
+    bookAlertTextEl.textContent = `${msg.barcode || ''} — ${msg.title || meta.title}`;
+    bookAlertNoteEl.textContent = 'Dieses Buch ist ausgemustert. Es kann nicht mehr verliehen werden.';
     bookAlertNoteEl.hidden = false;
   } else {
     bookAlertTextEl.textContent = `${msg.barcode || ''} — ${msg.msg || meta.title}`;
