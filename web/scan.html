@@ -158,9 +158,50 @@
       background: var(--dropdown); border: 1px solid var(--border); border-radius: 10px;
       padding: 10px; box-shadow: 0 8px 24px var(--shadow);
     }
-    .cam-dropdown.open { display: flex; gap: 8px; }
+    /* flex-direction:column, damit Modus-Umschalter oben, select+reload unten
+       (letztere nur im Kameramodus sichtbar, .cam-only). */
+    .cam-dropdown.open { display: flex; flex-direction: column; gap: 8px; }
+    .cam-dropdown .cam-row { display: flex; gap: 8px; }
     .cam-dropdown select { flex: 1; padding: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .cam-dropdown #reload-btn { padding: 10px 12px; font-size: 1.1rem; }
+    /* Modus-Umschalter (Segmented-Control): Kamera / Manuell. Aktiver
+       Segment-Button mit Akzent-Hintergrund. cam-only (select+reload) werden im
+       manuellen Modus ausgeblendet — sie sind dort ohne Funktion. */
+    .mode-toggle { display: flex; gap: 6px; }
+    .mode-toggle button {
+      flex: 1; padding: 9px 10px; font-size: .9rem; font-weight: 600;
+      border-radius: 8px; border: 1px solid var(--border);
+      background: transparent; color: var(--fg); cursor: pointer;
+      transition: background .15s;
+    }
+    .mode-toggle button:hover { background: var(--surface-2); }
+    .mode-toggle button.active { background: var(--surface-3); }
+    .app.manual-mode .cam-only { display: none; }
+
+    /* ---- Manueller Modus: #reader wird zum Eingabefeld ----
+       Html5Qrcode bekommt #reader als leeren Container; im manuellen Modus wird
+       das <input> per JS hineininjiziert. Hintergrund hell (statt Schwarz), damit
+       das Textfeld lesbar ist. Der grüne scan-success-Flash greift am Container. */
+    .app.manual-mode #reader { background: var(--surface); }
+    #manual-input {
+      width: 100%; height: 100%; border: none; outline: none;
+      background: transparent; color: var(--fg);
+      font-size: 1.4rem; text-align: center; border-radius: 12px;
+    }
+    /* Enter-Button (= torch-btn im manuellen Modus): kein „an"-State wie die
+       Laterne — nur hover/active wie jeder Steuerbutton. */
+    .app.manual-mode .torch-on { background: var(--surface-2) !important; }
+
+    /* ---- Fokus-Warnbanner (manueller Modus, Eingabefeld nicht fokussiert) ----
+       Vollbreite am unteren Rand, rot mit weißer Schrift. Klick fokussiert das
+       Eingabefeld. Z-index unter den Modal-Overlays (z-index:100). */
+    .focus-banner {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 90;
+      background: #d32f2f; color: #fff; font-weight: 700; font-size: .95rem;
+      text-align: center; padding: 10px 12px;
+      display: none; cursor: pointer; user-select: none;
+    }
+    .focus-banner.show { display: block; }
 
     /* ---- Statuszeile: Höhe passt sich dem Text an (wie die Buchzeilen) ----
        Abstand nach oben kommt vom .top-section-Grid (row-gap), nicht mehr über
@@ -377,8 +418,14 @@
         <button id="menu-btn" title="Menü"><span class="menu-icon"><span class="bar bar1"></span><span class="bar bar2"></span><span class="bar bar3"></span></span></button>
         <button id="gear-btn" title="Einstellungen / Kamera"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
         <div class="cam-dropdown" id="cam-dropdown">
-          <select id="camera-select"><option>Kameras laden…</option></select>
-          <button id="reload-btn" title="Kamera neu laden"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
+          <div class="mode-toggle">
+            <button id="mode-camera-btn" class="active" type="button">Kamera</button>
+            <button id="mode-manual-btn" type="button">Manuell</button>
+          </div>
+          <div class="cam-row cam-only">
+            <select id="camera-select"><option>Kameras laden…</option></select>
+            <button id="reload-btn" title="Kamera neu laden"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
+          </div>
         </div>
       </div>
       <div id="reader"></div>
@@ -432,6 +479,10 @@
     <div class="book-table-wrap">
       <div id="book-rows"></div>
     </div>
+
+    <!-- Fokus-Warnbanner (manueller Modus): sichtbar, solange das Eingabefeld
+         nicht fokussiert ist und kein Dialog offen ist. Klick fokussiert das Feld. -->
+    <div id="focus-banner" class="focus-banner">Vorsicht: Eingabefeld nicht fokussiert!</div>
   </div>
 
   <!-- Druck-Dialog: Kontrolle + Wahl der 2. Seite vor dem Drucken -->

@@ -271,7 +271,7 @@ function advanceToNext() {
   ws.send(JSON.stringify({ type: 'next', context_id: suggested ? suggested.id : undefined }));
 }
 
-function closeNextModal() { nextModal.classList.remove('show'); }
+function closeNextModal() { nextModal.classList.remove('show'); updateFocusBanner(); }
 
 // Nächster-Schüler-Klick: bei noch offenen vorgemerkten Büchern erst einen
 // Hinweis zeigen (Abbrechen / Nächster Schüler), sonst direkt weiterschalten.
@@ -285,6 +285,7 @@ async function requestNext() {
   if (offen.length === 0) { advanceToNext(); return; }
   renderOpenWarning(nextWarnEl, vorgemerkt, offen);
   nextModal.classList.add('show');
+  updateFocusBanner();
 }
 nextBtn.addEventListener('click', requestNext);
 modalNextConfirmBtn.addEventListener('click', () => { closeNextModal(); advanceToNext(); });
@@ -367,6 +368,7 @@ function showBookAlertModal(msg) {
     bookAlertNoteEl.hidden = true;
   }
   bookAlertModal.classList.add('show');
+  updateFocusBanner();
 }
 // Klasse ohne "Klasse "-Präfix (z. B. "6a" statt "Klasse 6a"), wie überall
 // sonst im Frontend (s. z. B. renderQueueList()).
@@ -383,7 +385,7 @@ function borrowerNameHtml(msg) {
   const form = borrowerForm(msg);
   return `<strong>${escapeHtml(`${last || ''}, ${first || ''}${form ? ` (${form})` : ''}`)}</strong>`;
 }
-function closeBookAlertModal() { bookAlertModal.classList.remove('show'); }
+function closeBookAlertModal() { bookAlertModal.classList.remove('show'); updateFocusBanner(); }
 // Bewusstes Schließen durch den Helfer → zusätzlich Host-Meldung aufräumen.
 // Guard: nur senden, wenn das Modal wirklich offen war (vermeidet redundante
 // Clears bei Kontextwechseln, die ohnehin die Queue aufräumt).
@@ -398,7 +400,7 @@ bookAlertCloseBtn.addEventListener('click', dismissBookAlert);
 bookAlertModal.addEventListener('click', (e) => { if (e.target === bookAlertModal) dismissBookAlert(); });
 
 // ---- Druck-Dialog ----
-function closePrintModal() { printModal.classList.remove('show'); }
+function closePrintModal() { printModal.classList.remove('show'); updateFocusBanner(); }
 
 // Dialog öffnen: erst auf Abschluss laufender Scans warten, dann Warnung
 // (vorgemerkte, noch nicht gescannte Bücher) berechnen und Default setzen.
@@ -412,6 +414,7 @@ async function openPrintDialog() {
   renderOpenWarning(printWarnEl, vorgemerkt, offen);
   slipCheck.checked = slipSecondPageDefault;
   printModal.classList.add('show');
+  updateFocusBanner();
 }
 
 // Vorgemerkte (status !== 'ausgeliehen'), in dieser Session noch nicht
@@ -467,7 +470,7 @@ function renderLendWarning(el) {
   el.style.display = '';
 }
 
-function closeLendModal() { lendConfirmModal.classList.remove('show'); }
+function closeLendModal() { lendConfirmModal.classList.remove('show'); updateFocusBanner(); }
 
 // Scan tatsächlich senden (aus onScanSuccess ausgelagert, damit der Freigabe-
 // Pfad denselben Sendeweg nutzt). `pendingScans++` nur hier → zurückgehaltene
@@ -999,6 +1002,7 @@ function onScanSuccess(value) {
     heldScanValue = value;
     renderLendWarning(lendWarnEl);
     lendConfirmModal.classList.add('show');
+    updateFocusBanner();
     setStatusText('Freigabe erforderlich — Buch zurückgehalten');
   } else {
     setStatusText('Gesendet: ' + value);
@@ -1009,6 +1013,111 @@ function onScanSuccess(value) {
   clearTimeout(scanFlashTimeout);
   scanFlashTimeout = setTimeout(() => readerEl.classList.remove('scan-success'), 1200);
 }
+
+// ---- Modus-Umschalter: Kamera ↔ manuelle Eingabe ----
+// Im manuellen Modus wird #reader zum Texteingabefeld, der Taschenlampen-Button
+// zum Enter-Button. Gesendet wird über denselben Pfad wie ein Kamera-Scan
+// (onScanSuccess), damit Duplicate-Schutz, Peek-Sperre, Freigabe-Dialog und
+// Statuszeile identisch laufen. Modus wird in sessionStorage gespeichert:
+// frischer Tab/QR-Scan → Kamera, Reload desselben Tabs → zuletzt gewählt.
+// Enter-Icon: Pfeil „nach unten, dann nach links" (↵, Return-Symbol), im Stil
+// der anderen Line-Icons. Schaft nach unten, Rundung nach links, Spitze links.
+const ICON_ENTER = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 4v9a2 2 0 0 1-2 2H4"/><path d="M8 11l-4 4 4 4"/></svg>';
+const TORCH_BTN_ORIG_HTML = torchBtn.innerHTML;    // originales Laterne-Icon
+const TORCH_BTN_ORIG_TITLE = torchBtn.title;
+
+// Ist einer der Hinweis-/Aktions-Dialoge offen? Das Fokus-Warnbanner wird dann
+// unterdrückt (das Eingabefeld ist dort logischerweise nicht fokussiert).
+function anyModalOpen() {
+  return printModal.classList.contains('show')
+    || bookAlertModal.classList.contains('show')
+    || nextModal.classList.contains('show')
+    || lendConfirmModal.classList.contains('show');
+}
+
+// Rotes Vollbreite-Banner am unteren Rand, sobald im manuellen Modus das
+// Eingabefeld NICHT fokussiert ist (und kein Dialog offen ist). Klick aufs
+// Banner fokussiert das Feld (Listener unten).
+function updateFocusBanner() {
+  const show = inputMode === 'manual'
+    && !!manualInput
+    && document.activeElement !== manualInput
+    && !anyModalOpen();
+  focusBanner.classList.toggle('show', show);
+}
+
+// Manuell getippten Wert senden (Enter-Taste oder Enter-Button). Feld leeren
+// und fokussiert halten — onScanSuccess übernimmt Duplicate-Schutz/Status/Flash.
+function submitManualInput() {
+  if (!manualInput) return;
+  const v = manualInput.value.trim();
+  if (v) { manualInput.value = ''; onScanSuccess(v); }
+  manualInput.focus();
+}
+
+async function setInputMode(mode) {
+  if (mode === inputMode) return;   // bereits aktiv → nicht neu aufbauen (lösche sonst getippten Text)
+  inputMode = mode;
+  try { sessionStorage.setItem(INPUT_MODE_KEY, mode); } catch (e) {}
+  appEl.classList.toggle('manual-mode', mode === 'manual');
+  modeCameraBtn.classList.toggle('active', mode === 'camera');
+  modeManualBtn.classList.toggle('active', mode === 'manual');
+  camDropdown.classList.remove('open');   // Modus gewählt → Dropdown zu
+
+  if (mode === 'manual') {
+    // Kamera stoppen + Taschenlampe aus (falls sie lief).
+    if (html5QrCode) {
+      try { await html5QrCode.stop(); } catch (e) {}
+      try { html5QrCode.clear(); } catch (e) {}
+      html5QrCode = null;
+    }
+    isCameraRunning = false;
+    isTorchOn = false;
+    torchBtn.classList.remove('torch-on');
+    // #reader leeren, Eingabefeld injizieren (Html5Qrcode bekommt den Container
+    // beim Zurückschalten wieder leer — Reihenfolge sauber).
+    readerEl.innerHTML = '';
+    const inp = document.createElement('input');
+    inp.id = 'manual-input';
+    inp.type = 'text';
+    inp.autocomplete = 'off';
+    inp.placeholder = 'Barcode eintippen …';
+    inp.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        submitManualInput();
+      }
+    });
+    inp.addEventListener('focus', updateFocusBanner);
+    inp.addEventListener('blur', updateFocusBanner);
+    readerEl.appendChild(inp);
+    manualInput = inp;
+    // Taschenlampen-Button → Enter-Button.
+    torchBtn.innerHTML = ICON_ENTER;
+    torchBtn.title = 'Eingabe senden (Enter)';
+    torchBtn.disabled = false;
+    inp.focus();
+    if (ws && ws.readyState === WebSocket.OPEN) setReadyStatus();
+    else setStatusText('Eingabe bereit — Barcode eintippen');
+    updateFocusBanner();
+  } else {
+    // Eingabefeld entfernen, Kamera-(re)starten.
+    readerEl.innerHTML = '';
+    manualInput = null;
+    focusBanner.classList.remove('show');
+    // Laterne wiederherstellen.
+    torchBtn.innerHTML = TORCH_BTN_ORIG_HTML;
+    torchBtn.title = TORCH_BTN_ORIG_TITLE;
+    if (currentCameraId) initScanner(currentCameraId);
+  }
+}
+
+modeCameraBtn.addEventListener('click', () => setInputMode('camera'));
+modeManualBtn.addEventListener('click', () => setInputMode('manual'));
+focusBanner.addEventListener('click', () => { if (manualInput) manualInput.focus(); });
+// Sicherheitsnetz: Fokus wandert woanders hin → Banner neu bewerten.
+document.addEventListener('focusin', updateFocusBanner);
+document.addEventListener('focusout', updateFocusBanner);
 
 // Load available cameras
 Html5Qrcode.getCameras().then(cameras => {
@@ -1022,10 +1131,16 @@ Html5Qrcode.getCameras().then(cameras => {
     cameras[0];
   cameraSelect.innerHTML = cameras.map(c => `<option value="${escapeHtml(c.id)}" ${c === preferred ? 'selected' : ''}>${escapeHtml(c.label)}</option>`).join('');
   currentCameraId = preferred?.id;
-  initScanner(currentCameraId);
+  // Gespeicherten Modus wiederherstellen (sessionStorage): manuell → direkt ins
+  // Eingabefeld, sonst Kamera starten. Frischer Tab/Scan → sessionStorage leer
+  // → Kamera (Default). Kameraliste steht für späteres Umschalten bereit.
+  if (sessionStorage.getItem(INPUT_MODE_KEY) === 'manual') setInputMode('manual');
+  else initScanner(currentCameraId);
 }).catch(err => {
   cameraSelect.innerHTML = '<option>Keine Kamera gefunden</option>';
   cameraSelect.disabled = true;
+  // Kamera unbrauchbar, aber manuelle Eingabe bleibt nutzbar.
+  if (sessionStorage.getItem(INPUT_MODE_KEY) === 'manual') setInputMode('manual');
 });
 
 async function initScanner(cameraId) {
@@ -1075,14 +1190,16 @@ async function initScanner(cameraId) {
 
 // Camera selector change
 cameraSelect.addEventListener('change', () => {
+  if (inputMode === 'manual') return;   // Kamera-Only — im manuellen Modus irrelevant
   initScanner(cameraSelect.value);
   isTorchOn = false;
   torchBtn.classList.remove('torch-on');
   camDropdown.classList.remove('open');
 });
 
-// Torch toggle
+// Torch toggle — im manuellen Modus: Eingabe senden (Enter-Button).
 torchBtn.addEventListener('click', async () => {
+  if (inputMode === 'manual') { submitManualInput(); return; }
   const video = document.querySelector('#reader video');
   if (!video || !video.srcObject) return;
   const track = video.srcObject.getVideoTracks()[0];
@@ -1098,18 +1215,21 @@ torchBtn.addEventListener('click', async () => {
 
 // Reload camera button (always visible)
 reloadBtn.addEventListener('click', () => {
+  if (inputMode === 'manual') return;   // Kamera-Only
   if (currentCameraId) initScanner(currentCameraId);
 });
 
-// Auto-restart camera when phone wakes from standby
+// Auto-restart camera when phone wakes from standby (Kameramodus nur)
 document.addEventListener('visibilitychange', () => {
+  if (inputMode === 'manual') return;
   if (!document.hidden && currentCameraId) {
     setTimeout(() => initScanner(currentCameraId), 300);
   }
 });
 
-// Fallback: detect frozen/black video and auto-restart
+// Fallback: detect frozen/black video and auto-restart (Kameramodus nur)
 setInterval(() => {
+  if (inputMode === 'manual') return;
   if (document.hidden || isRestarting || !currentCameraId) return;
   const video = document.querySelector('#reader video');
   if (video && (video.paused || video.ended || video.readyState < 2)) {

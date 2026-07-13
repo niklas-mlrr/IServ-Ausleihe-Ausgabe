@@ -8,6 +8,40 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-13 — Helferclient: Modus-Umschalter Kamera ↔ manuelle Eingabe
+
+Der Helfer-Scanner (`web/scan.html`, Modus A) lief bisher ausschließlich über
+die Gerätekamera. Für Fälle, in denen die Kamera unbrauchbar ist (Defekt,
+Berechtigungen, stark beschädigte Codes), kann der Helfer jetzt den Barcode per
+Tastatur eintippen — ohne die bewährte Scan-Logik zu umgehen.
+
+Im Kamera-Dropdown (Zahnrad) gibt es oben eine Segmented-Control
+„Kamera"/„Manuell". Im manuellen Modus gilt:
+
+- Kamera wird gestoppt, Taschenlampe aus.
+- `#reader` (Kamerafeld) wird zum Text-Eingabefeld.
+- Der Taschenlampen-Button wird zum Enter-Button (geometrisches Icon: Pfeil
+  nach unten, dann nach links, ↵-Return-Symbol).
+- Enter-Taste auf der Tastatur sendet den getippten Wert.
+- Ist das Eingabefeld nicht fokussiert, erscheint unten ein rotes Vollbreite-
+  Banner „Vorsicht: Eingabefeld nicht fokussiert!" (weiße Schrift); Klick aufs
+  Banner fokussiert das Feld. Bei offenen Dialogen (Drucken/Buch-Hinweis/
+  Nächster/Ausleihe-Freigabe) wird das Banner unterdrückt.
+
+Gesendet wird über denselben Pfad wie ein Kamera-Scan (`onScanSuccess`), sodass
+Duplicate-Schutz, Peek-Sperre, Freigabe-Dialog, Statuszeile und
+Buch-Hinweis-Modal identisch laufen. Der Modus wird in `sessionStorage`
+(`ausleihe-scan-input-mode`) gespeichert: ein frischer Tab/QR-Scan beginnt
+immer in der Kamera (sessionStorage leer), ein Reload desselben Tabs behält
+den zuletzt gewählten Modus. `#reader` bleibt ein leerer Container, den
+`Html5Qrcode` im Kameramodus ungeachtet übernimmt (input wird erst nach
+`stop()`+`clear()` injiziert und vor `initScanner` wieder entfernt).
+
+Rein client-seitig (HTML/CSS/JS in `web/scan.html`, `web/scan-state.js`,
+`web/scan-render.js`); kein Server-/API-/Python-Kontakt, kein IServ-Zugriff.
+Auto-Restart der Kamera (`visibilitychange`, eingefrorenes-Video-Intervall),
+Kamera-Select/-Reload sind im manuellen Modus per Guard deaktiviert.
+
 ## 2026-07-12 — Nachbesserung: kürzerer Notiztext für unbekannten Code am Schüler-Client
 
 Notiztext bei `unknown_book` am Schüler-Client (`web/student.js`) geändert

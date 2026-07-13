@@ -192,6 +192,18 @@ const printBtn = document.getElementById('print-btn');
 const nextBtn = document.getElementById('next-btn');
 const camDropdown = document.getElementById('cam-dropdown');
 const readerEl = document.getElementById('reader');
+// ---- Modus-Umschalter (Kamera ↔ manuelle Eingabe) ----
+// inputMode = 'camera' | 'manual'. Gespeichert in sessionStorage (nicht
+// localStorage): ein frischer Tab/QR-Scan beginnt immer in der Kamera, ein
+// Reload desselben Tabs behält den zuletzt gewählten Modus. manualInput ist
+// das per JS in #reader injizierte <input> (nur im manuellen Modus belegt).
+// focusBanner = rotes Warnbanner am unteren Rand (s. updateFocusBanner).
+let inputMode = 'camera';
+const INPUT_MODE_KEY = 'ausleihe-scan-input-mode';
+const modeCameraBtn = document.getElementById('mode-camera-btn');
+const modeManualBtn = document.getElementById('mode-manual-btn');
+let manualInput = null;                 // <input id="manual-input"> in #reader
+const focusBanner = document.getElementById('focus-banner');
 const searchBtn = document.getElementById('search-btn');
 const searchPanel = document.getElementById('search-panel');
 const searchClassSel = document.getElementById('search-class');
