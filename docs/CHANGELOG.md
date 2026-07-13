@@ -8,6 +8,21 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-13 — Helferclient: Spectator-Status bleibt nach Menü-Schließen erhalten
+
+Beim Schließen des Peek-Menüs rief `closePeek()` `setReadyStatus()` auf, das bei
+einem Zuschauer (Spectator) den Status mit „Warten…" überschrieb statt
+„Warten bis Schüler frei…" zu zeigen. Ursache: der Zuschauer-Zustand war nur
+implizit (`workerPending` dauerhaft true) vorhanden, nicht als eigener Flag.
+
+- `web/scan-state.js`: neuer State `spectating`; `setReadyStatus()` zeigt bei
+  `spectating` wieder „Warten bis Schüler frei…".
+- `web/scan-ws.js`: `spectating` in `student_info` aus `msg.spectator` gesetzt,
+  zurückgesetzt in `worker_ready`/`loading`/`waiting`. Der explizite
+  spectator-Zweig in `student_info` läuft jetzt einheitlich über
+  `setReadyStatus()`.
+- Rein clientseitig, kein Server-/API-Kontakt, kein Testbruch (222 Tests grün).
+
 ## 2026-07-13 — Warteschlange: aktive Schüler aufrufbar (Spectator-Warteschlange)
 
 In der Warteschlangen-Ansicht des Helferclients (`web/scan.html`, Peek/Idle-Menü)

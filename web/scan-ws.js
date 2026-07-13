@@ -14,6 +14,7 @@ function handleServerMessage(msg) {
     peeking = false;          // (neuer) Schüler geladen → keine Queue-Ansicht
     idleMenuOpen = false;     // Schüler geladen → Idle-Menü hinfällig (gelöscht
                              //  bereits beim loading, hier nur defensiv)
+    spectating = !!msg.spectator;  // Zuschauer: Status „Warten bis Schüler frei…"
     setMenuTitle();
     syncQueueView();
     const s = msg.student;
@@ -49,18 +50,17 @@ function handleServerMessage(msg) {
     // Bücher sofort sichtbar; Scans+„Scanner bereit"-Status aber erst, sobald
     // der Worker bereit ist (`worker_ready`). Bis dahin „Warten…" + Scans ignor.
     workerPending = true;
-    if (msg.spectator) {
-      // Zuschauer (spectate_student, server-seitig): Schüler ist bei einem
-      // ANDEREN Helfer aktiv, dieser Client bekommt nie ein `worker_ready` —
-      // `workerPending` bleibt dauerhaft true (sperrt Scans clientseitig
-      // bereits über den bestehenden Gate in onScanSuccess), Statuszeile
-      // zeigt dauerhaft den Wartehinweis statt „Warten…"/„Scanner bereit".
-      setStatusText('Warten bis Schüler frei…');
-    } else {
-      setReadyStatus();
-    }
+    // Zuschauer (spectating=true via spectate_student, server-seitig): Schüler
+    // ist bei einem ANDEREN Helfer aktiv, dieser Client bekommt nie ein
+    // `worker_ready` — `workerPending` bleibt dauerhaft true (sperrt Scans
+    // clientseitig bereits über den bestehenden Gate in onScanSuccess). Der
+    // Statushinweis („Warten bis Schüler frei…") kommt über setReadyStatus,
+    // das spectating auswertet — auch beim Schließen eines Peeks bleibt er so
+    // erhalten, statt mit „Warten…" überschrieben zu werden.
+    setReadyStatus();
   } else if (msg.type === 'worker_ready') {
     workerPending = false;
+    spectating = false;       // eigener Schüler übernommen (Beförderung/Laden)
     setReadyStatus();
   } else if (msg.type === 'loading') {
     // Server beginnt, einen neuen Schüler für diesen Helfer zu laden („Weiter"/
@@ -70,6 +70,7 @@ function handleServerMessage(msg) {
     studentActive = false;
     workerPending = true;
     loadingStudent = true;
+    spectating = false;        // neuer Schüler für diesen Helfer — nicht mehr Zuschauer
     // Ein Schüler wird aufgerufen (Aufrufen/Weiter/Nächster/Lupen-Suche) →
     // ein offenes Menü (Peek MIT Hintergrund-Schüler wie Idle OHNE) schließt
     // dabei immer, damit sofort scannbar ist, statt dass der Helfer manuell
@@ -149,6 +150,7 @@ function handleServerMessage(msg) {
     studentActive = false;
     workerPending = false;
     loadingStudent = false;  // kein Schüler (mehr) geladen — Queue anzeigen
+    spectating = false;       // Helfer frei — Zuschauer-Status hinfällig
     peeking = false;          // kein Schüler → Peek hinfällig
     setMenuTitle();
     syncQueueView();

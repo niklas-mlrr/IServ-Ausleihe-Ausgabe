@@ -30,6 +30,11 @@ const bookRowsEl = document.getElementById('book-rows');
 let ws;
 let studentActive = false;          // ist gerade ein Schüler zugewiesen?
 let workerPending = false;          // Schüler zugewiesen, aber Worker noch nicht bereit
+let spectating = false;             // Schüler bei einem ANDEREN Helfer aktiv — dieser
+                                  //  Client ist Zuschauer (spectate_student). Bekommt
+                                  //  nie `worker_ready`; Status bleibt „Warten bis
+                                  //  Schüler frei…", bis die Beförderung ein neues
+                                  //  `student_info` (ohne spectator) bringt.
 let queueSize = null;               // zuletzt gemeldete Warteschlangengröße
 let queueList = [];                // wartende Schüler (Fallback, eigene Klasse)
 let queueListAll = [];             // wie queueList, aber inkl. active/done (Fallback)
@@ -173,10 +178,15 @@ function syncQueueView() {
 // gerade geladen wird), zeigt die Statuszeile immer die Warteschlangenlänge.
 // Ist ein Schüler zugewiesen, aber der Worker noch nicht bereit, steht hier
 // „Warten…" — die Bücherliste ist zwar schon da, aber Scans buchen erst nach
-// `worker_ready`.
+// `worker_ready`. Zuschauer (spectating) bekommen nie ein `worker_ready` →
+// dauerhaft „Warten bis Schüler frei…", bis die Beförderung kommt. Wird auch
+// beim Schließen des Peeks gerufen und stellt so den Zuschauer-Status wieder
+// her (statt ihn mit „Warten…" zu überschreiben).
 function setReadyStatus() {
-  if (studentActive) setStatusText(workerPending ? 'Warten…' : 'Scanner bereit — Buch scannen');
-  else renderWaitingStatus();
+  if (studentActive) {
+    if (spectating) setStatusText('Warten bis Schüler frei…');
+    else setStatusText(workerPending ? 'Warten…' : 'Scanner bereit — Buch scannen');
+  } else renderWaitingStatus();
 }
 
 // escapeHtml, isBookDone: siehe common.js (vor scan.js eingebunden).
