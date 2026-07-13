@@ -317,13 +317,15 @@
     .book-empty { opacity: .4; padding: 14px 4px; font-size: .9rem; }
     /* Warteschlangen-Anzeige (kein Schüler zugewiesen): gleiche Zeilenform
        wie die Bücherliste, aber ohne Farbgebung — transparenter Hintergrund
-       und Rand, dafür mit „Aufrufen"-Button statt des Status-Icons. */
+       und Rand, dafür mit Aufruf-Pfeil statt des Status-Icons. */
     /* Kein Innenabstand oben/unten: der Button ist das höchste Element der
        Zeile, daher entspricht der Zeilen-margin-bottom (7px) direkt dem
-       sichtbaren Abstand zwischen den Rändern zweier "Aufrufen"-Buttons. */
-    .book-row.queue-row { grid-template-columns: 4.5rem 1fr auto; background: transparent; border-color: transparent; padding-top: 0; padding-bottom: 0; }
+       sichtbaren Abstand zwischen den Rändern zweier Aufruf-Pfeile. */
+    .book-row.queue-row { grid-template-columns: var(--queue-class-w, 4.5rem) 1fr auto; gap: 7px; background: transparent; border-color: transparent; padding-top: 0; padding-bottom: 0; }
+    .book-row.queue-row .b-title { margin-left: 7px; }  /* Klasse↔Name: 7px gap + 7px = 14px */
     .book-row.queue-row .b-call { display: flex; justify-content: flex-end; align-items: center; }
-    .call-btn { padding: 7px 14px; font-size: .85rem; font-weight: 600; border-radius: 8px;
+    .call-btn { display: inline-flex; align-items: center; justify-content: center;
+      padding: 7px 10px; font-size: 1.3rem; line-height: 1; border-radius: 8px;
       background: var(--surface-2); color: var(--fg); border: 1px solid var(--border); cursor: pointer; transition: background .2s; }
     .call-btn:hover { background: var(--surface-3); }
     .call-btn:active { background: var(--surface-4); }
@@ -340,13 +342,13 @@
     }
     .queue-group-active { background: rgba(33,150,243,.14); border-color: rgba(33,150,243,.55); }
     .queue-group-done   { background: rgba(46,125,50,.16);  border-color: rgba(46,125,50,.55); }
-    /* Aktiv-Gruppe: nur Klasse + Name (kein Button). Fertig-Gruppe: Zeilen
-       haben zusätzlich den „Aufrufen"-Button (data-student-id gesetzt), daher
-       dieselbe 3-Spalten-Aufteilung wie bei den wartenden book-row.queue-row. */
-    .queue-group-item { display: grid; grid-template-columns: 4.5rem 1fr; gap: 8px; align-items: center; }
-    .queue-group-item[data-student-id] { grid-template-columns: 4.5rem 1fr auto; }
+    /* Aktiv-/Fertig-Gruppe: Zeilen haben den Aufruf-Pfeil (data-student-id
+       gesetzt), daher dieselbe 3-Spalten-Aufteilung wie bei den wartenden
+       book-row.queue-row. */
+    .queue-group-item { display: grid; grid-template-columns: var(--queue-class-w, 4.5rem) 1fr; gap: 7px; align-items: center; }
+    .queue-group-item[data-student-id] { grid-template-columns: var(--queue-class-w, 4.5rem) 1fr auto; }
     .queue-group-item .qg-fach { font-weight: 600; }
-    .queue-group-item .qg-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .queue-group-item .qg-name { margin-left: 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }  /* Klasse↔Name: 7px gap + 7px = 14px */
     .queue-group-item .qg-call { display: flex; justify-content: flex-end; align-items: center; }
     /* Bewegungsreduktion respektieren: FLIP-Transition praktisch sofort. */
     @media (prefers-reduced-motion: reduce) {

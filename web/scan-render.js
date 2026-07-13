@@ -124,15 +124,35 @@ function renderBooks(books, animate = false) {
 // „Warten bis Schüler frei…", und automatische Beförderung, sobald der
 // Aktive den Schüler freigibt (server: spectate_student / end_student).
 // Fertige lassen sich erneut aufrufen (z. B. um nachträglich ein Buch zu
-// erfassen) — Button wie bei den Wartenden.
+// erfassen) — Aufruf-Pfeil wie bei den Wartenden.
 function renderQueueGroupItem(s, withCallBtn) {
   const form = (s.form || '').replace(/^Klasse\s+/i, '');
   const name = `${s.lastname}, ${s.firstname}`;
   const sidAttr = withCallBtn ? ` data-student-id="${escapeHtml(String(s.student_id))}"` : '';
-  const callBtn = withCallBtn ? '<div class="qg-call"><button class="call-btn">Aufrufen</button></div>' : '';
+  const callBtn = withCallBtn ? '<div class="qg-call"><button class="call-btn" title="Aufrufen" aria-label="Aufrufen"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></button></div>' : '';
   return `<div class="queue-group-item"${sidAttr}>`
     + `<div class="qg-fach">${escapeHtml(form)}</div>`
     + `<div class="qg-name">${escapeHtml(name)}</div>${callBtn}</div>`;
+}
+
+// Breite der Klassen-Spalte messen: so breit wie die längste vorkommende
+// Klasse. Damit starten die Namen in jeder Zeile (wartend + aktiv + fertig)
+// am selben X. Gemessen wird mit derselben Schrift wie .b-fach/.qg-fach
+// (.9rem, 600) über einen versteckten Span; das Ergebnis geht als
+// --queue-class-w an #book-rows (s. .book-row.queue-row/.queue-group-item).
+// Der Abstand Klasse↔Name (gap) und zwischen den Einträgen (margin/gap)
+// entspricht den 7px zwischen den Steuer-Elementen oben (.top-bar).
+function maxClassWidth(entries) {
+  const span = document.createElement('span');
+  span.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;font-size:.9rem;font-weight:600;';
+  document.body.appendChild(span);
+  let max = 0;
+  for (const s of entries) {
+    span.textContent = (s.form || '').replace(/^Klasse\s+/i, '');
+    max = Math.max(max, span.offsetWidth);
+  }
+  document.body.removeChild(span);
+  return max;
 }
 
 function renderQueue() {
@@ -160,13 +180,13 @@ function renderQueue() {
       return `<div class="book-row queue-row" data-student-id="${escapeHtml(String(s.student_id))}">`
         + `<div class="b-fach">${escapeHtml(form)}</div>`
         + `<div class="b-title">${escapeHtml(name)}</div>`
-        + `<div class="b-call"><button class="call-btn">Aufrufen</button></div></div>`;
+        + `<div class="b-call"><button class="call-btn" title="Aufrufen" aria-label="Aufrufen"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></button></div></div>`;
     }).join('');
   }
   // Gemeinsame Box je Status statt je Schüler eine eigene Zeile — anders als
   // bei den wartenden Schülern (list) oben, die weiterhin je einen eigenen
-  // "Aufrufen"-Button brauchen. Aktiv: Button (Aufruf → Zuschauer, warten bis
-  // frei). Fertig: Button (erneutes Aufrufen), analog zu den Wartenden.
+  // Aufruf-Pfeil brauchen. Aktiv: Pfeil (Aufruf → Zuschauer, warten bis
+  // frei). Fertig: Pfeil (erneutes Aufrufen), analog zu den Wartenden.
   if (active.length) {
     html += `<div class="queue-group queue-group-active">${active.map(s => renderQueueGroupItem(s, true)).join('')}</div>`;
   }
@@ -174,6 +194,12 @@ function renderQueue() {
     html += `<div class="queue-group queue-group-done">${done.map(s => renderQueueGroupItem(s, true)).join('')}</div>`;
   }
   bookRowsEl.innerHTML = html;
+  // Klassen-Spalte auf die längste Klasse setzen (s. maxClassWidth);
+  // einheitliche 7px wie zwischen den Steuer-Elementen oben.
+  const allEntries = [...list, ...active, ...done];
+  if (allEntries.length) {
+    bookRowsEl.style.setProperty('--queue-class-w', maxClassWidth(allEntries) + 'px');
+  }
 }
 
 // Weiter-Button: dieselbe Schaltfläche in beiden Modi, sie wandert nur —
