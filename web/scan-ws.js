@@ -196,8 +196,8 @@ function handleServerMessage(msg) {
     else if (!studentActive && !loadingStudent) { renderWaitingStatus(); renderQueue(); }
   } else if (msg.type === 'search_classes') {
     // Lupen-Suche: alle Klassen des Schuljahrs (IServ). Session-Cache füllen
-    // und Dropdown aufbauen — letzte Klasse vorwählen (localStorage), sonst
-    // erste. Sofort Schüler der gewählten Klasse nachladen.
+    // und Dropdown aufbauen — letzte Klasse vorwählen (sessionStorage), sonst
+    // Platzhalter „keine Klasse". Sofort Schüler der gewählten Klasse nachladen.
     searchClassCache = Array.isArray(msg.classes) ? msg.classes : [];
     renderSearchClasses();
   } else if (msg.type === 'search_students') {

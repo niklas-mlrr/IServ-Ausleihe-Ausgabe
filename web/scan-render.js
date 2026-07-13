@@ -792,8 +792,8 @@ menuBtn.addEventListener('click', (e) => {
 // Lupe klicken → Warteliste fährt nach unten (FLIP), zwei Dropdowns blenden
 // synchron ein: oben Klasse (alle des Schuljahrs), unten Schüler der gewählten
 // Klasse. Schüler wählen → wird geladen (search_call, ersetzt den Hintergrund-
-// Schüler). Letzte Klasse wird beim erneuten Öffnen vorausgewählt (localStorage),
-// bleibt aber änderbar. Alles read-only (IServ-GETs über den Server).
+// Schüler). Letzte Klasse wird beim erneuten Öffnen vorausgewählt
+// (sessionStorage, s.u.), bleibt aber änderbar. Alles read-only (IServ-GETs).
 
 // FLIP für die Panel-Bewegung: gleiche Technik wie animateMenu, nur dass die
 // Statuszeile stehen bleibt und nur name-row + book-table-wrap nach unten
@@ -854,8 +854,11 @@ function resetSearchPanel() {
   searchPanel.style.transition = '';
 }
 
-// Klassen-Dropdown aufbauen: letzte gewählte Klasse (localStorage) vorwählen,
-// falls vorhanden, sonst erste. Sofort Schüler der gewählten Klasse laden.
+// Klassen-Dropdown aufbauen. Vorauswahl wie beim Kamera-Modus in
+// sessionStorage gespeichert: frischer Tab/QR-Scan (sessionStorage leer) →
+// Platzhalter „keine Klasse" gewählt + Schüler-Dropdown „Zuerst Klasse wählen";
+// Reload desselben Tabs → zuletzt gewählte Klasse. Sofort Schüler der gewählten
+// Klasse laden (bei „keine Klasse" leer).
 function renderSearchClasses() {
   const classes = searchClassCache || [];
   if (!classes.length) {
@@ -866,9 +869,10 @@ function renderSearchClasses() {
     return;
   }
   searchClassSel.disabled = false;
-  const last = localStorage.getItem(SEARCH_LASTCLASS_KEY);
-  const preselect = (last && classes.includes(last)) ? last : classes[0];
-  searchClassSel.innerHTML = classes.map(c =>
+  const last = sessionStorage.getItem(SEARCH_LASTCLASS_KEY);
+  const preselect = (last && classes.includes(last)) ? last : '';
+  const placeholder = `<option value="" disabled${preselect ? '' : ' selected'}>— keine Klasse —</option>`;
+  searchClassSel.innerHTML = placeholder + classes.map(c =>
     `<option value="${escapeHtml(c)}"${c === preselect ? ' selected' : ''}>${escapeHtml(c)}</option>`).join('');
   loadSearchStudents(preselect);
 }
@@ -959,7 +963,7 @@ searchBtn.addEventListener('click', (e) => {
 
 searchClassSel.addEventListener('change', () => {
   const form = searchClassSel.value;
-  if (form) localStorage.setItem(SEARCH_LASTCLASS_KEY, form);
+  if (form) sessionStorage.setItem(SEARCH_LASTCLASS_KEY, form);
   loadSearchStudents(form);
 });
 

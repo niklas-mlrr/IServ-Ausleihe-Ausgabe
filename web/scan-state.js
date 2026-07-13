@@ -54,7 +54,9 @@ let queueView = false;             // .app.queue-view gesetzt? (Peek oder Idle)
 // clientseitig für die Session gecacht. `searchOpen` = Panel ausgeklappt;
 // `searchSubmitted` markiert eine laufende search_call-Antwort (lädt der neue
 // Schüler, schließt das Panel + Menü bewusst — `call`/`next` lassen das Menü
-// sonst offen). Letzte Klasse in localStorage für die Vorauswahl beim Öffnen.
+// sonst offen). Letzte Klasse in sessionStorage für die Vorauswahl beim
+// Öffnen — wie der Kamera-Modus: frischer Tab/QR-Scan → „keine Klasse",
+// Reload desselben Tabs → zuletzt gewählte Klasse.
 let searchOpen = false;
 let searchSubmitted = false;
 let searchClassCache = null;                 // string[] aller Klassen des Schuljahrs
