@@ -8,6 +8,30 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-13 — Helferclient: Warteschlange — Aufruf-Pfeil statt „Aufrufen"-Button, Klassen-Spalte dynamisch
+
+Die Warteschlangen-Anzeige im Helferclient (`web/scan-render.js`, `web/scan.html`)
+wurde an drei Stellen überarbeitet:
+
+- **Aufruf-Pfeil statt Textbutton:** Der „Aufrufen"-Button pro Warteschlangen-
+  Zeile (wartende Schüler sowie aktiv/fertig Gruppen) zeigt jetzt einen
+  geometrischen Rechts-Pfeil als `<svg class="ico">` (Lucide-Stil: Linie +
+  Pfeilspitze, `stroke=currentColor`, wie die Top-Bar-Icons Lupe/Menü) statt
+  des Texts „Aufrufen". `title`/`aria-label` bleiben „Aufrufen". Klick-Handler
+  (WS `call` via `.call-btn` + `data-student-id`) unverändert.
+- **Klassen-Spalte = längste Klasse:** Neue `maxClassWidth()` misst alle
+  vorkommenden Klassen (gleiche Schrift wie `.b-fach`/`.qg-fach`: .9rem/600)
+  über einen versteckten Span und setzt `--queue-class-w` auf `#book-rows`.
+  `.book-row.queue-row` und `.queue-group-item` nutzen
+  `var(--queue-class-w, 4.5rem)` als erste Grid-Spalte → die Namen starten in
+  jeder Zeile (wartend + aktiv + fertig) am selben X.
+- **Abstände:** Klasse↔Name 14px (7px grid-gap + 7px `margin-left` auf der
+  Name-Zelle); Name↔Pfeil und Eintrag↔Eintrag bleiben bei 7px (wie zwischen
+  den Steuer-Elementen oben: `.top-bar`/`.status-bar`/`.gear-wrap`).
+
+Keine Server-/Datenflussänderung; rein frontend. Keine neuen Tests (Frontend
+hat keine JS-Tests); `node --check` ok, bestehende Suite unbetroffen.
+
 ## 2026-07-13 — Helferclient: Lupe übernimmt existierenden Queue-Eintrag (kein Doppel-Aktiv bei Search→Queue)
 
 Wurde ein Schüler per Lupe (`search_call`) geladen, der zusätzlich als `pending`
