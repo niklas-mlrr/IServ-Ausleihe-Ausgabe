@@ -138,12 +138,12 @@ async def _handle_next(state, hub, helper, websocket, raw) -> None:
 
 async def _handle_call(state, hub, helper, websocket, raw) -> None:
     # Helfer ruft einen konkreten Schüler aus der Warteschlangen-
-    # Anzeige auf (Button bei wartenden UND bereits fertigen
-    # Schülern — Fertige lassen sich so erneut aufrufen, z. B. um
+    # Anzeige auf (Button bei wartenden, aktiven UND bereits fertigen
+    # Schülern — Aktive werden Zuschauer und warten, bis der Schüler
+    # frei ist; Fertige lassen sich so erneut aufrufen, z. B. um
     # nachträglich ein vergessenes Buch zu erfassen). Rein lokale
-    # Zuweisung — kein IServ-/DB-Schreibzugriff. Der Schüler muss
-    # 'pending' oder 'done' sein (nicht 'active': bereits bei einem
-    # Helfer, nicht 'skipped'); zwischen Prüfung und Zuweisung
+    # Zuweisung — kein IServ-/DB-Schreibzugriff. Bei 'pending'/'done'
+    # erfolgt die Zuweisung direkt; zwischen Prüfung und Zuweisung
     # liegt kein Await, also atomar im Eventloop (kein Doppel-
     # Aufruf zweier Helfer auf denselben Schüler).
     sid = raw.get("student_id")
@@ -182,11 +182,16 @@ async def _handle_call(state, hub, helper, websocket, raw) -> None:
                 )
                 return
             self_recall_reload = True
-        elif owner is not None:
-            # Schüler ist gerade bei einem ANDEREN Helfer aktiv (Queue-`call`
-            # oder Lupe) — statt eines Fehlers wird der Aufrufer Zuschauer
-            # (read-only Bücherliste, live mitaktualisiert) und automatisch
-            # befördert, sobald der aktive Helfer den Schüler beendet.
+        else:
+            # Schüler ist gerade aktiv, aber NICHT beim aufrufenden Helfer:
+            # entweder bei einem ANDEREN Helfer (Queue-`call`/Lupe) ODER bei
+            # einem Schülerclient (Modus B — dann ist `owner` None, weil
+            # Modus-B-Pairing `status='active'` ohne `assigned_helper` setzt).
+            # Statt eines Fehlers wird der Aufrufer Zuschauer (read-only
+            # Bücherliste, live mitaktualisiert) und automatisch befördert,
+            # sobald der Aktive den Schüler freigibt (end_student/
+            # pop_next_spectator — Owner-unabhängig, greift auch beim
+            # Selbst-Abschluss eines Schülerclients).
             await spectate_student(
                 state,
                 hub,
@@ -350,6 +355,27 @@ async def _handle_search_call(state, hub, helper, websocket, raw) -> None:
             state, hub, helper, student_id=sid, lastname=lastname, firstname=firstname, form=form
         )
         return
+    else:
+        # Kein Helfer-Owner — aber der Schüler kann trotzdem aktiv sein, wenn
+        # er gerade per Schülerclient (Modus B) geladen wurde: Modus-B-Pairing
+        # setzt `status='active'` OHNE `assigned_helper`, sodass
+        # `find_helper_for_student` None liefert. Ohne diesen Guard würde
+        # unten ein transienter Schüler erzeugt und per
+        # `assign_student_to_helper` übernommen → Doppel-Aktiv-Konflikt mit
+        # dem Schülerclient. Stattdessen Zuschauer werden und warten, bis der
+        # Schüler frei ist (Owner-unabhängige Beförderung via end_student).
+        queued = state.find_student(sid)
+        if queued is not None and queued.status == "active":
+            await spectate_student(
+                state,
+                hub,
+                helper,
+                student_id=sid,
+                lastname=lastname,
+                firstname=firstname,
+                form=form,
+            )
+            return
     if helper.student_id is not None:
         await end_student(
             state,

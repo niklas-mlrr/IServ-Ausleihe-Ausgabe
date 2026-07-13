@@ -37,6 +37,7 @@
 | V18 | **Spectator-/Wartelisten-Mechanismus** — zweiter Helfer (Queue-`call`/Lupe-`search_call`) auf einen bereits aktiven Schüler wird Zuschauer (`student_info` mit `spectator: true`, kein `worker_ready`) statt Fehler/Doppel-Worker; Scan-Fan-out an Spectators; Beförderung des am längsten Wartenden bei `end_student` (echter Queue-Schüler UND transienter Lupe-Schüler); FIFO-Kette bei mehreren Wartenden; Disconnect-Aufräumung der Warteliste | `tests/test_ws_scanner.py` (4 neue Tests, echte Zwei-Client-`websocket_connect`) + `tests/test_queue_flow.py` (3 neue Tests, Beförderung low-level über `end_student`) | 2026-07-11 | grün, 199 → 206 Tests |
 | V19 | **Spectator-Feinschliff** — Live-Refresh an Spectators bei Reload des aktiven Helfers (`broadcast_student_info_to_spectators`); Warteposition bleibt über einen Spectator-eigenen Reload erhalten (kein Aufräumen mehr im Disconnect-Handler, Reconnect-Zweig stellt die Ansicht ohne neuen Wartelisten-Eintrag wieder her); **kritischer Bugfix**: Selbst-Aufruf des aktiven Helfers auf seinen EIGENEN Schüler (Queue-`call`/Lupe) bei wartendem Spectator führte vorher zu zwei gleichzeitig aktiven Clients (End_student beförderte den Spectator, der Handler wies den Schüler danach trotzdem wieder dem Aufrufer zu) — behoben durch `refresh_active_student` (reiner Info-Refresh statt End_student+Reassign) | `tests/test_ws_scanner.py` (3 neue Tests: Selbst-Aufruf via `call`/`search_call` je mit wartendem Spectator, Reload-Fan-out) | 2026-07-11 | grün, 206 → 209 Tests |
 | V20 | **Selbst-Aufruf zählt als neuer Zugriff** — `refresh_active_student` (V19) wieder entfernt: Selbst-Aufruf MIT Warteliste stellt den Aufrufer jetzt hinten an (der bisher Wartende übernimmt sofort, inkl. Worker) statt nur aufzufrischen; Selbst-Aufruf OHNE Warteliste fällt in den normalen `end_student`+`assign_student_to_helper`-Pfad (voller Reload, sendet `loading` → schließt clientseitig Menü/Such-Panel, was beim reinen Refresh vorher unterblieb) | `tests/test_ws_scanner.py` (2 umbenannte Tests: `..._demotes_caller_to_back_of_queue`, 1 neuer Test für den No-Queue-Reload-Pfad) | 2026-07-11 | grün, 209 → 210 Tests |
+| V21 | **Aktive Schüler aufrufbar (Spectator auch bei Modus B)** — aktive Schüler in der Warteschlangen-Ansicht des Helferclients bekommen einen „Aufrufen"-Button und werden beim Klick Zuschauer (warten bis frei). Server: `_handle_call`/`_handle_search_call` machen den Aufrufer jetzt auch dann zum Spectator, wenn der aktive Schüler KEINEN Helfer-Owner hat (Modus-B-Pairing setzt `status='active'` ohne `assigned_helper`) — bisheriger Fehler „Schüler nicht (mehr) in der Warteschlange" bzw. Doppel-Aktiv-Konflikt bei der Lupe. `test_call_non_pending_student_errors` nutzt jetzt `skipped` (aktive → Spectator ist Soll-Zustand) | `tests/test_ws_scanner.py::test_call_helper_becomes_spectator_of_modus_b_active_student` (+ `test_call_non_pending_student_errors` umgestellt) | 2026-07-13 | grün, 222 Tests |
 
 ## Offen / zu testen
 
@@ -72,6 +73,24 @@ sollte wie ein neuer Zugriff zählen), die V20 behebt.
       automatisch befördert (Worker lädt, „Scanner bereit").
 - [ ] Bei drei Wartenden: FIFO-Reihenfolge der Beförderung am echten Gerät
       bestätigen.
+
+### Offen 2026-07-13 (Aktive Schüler aufrufbar — Modus-B-Pfad live)
+
+V21 erweitert den Spectator-Mechanismus auf Schüler, die per **Schülerclient
+(Modus B)** aktiv sind (kein Helfer-Owner). Per WS-Test abgesichert, aber am
+echten Gerät noch nicht gefahren:
+
+- [ ] Schüler per Modus B pairen (aktiv am Schülerclient), im Helferclient-
+      Menü den aktiven Schüler „Aufrufen" → Status „Warten bis Schüler frei…",
+      Bücherliste read-only, kein „Scanner bereit".
+- [ ] Schülerclient schließt selbst ab (`finish`) → wartender Helfer wird
+      automatisch befördert (eigen Worker, „Scanner bereit"), kein
+      Doppel-Aktiv-Konflikt.
+- [ ] Lupe auf denselben Modus-B-aktiven Schüler → ebenfalls Zuschauer (kein
+      transienter Doppel-Aktiver, kein Fehler).
+- [ ] Aktiver Schüler ohne Owner stammt nicht nur von Modus B, sondern ggf.
+      von einem abgerissenen Helfer (Stale) — Verhalten dort ebenfalls
+      plausibel (Spectator wird beim nächsten `end_student`/Reset befördert).
 
 ### Offen 2026-07-10 (Host: Sofort-fertig-Filter beim Klassen-Öffnen)
 

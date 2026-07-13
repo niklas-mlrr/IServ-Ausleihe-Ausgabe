@@ -118,9 +118,13 @@ function renderBooks(books, animate = false) {
 // Eine Zeile innerhalb einer Gruppen-Box (aktiv/fertig) — alle Zeilen einer
 // Gruppe teilen sich eine gemeinsame Box statt je eine eigene (s.
 // .queue-group), anders als bei den wartenden Schülern (eigene book-row je
-// Schüler). Aktive Schüler werden bereits von einem Helfer bedient (kein
-// „Aufrufen"-Button); fertige lassen sich erneut aufrufen (z. B. um
-// nachträglich ein Buch zu erfassen) — Button wie bei den Wartenden.
+// Schüler). Aktive Schüler werden bereits von einem Helfer ODER einem
+// Schülerclient (Modus B) bedient — der „Aufrufen"-Button macht den
+// aufrufenden Helfer zum Zuschauer (Spectator): Bücherliste read-only, dazu
+// „Warten bis Schüler frei…", und automatische Beförderung, sobald der
+// Aktive den Schüler freigibt (server: spectate_student / end_student).
+// Fertige lassen sich erneut aufrufen (z. B. um nachträglich ein Buch zu
+// erfassen) — Button wie bei den Wartenden.
 function renderQueueGroupItem(s, withCallBtn) {
   const form = (s.form || '').replace(/^Klasse\s+/i, '');
   const name = `${s.lastname}, ${s.firstname}`;
@@ -161,10 +165,10 @@ function renderQueue() {
   }
   // Gemeinsame Box je Status statt je Schüler eine eigene Zeile — anders als
   // bei den wartenden Schülern (list) oben, die weiterhin je einen eigenen
-  // "Aufrufen"-Button brauchen. Aktiv: kein Button. Fertig: Button (erneutes
-  // Aufrufen), analog zu den Wartenden.
+  // "Aufrufen"-Button brauchen. Aktiv: Button (Aufruf → Zuschauer, warten bis
+  // frei). Fertig: Button (erneutes Aufrufen), analog zu den Wartenden.
   if (active.length) {
-    html += `<div class="queue-group queue-group-active">${active.map(s => renderQueueGroupItem(s, false)).join('')}</div>`;
+    html += `<div class="queue-group queue-group-active">${active.map(s => renderQueueGroupItem(s, true)).join('')}</div>`;
   }
   if (done.length) {
     html += `<div class="queue-group queue-group-done">${done.map(s => renderQueueGroupItem(s, true)).join('')}</div>`;

@@ -164,17 +164,19 @@ def test_peek_queue_and_close_toggle_peeking(client, ws_env):
 
 
 # ---------------------------------------------------------------------------
-# 4) call auf einen nicht-pending Schüler → error + Queue-Nachpush (Re-Check
-#    „zwei Helfer rufen denselben Schüler auf").
+# 4) call auf einen nicht aufrufbaren Schüler (skipped) → error + Queue-
+#    Nachpush. Aktive Schüler werden inzwischen Spectator (s. Test 6),
+#    fertige erneut aufgerufen — übrig bleibt 'skipped' als echter Fehler-
+#    Fall (Re-Check „zwei Helfer rufen denselben Schüler auf").
 # ---------------------------------------------------------------------------
 
 
 def test_call_non_pending_student_errors(client, ws_env):
     state, token = ws_env
     ctx = state.open_context("10a")
-    # Schüler bereits 'active' (z. B. von einem anderen Helfer aufgerufen).
+    # Schüler 'skipped' (z. B. per /api/skip übersprungen) — nicht aufrufbar.
     ctx.queue.append(
-        QueueStudent(student_id=5, lastname="C", firstname="c", form="10a", status="active")
+        QueueStudent(student_id=5, lastname="C", firstname="c", form="10a", status="skipped")
     )
     state.helper_sessions[token].context_id = ctx.id
 
@@ -182,7 +184,7 @@ def test_call_non_pending_student_errors(client, ws_env):
         _drain_handshake(ws)
         ws.send_json({"type": "call", "student_id": 5})
         # Terminal muss `error` sein — NICHT `loading` (das käme, wenn der
-        # Re-Check fehlte und der aktive Schüler doch zugewiesen würde).
+        # Re-Check fehlte und der skipped-Schüler doch zugewiesen würde).
         msg = _recv_until_any(ws, {"error", "loading"})
         assert msg["type"] == "error", f"erwartete error, bekam {msg['type']}"
         assert "nicht (mehr)" in msg["msg"]
@@ -278,6 +280,35 @@ def test_call_second_helper_becomes_spectator_of_active_queue_student(client, ws
             # Der aktive Helfer bleibt unangetastet.
             assert student.status == "active"
             assert student.assigned_helper == "h1"
+
+
+def test_call_helper_becomes_spectator_of_modus_b_active_student(client, ws_env):
+    """`call` auf einen Schüler, der per Schülerclient (Modus B) aktiv ist:
+    Modus-B-Pairing setzt `status='active'` OHNE `assigned_helper`, sodass
+    `find_helper_for_student` None liefert. Früher fiel der Call durch zum
+    Fehler „Schüler nicht (mehr) in der Warteschlange"; jetzt wird der
+    aufrufende Helfer Zuschauer und wartet, bis der Schüler frei ist."""
+    state, token = ws_env
+    ctx = state.open_context("10a")
+    student = QueueStudent(student_id=4243, lastname="Test", firstname="S", form="10a")
+    student.status = "active"  # simuliert Modus-B-Pairing (kein assigned_helper)
+    ctx.queue.append(student)
+
+    with client.websocket_connect("/ws/scanner/h1") as ws1:
+        _drain_handshake(ws1)
+        ws1.send_json({"type": "call", "student_id": 4243})
+        msg = _recv_until_any(ws1, {"student_info", "error"})
+        assert msg["type"] == "student_info", f"erwartete student_info, bekam {msg}"
+        assert msg.get("spectator") is True
+        h1 = state.helper_sessions["h1"]
+        assert h1.student_id is None  # kein eigener Worker — nur Zuschauer
+        assert h1.spectating_student_id == 4243
+        assert state.student_spectators.get(4243) and (
+            state.student_spectators[4243][0].token == "h1"
+        )
+        # Der (Modus-B-)Schüler bleibt aktiv, ohne Helfer-Owner.
+        assert student.status == "active"
+        assert student.assigned_helper is None
 
 
 def test_search_call_second_helper_becomes_spectator_of_transient_target(client, ws_env):

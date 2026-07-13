@@ -8,6 +8,34 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-13 — Warteschlange: aktive Schüler aufrufbar (Spectator-Warteschlange)
+
+In der Warteschlangen-Ansicht des Helferclients (`web/scan.html`, Peek/Idle-Menü)
+bekommen aktive Schüler jetzt ebenfalls einen „Aufrufen"-Button — bisher nur
+wartende und fertige. Klick macht den aufrufenden Helfer zum **Zuschauer
+(Spectator)**: Bücherliste read-only, Status „Warten bis Schüler frei…", und
+automatische Beförderung, sobald der aktive Helfer (oder Schülerclient) den
+Schüler freigibt (`end_student`/`pop_next_spectator`).
+
+Zwei serverseitige Änderungen in `server/routes/ws.py`, damit das auch greift,
+wenn der Schüler nicht bei einem Helfer, sondern bei einem **Schülerclient
+(Modus B)** aktiv ist: Modus-B-Pairing setzt `status='active'` ohne
+`assigned_helper`, sodass `find_helper_for_student` None lieferte und der Call
+bisher mit „Schüler nicht (mehr) in der Warteschlange" fehlschlug.
+
+- `_handle_call`: aktiver Schüler ohne Helfer-Owner (Modus B) → `spectate_student`
+  statt Fehler. Der bisherige „anderer Helfer"-Spectator-Zweig wird dadurch zum
+  `else` (aktive NICHT beim Aufrufer → immer Zuschauer).
+- `_handle_search_call`: gleicher Guard nach dem „anderer Helfer"-Zweig, damit
+  die Lupe einen Modus-B-aktiven Schüler nicht als transienten Doppel-Aktiven
+  übernimmt, sondern ebenfalls als Zuschauer wartet.
+
+Frontend: `web/scan-render.js` (`renderQueue` rendert die aktive Gruppe jetzt mit
+Button). Keine CSS-Änderung (3-Spalten-Grid für `data-student-id` vorhanden).
+Tests: neuer `test_call_helper_becomes_spectator_of_modus_b_active_student`;
+`test_call_non_pending_student_errors` nutzt jetzt `skipped` (aktive → Spectator
+ist neuer Soll-Zustand). Read-only: kein IServ-/DB-Schreibzugriff.
+
 ## 2026-07-13 — Helferclient: Lupen-Suche startet auf „Klasse wählen"
 
 Die Lupen-Suche (Peek-Modus, Helfer-Scanner `web/scan.html`) hat beim Öffnen
