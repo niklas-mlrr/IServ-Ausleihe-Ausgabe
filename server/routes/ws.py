@@ -299,10 +299,11 @@ async def _handle_search_call(state, hub, helper, websocket, raw) -> None:
     # Helfer-Lupe: gezielt einen beliebigen IServ-Schüler laden
     # (Schnellsprung — der Schüler muss NICHT in der Warteschlange
     # stehen). Aktuellen Schüler wie beim Peek-`call` auf 'pending'
-    # zurückgeben, dann einen transienten QueueStudent (bewusst NICHT
-    # in eine Queue eingetragen) via assign_student_to_helper laden.
-    # Read-only: IServ/DB werden nur gelesen (get_student_info),
-    # kein Write.
+    # zurückgeben, dann den Schüler via assign_student_to_helper laden.
+    # Steht er bereits in einer Klassen-Queue, wird dieser ECHTE Eintrag
+    # übernommen (s. Claim-Kommentar unten) — sonst ein transienter
+    # QueueStudent (bewusst NICHT in eine Queue eingetragen). Read-only:
+    # IServ/DB werden nur gelesen (get_student_info), kein Write.
     sid = raw.get("student_id")
     form = str(raw.get("form") or "").strip()
     lastname = str(raw.get("lastname") or "").strip()
@@ -385,14 +386,35 @@ async def _handle_search_call(state, hub, helper, websocket, raw) -> None:
             session_state="revoked",
             helper_notify={"type": "loading"},  # Queue verbergen — neuer wird geladen
         )
-    student = QueueStudent(
-        student_id=sid,
-        lastname=lastname,
-        firstname=firstname,
-        form=form,
-        status="active",
-        assigned_helper=helper.token,
-    )
+    # Claim-Logik: steht der Ziel-Schüler bereits in einer Klassen-Queue
+    # (pending/done/skipped), wird genau dieser ECHTE Eintrag übernommen
+    # (active + zugewiesen) statt ein transienter Doppelgänger erzeugt. Ein
+    # transienter Doppelgänger ließe den echten Queue-Eintrag unangetastet
+    # stehen — bei 'pending' bliebe er für einen zweiten Helfer regulär
+    # aufrufbar: sein Queue-`call` sieht `status == "pending"` (NICHT
+    # "active"), übersieht den transienten Besitzer und übernimmt den
+    # Schüler → derselbe Schüler wäre von zwei Helfern gleichzeitig aktiv
+    # geladen. Den echten Eintrag übernehmen macht ihn "active", sodass der
+    # Queue-`call` des zweiten Helfers sauber in die Spectator-Warteliste
+    # läuft (s. _handle_call). Zugleich findet `end_student` beim Abschluss
+    # den aktiven Eintrag und löst den Helfer sauber (ohne Claim fände er
+    # nur den noch-pending-Eintrag mit `assigned_helper == None` und ließe
+    # den Helfer mit stale `student_id`/leakendem Worker zurück). Steht der
+    # Schüler in KEINER Queue (Schnellsprung zu beliebigem IServ-Schüler),
+    # bleibt es beim transienten Eintrag — bewusst nicht in eine Queue
+    # eingetragen.
+    existing = state.find_student_with_ctx(sid)
+    if existing is not None:
+        student = existing[1]
+    else:
+        student = QueueStudent(
+            student_id=sid,
+            lastname=lastname,
+            firstname=firstname,
+            form=form,
+            status="active",
+            assigned_helper=helper.token,
+        )
     await assign_student_to_helper(state, hub, helper, student)
 
 

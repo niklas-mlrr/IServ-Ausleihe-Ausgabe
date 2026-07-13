@@ -344,6 +344,59 @@ def test_search_call_second_helper_becomes_spectator_of_transient_target(client,
             assert h2.spectating_student_id == 4242
 
 
+def test_search_call_claims_existing_queue_entry_preventing_double_active(client, ws_env):
+    """Wurde ein Schüler per Lupe geladen, der zusätzlich als 'pending' in einer
+    Klassen-Queue steht, darf ein zweiter Helfer ihn nicht erneut aktiv über den
+    Queue-`call` laden. Ohne die Claim-Logik in `_handle_search_call` würde die
+    Lupe einen transienten Doppelgänger erzeugen und den echten Queue-Eintrag
+    'pending' stehen lassen — der zweite `call` sähe 'pending' (nicht 'active'),
+    übersähe den transienten Besitzer und übernähme den Schüler regulär → zwei
+    Helfer aktiv auf demselben Schüler. Stattdessen übernimmt die Lupe den echten
+    Eintrag (active + zugewiesen), und der zweite `call` wird Zuschauer."""
+    state, token = ws_env
+    ctx = state.open_context("10a")
+    student = QueueStudent(student_id=4242, lastname="Test", firstname="S", form="10a")
+    ctx.queue.append(student)  # pending
+    state.helper_sessions["h2"] = HelperSession(token="h2", name="Helfer 2")
+
+    search_call = {
+        "type": "search_call",
+        "student_id": 4242,
+        "form": "10a",
+        "lastname": "Test",
+        "firstname": "S",
+    }
+    with client.websocket_connect("/ws/scanner/h1") as ws1:
+        _drain_handshake(ws1)
+        ws1.send_json(search_call)
+        _recv_until(ws1, "worker_ready")
+        h1 = state.helper_sessions["h1"]
+        assert h1.student_id == 4242
+        # Lupe hat den ECHTEN Queue-Eintrag übernommen — kein transienter
+        # Doppelgänger; der Eintrag ist 'active' und dem Helfer zugewiesen.
+        assert student.status == "active"
+        assert student.assigned_helper == "h1"
+        assert state.find_helper_for_student(4242) is h1
+
+        with client.websocket_connect("/ws/scanner/h2") as ws2:
+            _drain_handshake(ws2)
+            ws2.send_json({"type": "call", "student_id": 4242})
+            msg = _recv_until_any(ws2, {"student_info", "error"})
+            assert msg["type"] == "student_info", f"erwartete student_info, bekam {msg}"
+            assert msg.get("spectator") is True
+            h2 = state.helper_sessions["h2"]
+            # Zweiter Helfer bekommt KEINEN eigenen Worker — nur Zuschauer.
+            assert h2.student_id is None
+            assert h2.spectating_student_id == 4242
+            assert state.student_spectators.get(4242) and (
+                state.student_spectators[4242][0].token == "h2"
+            )
+            # Erster Helfer bleibt unangetastet der allein aktive Besitzer.
+            assert h1.student_id == 4242
+            assert student.status == "active"
+            assert student.assigned_helper == "h1"
+
+
 def test_scan_fans_out_to_spectator(client, ws_env):
     """Ein Scan des aktiven Helfers wird an alle Spectators dieses Schülers
     gespiegelt (`spectator: True`) — die Bücherliste bleibt so live

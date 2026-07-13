@@ -8,6 +8,32 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-13 — Helferclient: Lupe übernimmt existierenden Queue-Eintrag (kein Doppel-Aktiv bei Search→Queue)
+
+Wurde ein Schüler per Lupe (`search_call`) geladen, der zusätzlich als `pending`
+in einer Klassen-Queue stand, baute die Lupe einen **transienten Doppelgänger**
+(`status=active`, zugewiesen) und ließ den echten Queue-Eintrag unangetastet
+`pending`. Ein zweiter Helfer, der denselben Schüler aus der Warteschlangen-Ansicht
+aufruft (`call`), sah am Queue-Eintrag `status == "pending"` (nicht `"active"`),
+übersah den transienten Besitzer und übernahm den Schüler regulär → **derselbe
+Schüler war von zwei Helfern gleichzeitig aktiv geladen** (inkl. zweitem Worker-
+Context für dieselbe `student_id`).
+
+- `server/routes/ws.py::_handle_search_call`: Claim-Logik — steht der Ziel-Schüler
+  bereits in einer Klassen-Queue (beliebiger Status), wird dieser ECHTE Eintrag
+  übernommen (`active` + zugewiesen via `assign_student_to_helper`) statt ein
+  transienter erzeugt. Steht er in keiner Queue (Schnellsprung zu beliebigem
+  IServ-Schüler), bleibt es beim transienten Eintrag (bewusst nicht in einer
+  Queue). Damit läuft der `call` des zweiten Helfers sauber in die bestehende
+  Spectator-Warteliste (Status „Warten bis Schüler frei…", automatische
+  Beförderung bei Freigabe). Nebeneffekt behoben: `end_student` findet beim
+  Abschluss jetzt den aktiven Eintrag und löst den Helfer sauber (vorher stieß
+  es auf den noch-`pending`-Eintrag mit `assigned_helper == None` und ließ den
+  Helfer mit stale `student_id`/leakendem Worker zurück).
+- Regressionstest `tests/test_ws_scanner.py::
+  test_search_call_claims_existing_queue_entry_preventing_double_active`.
+  Suite grün (223 Tests).
+
 ## 2026-07-13 — Helferclient: Spectator-Status bleibt nach Menü-Schließen erhalten
 
 Beim Schließen des Peek-Menüs rief `closePeek()` `setReadyStatus()` auf, das bei
