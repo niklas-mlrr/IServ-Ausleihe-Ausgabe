@@ -55,7 +55,7 @@ let queueView = false;             // .app.queue-view gesetzt? (Peek oder Idle)
 // `searchSubmitted` markiert eine laufende search_call-Antwort (lädt der neue
 // Schüler, schließt das Panel + Menü bewusst — `call`/`next` lassen das Menü
 // sonst offen). Letzte Klasse in sessionStorage für die Vorauswahl beim
-// Öffnen — wie der Kamera-Modus: frischer Tab/QR-Scan → „keine Klasse",
+// Öffnen — wie der Kamera-Modus: frischer Tab/QR-Scan → „Klasse wählen",
 // Reload desselben Tabs → zuletzt gewählte Klasse.
 let searchOpen = false;
 let searchSubmitted = false;

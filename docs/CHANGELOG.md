@@ -8,7 +8,7 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
-## 2026-07-13 — Helferclient: Lupen-Suche startet auf „keine Klasse"
+## 2026-07-13 — Helferclient: Lupen-Suche startet auf „Klasse wählen"
 
 Die Lupen-Suche (Peek-Modus, Helfer-Scanner `web/scan.html`) hat beim Öffnen
 bislang die zuletzt gewählte Klasse vorausgewählt — und beim allerersten Öffnen
@@ -17,14 +17,14 @@ unbeabsichtigt: ohne bewusste Auswahl springt der Helfer so sofort auf eine
 fremde Klasse und lädt deren Schüler.
 
 Neu steht beim ersten Öffnen der Suche in einem Tab der Platzhalter
-„— keine Klasse —" gewählt, das Schüler-Dropdown zeigt „Zuerst Klasse wählen".
+„— Klasse wählen —" gewählt, das Schüler-Dropdown zeigt „Zuerst Klasse wählen".
 Wählt der Helfer eine Klasse, wird sie fortan vorausgewählt — aber nur noch
 innerhalb desselben Tabs.
 
 Dazu ist die letzte Klasse — analog zum Kamera-Modus-Umschalter — von
 `localStorage` nach `sessionStorage` gewandert (`SEARCH_LASTCLASS_KEY =
 ausleihe-search-lastclass`): ein frischer Tab/QR-Scan beginnt immer auf
-„keine Klasse" (sessionStorage leer), ein Reload desselben Tabs behält die
+„Klasse wählen" (sessionStorage leer), ein Reload desselben Tabs behält die
 zuletzt gewählte Klasse. Der Platzhalter ist `disabled` (wie „— Schüler
 wählen —" im Schüler-Dropdown), also nach dem Verlassen nicht wieder
 anwählbar.

@@ -197,7 +197,7 @@ function handleServerMessage(msg) {
   } else if (msg.type === 'search_classes') {
     // Lupen-Suche: alle Klassen des Schuljahrs (IServ). Session-Cache füllen
     // und Dropdown aufbauen — letzte Klasse vorwählen (sessionStorage), sonst
-    // Platzhalter „keine Klasse". Sofort Schüler der gewählten Klasse nachladen.
+    // Platzhalter „Klasse wählen". Sofort Schüler der gewählten Klasse nachladen.
     searchClassCache = Array.isArray(msg.classes) ? msg.classes : [];
     renderSearchClasses();
   } else if (msg.type === 'search_students') {

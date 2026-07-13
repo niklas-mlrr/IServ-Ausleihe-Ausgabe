@@ -856,9 +856,9 @@ function resetSearchPanel() {
 
 // Klassen-Dropdown aufbauen. Vorauswahl wie beim Kamera-Modus in
 // sessionStorage gespeichert: frischer Tab/QR-Scan (sessionStorage leer) →
-// Platzhalter „keine Klasse" gewählt + Schüler-Dropdown „Zuerst Klasse wählen";
+// Platzhalter „Klasse wählen" gewählt + Schüler-Dropdown „Zuerst Klasse wählen";
 // Reload desselben Tabs → zuletzt gewählte Klasse. Sofort Schüler der gewählten
-// Klasse laden (bei „keine Klasse" leer).
+// Klasse laden (bei Platzhalter leer).
 function renderSearchClasses() {
   const classes = searchClassCache || [];
   if (!classes.length) {
@@ -871,7 +871,7 @@ function renderSearchClasses() {
   searchClassSel.disabled = false;
   const last = sessionStorage.getItem(SEARCH_LASTCLASS_KEY);
   const preselect = (last && classes.includes(last)) ? last : '';
-  const placeholder = `<option value="" disabled${preselect ? '' : ' selected'}>— keine Klasse —</option>`;
+  const placeholder = `<option value="" disabled${preselect ? '' : ' selected'}>— Klasse wählen —</option>`;
   searchClassSel.innerHTML = placeholder + classes.map(c =>
     `<option value="${escapeHtml(c)}"${c === preselect ? ' selected' : ''}>${escapeHtml(c)}</option>`).join('');
   loadSearchStudents(preselect);
