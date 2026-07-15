@@ -4,8 +4,8 @@ Seminarfachprojekt: Handy-Scanner für die Schulbuch-Stapelerstellung (Modus A)
 und Live-Ausgabe-Pilot (Modus B). **Arbeitsgrundlage: `docs/PLAN.md`** (Zielbild,
 Architektur, Sicherheitsmodell, Phasen, offene Punkte O1–O9).
 
-Wiki-Kontext: `~/cc/wiki/30_projects/sba/ausleihe_ausgabe/` (Projekt) und
-`~/cc/wiki/30_projects/sba/ausleihe_api/` (api_reference, auth, schemas,
+Wiki-Kontext: `~/wiki/wiki/30_projects/sba/ausleihe_ausgabe/` (Projekt) und
+`~/wiki/wiki/30_projects/sba/ausleihe_api/` (api_reference, auth, schemas,
 write_endpoints).
 
 ## ⚠️ PRODUKTIONS-SCHUTZ — UNBEDINGT BEACHTEN
@@ -31,7 +31,7 @@ produktive Schul-/Schülerdaten zu.
 - Schreiboperationen (Buch ausgeben/zurücknehmen) laufen **ausschließlich**
   via Playwright durch das **offizielle IServ-Frontend** — nie durch
   selbstprogrammierte API-Calls. Die in
-  `~/cc/wiki/30_projects/sba/ausleihe_api/write_endpoints.md` dokumentierten
+  `~/wiki/wiki/30_projects/sba/ausleihe_api/write_endpoints.md` dokumentierten
   Schreib-Endpunkte (z. B. `processBook`) sind reine Dokumentation.
 - **Playwright-Tests nur mit Niklas' Account und ausgemusterten Büchern.**
   Jede Test-Ausleihe wird **sofort zurückgenommen**. Vor jedem Probelauf den
@@ -65,7 +65,7 @@ Rückbau-Plan; Real-Buchungen nie unbeaufsichtigt.
 - **`docs/` im Repo ist die Primärquelle** für alles Projektgebundene:
   PLAN.md, Spike-Protokolle, Architekturentscheidungen, Messergebnisse
   (= Seminarfach-Material, versioniert mit dem Code).
-- Die Wiki-Seite (`~/cc/wiki/30_projects/sba/ausleihe_ausgabe/overview.md`)
+- Die Wiki-Seite (`~/wiki/wiki/30_projects/sba/ausleihe_ausgabe/overview.md`)
   ist nur Überblick + Einstieg: Status, Key Facts, Links auf `docs/`.
   Inhalte nie duplizieren — eine Info hat genau einen Heimatort.
 - **Bei `/wiki-ingest` in diesem Projekt immer beide Seiten prüfen:**

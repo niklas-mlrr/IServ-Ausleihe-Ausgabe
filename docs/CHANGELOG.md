@@ -868,7 +868,7 @@ sichtbare Bewegung an sein Ziel sprang; (2) da der Button beim Schließen des
 Menüs Kind eines selbst FLIP-animierten Elements (`.status-bar`) wird, addierte
 sich sein eigener Transform zum ererbten — er schoss weit über die Zielposition
 hinaus statt sanft mitzuwandern. Details + wiederverwendbare Faustregel:
-`~/cc/_logs/2026-07-10_sba_helfer_weiter_lupe_swap.md`.
+`~/wiki/_logs/2026-07-10_sba_helfer_weiter_lupe_swap.md`.
 
 Reiner UI-Fix im Helferclient (`web/scan.html`, `web/scan.js`), kein
 Verhaltenseingriff auf dem Buchungspfad. Commit `de59af6`.
@@ -1813,8 +1813,8 @@ gestartet war und die neue Route noch nicht kannte, während das
 statische `host.html` sofort die neue UI zeigte. Diagnostiziert via
 `ps -o lstart` vs. `stat -c %y`; Neustart bewusst dem Nutzer überlassen
 (aktive Helfer-/Queue-Sessions wären sonst verloren gegangen). Details:
-`~/cc/_logs/2026-07-05_sba_hide_book_series_and_reload_gotcha.md`,
-`~/cc/wiki/40_experience_logs/lessons_learned.md`.
+`~/wiki/_logs/2026-07-05_sba_hide_book_series_and_reload_gotcha.md`,
+`~/wiki/wiki/40_experience_logs/lessons_learned.md`.
 
 ## 2026-07-05 — Karte „Bücher-Reihenfolge (Scanner)" entfernt
 
