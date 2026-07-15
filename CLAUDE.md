@@ -8,6 +8,12 @@ Wiki-Kontext: `~/wiki/wiki/30_projects/sba/ausleihe_ausgabe/` (Projekt) und
 `~/wiki/wiki/30_projects/sba/ausleihe_api/` (api_reference, auth, schemas,
 write_endpoints).
 
+## Git-Worktrees — nicht verwenden
+
+In diesem Projekt **keine Git-Worktrees anlegen oder vorschlagen** (weder via
+`git worktree` noch via Agent-Tool `isolation: "worktree"`) — außer der Nutzer
+fragt explizit danach. Normale Branches direkt im Hauptverzeichnis genügen.
+
 ## ⚠️ PRODUKTIONS-SCHUTZ — UNBEDINGT BEACHTEN
 
 Die `.env` enthält **echte IServ-Zugangsdaten gegen die PRODUKTIONSUMGEBUNG**
