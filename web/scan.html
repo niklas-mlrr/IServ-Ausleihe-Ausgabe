@@ -20,6 +20,9 @@
       --btn: clamp(52px, 14vw, 88px);
       --gap: 8px;
       --status-h: calc(var(--btn) * 2 / 3);
+      /* Höhe der Info-Icons in der Queue (Drucker/Antrag/Buch) UND des
+         X/Y-/Betrag-Kästchens (s. .q-ico/.q-info-amount) — beide gleich hoch. */
+      --q-info-h: 1.6rem;
     }
     @media (prefers-color-scheme: light) {
       :root {
@@ -321,7 +324,7 @@
     /* Kein Innenabstand oben/unten: der Button ist das höchste Element der
        Zeile, daher entspricht der Zeilen-margin-bottom (7px) direkt dem
        sichtbaren Abstand zwischen den Rändern zweier Aufruf-Pfeile. */
-    .book-row.queue-row { grid-template-columns: var(--queue-class-w, 4.5rem) 1fr auto; gap: 7px; background: transparent; border-color: transparent; padding-top: 0; padding-bottom: 0; }
+    .book-row.queue-row { grid-template-columns: var(--queue-class-w, 4.5rem) 1fr auto auto; gap: 7px; background: transparent; border-color: transparent; padding-top: 0; padding-bottom: 0; }
     .book-row.queue-row .b-title { margin-left: 7px; }  /* Klasse↔Name: 7px gap + 7px = 14px */
     .book-row.queue-row .b-call { display: flex; justify-content: flex-end; align-items: center; }
     .call-btn { display: inline-flex; align-items: center; justify-content: center;
@@ -329,6 +332,20 @@
       background: var(--surface-2); color: var(--fg); border: 1px solid var(--border); cursor: pointer; transition: background .2s; }
     .call-btn:hover { background: var(--surface-3); }
     .call-btn:active { background: var(--surface-4); }
+    /* Info-Spalte links vom Aufrufen-Button: rechtsbündige Reihe kompakter
+       Icons/Kurztexte (s. scan-render.js queueInfoIcons) — leer, wenn keine
+       Infos vorliegen, nimmt dann keinen sichtbaren Platz ein. */
+    .q-info { display: flex; justify-content: flex-end; align-items: center; gap: 6px; font-size: .78rem; font-weight: 600; opacity: .75; white-space: nowrap; }
+    .q-info-item { display: inline-flex; align-items: center; }
+    /* X/Y + Betrag: eigenes Kästchen statt nacktem Text, genauso hoch wie die
+       Icon-Symbole (--q-info-h, gemeinsam mit .q-ico) — Schriftgröße wie der
+       Name (.b-title, .9rem). */
+    .q-info-amount {
+      height: var(--q-info-h); box-sizing: border-box; padding: 0 6px;
+      border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2);
+      font-size: .9rem; font-weight: 400; justify-content: center;
+    }
+    .q-ico { width: var(--q-info-h); height: var(--q-info-h); }
     /* Gruppen-Boxen unter der eigentlichen (wartenden) Warteschlange: alle
        gerade aufgerufenen (aktiv) bzw. bereits fertigen Schüler teilen sich
        je EINE gemeinsame Box statt einer Zeile pro Schüler (anders als bei
@@ -346,7 +363,7 @@
        gesetzt), daher dieselbe 3-Spalten-Aufteilung wie bei den wartenden
        book-row.queue-row. */
     .queue-group-item { display: grid; grid-template-columns: var(--queue-class-w, 4.5rem) 1fr; gap: 7px; align-items: center; }
-    .queue-group-item[data-student-id] { grid-template-columns: var(--queue-class-w, 4.5rem) 1fr auto; }
+    .queue-group-item[data-student-id] { grid-template-columns: var(--queue-class-w, 4.5rem) 1fr auto auto; }
     .queue-group-item .qg-fach { font-weight: 600; }
     .queue-group-item .qg-name { margin-left: 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }  /* Klasse↔Name: 7px gap + 7px = 14px */
     .queue-group-item .qg-call { display: flex; justify-content: flex-end; align-items: center; }

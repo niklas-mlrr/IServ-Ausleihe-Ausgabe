@@ -8,6 +8,66 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-18 — Helfer-Queue-Info-Icons: Feinschliff (Kästchen, Drucker/X-Y exklusiv)
+
+Zwei Nachschärf-Runden auf den vorigen Eintrag (Helfer-Queue-Info-Icons):
+
+- **Druckersymbol vereinheitlicht:** Strichstärke von 2 auf 2.5 angehoben —
+  war als einziges der Info-Icons noch dünn, wirkte dadurch kleiner als die
+  Antrags-/Buch-Icons, obwohl `.q-ico` (Breite/Höhe) schon identisch war.
+- **X/Y bekommt dieselbe Schriftgröße wie der Name:** Klasse `q-info-amount`
+  (bisher nur für den offenen Betrag) jetzt auch auf dem X/Y-Text — beide
+  damit `.9rem` wie `.b-title`, nicht mehr die kompaktere `.78rem`-
+  Basisgröße der reinen Icon-Items.
+- **X/Y + Betrag als eigenes Kästchen**, genauso hoch wie die Icon-Symbole:
+  neue CSS-Variable `--q-info-h` (`1.6rem`, in `:root` neben `--btn`/`--gap`)
+  treibt sowohl `.q-ico` (Breite/Höhe) als auch `.q-info-amount` (`height`,
+  `box-sizing: border-box`, Rahmen + `border-radius` + `--surface-2`-
+  Hintergrund) — beide dadurch exakt gleich hoch, unabhängig von
+  verschachtelten `em`-Schriftgrößen-Kontexten.
+- **Drucker verdrängt X/Y:** Ist ein Leihschein bereits gedruckt
+  (`slip_printed`), zeigt die Info-Spalte nur noch das Druckersymbol, nicht
+  mehr zusätzlich X/Y — sobald gedruckt ist, ist der Bücher-Fortschritt für
+  den Helfer nicht mehr die relevante Info. `queueInfoIcons` in
+  `web/scan-render.js` prüft jetzt `if (slip_printed) … else if
+  (books_total) …` statt beide unabhängig voneinander zu pushen.
+
+## 2026-07-18 — Helfer-Queue: Info-Icons vor dem Aufrufen-Button (Gegenstück zur Host-Info-Spalte)
+
+Die Host-Info-Spalte (X/Y Bücher, Leihschein, Anmelde-/Zahlstatus, s. Eintrag
+weiter unten) war bisher nur im Host sichtbar. Jetzt zeigt auch die
+Warteschlangen-Ansicht im Helfer-Client (`scan.html`/`scan-render.js`) dieselben
+Felder — rechtsbündig links vom „Aufrufen"-Pfeil, sowohl bei wartenden
+Schülern (`book-row.queue-row`) als auch in den Aktiv-/Fertig-Gruppenboxen
+(`queue-group-item`). Anders als im Host (Text-Badges, viel Platz in der
+Tabelle) sind es hier kompakte Icons — die schmale Queue-Zeile auf dem Handy
+hat keinen Platz für ausgeschriebene Labels:
+
+- **X/Y Bücher** — Text wie im Host.
+- **Leihschein gedruckt** — dasselbe Druckersymbol wie der Leihschein-Button.
+- **Nicht angemeldet** — Buchsymbol (Deckel + Buchrücken-Kurve unten links,
+  Lucide-„book"-Stil) mit diagonalem Strich durchgestrichen.
+- **Ermäßigungsantrag offen** / **Befreiungsantrag offen** — dieselbe Form
+  (Blatt mit gefalteter Ecke), unterschieden nur durch den großen,
+  zentrierten Buchstaben „E"/„B" — Icon-Design nach Nutzer-Referenzbildern
+  (`Antragfehlt.PNG`, `Buch.PNG`, nicht ins Repo übernommen) mehrfach
+  nachgeschärft: rundere Ecken (via `stroke-linejoin="round"` + dickerer
+  Strichstärke 2.5 statt 2), größere Darstellung (`.q-ico` 1.15em → 1.5em →
+  1.9em über mehrere Iterationen).
+- **Offener Betrag** (z. B. „40,54€", ohne bekannten Betrag „offen") — als
+  Text in eigener Schriftgröße `.q-info-amount` (.9rem, normales Gewicht),
+  bewusst genauso groß wie der Schülername (`.b-title`) — die übrigen
+  Info-Items (X/Y, Icons) bleiben kompakter (.78rem).
+- Alle Icons ausschließlich aus geometrischen SVG-Grundformen (Pfad/Linie/
+  Rect), keine externen Icon-Fonts. Neue Funktion `queueInfoIcons(s)` in
+  `web/scan-render.js`, Grid-Spalte `.q-info` zusätzlich in
+  `.book-row.queue-row` und `.queue-group-item[data-student-id]`
+  (`grid-template-columns` je um ein `auto` erweitert); leer, wenn keine
+  Infos vorliegen, nimmt dann keinen Platz ein. Reine Frontend-Änderung,
+  keine neuen Server-Felder — nutzt dieselben `QueueStudent`-Felder, die
+  bereits für die Host-Info-Spalte über `contexts_update` an alle Clients
+  (Host **und** Helfer) gehen.
+
 ## 2026-07-18 — Einstellungen: Ausblenden wirkt sofort auf den Clients (Live-Repush)
 
 Bisher wurde beim Ausblenden einer Buchreihe im Einstellungen-Dialog zwar der

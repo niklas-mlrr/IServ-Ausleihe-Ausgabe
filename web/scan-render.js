@@ -129,10 +129,56 @@ function renderQueueGroupItem(s, withCallBtn) {
   const form = (s.form || '').replace(/^Klasse\s+/i, '');
   const name = `${s.lastname}, ${s.firstname}`;
   const sidAttr = withCallBtn ? ` data-student-id="${escapeHtml(String(s.student_id))}"` : '';
+  const info = withCallBtn ? queueInfoIcons(s) : '';
   const callBtn = withCallBtn ? '<div class="qg-call"><button class="call-btn" title="Aufrufen" aria-label="Aufrufen"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></button></div>' : '';
   return `<div class="queue-group-item"${sidAttr}>`
     + `<div class="qg-fach">${escapeHtml(form)}</div>`
-    + `<div class="qg-name">${escapeHtml(name)}</div>${callBtn}</div>`;
+    + `<div class="qg-name">${escapeHtml(name)}</div>${info}${callBtn}</div>`;
+}
+
+// Info-Spalte links vom Aufrufen-Button: rein INFORMATIVE Hinweise zu einem
+// Schüler, analog zur Info-Spalte im Host (s. host-render.js infoBadges),
+// hier aber als kompakte Icons statt Text-Badges — in der schmalen
+// Queue-Zeile ist kein Platz für ausgeschriebene Labels. Icons bestehen
+// ausschließlich aus geometrischen Formen (+ je einem großen Kennbuchstaben
+// bei den Antrags-Icons):
+//   • X/Y  — ausgegebene / angemeldete Bücher (Text, wie im Host).
+//   • Drucker — Leihschein wurde bereits gedruckt.
+//   • Durchgestrichenes Buch — nicht angemeldet.
+//   • Beschriebenes Blatt mit großem „E" — Ermäßigungsantrag offen.
+//   • Beschriebenes Blatt mit großem „B" — Befreiungsantrag offen.
+//   • Betrag (z. B. „40,54€") — Zahlung offen; ohne bekannten Betrag „offen".
+const ICON_PRINTER_SM = '<svg class="ico q-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>';
+// Buchsymbol (Deckel + Buchrücken-Kurve unten links) — dieselbe Grundform
+// wird auch fürs „nicht angemeldet"-Icon verwendet, dort zusätzlich mit
+// diagonalem Strich durchgestrichen.
+const BOOK_SHAPE = '<path d="M6.5 3H18a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H6.5A2.5 2.5 0 0 1 4 18.5v-13A2.5 2.5 0 0 1 6.5 3Z"/><path d="M4 18.5A2.5 2.5 0 0 1 6.5 16H19"/>';
+const ICON_BOOK_CROSSED = `<svg class="ico q-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">${BOOK_SHAPE}<line x1="3" y1="21" x2="21" y2="3"/></svg>`;
+function docLetterIcon(letter) {
+  return `<svg class="ico q-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3.5h10l4 4v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-16a1 1 0 0 1 1-1Z"/><path d="M15 3.5v4h4"/><text x="10" y="18.5" text-anchor="middle" font-size="11" font-weight="800" stroke="none" fill="currentColor">${letter}</text></svg>`;
+}
+function queueInfoIcons(s) {
+  const out = [];
+  // Leihschein gedruckt verdrängt X/Y — sobald gedruckt ist, ist der
+  // Bücher-Fortschritt für den Helfer nicht mehr die relevante Info.
+  if (s.slip_printed) {
+    out.push(`<span class="q-info-item" title="Leihschein wurde gedruckt">${ICON_PRINTER_SM}</span>`);
+  } else if (s.books_total) {
+    out.push(`<span class="q-info-item q-info-amount" title="ausgegebene / angemeldete Bücher">${s.books_done}/${s.books_total}</span>`);
+  }
+  if (s.enrolled === false) {
+    out.push(`<span class="q-info-item" title="Nicht angemeldet">${ICON_BOOK_CROSSED}</span>`);
+  } else if (s.enrolled) {
+    if (s.paid === false) {
+      const open = typeof s.amount_open === 'number'
+        ? `${s.amount_open.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}€`
+        : 'offen';
+      out.push(`<span class="q-info-item q-info-amount" title="Bezahlung ausstehend">${open}</span>`);
+    }
+    if (s.remission_pending) out.push(`<span class="q-info-item" title="Ermäßigungsantrag ausstehend">${docLetterIcon('E')}</span>`);
+    if (s.exemption_pending) out.push(`<span class="q-info-item" title="Befreiungsantrag ausstehend">${docLetterIcon('B')}</span>`);
+  }
+  return `<div class="q-info">${out.join('')}</div>`;
 }
 
 // Breite der Klassen-Spalte messen: so breit wie die längste vorkommende
@@ -180,6 +226,7 @@ function renderQueue() {
       return `<div class="book-row queue-row" data-student-id="${escapeHtml(String(s.student_id))}">`
         + `<div class="b-fach">${escapeHtml(form)}</div>`
         + `<div class="b-title">${escapeHtml(name)}</div>`
+        + queueInfoIcons(s)
         + `<div class="b-call"><button class="call-btn" title="Aufrufen" aria-label="Aufrufen"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></button></div></div>`;
     }).join('');
   }
