@@ -22,6 +22,8 @@
       --ok-hover: #28b84e;
       --ok-tint: #1a3a1a;
       --warn: #ffd60a;
+      --slip-tint: #3a3210;     /* Badge „Leihschein gedruckt" (Queue) */
+      --slip-text: #ffd60a;
       --danger: #ff3b30;
       --danger-hover: #d43028;
       --danger-text: #ff6b6b;
@@ -40,6 +42,7 @@
         --border: #dcdce1; --border-faint: #ececf0; --input-bg: #ffffff;
         --alert-bg: #ffe5e3; --info-bg: #d6ecff; --info-tint: rgba(10, 132, 255, .12);
         --ok-tint: #e3f7e8; --danger-text: #d70015; --danger-tint: #ffe5e3;
+        --slip-tint: #fff2c2; --slip-text: #8a6100;
         color-scheme: light;
       }
     }
@@ -49,6 +52,7 @@
       --border: #dcdce1; --border-faint: #ececf0; --input-bg: #ffffff;
       --alert-bg: #ffe5e3; --info-bg: #d6ecff; --info-tint: rgba(10, 132, 255, .12);
       --ok-tint: #e3f7e8; --danger-text: #d70015; --danger-tint: #ffe5e3;
+      --slip-tint: #fff2c2; --slip-text: #8a6100;
       color-scheme: light;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -144,6 +148,14 @@
     .badge-active   { background: var(--info-bg); color: var(--info); }
     .badge-done     { background: var(--ok-tint); color: var(--ok); }
     .badge-skipped  { background: var(--danger-tint); color: var(--danger-text); }
+    /* Info-Spalte der Queue: rein informative Badges (X/Y, Leihschein,
+       Anmelde-/Zahlstatus) — bewusst flacher als die Status-Badges, damit die
+       ablaufsteuernde Status-Spalte optisch führend bleibt. */
+    .q-info { display: flex; flex-wrap: wrap; gap: 4px; }
+    .badge-slip         { background: var(--slip-tint); color: var(--slip-text); }
+    .badge-info-neutral { background: var(--surface-2); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+    .badge-info-ok      { background: var(--ok-tint); color: var(--ok); }
+    .badge-info-warn    { background: var(--danger-tint); color: var(--danger-text); font-weight: 500; }
     .code-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border-faint); flex-wrap: wrap; }
     .code-row:last-child { border-bottom: none; }
     .code-val { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1.25rem; font-weight: 700; letter-spacing: .12em; color: var(--info); }
@@ -263,11 +275,16 @@
     .bo-row.bo-hidden { opacity: .5; }
     .bo-row.bo-hidden .bo-title, .bo-row.bo-hidden .bo-fach { text-decoration: line-through; }
     .bo-hide-btn {
-      flex-shrink: 0; background: transparent; border: 1px solid var(--border);
-      border-radius: 6px; padding: 3px 8px; cursor: pointer; font-size: .95rem;
-      line-height: 1; opacity: .8;
+      flex-shrink: 0; width: 30px; height: 30px; padding: 0;
+      display: inline-flex; align-items: center; justify-content: center;
+      border: none; border-radius: 6px; cursor: pointer; color: #fff;
+      font-size: 1.05rem; line-height: 1;
+      background: #2e9e5b; /* sichtbar → grünes Kästchen mit Haken */
     }
-    .bo-hide-btn:hover { opacity: 1; background: var(--panel, rgba(255,255,255,.06)); }
+    .bo-row.bo-hidden .bo-hide-btn { background: #c0392b; /* ausgeblendet → rotes Kästchen mit Verbotssymbol */ }
+    /* Verbotssymbol bleibt auch im ausgeblendeten (abgedunkelten) Row deutlich sichtbar. */
+    .bo-row.bo-hidden .bo-hide-btn { opacity: 1; }
+    .bo-hide-btn:hover { filter: brightness(1.12); }
     .col-label {
       font-size: .8rem; text-transform: uppercase; letter-spacing: .06em;
       opacity: .45; margin: 0 4px 8px;
@@ -314,6 +331,9 @@
     .ns-name { font-size: 1.35rem; font-weight: 700; line-height: 1.15; }
     .ns-meta { font-size: .85rem; color: var(--text-muted); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
     .ns-helper { color: var(--info); }
+    /* Klasse in Klammern hinter dem Schülernamen in der Helferliste — nur bei
+       Lupe-Zuweisung (cross-class), etwas dezenter als der Name. */
+    .helper-student-class { color: var(--text-muted); font-weight: 400; }
     /* Ausgemustertes/verliehenes Buch bei diesem Schüler gescannt — Kästchen rot. */
     .ns-tile-alert { background: var(--alert-bg); outline: 2px solid var(--danger); }
     .ns-alert { font-size: .85rem; font-weight: 600; color: var(--danger); display: flex; align-items: center; justify-content: space-between; gap: 8px; }

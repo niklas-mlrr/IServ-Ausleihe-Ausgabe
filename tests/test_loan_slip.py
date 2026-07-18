@@ -127,6 +127,7 @@ def test_print_loan_slip_applies_class_override(tmp_path, monkeypatch):
     class FakeQS:
         student_id = 2159
         form = "11b"
+        slip_printed = False  # wird von print_loan_slip_for gesetzt (Badge „Leihschein")
 
     class FakeSettings:
         printer_name_override = None

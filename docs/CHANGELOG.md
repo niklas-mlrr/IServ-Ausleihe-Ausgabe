@@ -8,6 +8,195 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-18 — Einstellungen: Ausblenden wirkt sofort auf den Clients (Live-Repush)
+
+Bisher wurde beim Ausblenden einer Buchreihe im Einstellungen-Dialog zwar der
+jahrgangsweite Hidden-Stand gespeichert und `broadcast_settings()` geschickt,
+aber die `settings`-Nachricht trägt nur `book_order` — nicht die gefilterte
+Bücherliste. Folge: Die Reihenfolge („Verschieben") kam live auf den
+Helfer-Geräten an (Client sortiert `currentBooks` neu), das **Ausblenden**
+aber erst beim nächsten Schülerladen. Abhilfe über einen gezielten Live-Nachzug
+der Bücherliste, ohne den langsameren Worker-Neuaufbau und ohne den Scan-
+Fortschritt am Client zu löschen:
+
+- **Neue Nachricht `booklist_update`** (`{type, books, book_order}`) — ersetzt
+  auf dem Client nur die Bücherliste + Reihenfolge und rendert neu;
+  `scannedIsbns`/`scanOrder` bleiben erhalten (ein ausgeblendetes, bereits
+  gescanntes Buch fällt einfach raus, ein wieder eingeblendetes taucht mit
+  seinem IServ-Status auf). Handler in `web/scan-ws.js` (Modus A) und
+  `web/student.js` (Modus B). Bewusst KEINE volle `student_info`, da diese
+  clientseitig `resetScannedState` auslöst.
+- **`repush_booklist`** (`server/sessions.py`) — holt die Schülerinfo frisch,
+  filtert ausgeblendete Reihen neu (`hydrate_student_info` → `apply_hidden_books`),
+  rechnet die ISBN-Vorabmengen (expected/vormerk/lent/lent_codes) auf dem
+  HelperSession/StudentSessionB neu (damit `evaluate_scan_for_booking` den
+  neuen Hidden-Stand sieht) und schickt `booklist_update`. Worker-Context wird
+  NICHT angefasst. Session-Scan-Fortschritt (X/Y-Zählung auf dem Host) bleibt
+  für sichtbare Bücher erhalten (`done_isbns |= prev_done & new_isbns`), ein
+  ausgeblendetes Buch fällt aus BOTH X und Y.
+- **`/api/booklist-hidden`** (`server/routes/booklists.py`) — schickt nach
+  `broadcast_settings()` an alle aktiven Helfer (Modus A) UND gepaarten
+  Schüler-Sessions (Modus B), deren zugewiesener Schüler via
+  `form_catalog_cache` dem geänderten Jahrgang zugeordnet ist, per
+  `asyncio.gather` parallel den `repush_booklist`; danach
+  `broadcast_host` (Y der „X/Y Bücher"-Queue-Anzeige hat sich geändert).
+  `_student_in_grade` filtert per Cache (beim Schülerladen befüllt; ohne
+  Eintrag wurde der Schüler nie geladen → keine Liste zu aktualisieren).
+- Ausgeblendet ist damit jetzt so „sofort" wie Verschieben, betriebssicher
+  (read-only, kein IServ-Write) und fortlaufender Scan-Fortschritt bleibt
+  erhalten. Neuer Test `tests/test_booklist_repush.py` (4 Fälle: Filter +
+  Vormerk-Neuerung, Scan-Fortschritt erhalten, Modus-B ws=None-Skip,
+  IServ-Fehler-resilient). Suite: 238 grün.
+
+## 2026-07-18 — Einstellungen: Ausblenden-Toggle als grünes/rotes Kästchen
+
+Das Ausblenden-Icon in der Bücherlisten-Ansicht des Einstellungen-Dialogs
+war bislang ein Auge/Auge-durchgestrichen. Jetzt ist der Toggle ein farbiges
+Kästchen mit klarem Zustand: **grün + Haken** (aus Geraden, `polyline`) =
+sichtbar, **rot + Verbotssymbol** (Kreis + 45°-Strich) = ausgeblendet. Das
+rote Kästchen bleibt auch im abgedunkelten ausgeblendeten Row deutlich
+(`opacity: 1` auf dem Button). Symbole als `ICON_CHECK`/`ICON_NO` in
+`web/host-render.js`; Box-Style in `web/host.css` (`.bo-hide-btn` 30×30,
+farbig, `brightness(1.12)` bei hover). Keine Server-/Datenflussänderung;
+rein frontend, keine neuen Tests, `node --check` ok.
+
+## 2026-07-18 — Host: Leihschein-Button als Druckersymbol statt Schrift
+
+Die Leihschein-Buttons im Host zeigen statt des Worts „Leihschein" jetzt das
+dasselbe Druckersymbol wie der Helfer-Client (`web/scan.html #print-btn`):
+`<svg class="ico">` aus `polyline`/`path`/`rect`. Betroffen sind beide
+Vorkommen in `web/host-render.js` — die „Aktuell in Ausgabe"-Kachel
+(`renderCtxNowServing`) und die Queue-Tabelle (`renderCtxQueue`, dort in der
+`printBtn`-Konstante). Das SVG liegt als `ICON_PRINTER`-Konstante neben
+`ICON_SUN`/`ICON_MOON`; `title`/`aria-label="Leihschein drucken"` sichern
+Tooltip und Bedienung. `.ico` ist in `host.css` und `scan.html` identisch
+definiert (`1em`, `currentColor`), daher gleiche Optik. Keine Server-/
+Datenflussänderung; rein frontend, keine neuen Tests, `node --check` ok.
+
+## 2026-07-18 — Host-Queue: Klassen-Präfix „Klasse " in der Spalte entfernt
+
+In der Queue-Tabelle eines Klassen-Tabs (`renderCtxQueue`, `web/host-render.js`)
+wurde `s.form` ungefiltert ausgegeben — z. B. „Klasse 10a". Da die
+Spaltenüberschrift bereits „Klasse" lautet (`<th>Klasse</th>`), ist das Präfix
+redundantes Rauschen. Es wird jetzt wie schon in der Helferliste (Lupe-Zuweisung,
+host-render.js:796) mit `.replace(/^Klasse\s+/i, '')` entfernt — darunter steht
+nur noch „10a". Keine Server-/Datenflussänderung; rein frontend, keine neuen
+Tests, `node --check` ok.
+
+## 2026-07-18 — Now-Serving-Kachel: Trennen-Button für aktive Schüler
+
+Die „Aktuell in Ausgabe"-Kacheln (`renderCtxNowServing`, ein Tile pro aktiver
+Schüler) hatten nur `Abschließen` und `Leihschein`, nicht aber `Trennen` —
+obwohl derselbe Schüler in der Queue-Tabelle darunter einen Trennen-Button
+hatte. Host muss also bislang in die untere Tabelle wechseln, um eine
+Verbindung aus der laufenden Ausgabe zu lösen.
+
+- **`web/host-render.js`** (`renderCtxNowServing`): dritter Button
+  `<button class="secondary" data-action="disconnect" data-student-id="…">Trennen</button>`
+  im `.ns-actions`-Block. Dasselbe `data-action` wie in `renderCtxQueue`,
+  derselbe Handler (`disconnectStudent` → `/api/disconnect`), keine
+  Server-Änderung.
+- **Endpunkt deckt aktive Schüler ab:** `/api/disconnect`
+  (`server/routes/queue.py`) lehnt nur `done`/`skipped` ab; für `active`
+  läuft `end_student(queue_status="pending", session_state="revoked")` —
+  löst Helfer-/Schüler-Verbindung und setzt den Schüler auf `Wartend`
+  zurück (nicht übersprungen), wie in der Queue auch.
+- Keine neuen Tests (Frontend hat keine JS-Tests); `node --check` ok,
+  bestehende Suite unbetroffen.
+
+## 2026-07-18 — Host-Helferliste: Lupe-Schüler als aktuell angezeigt (mit Klasse)
+
+Bislang erschien in der Host-Helferliste ein per **Helfer-Lupe** (`search_call`)
+aufgerufener Schüler oft als „–": `findStudentInState(h.student_id)` durchsucht
+nur die Klassen-Queues, ein **transienter** Lupe-Schüler (Schnellsprung zu
+einem IServ-Schüler, der in KEINER Queue steht) steht dort aber nicht. Zudem
+fehlte dem Host das Signal „via Lupe gekommen", um die Klasse überhaupt
+unterschiedlich anzuzeigen.
+
+- **`HelperSession`** bekommt drei Felder: `student_lastname` /
+  `student_firstname` (redundant zum `QueueStudent`, aber die einzige
+  Namensquelle im Host-Snapshot für transiente Lupe-Schüler) und
+  `student_via_search` (bool). `student_form` wird zusätzlich im
+  `as_dict()`-Snapshot ausgeliefert (vorher nur intern für den Reconnect).
+  Alle gesetzt in `assign_student_to_helper`, gelöscht in `_detach_helper`.
+- **`assign_student_to_helper(..., via_search=False)`** — Keyword-Default
+  `False`; `_handle_search_call` übergibt `True`, alle anderen Aufrufer
+  (`_handle_call`, `assign_next_pending_to_helper`, `/api/next-student`)
+  belassen es beim Default. Setzt die Namen + das Flag am Helfer VOR dem
+  `broadcast_host`, sodass der Host sie im selben Snapshot sieht.
+- **`SpectatorWaiter` + `spectate_student`** schleppen `via_search` mit,
+  damit die Beförderung aus einer Spectator-Warteliste (Übernahme des
+  Schülers nach Wartezeit, s. `end_student`) die Lupe-Herkunft vererbt —
+  der Host zeigt die Klasse in Klammern auch nach zwischenzeitlichem
+  Zuschauen. `_handle_search_call` übergibt `via_search=True` an alle
+  drei Spectator-Pfade; `_handle_call` an seine beiden (Default `False`).
+- **Host `renderHelpers`** (`web/host-render.js`): Name primär aus dem
+  Queue-Eintrag (`findStudentInState`), Fallback auf die am Helfer
+  hinterlegten `student_lastname`/`student_firstname` (greift bes. bei
+  transienten Lupe-Schülern). Klasse in Klammern **nur** bei
+  `student_via_search` (`<span class="helper-student-class">(10a)</span>`);
+  bei Queue-Aufrufen nicht, da der Klassen-Tab die Klasse ohnehin
+  impliziert. „Klasse "-Präfix im `form`-Wert gestrichen
+  (`.replace(/^Klasse\s+/i, '')`, analog `scan-render.js`), sonst stünde
+  „(Klasse 10a)". Stil dafür in `web/host.css` (`.helper-student-class`,
+  dezenter `--text-muted`).
+- **Draht-Format:** `helpers[*]` bekommt vier Schlüssel dazu
+  (`student_lastname`, `student_firstname`, `student_form`,
+  `student_via_search`). Der Charakterisierungs-Test
+  `tests/test_state_contract.py` friert nur die **Top-Level**-Keys des
+  Snapshots ein, nicht die Helper-Sub-Keys → unverändert grün (234 Tests).
+
+## 2026-07-18 — Host-Queue: eigene Info-Spalte (X/Y Bücher, Leihschein, Anmelde-/Zahlstatus)
+
+Die Klassen-Warteschlange (`renderCtxQueue`) hat eine **neue Spalte „Info"**.
+Bewusst getrennt von der Status-Spalte: `status`
+(Wartend/Aktiv/Fertig/Übersprungen) steuert den Ablauf, die Info-Spalte ist rein
+informativ und hat auf keine Queue-Logik Einfluss. Server-seitig heißt das:
+keine neuen `status`-Werte, sondern eigene Felder auf `QueueStudent`.
+
+- **X/Y Bücher:** Y = die beim Schüler angemeldeten Bücher **ohne** die
+  ausgeblendeten Reihen (exakt die Liste, die Helfer-/Schüler-Client sehen —
+  `apply_hidden_books` läuft vorher), X = davon erledigte. „Erledigt" ist
+  dieselbe Definition wie in den Clients (`isBookDone`): bereits ausgeliehen
+  ODER in dieser Session gescannt. `staged` zählt mit, sonst stünde im
+  read-only Regelbetrieb (`ALLOW_BOOKING=false`) dauerhaft X=0. Felder
+  `books_total`/`done_isbns` (Draht: `books_total`/`books_done`), gefüllt in
+  `hydrate_student_info` (→ `init_book_progress`), fortgeschrieben in
+  `process_scan` (→ `mark_book_done`). `books_total = null` (noch nie geladen)
+  → kein Badge.
+- **Leihschein:** Flag `QueueStudent.slip_printed`, gesetzt in
+  `print_loan_slip_for` auf allen drei Erfolgspfaden (Druck, Host-Download,
+  Datei-Fallback) via `_mark_slip_printed` inkl. Host-Broadcast.
+- **Anmelde-/Zahlstatus:** „Nicht angemeldet", „Ermäßigungsantrag ausstehend",
+  „Befreiungsantrag ausstehend" — aus `get_student_info`
+  (`enrolled`/`paid`/`remission_pending`/`exemption_pending`) über
+  `QueueStudent.set_info_flags`. „Nicht angemeldet" steht allein: ohne
+  Anmeldung liefert IServ zu Zahlung und Anträgen nichts Belastbares, die
+  übrigen Felder bleiben dann `None` (= kein Badge) statt einen unbekannten
+  Stand als Tatsache zu zeigen. `None` heißt generell „noch nicht abgefragt"
+  und erzeugt nie ein Badge.
+- **Offener Betrag statt Pauschal-Hinweis:** Statt „nicht bezahlt" zeigt das
+  Badge den konkreten Rest, z. B. **„40,54 € offen"** — neues Feld
+  `QueueStudent.amount_open` (Float, aus IServ `amountOpen`, robust gegen
+  String-Werte), befüllt in `set_info_flags`. Fehlt `amount_open` (IServ
+  liefert ihn nicht in jeder Einschreibung), fällt die Badge-Anzeige auf den
+  Text „Bezahlung ausstehend" zurück. Formatierung deutsch
+  (`toLocaleString('de-DE', {minimumFractionDigits:2, maximumFractionDigits:2})`).
+- **Ein Abruf für beides:** `_apply_auto_done` heißt jetzt
+  `_load_student_flags` und läuft beim Klassen-Öffnen **immer** (vorher nur bei
+  gewählten Auto-Fertig-Filtern) — derselbe parallele, read-only
+  `get_student_info`-Fan-out füllt die Info-Flags und wendet, falls gewählt,
+  die Auto-Fertig-Filter an. Merkbare Änderung: Klassen-Öffnen macht jetzt in
+  jedem Fall N read-only GETs (vorher nur mit Filter). Fehler bleiben pro
+  Schüler gekapselt (Flags bleiben `None`, Status unverändert).
+- **Reset:** `end_student(queue_status="pending")` ruft
+  `QueueStudent.reset_progress()` (Zähler + Leihschein-Marker) — die
+  IServ-Flags bleiben, das sind keine Durchlauf-Daten. Bei `done`/`skipped`
+  bleibt alles stehen.
+- CSS: `.q-info` (Badge-Reihe), `.badge-slip` (neue Variablen
+  `--slip-tint`/`--slip-text`, hell + dunkel), `.badge-info-neutral/-ok/-warn`.
+  Tests: `tests/test_queue_progress.py` (11).
+
 ## 2026-07-13 — Helferclient: Warteschlange — Aufruf-Pfeil statt „Aufrufen"-Button, Klassen-Spalte dynamisch
 
 Die Warteschlangen-Anzeige im Helferclient (`web/scan-render.js`, `web/scan.html`)

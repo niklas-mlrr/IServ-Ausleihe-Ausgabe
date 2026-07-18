@@ -28,6 +28,30 @@ class QueueStudent:
     form: str
     status: Literal["pending", "active", "done", "skipped"] = "pending"
     assigned_helper: str | None = None
+    # Fortschritt „X/Y Bücher" für die Host-Queue: Y = angemeldete Bücher des
+    # Schülers OHNE die ausgeblendeten Reihen (also exakt die Liste, die auch
+    # Helfer-/Schüler-Client sehen — `apply_hidden_books` lief schon), X = davon
+    # erledigte (bei Hydration bereits ausgeliehen + in dieser Session
+    # gescannt/gebucht). Gefüllt in `hydrate_student_info`, fortgeschrieben in
+    # `process_scan`; 0/None solange der Schüler noch nie geladen wurde.
+    books_total: int | None = None
+    done_isbns: set[str] = field(default_factory=set)
+    # Anmelde-/Zahlstatus aus IServ (`get_student_info`) — rein INFORMATIV für
+    # die Queue-Anzeige, ohne Einfluss auf `status` (die Zuweisungs-Zustands-
+    # maschine). `None` = noch nicht abgefragt. Gefüllt beim Klassen-Laden
+    # (`_load_student_flags`) und bei jeder Hydration aufgefrischt.
+    enrolled: bool | None = None
+    paid: bool | None = None
+    # Noch offener Betrag in Euro (IServ `amountOpen`) — die Queue zeigt statt
+    # eines pauschalen „nicht bezahlt" den konkreten Rest („40,54 € offen").
+    amount_open: float | None = None
+    remission_pending: bool | None = None
+    exemption_pending: bool | None = None
+    # Leihschein wurde für diesen Schüler gedruckt (`print_loan_slip_for`).
+    # Bewusst ein eigenes Flag statt eines fünften `status`-Werts: der Status
+    # ist die Zuweisungs-Zustandsmaschine (pending/active/done/skipped) und
+    # bleibt davon unberührt; „Leihschein" ist eine reine Info-Anzeige.
+    slip_printed: bool = False
 
     def as_dict(self) -> dict:
         return {
@@ -37,7 +61,46 @@ class QueueStudent:
             "form": self.form,
             "status": self.status,
             "assigned_helper": self.assigned_helper,
+            "books_total": self.books_total,
+            "books_done": len(self.done_isbns),
+            "slip_printed": self.slip_printed,
+            "enrolled": self.enrolled,
+            "paid": self.paid,
+            "amount_open": self.amount_open,
+            "remission_pending": self.remission_pending,
+            "exemption_pending": self.exemption_pending,
         }
+
+    def set_info_flags(self, info: dict) -> None:
+        """Anmelde-/Zahlstatus aus einem `get_student_info`-Payload übernehmen
+        (informative Queue-Anzeige). Ohne Anmeldung liefert IServ für die
+        übrigen Felder keine belastbaren Werte — die bleiben dann `None`,
+        statt „nicht bezahlt" o. ä. vorzutäuschen (gleiche Logik wie beim
+        Auto-Fertig-Filter, s. `_load_student_flags`)."""
+        self.enrolled = bool(info.get("enrolled"))
+        if not self.enrolled:
+            self.paid = self.remission_pending = self.exemption_pending = None
+            self.amount_open = None
+            return
+        self.paid = bool(info.get("paid"))
+        self.remission_pending = bool(info.get("remission_pending"))
+        self.exemption_pending = bool(info.get("exemption_pending"))
+        # `amountOpen` fehlt in manchen Einschreibungen → None (die UI zeigt
+        # dann „Bezahlung ausstehend" ohne Betrag, statt „0,00 € offen" zu
+        # behaupten).
+        raw = info.get("amount_open")
+        try:
+            self.amount_open = None if raw is None else float(raw)
+        except (TypeError, ValueError):
+            self.amount_open = None
+
+    def reset_progress(self) -> None:
+        """Buch-Fortschritt und Leihschein-Marker zurücksetzen — beim Zurück-
+        setzen auf „Wartend" (Trennen/Reset), damit ein neuer Durchlauf nicht
+        mit den Zählern des alten startet."""
+        self.books_total = None
+        self.done_isbns = set()
+        self.slip_printed = False
 
     @classmethod
     def from_iserv(cls, d: dict, *, form: str) -> QueueStudent:
@@ -66,6 +129,11 @@ class SpectatorWaiter:
     lastname: str
     firstname: str
     form: str
+    # Herkunft der Zuschauer-Registrierung: True, wenn der Spectator per Lupe
+    # (`search_call`) kam — wird bei der Beförderung (Übernahme des Schülers
+    # nach Wartezeit) an `HelperSession.student_via_search` vererbt, sodass der
+    # Host auch dann die Klasse in Klammern zeigt. Rationale: docs/PLAN.md.
+    via_search: bool = False
 
 
 @dataclass
@@ -76,6 +144,18 @@ class HelperSession:
     # Klasse (form) des zugew. Schülers; Quelle für book_order/info["form"] beim
     # Reconnect ohne QueueStudent. Rationale: docs/PLAN.md § State-Feld-Rationale
     student_form: str | None = None
+    # Name des zugew. Schülers — redundant zum QueueStudent, aber für transient
+    # Lupe-Schüler (stehen in KEINER Queue, s. `_handle_search_call`) die einzige
+    # Namensquelle im Host-Snapshot: `findStudentInState` findet sie sonst nicht
+    # und die Helferliste zeigte „–". Rationale: docs/PLAN.md § State-Feld-Rationale
+    student_lastname: str | None = None
+    student_firstname: str | None = None
+    # True, wenn der Schüler per Lupe (`search_call`) zugewiesen wurde — der
+    # Host zeigt in der Helferliste in dem Fall die Klasse in Klammern hinter
+    # dem Namen (bei Queue-Aufrufen nicht, da die Klasse dort der Tab impliziert).
+    # Wird bei Beförderung aus einer Spectator-Warteliste vererbt (s.
+    # `SpectatorWaiter.via_search`). Rationale: docs/PLAN.md § State-Feld-Rationale
+    student_via_search: bool = False
     # Schüler, den dieser Helfer nur ZUSCHAUT (read-only, kein eigener Worker),
     # weil er bei einem ANDEREN Helfer aktiv ist — getrennt von `student_id`
     # (das bleibt strikt „ich besitze Worker + Queue-Slot"). Niemals
@@ -118,6 +198,13 @@ class HelperSession:
             "context_id": self.context_id,
             "last_scan": self.last_scan,
             "created_at": self.created_at.isoformat(),
+            # Name/Klasse + Lupe-Herkunft des zugew. Schülers — für die
+            # Helferliste im Host (s. `renderHelpers`), bes. bei transienten
+            # Lupe-Schülern, die `findStudentInState` nicht findet.
+            "student_lastname": self.student_lastname,
+            "student_firstname": self.student_firstname,
+            "student_form": self.student_form,
+            "student_via_search": self.student_via_search,
         }
 
 

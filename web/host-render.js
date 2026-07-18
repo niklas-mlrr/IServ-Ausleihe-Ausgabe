@@ -21,6 +21,9 @@ window.__host = window.__host || {};
   const THEME_CYCLE = { '': 'light', 'light': 'dark', 'dark': '' };
   const ICON_SUN = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>';
   const ICON_MOON = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>';
+  // Druckersymbol für die Leihschein-Buttons — dasselbe SVG wie im Helfer-Client
+  // (scan.html #print-btn), nur hier statt dem Wort „Leihschein".
+  const ICON_PRINTER = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>';
   const THEME_LABEL = { '': 'Auto', 'light': ICON_SUN + ' Hell', 'dark': ICON_MOON + ' Dunkel' };
   function applyTheme(t) {
     if (t) document.documentElement.setAttribute('data-theme', t);
@@ -168,7 +171,7 @@ window.__host = window.__host || {};
             </div>
             <div class="table-scroll">
               <table class="queue-table">
-                <thead><tr><th>Name</th><th>Klasse</th><th>Status</th><th></th></tr></thead>
+                <thead><tr><th>Name</th><th>Klasse</th><th>Status</th><th>Info</th><th></th></tr></thead>
                 <tbody data-ctx-queue="${id}"></tbody>
               </table>
             </div>
@@ -660,7 +663,8 @@ window.__host = window.__host || {};
           ${alertLbl}
           <div class="ns-actions">
             <button class="success" data-action="finish" data-student-id="${s.student_id}">Abschließen</button>
-            <button class="secondary" data-action="print" data-student-id="${s.student_id}">Leihschein</button>
+            <button class="secondary" data-action="print" data-student-id="${s.student_id}" title="Leihschein drucken" aria-label="Leihschein drucken">${ICON_PRINTER}</button>
+            <button class="secondary" data-action="disconnect" data-student-id="${s.student_id}">Trennen</button>
           </div>
         </div>`;
       }).join('') + '</div>';
@@ -785,8 +789,20 @@ window.__host = window.__host || {};
     const classOpts = '<option value="">(aktive)</option>' +
       tabOrder.map(id => `<option value="${id}">${escapeHtml(ctxs[id]?.form || 'Klasse')}</option>`).join('');
     tbody.innerHTML = helpers.map(h => {
+      // Name: bevorzugt aus dem Queue-Eintrag (findStudentInState), Fallback
+      // auf die am Helfer hinterlegten Namen — letzteres greift bes. bei
+      // transienten Lupe-Schülern, die in KEINER Queue stehen und sonst als
+      // „–" erschienen.
       const student = h.student_id ? findStudentInState(h.student_id) : null;
-      const studentName = student ? `${escapeHtml(student.lastname)}, ${escapeHtml(student.firstname)}` : '–';
+      const ln = student ? student.lastname : h.student_lastname;
+      const fn = student ? student.firstname : h.student_firstname;
+      const form = (student ? student.form : h.student_form || '').replace(/^Klasse\s+/i, '');
+      const hasName = ln || fn;
+      // Klasse nur bei Lupe-Zuweisung in Klammern zeigen — bei Queue-Aufrufen
+      // impliziert der Klassen-Tab die Klasse, eine Wiederholung wäre Rauschen.
+      // Präfix „Klasse " streichen (s. scan-render.js), sonst „(Klasse 10a)".
+      const classTag = (h.student_via_search && form) ? ` <span class="helper-student-class">(${escapeHtml(form)})</span>` : '';
+      const studentName = hasName ? `${escapeHtml(ln || '')}${ln ? ', ' : ''}${escapeHtml(fn || '')}${classTag}` : '–';
       const connDot = h.connected ? '<span style="color:#30d158">●</span>' : '<span style="color:#888">○</span>';
       const hasStudent = h.student_id !== null;
       return `<tr>
@@ -813,6 +829,40 @@ window.__host = window.__host || {};
     if (!r.ok) { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Umbindung fehlgeschlagen'); }
   }
 
+  // Info-Spalte der Queue: rein INFORMATIVE Hinweise zu einem Schüler, strikt
+  // getrennt vom Status (Wartend/Aktiv/Fertig/Übersprungen), der den Ablauf
+  // steuert. Nichts hier verändert die Queue-Logik.
+  //   • X/Y  — ausgegebene / angemeldete Bücher (ausgeblendete Reihen zählen in
+  //            beiden nicht mit); erst ab dem ersten Laden des Schülers bekannt.
+  //   • Leihschein — Schein wurde für diesen Schüler bereits gedruckt.
+  //   • Anmelde-/Zahlstatus aus IServ (`null` = noch nicht abgefragt → kein
+  //     Badge, statt einen unbekannten Stand als „okay" darzustellen).
+  //     „Nicht angemeldet" steht allein: ohne Anmeldung liefert IServ zu Zahlung
+  //     und Anträgen nichts Belastbares (s. QueueStudent.set_info_flags).
+  function infoBadges(s) {
+    const out = [];
+    if (s.books_total) {
+      const full = s.books_done >= s.books_total;
+      out.push(`<span class="badge badge-info-neutral${full ? ' badge-info-ok' : ''}" title="ausgegebene / angemeldete Bücher">${s.books_done}/${s.books_total}</span>`);
+    }
+    if (s.slip_printed) out.push('<span class="badge badge-slip" title="Leihschein wurde gedruckt">Leihschein</span>');
+    if (s.enrolled === false) {
+      out.push('<span class="badge badge-info-warn">Nicht angemeldet</span>');
+    } else if (s.enrolled) {
+      if (s.paid === false) {
+        // Konkreter Restbetrag statt pauschalem Hinweis; fehlt `amount_open`
+        // (IServ liefert ihn nicht immer), bleibt es beim allgemeinen Text.
+        const open = typeof s.amount_open === 'number'
+          ? `${s.amount_open.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € offen`
+          : 'Bezahlung ausstehend';
+        out.push(`<span class="badge badge-info-warn">${open}</span>`);
+      }
+      if (s.remission_pending) out.push('<span class="badge badge-info-warn">Ermäßigungsantrag ausstehend</span>');
+      if (s.exemption_pending) out.push('<span class="badge badge-info-warn">Befreiungsantrag ausstehend</span>');
+    }
+    return `<div class="q-info">${out.join('')}</div>`;
+  }
+
   // Queue-Tabelle eines Klassen-Tabs.
   function renderCtxQueue(id) {
     const ctx = (state.contexts || {})[id];
@@ -822,7 +872,7 @@ window.__host = window.__host || {};
     if (qc) qc.textContent = `(${queue.filter(q => q.status === 'pending').length} offen / ${queue.length} gesamt)`;
     if (!tbody) return;
     if (!queue.length) {
-      tbody.innerHTML = '<tr><td colspan="4" style="opacity:.4;text-align:center">Keine Schüler — Klasse hinzufügen</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="5" style="opacity:.4;text-align:center">Keine Schüler — Klasse hinzufügen</td></tr>';
       return;
     }
     tbody.innerHTML = queue.map(s => {
@@ -830,7 +880,7 @@ window.__host = window.__host || {};
       const statusLabel = { pending: 'Wartend', active: 'Aktiv', done: 'Fertig', skipped: 'Übersprungen' }[s.status] || s.status;
       const pairBtn = (state.modus_b && state.modus_b.open)
         ? `<button class="success" data-action="pair-student" data-student-id="${s.student_id}">Pairing</button> ` : '';
-      const printBtn = `<button class="secondary" data-action="print" data-student-id="${s.student_id}">Leihschein</button>`;
+      const printBtn = `<button class="secondary" data-action="print" data-student-id="${s.student_id}" title="Leihschein drucken" aria-label="Leihschein drucken">${ICON_PRINTER}</button>`;
       // Trennen: löst Helfer-/Schüler-Verbindung und setzt den Schüler zurück auf "Wartend".
       const disconnectBtn = `<button class="secondary" data-action="disconnect" data-student-id="${s.student_id}">Trennen</button>`;
       const actions = s.status === 'pending'
@@ -842,8 +892,9 @@ window.__host = window.__host || {};
             : '';
       return `<tr class="${s.status === 'active' ? 'row-active' : ''}">
         <td>${escapeHtml(s.lastname)}, ${escapeHtml(s.firstname)}</td>
-        <td>${escapeHtml(s.form)}</td>
+        <td>${escapeHtml((s.form || '').replace(/^Klasse\s+/i, ''))}</td>
         <td><span class="badge ${badgeClass}">${statusLabel}</span></td>
+        <td>${infoBadges(s)}</td>
         <td><div class="row-actions">${actions}</div></td>
       </tr>`;
     }).join('');
@@ -1111,8 +1162,10 @@ window.__host = window.__host || {};
     renderBooklistList();
   }
 
-  const ICON_EYE = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z"/><circle cx="12" cy="12" r="3"/></svg>';
-  const ICON_EYE_OFF = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 11 7 11 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.53 13.53 0 0 0 1 12s4 7 11 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+  // Sichtbar-Indikator: grünes Kästchen mit Haken (geometrisch, aus Geraden).
+  const ICON_CHECK = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="5,12 10,17 19,7"/></svg>';
+  // Ausgeblendet-Indikator: rotes Kästchen mit Verbotssymbol (Kreis + 45°-Strich).
+  const ICON_NO = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="12" cy="12" r="8.2"/><line x1="6.2" y1="6.2" x2="17.8" y2="17.8"/></svg>';
 
   function renderBooklistList() {
     const list = document.getElementById('bl-list');
@@ -1130,7 +1183,7 @@ window.__host = window.__host || {};
         + `<span class="bo-num">${i + 1}</span>`
         + `<span class="bo-fach">${escapeHtml(b.subject || '')}</span>`
         + `<span class="bo-title">${escapeHtml(b.title || isbn)}</span>`
-        + `<button type="button" class="bo-hide-btn" title="${hidden ? 'Wieder einblenden' : 'Ausblenden'}" aria-label="${hidden ? 'Wieder einblenden' : 'Ausblenden'}">${hidden ? ICON_EYE_OFF : ICON_EYE}</button></div>`;
+        + `<button type="button" class="bo-hide-btn" title="${hidden ? 'Wieder einblenden' : 'Ausblenden'}" aria-label="${hidden ? 'Wieder einblenden' : 'Ausblenden'}">${hidden ? ICON_NO : ICON_CHECK}</button></div>`;
     }).join('');
     list.querySelectorAll('.bo-row').forEach(row => {
       row.addEventListener('dragstart', onBlDragStart);

@@ -131,6 +131,13 @@ function handleServerMessage(msg) {
     // scan_result-Meldung; sie ändert sich nur zusammen mit neuem Text.
     bookAlertOpen = false;
     closeBookAlertModal();
+  } else if (msg.type === 'booklist_update') {
+    // Live-Nachzug der Bücherliste nach einer Ausblendungs-/Reihenfolge-Änderung
+    // im Einstellungen-Dialog. Ersetzt nur die Liste + Reihenfolge, lässt den
+    // Scan-Fortschritt (scannedIsbns/scanOrder) unangetastet.
+    if (Array.isArray(msg.book_order)) bookOrder = msg.book_order;
+    if (Array.isArray(msg.books)) currentBooks = msg.books;
+    renderBooks(currentBooks);
   } else if (msg.type === 'closed') {
     finished = true; clearToken(); show('done');
   } else if (msg.type === 'error') {

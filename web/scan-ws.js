@@ -135,6 +135,14 @@ function handleServerMessage(msg) {
       bookOrder = msg.book_order;
       if (studentActive) renderBooks(currentBooks);  // aktuelle Liste live umsortieren
     }
+  } else if (msg.type === 'booklist_update') {
+    // Live-Nachzug der Bücherliste nach einer Ausblendungs-/Reihenfolge-Änderung
+    // im Einstellungen-Dialog. Ersetzt nur die Liste + Reihenfolge, lässt den
+    // Scan-Fortschritt (scannedIsbns/scanOrder) unangetastet — ein ausgeblendetes
+    // Buch fällt raus, ein wieder eingeblendetes taucht mit IServ-Status auf.
+    if (Array.isArray(msg.book_order)) bookOrder = msg.book_order;
+    if (Array.isArray(msg.books)) currentBooks = msg.books;
+    if (studentActive) renderBooks(currentBooks);
   } else if (msg.type === 'print_result') {
     printBtn.disabled = false;
     const detail = msg.ok

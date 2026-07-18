@@ -349,11 +349,13 @@ async def _handle_search_call(state, hub, helper, websocket, raw) -> None:
                 lastname=lastname,
                 firstname=firstname,
                 form=form,
+                via_search=True,
             )
             return
     elif owner is not None:
         await spectate_student(
-            state, hub, helper, student_id=sid, lastname=lastname, firstname=firstname, form=form
+            state, hub, helper, student_id=sid, lastname=lastname, firstname=firstname, form=form,
+            via_search=True,
         )
         return
     else:
@@ -375,6 +377,7 @@ async def _handle_search_call(state, hub, helper, websocket, raw) -> None:
                 lastname=lastname,
                 firstname=firstname,
                 form=form,
+                via_search=True,
             )
             return
     if helper.student_id is not None:
@@ -415,7 +418,7 @@ async def _handle_search_call(state, hub, helper, websocket, raw) -> None:
             status="active",
             assigned_helper=helper.token,
         )
-    await assign_student_to_helper(state, hub, helper, student)
+    await assign_student_to_helper(state, hub, helper, student, via_search=True)
 
 
 async def _handle_peek_queue(state, hub, helper, websocket, raw) -> None:

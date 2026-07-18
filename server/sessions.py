@@ -116,7 +116,42 @@ async def hydrate_student_info(state: AppState, info: dict, form: str, target) -
     apply_hidden_books(info, await get_hidden_isbns_for_form(state, form))
     target.expected_isbns = expected_isbns_from_info(info)
     target.vormerk_isbns, target.lent_isbns, target.lent_codes = booking_isbn_sets_from_info(info)
+    init_book_progress(state, getattr(target, "student_id", None), info)
     return info
+
+
+def init_book_progress(state: AppState, student_id: int | None, info: dict) -> None:
+    """Startwerte für den „X/Y Bücher"-Zähler der Host-Queue setzen.
+
+    Y = alle angemeldeten Bücher des Schülers ohne die ausgeblendeten Reihen
+    (`info["books"]` ist hier bereits durch `apply_hidden_books` gelaufen),
+    X = die davon bereits ausgeliehenen. Kein Queue-Eintrag (transienter
+    Lupe-Schüler) → nichts zu tun."""
+    if student_id is None:
+        return
+    student = state.find_student(student_id)
+    if student is None:
+        return
+    # Anmelde-/Zahlstatus gleich mit auffrischen — `info` trägt ihn ohnehin,
+    # und beim Laden des Schülers ist er aktueller als der vom Klassen-Öffnen.
+    student.set_info_flags(info)
+    books = info.get("books", [])
+    student.books_total = len(books)
+    student.done_isbns = {
+        b["isbn"] for b in books if b.get("isbn") and b.get("status") == "ausgeliehen"
+    }
+
+
+def mark_book_done(state: AppState, student_id: int, isbn: str | None) -> None:
+    """Ein erfolgreich gescanntes/gebuchtes Buch im Queue-Fortschritt zählen —
+    dieselbe „erledigt"-Definition wie in den Clients (`isBookDone`):
+    ausgeliehen ODER in dieser Session gescannt (auch nur gestaged, solange
+    `ALLOW_BOOKING=false`)."""
+    if not isbn:
+        return
+    student = state.find_student(student_id)
+    if student is not None:
+        student.done_isbns.add(isbn)
 
 
 def apply_hidden_books(info: dict, hidden_isbns: set[str]) -> None:
@@ -406,6 +441,11 @@ async def process_scan(
         vormerk_isbns.discard(decision["isbn"])
         if decision.get("code"):
             lent_codes.add(decision["code"])
+    # Fortschrittszähler der Host-Queue mitziehen — 'staged' zählt bewusst mit,
+    # sonst stünde im read-only Regelbetrieb (ALLOW_BOOKING=false) dauerhaft
+    # X=0, während die Client-Bücherliste die Reihen längst als erledigt zeigt.
+    if result.get("status") in ("booked", "staged"):
+        mark_book_done(state, student_id, result.get("isbn"))
     return result
 
 
@@ -501,6 +541,7 @@ async def print_loan_slip_for(
                 student_id,
                 pages or "alle",
             )
+            await _mark_slip_printed(state, student_id)
             return {
                 "ok": True,
                 "backend": "download",
@@ -521,6 +562,8 @@ async def print_loan_slip_for(
             pages=pages,
         )
         result["detail"] = "kein Host-Browser verbunden — " + result.get("detail", "")
+        if result.get("ok"):
+            await _mark_slip_printed(state, student_id)
         return result
 
     result = await print_pdf(
@@ -538,7 +581,24 @@ async def print_loan_slip_for(
         result.get("backend"),
         pages or "alle",
     )
+    if result.get("ok"):
+        await _mark_slip_printed(state, student_id)
     return result
+
+
+async def _mark_slip_printed(state: AppState, student_id: int) -> None:
+    """Queue-Eintrag als „Leihschein gedruckt" markieren und die Hosts
+    aktualisieren — daraus wird im Host-Client das Badge „Leihschein"
+    (zwischen „Aktiv" und „Fertig"). Kein Queue-Eintrag (transienter
+    Lupe-Schüler) → still nichts tun."""
+    student = state.find_student(student_id)
+    if student is None or student.slip_printed:
+        return
+    student.slip_printed = True
+    try:
+        await get_hub().broadcast_host(state.state_snapshot())
+    except Exception:  # noqa: BLE001 — Druck darf an einem Broadcast nicht scheitern
+        log.debug("Host-Broadcast nach Leihschein-Druck fehlgeschlagen", exc_info=True)
 
 
 async def _download_slip_to_host(
@@ -679,6 +739,9 @@ async def _detach_helper(state: AppState, hub, helper, helper_notify: dict | Non
         helper.load_task.cancel()
     helper.student_id = None
     helper.student_form = None
+    helper.student_lastname = None
+    helper.student_firstname = None
+    helper.student_via_search = False
     helper.expected_isbns = set()
     helper.vormerk_isbns = set()
     helper.lent_isbns = set()
@@ -748,10 +811,17 @@ async def end_student(
         promoted = state.helper_sessions.get(waiter.token) if waiter else None
         if promoted is not None:
             student.assigned_helper = None
-            await assign_student_to_helper(state, hub, promoted, student)
+            await assign_student_to_helper(
+                state, hub, promoted, student, via_search=waiter.via_search
+            )
         else:
             student.status = queue_status  # type: ignore[assignment]
             student.assigned_helper = None
+            # Zurück in die Warteschlange (Trennen/Reset) = neuer Durchlauf →
+            # Buch-Zähler und Leihschein-Marker fallen zurück auf Null. Bei
+            # done/skipped bleiben sie stehen (Host sieht, wie weit es kam).
+            if queue_status == "pending":
+                student.reset_progress()
         if old_helper and old_helper in state.helper_sessions:
             h = state.helper_sessions[old_helper]
             await _detach_helper(state, hub, h, helper_notify)
@@ -774,7 +844,9 @@ async def end_student(
                 status="active",
                 assigned_helper=promoted.token,
             )
-            await assign_student_to_helper(state, hub, promoted, transient)
+            await assign_student_to_helper(
+                state, hub, promoted, transient, via_search=waiter.via_search
+            )
         if old_transient_helper is not None and old_transient_helper.student_id == student_id:
             await _detach_helper(state, hub, old_transient_helper, helper_notify)
 
@@ -850,6 +922,60 @@ async def load_and_push_helper_student(state: AppState, hub, student, helper) ->
     await hub.send_scanner(helper.token, {"type": "worker_ready"})
 
 
+async def repush_booklist(
+    state: AppState, hub, student_id: int, target, *, helper: bool
+) -> None:
+    """Live-Nachzug der Bücherliste nach einer jahrgangsweiten Reihenfolge-/
+    Ausblendungs-Änderung (Einstellungen-Dialog, „Ausblenden"-Toggle).
+
+    Holt die Schülerinfo frisch, filtert ausgeblendete Reihen neu
+    (`hydrate_student_info` → `apply_hidden_books`), rechnet die ISBN-Vorabmengen
+    (expected/vormerk/lent/lent_codes) auf ``target`` auf und schickt dem Client
+    eine ``booklist_update``-Nachricht mit der neuen gefilterten Liste +
+    Reihenfolge. Bewusst KEINE volle ``student_info``: diese löst clientseitig
+    ``resetScannedState`` aus und würde den Scan-Fortschritt im Helfer-/
+    Schüler-Client löschen. ``booklist_update`` ersetzt nur die Bücherliste und
+    rendert neu — ``scannedIsbns``/``scanOrder`` bleiben erhalten (ein
+    ausgeblendetes, bereits gescanntes Buch fällt einfach aus der Liste, ein
+    wieder eingeblendetes taucht mit seinem IServ-Status auf).
+
+    Der Worker-Context wird NICHT angefasst (im Gegensatz zu
+    `load_and_push_helper_student`/`load_and_push_paired_student`).
+
+    ``target``: HelperSession (Modus A, ``helper=True`` → Versand via
+    `send_scanner`) oder StudentSessionB (Modus B, ``helper=False`` → Versand
+    via `send_websocket`). Beide tragen die vier ISBN-Mengen, die
+    `hydrate_student_info` aktualisiert; ``student_id`` gehört zu ``target``.
+    """
+    student = state.find_student(student_id)
+    if student is None:
+        return
+    # Session-Scan-Fortschritt (X/Y-Zählung auf dem Host) bewahren:
+    # hydrate_student_info → init_book_progress setzt done_isbns auf die
+    # „ausgeliehen"-ISBNs aus info zurück; in dieser Session gescannte Bücher
+    # wären sonst aus der Zählung weg. Nur Bücher, die nach dem Ausblenden noch
+    # in der Liste stehen, behalten ihren Fortschritt (ein ausgeblendetes Buch
+    # fällt aus Y UND aus X — die Quote stimmt).
+    prev_done = set(student.done_isbns) if student.done_isbns else set()
+    try:
+        info = await state.iserv.get_student_info(student_id, state.selected_schoolyear)
+    except Exception:  # noqa: BLE001
+        log.exception("Schülerinfo für booklist_update (%d) fehlgeschlagen", student_id)
+        return
+    info = await hydrate_student_info(state, info, getattr(student, "form", ""), target)
+    new_isbns = {b.get("isbn") for b in info.get("books", []) if b.get("isbn")}
+    student.done_isbns |= prev_done & new_isbns
+    msg = {
+        "type": "booklist_update",
+        "books": info.get("books", []),
+        "book_order": info.get("book_order", []),
+    }
+    if helper:
+        await hub.send_scanner(target.token, msg)
+    elif target.ws is not None:
+        await hub.send_websocket(target.ws, msg)
+
+
 async def advance_helper(state: AppState, hub, helper, context_id: str | None = None) -> dict:
     """Helfer auf den nächsten Wartenden setzen.
 
@@ -918,7 +1044,9 @@ def rebind_helper_to_context(helper, context_id: str | None) -> None:
     helper.context_id = context_id
 
 
-async def assign_student_to_helper(state: AppState, hub, helper, student) -> dict:
+async def assign_student_to_helper(
+    state: AppState, hub, helper, student, *, via_search: bool = False
+) -> dict:
     """Gezielten (wartenden) Schüler diesem Helfer zuweisen.
 
     Genutzt von `assign_next_pending_to_helper` („nächster") und vom
@@ -929,6 +1057,11 @@ async def assign_student_to_helper(state: AppState, hub, helper, student) -> dic
     Der Aufrufer stellt sicher, dass `student.status` `'pending'` oder
     `'done'` ist (erneutes Aufrufen eines fertigen Schülers) und der Helfer
     keinen aktiven Schüler mehr hat.
+
+    ``via_search=True`` markiert eine Zuweisung per Helfer-Lupe
+    (`_handle_search_call`) — der Host zeigt dann in der Helferliste die
+    Klasse in Klammern hinter dem Namen (bei Queue-Aufrufen nicht). Wird bei
+    der Beförderung aus einer Spectator-Warteliste vom Spectator vererbt.
     """
     if helper.spectating_student_id is not None:
         # Helfer bekommt jetzt einen ECHTEN (Worker-)Schüler zugewiesen — eine
@@ -941,6 +1074,12 @@ async def assign_student_to_helper(state: AppState, hub, helper, student) -> dic
     student.assigned_helper = helper.token
     helper.student_id = student.student_id
     helper.student_form = student.form  # für Reconnect, falls Schüler nicht in Queue (Lupe)
+    # Name am Helfer hinterlegen — für die Helferliste im Host, bes. bei
+    # transienten Lupe-Schülern (stehen in KEINER Queue, sonstige Namens-
+    # quelle `findStudentInState` greift nicht).
+    helper.student_lastname = student.lastname
+    helper.student_firstname = student.firstname
+    helper.student_via_search = via_search
     helper.peeking = False  # neuer Schüler → keine Queue-Ansicht mehr
     await hub.broadcast_host(state.state_snapshot())
     # Client in den Lade-Zustand versetzen: Queue verbergen, „wird geladen …"
@@ -964,6 +1103,7 @@ async def spectate_student(
     lastname: str,
     firstname: str,
     form: str,
+    via_search: bool = False,
 ) -> None:
     """Helfer als Zuschauer (Spectator) auf einen bei einem ANDEREN Helfer
     bereits aktiven Schüler registrieren: Bücherliste read-only anzeigen
@@ -998,7 +1138,9 @@ async def spectate_student(
     # echten Besitzer, für den Reconnect-Wiederherstellungs-Zweig in
     # ws_scanner (dort steht sonst keine Form zur Verfügung).
     helper.student_form = form
-    state.add_spectator(student_id, SpectatorWaiter(helper.token, lastname, firstname, form))
+    state.add_spectator(
+        student_id, SpectatorWaiter(helper.token, lastname, firstname, form, via_search)
+    )
     await hub.send_scanner(helper.token, {"type": "loading"})
     try:
         info = await state.iserv.get_student_info(student_id, state.selected_schoolyear)

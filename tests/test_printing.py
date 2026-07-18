@@ -57,6 +57,11 @@ def test_print_loan_slip_for_reads_and_prints(tmp_path, monkeypatch):
         iserv = FakeIServ()
         settings = FakeSettings()
 
+        # Kein Queue-Eintrag → der Leihschein-Marker (Badge „Leihschein") wird
+        # still übersprungen; hier geht es nur um den Druckpfad.
+        def find_student(self, student_id):
+            return None
+
     cfg = Config(
         iserv_domain="example.org",
         iserv_username="u",
@@ -118,6 +123,11 @@ def test_print_loan_slip_save_pdf_locally_pushes_download(tmp_path, monkeypatch)
     class FakeState:
         iserv = FakeIServ()
         settings = FakeSettings()
+
+        # Kein Queue-Eintrag → der Leihschein-Marker (Badge „Leihschein") wird
+        # still übersprungen; hier geht es nur um den Druckpfad.
+        def find_student(self, student_id):
+            return None
         host_ws_connections = [ws]
 
     monkeypatch.setattr(sessions, "get_config", lambda: _cfg(tmp_path, print_backend="lp"))
@@ -149,6 +159,11 @@ def test_print_loan_slip_save_pdf_locally_falls_back_to_file(tmp_path, monkeypat
     class FakeState:
         iserv = FakeIServ()
         settings = FakeSettings()
+
+        # Kein Queue-Eintrag → der Leihschein-Marker (Badge „Leihschein") wird
+        # still übersprungen; hier geht es nur um den Druckpfad.
+        def find_student(self, student_id):
+            return None
         host_ws_connections = []  # kein Host-Browser verbunden
 
     monkeypatch.setattr(sessions, "get_config", lambda: _cfg(tmp_path, print_backend="lp"))

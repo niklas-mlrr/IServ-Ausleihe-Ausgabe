@@ -6,6 +6,7 @@ Enthält auch die geteilten Helfer `_ensure_class_catalog` (von
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import HTTPException
@@ -13,10 +14,25 @@ from fastapi import HTTPException
 from ..book_order import normalize_book_order
 from ..booklist_store import save as save_booklist_state
 from ..hub import get_hub
+from ..sessions import repush_booklist
 from ..state import get_state
 from ._deps import BooklistHiddenRequest, BooklistOrderRequest, host_router
 
 log = logging.getLogger(__name__)
+
+
+def _student_in_grade(state, student_id: int, grade: int) -> bool:
+    """Hat dieser Schüler (über seine Klasse/form) den Jahrgang ``grade``?
+
+    Nutzt den `form_catalog_cache` (beim Laden des Schülers über
+    `hydrate_student_info` → `get_book_order_for_form` → `_grade_and_catalog`
+    befüllt). Ein Schüler ohne Cache-Eintrag wurde noch nie geladen → hat keine
+    angezeigte Bücherliste → muss nicht repushed werden."""
+    student = state.find_student(student_id)
+    if student is None:
+        return False
+    cached = state.caches.form_catalog_cache.get(student.form)
+    return bool(cached and cached[0] == grade)
 
 
 # ---------------------------------------------------------------------------
@@ -163,4 +179,33 @@ async def set_booklist_hidden(body: BooklistHiddenRequest) -> dict:
     _persist_booklist_settings(state)
     hub = get_hub()
     await hub.broadcast_settings()
+    # Allen aktiven Clients (Modus A Helfer + Modus B Schüler), deren
+    # zugewiesener Schüler in diesem Jahrgang ist, die neu gefilterte Bücherliste
+    # live nachschieben — Ausblenden wirkt damit sofort auf dem Gerät, nicht erst
+    # beim nächsten Schülerladen. `booklist_update` ersetzt nur die Liste und
+    # lässt den Scan-Fortschritt am Client unangetastet (s. `repush_booklist`).
+    tasks: list[asyncio.Task] = []
+    for helper in state.helper_sessions.values():
+        if helper.student_id is None or helper.ws is None:
+            continue
+        if _student_in_grade(state, helper.student_id, grade):
+            tasks.append(
+                asyncio.create_task(
+                    repush_booklist(state, hub, helper.student_id, helper, helper=True)
+                )
+            )
+    for session in state.student_sessions.values():
+        if session.student_id is None or session.ws is None or session.state != "paired":
+            continue
+        if _student_in_grade(state, session.student_id, grade):
+            tasks.append(
+                asyncio.create_task(
+                    repush_booklist(state, hub, session.student_id, session, helper=False)
+                )
+            )
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+        # Y der „X/Y Bücher"-Queue-Anzeige hat sich geändert (ausgeblendete
+        # Reihen zählen nicht mehr) → Host-Snapshot neu pushen.
+        await hub.broadcast_host(state.state_snapshot())
     return {"ok": True, "grade": grade, "hidden": sorted(hidden)}

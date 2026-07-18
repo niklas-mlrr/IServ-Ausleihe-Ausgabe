@@ -39,8 +39,52 @@
 | V20 | **Selbst-Aufruf zählt als neuer Zugriff** — `refresh_active_student` (V19) wieder entfernt: Selbst-Aufruf MIT Warteliste stellt den Aufrufer jetzt hinten an (der bisher Wartende übernimmt sofort, inkl. Worker) statt nur aufzufrischen; Selbst-Aufruf OHNE Warteliste fällt in den normalen `end_student`+`assign_student_to_helper`-Pfad (voller Reload, sendet `loading` → schließt clientseitig Menü/Such-Panel, was beim reinen Refresh vorher unterblieb) | `tests/test_ws_scanner.py` (2 umbenannte Tests: `..._demotes_caller_to_back_of_queue`, 1 neuer Test für den No-Queue-Reload-Pfad) | 2026-07-11 | grün, 209 → 210 Tests |
 | V21 | **Aktive Schüler aufrufbar (Spectator auch bei Modus B)** — aktive Schüler in der Warteschlangen-Ansicht des Helferclients bekommen einen „Aufrufen"-Button und werden beim Klick Zuschauer (warten bis frei). Server: `_handle_call`/`_handle_search_call` machen den Aufrufer jetzt auch dann zum Spectator, wenn der aktive Schüler KEINEN Helfer-Owner hat (Modus-B-Pairing setzt `status='active'` ohne `assigned_helper`) — bisheriger Fehler „Schüler nicht (mehr) in der Warteschlange" bzw. Doppel-Aktiv-Konflikt bei der Lupe. `test_call_non_pending_student_errors` nutzt jetzt `skipped` (aktive → Spectator ist Soll-Zustand) | `tests/test_ws_scanner.py::test_call_helper_becomes_spectator_of_modus_b_active_student` (+ `test_call_non_pending_student_errors` umgestellt) | 2026-07-13 | grün, 222 Tests |
 | V22 | **Search→Queue kein Doppel-Aktiv** — Lupe (`search_call`) auf einen Schüler, der zusätzlich als `pending` in einer Klassen-Queue steht, übernimmt jetzt den ECHTEN Queue-Eintrag (`active` + zugewiesen) statt einen transienten Doppelgänger zu bauen. Ohne Claim blieb der Queue-Eintrag `pending` → ein zweiter Helfer konnte ihn via `call` regulär übernehmen → derselbe Schüler zwei aktive Helfer/Worker. Mit Claim läuft der `call` in die Spectator-Warteliste („Warten bis Schüler frei…"). Invariante: nie zwei aktive Helfer auf demselben Schüler. Nebeneffekt: `end_student` löst den Helfer beim Abschluss sauber (vorher stale `student_id`/Worker-Leak). | `tests/test_ws_scanner.py::test_search_call_claims_existing_queue_entry_preventing_double_active` | 2026-07-13 | grün, 223 Tests |
+| V23 | **Ausblenden wirkt sofort auf den Clients (Live-Repush)** — das Ausblenden einer Buchreihe im Einstellungen-Dialog schickt den aktiven Helfern (Modus A) UND gepaarten Schüler-Sessions (Modus B) desselben Jahrgangs eine `booklist_update`-Nachricht mit der neu gefilterten Liste + Reihenfolge; die Reihe fällt live aus der Geräteliste, ohne den Worker-Neuaufbau und ohne den clientseitigen Scan-Fortschritt zu löschen (`scannedIsbns`/`scanOrder` bleiben). Server: `repush_booklist` (`server/sessions.py`) holt die Schülerinfo frisch, rechnet die ISBN-Vorabmengen neu (damit `evaluate_scan_for_booking` den neuen Hidden-Stand sieht) und bewahrt die X/Y-Zählung für sichtbare Bücher; `/api/booklist-hidden` repusht per `asyncio.gather` parallel + `broadcast_host`. | `tests/test_booklist_repush.py` (4 Tests: Filter + Vormerk-Neuerung, Scan-Fortschritt erhalten für sichtbare Bücher, Modus-B ws=None-Skip, IServ-Fehler-resilient) | 2026-07-18 | grün, 238 Tests. **Live-Check am echten Gerät noch offen** (s. „Offen" unten) |
 
 ## Offen / zu testen
+
+### Offen 2026-07-18 (Ausblenden-Live-Repush: Verifizierung am echten Gerät)
+
+Der Live-Repush beim Ausblenden (`booklist_update`, V23) ist per Unit-Test
+abgesichert, aber am echten Helfer-Gerät gegen einen laufenden Server noch
+nicht verifiziert — insbesondere die clientseitige Wahrnehmung (Scan-Fortschritt
+bleibt, ausgeblendetes Buch fällt sofort raus, wieder eingeblendetes taucht auf).
+
+- [ ] Modus A: zugewiesener Schüler geladen → im Einstellungen-Dialog eine
+      Reihe ausblenden + speichern → fällt sofort aus der Helfer-Liste, ohne
+      dass der Scan-Fortschritt schon gescannter Bücher zurückgesetzt wird.
+- [ ] Modus A: ausgeblendete Reihe wieder einblenden → taucht sofort wieder
+      mit ihrem IServ-Status (vorgemerkt/ausgeliehen) auf.
+- [ ] Modus A: ein in dieser Session gescanntes Buch wird ausgeblendet → fällt
+      aus der Liste, X/Y-Zählung auf dem Host passt (Buch zählt weder in X noch Y).
+- [ ] Modus B (Pilot, falls aktiv): gepaarter Schüler, Ausblenden wirkt sofort
+      auf dem Schüler-Handy.
+- [ ] Grenzfall: Helfer ohne zugewiesenen Schüler bekommt keine `booklist_update`
+      (kein Crash, keine Aktion).
+- [ ] IServ vorübergehend nicht erreichbar beim Speichern → Save-Endpoint
+      crasht nicht, Helfer behält vorübergehend die alte Liste.
+
+### Offen 2026-07-18 (Host-Helferliste: Lupe-Schüler als aktuell + Klasse in Klammern)
+
+Per Lupe (`search_call`) zugewiesene Schüler erscheinen jetzt in der Host-
+Helferliste als aktueller Schüler (vorher „–" bei transienten Lupe-Schülern,
+die in keiner Queue stehen), mit Klasse in Klammern — aber NUR bei Lupe-
+Zuweisung. Server-seitig: `HelperSession.student_lastname`/`student_firstname`/
+`student_via_search` (+ `student_form` im Snapshot), `SpectatorWaiter.via_search`,
+`assign_student_to_helper(..., via_search=)`. Unit-Test-Suite grün (234), aber
+die Host-Anzeige ist nicht test-abgedeckt — Live-Check ausständig.
+
+- [ ] Lupe: transienter Schüler (nicht in einer Queue) erscheint in der
+      Host-Helferliste mit Namen + „(Klasse)" — nicht mehr „–".
+- [ ] Lupe: Schüler, der bereits in einer Queue steht (Claim-Pfad), erscheint
+      ebenfalls mit „(Klasse)".
+- [ ] Queue-Aufruf (`call`/„Nächster"): Schüler erscheint OHNE Klammer-Klasse.
+- [ ] „Klasse "-Präfix im `form`-Wert wird gestrichen → „(10a)", nicht
+      „(Klasse 10a)".
+- [ ] Spectator-Beförderung: nach Wartezeit übernommener Lupe-Schüler zeigt
+      beim übernehmenden Helfer weiterhin „(Klasse)" (Vererbung `via_search`).
+- [ ] Nach Trennen/Wechsel des Schülers verschwindet die Klammer (Reset in
+      `_detach_helper`).
 
 ### Offen 2026-07-11 (Spectator-Modus: Verifizierung am echten Zwei-Client-Setup)
 
@@ -95,7 +139,7 @@ echten Gerät noch nicht gefahren:
 
 ### Offen 2026-07-10 (Host: Sofort-fertig-Filter beim Klassen-Öffnen)
 
-`OpenClassRequest.auto_done` + `_apply_auto_done()` (`server/routes/classes.py`)
+`OpenClassRequest.auto_done` + `_load_student_flags()` (`server/routes/classes.py`)
 setzen Schüler beim Laden einer neuen Klasse sofort auf `done`, wenn eine
 gewählte Bedingung zutrifft (nicht angemeldet / nicht bezahlt / Ermäßigungs-
 bzw. Befreiungsantrag ohne Nachweis). Nur ad-hoc mit einem temporären

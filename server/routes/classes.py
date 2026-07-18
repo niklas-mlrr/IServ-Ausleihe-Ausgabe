@@ -30,26 +30,34 @@ from .booklists import _ensure_class_catalog
 
 log = logging.getLogger(__name__)
 
-# Beim Klassen-Laden wählbare Sofort-fertig-Filter, s. `_apply_auto_done`.
+# Beim Klassen-Laden wählbare Sofort-fertig-Filter, s. `_load_student_flags`.
 _AUTO_DONE_FILTERS = {"not_enrolled", "unpaid", "remission_pending", "exemption_pending", "all_lent"}
 
 
-async def _apply_auto_done(state: AppState, ctx: ClassContext, auto_done: list[str]) -> None:
-    """Schüler, auf die eine der gewählten Bedingungen zutrifft, direkt beim
-    Klassen-Laden auf 'done' setzen (nicht angemeldet / nicht bezahlt /
-    Ermäßigungs- bzw. Befreiungsantrag ohne Nachweis / alle vorgemerkten Bücher
-    bereits ausgeliehen) — parallele read-only IServ-GETs pro Schüler
-    (`get_student_info`, wie in der Scanner-Anzeige). Fehler pro Schüler sind
-    nicht fatal (Schüler bleibt 'pending'), damit ein einzelner IServ-Fehler
-    nicht das ganze Klassen-Laden blockiert.
+async def _load_student_flags(state: AppState, ctx: ClassContext, auto_done: list[str]) -> None:
+    """Anmelde-/Zahlstatus der ganzen Klasse laden — parallele read-only
+    IServ-GETs pro Schüler (`get_student_info`, wie in der Scanner-Anzeige).
+
+    Zwei Zwecke aus EINEM Abruf:
+
+    1. **Info-Anzeige (immer):** `QueueStudent.set_info_flags` füllt
+       `enrolled`/`paid`/`remission_pending`/`exemption_pending` für die
+       Info-Spalte der Host-Queue. Rein informativ — der `status` bleibt
+       unberührt.
+    2. **Auto-Fertig (nur mit gewählten Filtern):** Schüler, auf die eine der
+       gewählten Bedingungen zutrifft, direkt auf 'done' setzen (nicht
+       angemeldet / nicht bezahlt / Ermäßigungs- bzw. Befreiungsantrag ohne
+       Nachweis / alle vorgemerkten Bücher bereits ausgeliehen).
+
+    Fehler pro Schüler sind nicht fatal (Flags bleiben `None`, Schüler bleibt
+    'pending'), damit ein einzelner IServ-Fehler nicht das ganze Klassen-Laden
+    blockiert.
 
     'nicht angemeldet' schließt die übrigen Filter aus — ohne Anmeldung liefert
     IServ keinen Zahl-/Nachweis-/Bücher-Status, also wären `unpaid` u. a. sonst
     bedeutungslose Platzhalterwerte, die einen unangemeldeten Schüler
     fälschlich träfen, selbst wenn nur z. B. `unpaid` gewählt wurde."""
     filters = set(auto_done) & _AUTO_DONE_FILTERS
-    if not filters:
-        return
 
     async def _check(student: QueueStudent) -> None:
         try:
@@ -59,6 +67,7 @@ async def _apply_auto_done(state: AppState, ctx: ClassContext, auto_done: list[s
                 "Anmelde-/Zahlstatus für Schüler %s konnte nicht geladen werden", student.student_id
             )
             return
+        student.set_info_flags(info)
         if not info.get("enrolled"):
             if "not_enrolled" in filters:
                 student.status = "done"
@@ -201,8 +210,12 @@ async def open_class(body: OpenClassRequest) -> dict:
 
     ctx = state.open_context(form)
     ctx.queue = [QueueStudent.from_iserv(s, form=form) for s in students]
-    if body.auto_done:
-        await _apply_auto_done(state, ctx, body.auto_done)
+    # Immer (nicht nur bei gewählten Auto-Fertig-Filtern): der Abruf füllt auch
+    # die Info-Flags für die Queue-Anzeige. Fehler sind pro Schüler gekapselt.
+    try:
+        await _load_student_flags(state, ctx, body.auto_done or [])
+    except Exception:
+        log.exception("Anmelde-/Zahlstatus der Klasse %s konnte nicht geladen werden", form)
     # Katalog + Bücher-Reihenfolge sofort aufbauen (übernimmt eine im
     # Einstellungen-Dialog vorkonfigurierte Reihenfolge automatisch für den
     # Scanner) — Fehler hier sind nicht fatal, die Klasse bleibt trotzdem geladen.

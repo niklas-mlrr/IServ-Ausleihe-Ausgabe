@@ -740,6 +740,18 @@ Zeilen-Kommentare und alle `# Abgesichert: tests/…`-Zeiger bleiben am Code.
   Queue steht (Helfer-Lupe / `search_call` — dort gibt es keinen `QueueStudent`,
   an dem die Form hing; s. `ws_scanner`-Reconnect). Invariant: nur relevant, wenn
   `student_id is not None`; gesetzt ausschließlich in `assign_student_to_helper`.
+  Wird zusätzlich im `as_dict()`-Snapshot ausgeliefert (für die Host-Helferliste,
+  s. `student_via_search`).
+- **`student_lastname` / `student_firstname`** — Name des zugewiesenen Schülers,
+  redundant zum `QueueStudent`, aber die einzige Namensquelle im Host-Snapshot
+  für **transiente Lupe-Schüler** (stehen in KEINER Queue, sonst würde
+  `findStudentInState` sie nicht finden und die Helferliste zeigte „–"). Setzt in
+  `assign_student_to_helper`, gelöscht in `_detach_helper`.
+- **`student_via_search`** — `True`, wenn der Schüler per Helfer-Lupe
+  (`search_call`) zugewiesen wurde. Der Host zeigt dann in der Helferliste die
+  Klasse in Klammern hinter dem Namen (bei Queue-Aufrufen nicht, da der Klassen-
+  Tab die Klasse impliziert). Wird bei der Beföderung aus einer Spectator-
+  Warteliste vom `SpectatorWaiter.via_search` vererbt.
 - **`context_id`** — Klasse (Kontext), die dieser Helfer bedient.
   „Nächster"/„Aufrufen" zieht aus der Queue dieses Kontexts; `None` = noch keiner
   Klasse zugewiesen (Fallback auf den aktiven Kontext, s. `next_pending`). Rein
