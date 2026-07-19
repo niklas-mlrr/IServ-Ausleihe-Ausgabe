@@ -302,6 +302,44 @@ def test_pool_snapshot_shape():
     assert st.print_queue.pool_summary() == {"waiting": 0}
 
 
+def test_waiting_list_originator_and_form(monkeypatch):
+    """`waiting_list` liefert pro wartendem Auftrag Position, Schüler, Klasse
+    und Auftraggeber (Host / Helfer namentlich / Schüler). Schüler-Lookup live
+    aus dem State; ohne aktive Kontext-Queue Fallback auf den job.name."""
+    from server.state import QueueStudent
+
+    st = AppState()
+    monkeypatch.setattr(state_mod, "get_state", lambda: st)
+    monkeypatch.setattr(hub, "get_state", lambda: st)
+    # Helfer als Auftraggeber namentlich auflösbar; zweiter Token bleibt unbekannt.
+    st.helper_sessions["tok-h1"] = HelperSession(token="tok-h1", name="Lukas")
+    # Schüler 1 steht in einer aktiven Kontext-Queue → Lookup mit echter Form.
+    ctx = st.open_context("Klasse 5a")
+    ctx.queue.append(
+        QueueStudent(student_id=1, lastname="Müller", firstname="Max", form="Klasse 5a")
+    )
+    pq = st.print_queue
+    # Worker nicht starten → Aufträge bleiben in `waiting` (kein Dispatch).
+    asyncio.run(pq.enqueue(_job("host", 1, host_sid="s1", name="Müller, Max (Klasse 5a)")))
+    asyncio.run(pq.enqueue(_job("helper", 2, helper_token="tok-h1", name="Schmidt, Anna (6b)")))
+    asyncio.run(pq.enqueue(_job("helper", 3, helper_token="tok-x", name="Karl (7c)")))
+    asyncio.run(pq.enqueue(_job("student", 4, name="Wolf, Tom (8d)")))
+
+    wl = pq.waiting_list(st)
+    # Rollen-gerechte Reihenfolge: HOST vor HELFER vor SCHÜLER.
+    assert [w["position"] for w in wl] == [0, 1, 2, 3]
+    # Schüler 1 aus Kontext-Queue: Name ohne Form, Form bereinigt („Klasse " gestrippt).
+    assert wl[0]["student"] == "Müller, Max"
+    assert wl[0]["form"] == "5a"
+    assert wl[0]["originator"] == "Host"
+    # Helfer namentlich; unbekannter Token → Fallback „Helfer".
+    assert wl[1]["originator"] == "Lukas"
+    assert wl[2]["originator"] == "Helfer"
+    assert wl[3]["originator"] == "Schüler"
+    # Schüler 2–4 nicht in aktiver Kontext-Queue → Fallback auf job.name, form None.
+    assert wl[1]["student"] == "Schmidt, Anna (6b)" and wl[1]["form"] is None
+
+
 # ---- Pool-Verteilung mit pro-Klasse Drucker-Allowlist -------------------
 
 

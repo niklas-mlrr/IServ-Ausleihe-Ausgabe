@@ -388,6 +388,51 @@ class PrintQueue:
         # die Statusanzeige irrelevant ist.
         return {"waiting": len(self.waiting)}
 
+    def waiting_list(self, state) -> list[dict]:
+        """Wartende Aufträge (zentrale Warteschlange, noch ohne zugewiesenen
+        Drucker) für den Host-Snapshot: Position, Schüler, Klasse und
+        Auftraggeber. Lock-frei (Anzeige-Konsistenz reicht, s. `pool_printers`).
+
+        Schüler-/Klassen-/Urheber-Lookup live aus dem State, nicht zum
+        Enqueue-Zeitpunkt eingefroren — ein Helfer kann sich zwischenzeitlich
+        umbenannt haben, ein Schüler aus der Kontext-Queue gerutscht sein
+        (dann Fallback auf den am Auftrag gespeicherten `name`)."""
+        out: list[dict] = []
+        for idx, j in enumerate(self.waiting):
+            student = state.find_student(j.student_id)
+            if student is not None:
+                student_name = slip_name(student.lastname, student.firstname, None)
+                form_clean = (student.form or "").removeprefix("Klasse ").strip()
+                form = form_clean or None
+            else:
+                # Schüler nicht mehr in einer aktiven Kontext-Queue — der am
+                # Auftrag hinterlegte `name` trägt die Form in Klammern.
+                student_name = j.name
+                form = None
+            out.append(
+                {
+                    "position": idx,
+                    "student": student_name,
+                    "form": form,
+                    "originator": self._originator_label(state, j),
+                }
+            )
+        return out
+
+    def _originator_label(self, state, job: PrintJob) -> str:
+        """Auftraggeber für die Warteschlangen-Anzeige: Helfer namentlich
+        (Token-Lookup), Host als „Host", Schüler als „Schüler" (derzeit nicht
+        enqueueiert, s. Modul-Docstring „künftig"). Fallback auf die Rolle."""
+        if job.helper_token:
+            h = state.helper_sessions.get(job.helper_token)
+            name = getattr(h, "name", None) if h is not None else None
+            return name or "Helfer"
+        if job.host_sid:
+            return "Host"
+        if job.role == "student":
+            return "Schüler"
+        return job.role or "–"
+
     # ---- Notifications -------------------------------------------------
 
     async def _notify_all(self) -> None:

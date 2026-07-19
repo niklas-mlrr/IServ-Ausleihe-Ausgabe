@@ -138,9 +138,14 @@
     td { padding: 7px 8px; border-bottom: 1px solid var(--border-faint); }
     tr:last-child td { border-bottom: none; }
     /* Druckerwarteschlangen-Box (Host-Tab) — Spiegel der Helfer-Card. */
-    .pq-waiting { font-size: 0.85rem; margin-bottom: 8px; color: var(--text-muted); }
-    .pq-waiting b { color: var(--text); }
+    .pq-section {
+      font-size: .8rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .04em; opacity: .7; margin: 14px 0 6px;
+    }
+    .pq-section:first-child { margin-top: 0; }
     .pq-table td:last-child { white-space: normal; }
+    .pq-wait-table { font-size: 0.85rem; }
+    .pq-wait-table .pq-pos { color: var(--text-muted); width: 28px; }
     .pq-dot {
       display: inline-block; width: 8px; height: 8px; border-radius: 50%;
       margin-right: 6px; vertical-align: middle;

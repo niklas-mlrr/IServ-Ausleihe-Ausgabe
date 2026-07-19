@@ -20,7 +20,9 @@ from server.state import AppState
 
 # Exakt die Schlüssel, die `state_snapshot()` liefert (Stand vor dem
 # AppState-Split). web/host.js liest daraus u. a. `contexts`, `helpers`,
-# `modus_b`, `book_order`, `printers` (Drucker-Pool), `print_queue_summary`.
+# `modus_b`, `book_order`, `printers` (Drucker-Pool), `print_queue_summary`
+# (mit `waiting`-Zähler + `waiting_list`: zentrale Warteschlange als
+# Schüler-/Klassen-/Auftraggeber-Liste für die Host-Druckerwarteschlangen-Box).
 EXPECTED_SNAPSHOT_KEYS = {
     "type",
     "active_form",
@@ -86,4 +88,4 @@ def test_toggle_defaults_are_off():
     assert printers[0]["name"] is None
     assert printers[0]["is_default"] is True
     assert printers[0]["load"] == 0
-    assert snap["print_queue_summary"] == {"waiting": 0}
+    assert snap["print_queue_summary"] == {"waiting": 0, "waiting_list": []}

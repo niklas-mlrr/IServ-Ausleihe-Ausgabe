@@ -625,7 +625,10 @@ class AppState:
             "fix_class_on_slip": self.settings.fix_class_on_slip,
             "slip_second_page_default": self.settings.slip_second_page_default,
             "printers": self.print_queue.pool_printers(self.settings.printers),
-            "print_queue_summary": self.print_queue.pool_summary(),
+            "print_queue_summary": {
+                **self.print_queue.pool_summary(),
+                "waiting_list": self.print_queue.waiting_list(self),
+            },
             "book_order": list(ctx.book_order) if ctx else [],
         }
 

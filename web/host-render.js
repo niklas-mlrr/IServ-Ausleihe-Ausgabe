@@ -1021,22 +1021,22 @@ window.__host = window.__host || {};
 
   // ---- Druckerwarteschlange (Host-Tab) ----
   // Live-Status des Drucker-Pools (Last, druckt/wartet je Drucker) plus die
-  // zentrale Warteschlange (Aufträge ohne zugewiesenen Drucker). Daten aus dem
-  // State-Snapshot (`state.printers`/`state.print_queue_summary`); der Server
-  // pusht auf jeden Druck-Übergang einen frischen Snapshot (print_queue.
-  // _notify_all), darum folgt die Box ohne Polling.
+  // zentrale Warteschlange (Aufträge ohne zugewiesenen Drucker) als Liste:
+  // Schüler, Klasse, Auftraggeber. Daten aus dem State-Snapshot
+  // (`state.printers`/`state.print_queue_summary`); der Server pusht auf jeden
+  // Druck-Übergang einen frischen Snapshot (print_queue._notify_all), darum
+  // folgt die Box ohne Polling.
   function renderPrintQueue() {
     const box = document.getElementById('print-queue-box');
     if (!box) return;
     const pool = state.printers || [];
-    const waiting = (state.print_queue_summary && state.print_queue_summary.waiting) || 0;
+    const summary = state.print_queue_summary || {};
+    const waiting = summary.waiting || 0;
+    const waitingList = summary.waiting_list || [];
     if (!pool.length) {
       box.innerHTML = '<p class="hint">Kein Drucker konfiguriert — Druck nicht möglich. In den Einstellungen Drucker hinzufügen.</p>';
       return;
     }
-    const waitLine = waiting > 0
-      ? `<div class="pq-waiting">In zentraler Warteschlange: <b>${waiting}</b> ${waiting === 1 ? 'Auftrag' : 'Aufträge'}</div>`
-      : '';
     const rows = pool.map(p => {
       const printing = p.printing_name;
       const spooled = p.spooled_name;
@@ -1059,11 +1059,29 @@ window.__host = window.__host || {};
         <td><span class="pq-dot pq-${dot}" aria-hidden="true"></span> ${status}</td>
       </tr>`;
     }).join('');
-    box.innerHTML = `${waitLine}
+    // Zentrale Warteschlange: jeder wartende Auftrag mit Schüler, Klasse,
+    // Auftraggeber (Host / Helfer namentlich). Position = Reihenfolge im
+    // Drucker-Pool (rollen-gerecht, HOST vor HELFER vor SCHÜLER).
+    const waitRows = waitingList.map(w => `<tr>
+      <td class="pq-pos">${w.position + 1}</td>
+      <td>${escapeHtml(w.student || '–')}</td>
+      <td>${w.form ? escapeHtml(w.form) : '–'}</td>
+      <td>${escapeHtml(w.originator || '–')}</td>
+    </tr>`).join('');
+    const waitBlock = waitingList.length
+      ? `<table class="pq-wait-table">
+          <thead><tr><th>#</th><th>Schüler</th><th>Klasse</th><th>Auftraggeber</th></tr></thead>
+          <tbody>${waitRows}</tbody>
+        </table>`
+      : '<p class="hint" style="margin:0">Zentrale Warteschlange leer.</p>';
+    box.innerHTML = `
+      <div class="pq-section">Drucker (${pool.length})</div>
       <table class="pq-table">
         <thead><tr><th>Drucker</th><th>Status</th></tr></thead>
         <tbody>${rows}</tbody>
-      </table>`;
+      </table>
+      <div class="pq-section">Zentrale Warteschlange (${waiting})</div>
+      ${waitBlock}`;
   }
 
   function renderHelpers() {
