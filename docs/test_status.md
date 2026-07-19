@@ -42,8 +42,38 @@
 | V23 | **Ausblenden wirkt sofort auf den Clients (Live-Repush)** — das Ausblenden einer Buchreihe im Einstellungen-Dialog schickt den aktiven Helfern (Modus A) UND gepaarten Schüler-Sessions (Modus B) desselben Jahrgangs eine `booklist_update`-Nachricht mit der neu gefilterten Liste + Reihenfolge; die Reihe fällt live aus der Geräteliste, ohne den Worker-Neuaufbau und ohne den clientseitigen Scan-Fortschritt zu löschen (`scannedIsbns`/`scanOrder` bleiben). Server: `repush_booklist` (`server/sessions.py`) holt die Schülerinfo frisch, rechnet die ISBN-Vorabmengen neu (damit `evaluate_scan_for_booking` den neuen Hidden-Stand sieht) und bewahrt die X/Y-Zählung für sichtbare Bücher; `/api/booklist-hidden` repusht per `asyncio.gather` parallel + `broadcast_host`. | `tests/test_booklist_repush.py` (4 Tests: Filter + Vormerk-Neuerung, Scan-Fortschritt erhalten für sichtbare Bücher, Modus-B ws=None-Skip, IServ-Fehler-resilient) | 2026-07-18 | grün, 238 Tests. **Live-Check am echten Gerät noch offen** (s. „Offen" unten) |
 | V24 | **Interne Druckerwarteschlange (Logik)** — Rollen-gerechte Einfügung (HOST>HELFER>SCHÜLER, „hinter letzte Gleichrangige"), bereits gespoolte/druckende Aufträge bleiben am Kopf gepinnt (am OS verbindlich); 2-in-flight-Pipeline (B→`spooled` Pos 1, C→`queued` Pos 2, nach A fertig rückt B→`printing` Pos 0); Fehler-Fall wird `failed` mit `ok=False`; `print_pdf` liefert CUPS-`job_handle` („request id is X-123"), `file`-Backend `None`; `await_print_completion(None)` sofort fertig. | `tests/test_print_queue.py` (7 Tests) + `tests/test_printing.py` (3 neue: `job_handle` CUPS, `file` None, Completion-None) | 2026-07-19 | grün, 248 Tests. **Echte-Drucker-Verifizierung (OS-Polling, 2-in-flight am Live-System, Host-Popup nur am startenden Host) noch offen** (s. „Offen" unten) |
 | V25 | **Drucker-Pool (Logik + Persistenz)** — Reiter-Verwaltung wie Klassen-Tabs; Round-Robin-Füllung (niedrigste Last, linkester Tie-Break) verteilt 4 Aufträge auf 2 Drucker als `[(p1,printing),(p2,printing),(p1,spooled),(p2,spooled)]`; leerer Pool lässt Aufträge in der zentralen Warteschlange (Scheduler dispatcht nichts); `pool_printers`/`pool_summary` liefern die Snapshot-Form (`is_default`/`load`/`printing_name`/`spooled_name`/`waiting`); Persistenz `data/printers.json` round-trip + Drop fehlender benannter Drucker (gegen Geräte-Liste, inkl. JSON-Bereinigung) + erster-Start-Default `[Standarddrucker]` + unbekannter Duplex-Modus → `one_sided`; Snapshot-Schema `printers`+`print_queue_summary` statt `printer_name` (mitgeführter Charakterisierungs-Test). | `tests/test_print_queue.py` (3 neue: Round-Robin-Füllung, leerer Pool, Snapshot-Form) + `tests/test_printer_store.py` (5: erster Start, Roundtrip, Drop fehlend, leere Geräteliste, unbekannter Duplex) + `tests/test_state_contract.py` (Schema mitgeführt) | 2026-07-19 | grün, 256 Tests. **Live-Mehrdrucker-Smoke (Verteilung am echten Gerät) noch offen** (s. „Offen" unten) |
+| V26 | **Pro-Klasse Drucker-Allowlist + pool-gerechte Verteilung** — `ClassContext.allowed_printer_ids: set[str]\|None` (`None`=alle); `PrintJob.allowed_printers`-Snapshot reist mit in die zentrale Warteschlange. Scheduler `_claim_fills` **level-weise** (erst alle Last-0-Drucker, dann Last-1) statt „niedrigste Last": Auftrag erlaubt nur p2 → geht an p2 (p1 bleibt frei, obwohl idle + linkester); Kopf erlaubt p1+p2, beide idle → p1 (linkester); p1 Last 1 + p2 idle, Auftrag beide erlaubt → p2 (Parallelismus, nicht p1s 2. Slot); Kopf nur p2, p1 idle → p1 zieht nächst-erlaubten (späteren), Kopf geht an p2; `allowed=set()` → bleibt waiting (Scheduler-Grace zusätzlich zur Enqueue-Verweigerung). `allowed=None` ≡ alt → bestehende Round-Robin-Tests grün. Vorab-Verweigerung: explizite Allowlist ohne einzigen Pool-Drucker → 400 (HTTP) / `print_result{ok:false}` (WS). `POST /api/context-printers` setzt Allowlist nachträglich + `wake()` + Broadcast. | `tests/test_print_queue.py` (5 neue: nur-p2, linkester-beide-idle, Parallelismus-idle-bevor-2.-Slot, Kopf-überspringen-nicht-erlaubt, leere Menge bleibt waiting) | 2026-07-19 | grün, 261 Tests. **Live-Check (Allowlist-Verteilung + UI-Checkboxen am echten Gerät) noch offen** (s. „Offen" unten) |
 
 ## Offen / zu testen
+
+### Offen 2026-07-19 (Pro-Klasse Drucker-Allowlist: Live-Check)
+
+Die pro-Klasse Drucker-Allowlist (V26) ist per Unit-Test logisch abgesichert
+(level-weise Verteilung respektiert Allowlist + Parallelismus + linkester-
+Tie-Break, `allowed=None` ≡ Altverhalten, leere Menge bleibt waiting). Das
+Live-Verhalten am echten Gerät (Verteilung gemäß Allowlist, UI-Checkboxen im
+Klassen-Öffnen + im Klassen-Reiter, nachträgliche Änderung + Broadcast) ist
+offen. Auf dem Dev-VPS (`file`-Backend) meldet `list_printers` keine Geräte →
+nur der Standarddrucker ist wählbar; echte Allowlist-Verteilung braucht einen
+CUPS/Sumatra-Rechner mit ≥ 2 konfigurierten Pool-Druckern.
+
+- [ ] **UI `panel-new`:** beim Öffnen einer Klasse zeigt der Drucker-Block
+      alle Pool-Drucker als Checkboxen (Default alle angehakt = alle);
+      Auswahl wird für das nächste Öffnen gemerkt (`localStorage`).
+- [ ] **UI Klassen-Tab:** „Drucker für {Klasse}"-Karte zeigt die Checkboxen
+      initialisiert aus dem Snapshot; Änderung feuert `POST /api/context-
+      printers`, wird sofort auf anderen Host-Tabs sichtbar (`applyState`).
+- [ ] **Kein Switch / nicht ausgegraut:** Checkboxen sind native Checkboxen
+      (keine iOS-Toggles), Labels voll opacity (globale `label{opacity:.6}`
+      übersteuert).
+- [ ] **Verteilung gemäß Allowlist** (nur nach Freigabe nach CLAUDE.md §6,
+      mit ausgemusterten Büchern, nicht unbeaufsichtigt): Klasse mit nur
+      Drucker 2 erlaubt → Leihschein druckt auf Drucker 2, Drucker 1 bleibt
+      frei; Klasse mit beiden erlaubt + 2 schnelle Drucke → verteilt auf
+      beide (Last 1/1, nicht 2/0).
+- [ ] **Nachträgliche Änderung:** Allowlist im laufenden Klassen-Reiter
+      ändern → `wake()` verteilt künftige Drucke neu (wartende Aufträge
+      behalten ihre alte Allowlist, nur künftige Drucke sehen die neue).
 
 ### Offen 2026-07-19 (Drucker-Pool: Live-Mehrdrucker-Smoke)
 
