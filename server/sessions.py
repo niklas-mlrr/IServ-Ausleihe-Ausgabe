@@ -487,12 +487,15 @@ async def print_loan_slip_for(
     *,
     variant: str = "student-always_school-auto",
     pages: str | None = "1",
+    printer_name: str | None = None,
 ) -> dict:
     """Leihschein eines Schülers holen (read-only GET) und lokal drucken.
 
     Geholt wird stets der 2-seitige Beleg (Seite 1 = immer gedruckt, Seite 2 =
     Schüler-Leihschein). `pages` wählt den zu druckenden Bereich: ``"1"`` nur die
-    erste Seite (Default), ``None`` beide Seiten.
+    erste Seite (Default), ``None`` beide Seiten. `printer_name` = der Drucker,
+    an den dieser Auftrag geht (vom Pool-Scheduler zugewiesen); ``None`` = der
+    Standarddrucker des Geräts (``cfg.printer_name`` bzw. OS-Default).
 
     Gemeinsame Orchestrierung für den Host-Endpoint (`/api/print-loan-slip`)
     und den Scanner (WS `print`). Kein Schreibzugriff auf IServ — `get_loan_slip_pdf`
@@ -569,7 +572,7 @@ async def print_loan_slip_for(
     result = await print_pdf(
         pdf,
         backend=cfg.print_backend,
-        printer_name=state.settings.printer_name_override or cfg.printer_name,
+        printer_name=printer_name or cfg.printer_name,
         sumatra_path=cfg.sumatra_path,
         output_dir=cfg.print_output_dir,
         label=f"leihschein_{student_id}",

@@ -502,6 +502,14 @@ async def _handle_print(state, hub, helper, websocket, raw) -> None:
             {"type": "print_result", "ok": False, "msg": "Kein Schüler zugewiesen"},
         )
         return
+    # Leerer Drucker-Pool → Druck verweigern (Auftrag würde sonst endlos in der
+    # Warteschlange hängen, da der Scheduler nichts verteilt).
+    if not state.settings.printers:
+        await hub.send_websocket(
+            websocket,
+            {"type": "print_result", "ok": False, "msg": "Kein Drucker konfiguriert"},
+        )
+        return
     # Seite 1 wird immer gedruckt; Seite 2 (Schüler-Leihschein) nur,
     # wenn der Helfer sie im Druck-Dialog aktiviert hat.
     second_page = bool(raw.get("second_page"))

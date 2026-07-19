@@ -14,7 +14,10 @@ from ..sessions import handle_commit
 from ..state import get_state
 from ._deps import (
     CommitBookRequest,
-    PrinterRequest,
+    PrinterAddRequest,
+    PrinterDuplexRequest,
+    PrinterRemoveRequest,
+    PrinterReorderRequest,
     PrintLoanSlipRequest,
     host_router,
     require_host,
@@ -45,11 +48,15 @@ async def print_loan_slip(body: PrintLoanSlipRequest, sid: str = Depends(require
     if body.student_id is None:
         raise HTTPException(400, "student_id fehlt")
     student_id = body.student_id
+    # Leerer Drucker-Pool → Druck verweigern (Auftrag würde sonst endlos in der
+    # Warteschlange hängen, da der Scheduler nichts verteilt).
+    state = get_state()
+    if not state.settings.printers:
+        raise HTTPException(400, "Kein Drucker konfiguriert")
     # Seite 1 wird immer gedruckt; Seite 2 (Schüler-Leihschein) nur, wenn der
     # Host-Toggle gesetzt ist.
     pages = None if body.second_page else "1"
 
-    state = get_state()
     student = state.find_student(student_id)
     name = slip_name(
         student.lastname if student else None,
@@ -78,32 +85,123 @@ async def print_loan_slip(body: PrintLoanSlipRequest, sid: str = Depends(require
 
 @host_router.get("/api/printers")
 async def get_printers() -> dict:
-    """Dem Host-Gerät bekannte Drucker für die Auswahl im Einstellungen-Dialog.
-
-    Rein lesend (lpstat/Get-Printer, lokales System — kein IServ-/DB-Zugriff).
+    """Dem Host-Gerät bekannte Drucker + den konfigurierten Pool für die
+    Einstellungen. Rein lesend (lpstat/Get-Printer, lokales System — kein
+    IServ-/DB-Zugriff). Liefert `printers` (Geräteliste), `default`, `backend`
+    und zusätzlich `pool` (konfigurierte Drucker mit Live-Last) sowie
+    `waiting` (zentrale Warteschlange).
     """
     from ..printing import list_printers
 
     cfg = get_config()
     state = get_state()
     info = await list_printers(cfg.print_backend)
-    info["current"] = state.settings.printer_name_override or cfg.printer_name
-    info["env_default"] = cfg.printer_name
+    info["pool"] = state.print_queue.pool_printers(state.settings.printers)
+    info["waiting"] = state.print_queue.pool_summary()["waiting"]
     return info
 
 
-@host_router.post("/api/printer")
-async def set_printer(body: PrinterRequest) -> dict:
-    """Einstellungen-Dialog: Leihschein-Drucker wählen.
+# ---------------------------------------------------------------------------
+# Drucker-Pool verwalten (Einstellungen-Dialog) — In-Memory + Persistenz
+# ---------------------------------------------------------------------------
 
-    Setzt nur den In-Memory-Override im Serverstate (leer = zurück auf
-    .env/Systemstandard) — kein IServ-/DB-Zugriff, nichts wird persistiert.
-    """
-    state = get_state()
-    name = body.printer.strip()
-    state.settings.printer_name_override = name or None
+
+def _persist_printers(state) -> None:
+    """Aktuellen Pool atomar nach `data/printers.json` wegschreiben (non-fatal
+    — Schreibfehler crashen den Endpoint nicht)."""
+    from ..printer_store import save as save_printers
+
+    try:
+        save_printers(state.settings.printers)
+    except Exception:  # noqa: BLE001 — Persistenz darf Endpoint nicht crashen
+        log.exception("Speichern der Drucker-Einstellungen fehlgeschlagen")
+
+
+async def _after_pool_change(state, *, wake: bool = False) -> dict:
+    """Nach einer Pool-Mutation: persistieren, ggf. Scheduler wecken (wartende
+    Aufträge verteilen), alle Hosts über den neuen Snapshot informieren."""
+    _persist_printers(state)
+    if wake:
+        state.print_queue.wake()
     await get_hub().broadcast_host(state.state_snapshot())
-    return {"ok": True, "printer": state.settings.printer_name_override}
+    return {"ok": True, "pool": state.print_queue.pool_printers(state.settings.printers)}
+
+
+@host_router.post("/api/printers/add")
+async def add_printer(body: PrinterAddRequest) -> dict:
+    """Einen Drucker zum Pool hinzufügen. `name=None` fügt den Standarddrucker
+    hinzu (falls noch nicht vorhanden); benannte Drucker nur, wenn das Gerät
+    sie meldet und sie noch nicht im Pool sind. Duplex-Default `one_sided`.
+    """
+    from ..printing import list_printers
+
+    cfg = get_config()
+    state = get_state()
+    name = body.name
+    # name=None → Standarddrucker; sonst normalisieren.
+    if name is not None:
+        name = name.strip() or None
+    # Doppelte Einträge vermeiden (Standarddrucker name=None bzw. gleicher Name).
+    def _matches(p) -> bool:
+        return (p.name is None and name is None) or (p.name == name and name is not None)
+
+    if any(_matches(p) for p in state.settings.printers):
+        raise HTTPException(409, "Drucker bereits im Pool")
+    # Benannte Drucker müssen das Gerät aktuell melden (read-only Prüfung).
+    if name is not None:
+        info = await list_printers(cfg.print_backend)
+        if name not in (info.get("printers") or []):
+            raise HTTPException(400, f"Drucker „{name}“ am Gerät nicht gefunden")
+    from ..state import PrinterConfig
+
+    state.settings.printers.append(PrinterConfig(name=name))
+    return await _after_pool_change(state, wake=True)
+
+
+@host_router.post("/api/printers/remove")
+async def remove_printer(body: PrinterRemoveRequest) -> dict:
+    """Einen Drucker aus dem Pool entfernen. Drucker mit aktiven Druckaufträgen
+    (Last > 0) können nicht entfernt werden (→ 400)."""
+    state = get_state()
+    pid = body.id.strip()
+    printer = next((p for p in state.settings.printers if p.id == pid), None)
+    if printer is None:
+        raise HTTPException(404, "Drucker nicht gefunden")
+    slots = state.print_queue.slots.get(pid)
+    if slots and slots.load > 0:
+        raise HTTPException(400, "Drucker noch beschäftigt — bitte warten")
+    state.settings.printers = [p for p in state.settings.printers if p.id != pid]
+    return await _after_pool_change(state)
+
+
+@host_router.post("/api/printers/duplex")
+async def set_printer_duplex(body: PrinterDuplexRequest) -> dict:
+    """Duplex-Modus eines Druckers setzen (nur gespeichert, nicht ans Backend
+    weitergereicht — Backends können Duplex CLI-seitig nicht zuverlässig)."""
+    from ..state import DUPLEX_MODES
+
+    if body.duplex not in DUPLEX_MODES:
+        raise HTTPException(400, f"Unbekannter Duplex-Modus: {body.duplex}")
+    state = get_state()
+    pid = body.id.strip()
+    printer = next((p for p in state.settings.printers if p.id == pid), None)
+    if printer is None:
+        raise HTTPException(404, "Drucker nicht gefunden")
+    printer.duplex = body.duplex  # type: ignore[assignment]
+    return await _after_pool_change(state)
+
+
+@host_router.post("/api/printers/reorder")
+async def reorder_printers(body: PrinterReorderRequest) -> dict:
+    """Neue Reihenfolge aller Drucker (bestimmt Verteilungspriorität — linkester
+    freier Drucker zuerst). Die übergebenen IDs müssen genau den aktuellen Pool
+    abdecken (kein Hinzufügen/Entfernen hierfür)."""
+    state = get_state()
+    by_id = {p.id: p for p in state.settings.printers}
+    if set(body.ids) != set(by_id) or len(body.ids) != len(by_id):
+        raise HTTPException(400, "IDs passen nicht zum aktuellen Pool")
+    state.settings.printers = [by_id[i] for i in body.ids]
+    return await _after_pool_change(state, wake=True)
 
 
 # ---------------------------------------------------------------------------

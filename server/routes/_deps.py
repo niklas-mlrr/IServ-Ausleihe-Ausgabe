@@ -157,8 +157,24 @@ class SettingsToggleRequest(BaseModel):
     second_page: bool | None = None
 
 
-class PrinterRequest(BaseModel):
-    printer: str = ""
+class PrinterAddRequest(BaseModel):
+    """Body für `POST /api/printers/add`. `name=None` fügt den Standarddrucker
+    hinzu (falls noch nicht im Pool)."""
+
+    name: str | None = None
+
+
+class PrinterRemoveRequest(BaseModel):
+    id: str = ""
+
+
+class PrinterDuplexRequest(BaseModel):
+    id: str = ""
+    duplex: str = "one_sided"
+
+
+class PrinterReorderRequest(BaseModel):
+    ids: list[str] = []
 
 
 class AddHelperRequest(BaseModel):

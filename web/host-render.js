@@ -757,15 +757,184 @@ window.__host = window.__host || {};
     } catch (_) {}
   }
 
-  // Einstellungen: Leihschein-Drucker setzen (In-Memory-Override im Server-
-  // State; leer = zurück auf .env/Systemstandard).
-  async function setPrinter(name) {
-    const r = await fetch('/api/printer', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ printer: name }),
+  // ---- Drucker-Pool (Einstellungen-Dialog) ----------------------------
+  // Reiter wie Klassen-Tabs: pro Drucker ein Reiter + Panel (Duplex-Dropdown,
+  // Entfernen). Mutationen (add/remove/duplex/reorder) gehen sofort an den
+  // Server (eigene Endpunkte), nicht über den „Speichern"-Fluss — nur der
+  // Schüler-Leihschein-Toggle bleibt dort.
+  const DUPLEX_OPTIONS = [
+    {v: 'one_sided', l: 'Einseitig'},
+    {v: 'two_sided_long', l: 'Doppelseitig (lange Seite)'},
+    {v: 'two_sided_short', l: 'Doppelseitig (kurze Seite)'},
+  ];
+  let activePrinterTabId = null;
+  let printerDeviceInfo = {printers: [], default: null, backend: null};
+
+  function printerLabel(p) {
+    if (p.name === null || p.name === undefined) {
+      const dev = printerDeviceInfo.default;
+      return dev ? `Standarddrucker (${dev})` : 'Standarddrucker';
+    }
+    return p.name;
+  }
+
+  async function fetchPrinters() {
+    try {
+      const r = await fetch('/api/printers');
+      if (r.ok) return await r.json();
+    } catch (_) {}
+    return null;
+  }
+
+  async function refreshPrinterPool() {
+    const info = await fetchPrinters();
+    if (!info) return;
+    printerDeviceInfo = {printers: info.printers || [], default: info.default || null, backend: info.backend || null};
+    renderPrinterPool(info.pool || []);
+  }
+
+  function renderPrinterPool(pool) {
+    const tabs = document.getElementById('printer-tabs');
+    const panels = document.getElementById('printer-panels');
+    tabs.innerHTML = '';
+    panels.innerHTML = '';
+    if (!pool.length) {
+      panels.innerHTML = '<p class="hint">Kein Drucker konfiguriert — Leihschein-Druck nicht möglich. Mit „+" einen hinzufügen.</p>';
+      activePrinterTabId = null;
+      return;
+    }
+    if (!pool.some(p => p.id === activePrinterTabId)) activePrinterTabId = pool[0].id;
+    for (const p of pool) {
+      const active = p.id === activePrinterTabId;
+      const busy = p.load > 0;
+      const btn = document.createElement('button');
+      btn.className = 'ptab' + (active ? ' active' : '');
+      btn.dataset.pid = p.id;
+      btn.draggable = true;
+      btn.title = 'Drucker-Reiter (ziehen zum Umsortieren)';
+      // × hinter dem Namen (Spiegel der Klassen-Tab-Schließen-Markierung).
+      const closeTitle = busy ? 'Drucker noch beschäftigt — Entfernen gesperrt' : 'Drucker entfernen';
+      const closeCls = busy ? 'ptab-close is-busy' : 'ptab-close';
+      btn.innerHTML = `${escapeHtml(printerLabel(p))} <span class="${closeCls}" data-close="${p.id}" title="${closeTitle}">×</span>`;
+      // Klick auf den Tab-Körper (nicht auf ×) aktiviert den Reiter.
+      btn.onclick = (e) => {
+        if (e.target.closest('[data-close]')) return;
+        activePrinterTabId = p.id; renderPrinterPool(pool);
+      };
+      wirePrinterTabDrag(btn, pool);
+      tabs.appendChild(btn);
+      if (active) panels.appendChild(buildPrinterPanel(p, pool));
+    }
+    // × Klicks → Bestätigungsdialog (liegt jetzt über dem Settings-Dialog, s. CSS
+    // #confirm-modal z-index) + Entfernen. Beschäftigte Drucker sind gesperrt.
+    tabs.querySelectorAll('[data-close]').forEach(el => {
+      el.onclick = async (e) => {
+        e.stopPropagation();
+        const id = el.dataset.close;
+        if (el.classList.contains('is-busy')) { showMsg('Drucker noch beschäftigt — bitte warten'); return; }
+        const p = pool.find(x => x.id === id);
+        if (!p) return;
+        if (!await confirmDialog(`Drucker „${printerLabel(p)}" entfernen?`, 'Entfernen')) return;
+        await removePrinter(id);
+      };
     });
-    if (r.ok) showMsg(name ? `Leihscheine gehen jetzt an „${name}"` : 'Leihscheine gehen an den Standard-Drucker');
-    else showMsg('Drucker konnte nicht gesetzt werden');
+  }
+
+  function buildPrinterPanel(p, pool) {
+    const panel = document.createElement('div');
+    panel.className = 'printer-panel';
+    const busy = p.load > 0;
+    const statusLine = busy
+      ? `<p class="hint">Belegt: ${p.load}/2 — ${p.printing_name ? 'druckt „' + escapeHtml(p.printing_name) + '"' : 'wartend'}${p.spooled_name ? ' · wartet „' + escapeHtml(p.spooled_name) + '"' : ''}</p>`
+      : '';
+    const opts = DUPLEX_OPTIONS.map(o => `<option value="${o.v}"${o.v === p.duplex ? ' selected' : ''}>${o.l}</option>`).join('');
+    panel.innerHTML = `
+      <div class="printer-panel-name">${escapeHtml(printerLabel(p))}</div>
+      <label class="settings-row settings-field" title="Wie gedruckt wird, falls ein Auftrag länger als zwei Seiten ist. Wird nur gespeichert (nicht ans Backend weitergereicht).">
+        Duplex (bei &gt; 2 Seiten)
+        <select data-act="duplex">${opts}</select>
+      </label>
+      ${statusLine}
+    `;
+    panel.querySelector('[data-act="duplex"]').onchange = (e) => setPrinterDuplex(p.id, e.target.value);
+    return panel;
+  }
+
+  // Drag-to-reorder der Drucker-Reiter (HTML5 DnD), Spiegel der booklist-Logik.
+  function wirePrinterTabDrag(btn, pool) {
+    let dragId = null;
+    btn.addEventListener('dragstart', (e) => { dragId = btn.dataset.pid; e.dataTransfer.effectAllowed = 'move'; });
+    btn.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; });
+    btn.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const targetId = btn.dataset.pid;
+      if (!dragId || dragId === targetId) return;
+      const ids = pool.map(p => p.id);
+      const from = ids.indexOf(dragId), to = ids.indexOf(targetId);
+      ids.splice(from, 1); ids.splice(to, 0, dragId);
+      reorderPrinters(ids);
+    });
+  }
+
+  async function setPrinterDuplex(id, duplex) {
+    const r = await fetch('/api/printers/duplex', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({id, duplex}),
+    });
+    if (r.ok) showMsg('Duplex-Modus gespeichert');
+    else showMsg('Duplex konnte nicht gespeichert werden');
+    await refreshPrinterPool();
+  }
+
+  async function removePrinter(id) {
+    const r = await fetch('/api/printers/remove', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({id}),
+    });
+    if (r.ok) showMsg('Drucker entfernt');
+    else if (r.status === 400) showMsg('Drucker noch beschäftigt — bitte warten');
+    else showMsg('Drucker konnte nicht entfernt werden');
+    await refreshPrinterPool();
+  }
+
+  async function reorderPrinters(ids) {
+    const r = await fetch('/api/printers/reorder', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ids}),
+    });
+    await refreshPrinterPool();
+  }
+
+  async function addPrinter(name) {
+    const r = await fetch('/api/printers/add', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name}),
+    });
+    if (r.ok) { showMsg('Drucker hinzugefügt'); await refreshPrinterPool(); }
+    else { const t = await r.text().catch(() => ''); showMsg('Hinzufügen fehlgeschlagen' + (t ? ` (${t})` : '')); }
+  }
+
+  function openPrinterAddRow(pool) {
+    const row = document.getElementById('printer-add-row');
+    const sel = document.getElementById('printer-add-select');
+    const inPool = new Set(pool.map(p => p.name));
+    const device = (printerDeviceInfo.printers || []).filter(n => !inPool.has(n));
+    const opts = [];
+    if (!inPool.has(null)) opts.push('<option value="">Standarddrucker</option>');
+    for (const n of device) opts.push(`<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`);
+    if (!opts.length) {
+      sel.innerHTML = '<option value="">— keine weiteren Drucker verfügbar —</option>';
+    } else {
+      sel.innerHTML = opts.join('');
+    }
+    row.style.display = '';
+    sel.focus();
+  }
+
+  async function initPrinterPoolUI() {
+    activePrinterTabId = null;
+    document.getElementById('printer-add-row').style.display = 'none';
+    await refreshPrinterPool();
   }
 
   function renderWorkerStatus() {
@@ -1080,9 +1249,13 @@ window.__host = window.__host || {};
     const pdfCb = document.getElementById('save-pdf-locally');
     const fixCb = document.getElementById('fix-class-on-slip');
     const slipCb = document.getElementById('slip-second-page');
-    const printerSel = document.getElementById('printer-select');
     const saveBtn = document.getElementById('settings-dialog-save');
     const cancelBtn = document.getElementById('settings-dialog-cancel');
+    const addBtn = document.getElementById('printer-add-btn');
+    const addRow = document.getElementById('printer-add-row');
+    const addSel = document.getElementById('printer-add-select');
+    const addConfirm = document.getElementById('printer-add-confirm');
+    const addCancel = document.getElementById('printer-add-cancel');
     const prevFocus = document.activeElement;
     // Immer mit dem Drucker-Reiter starten, statt den zuletzt gewählten Reiter zu behalten.
     document.querySelectorAll('#settings-tabs .tab').forEach(t => t.classList.toggle('active', t.id === 'settings-tab-drucker-btn'));
@@ -1094,37 +1267,18 @@ window.__host = window.__host || {};
     pdfCb.checked = !!state.save_pdf_locally;
     fixCb.checked = !!state.fix_class_on_slip;
     slipCb.checked = !!state.slip_second_page_default;
-    const prev = { ts: tsCb.checked, pdf: pdfCb.checked, fix: fixCb.checked, slip: slipCb.checked, printer: state.printer_name || '' };
-    // Druckerliste vom Server holen (rein lesend) und das Dropdown füllen.
-    printerSel.innerHTML = '<option value="">wird geladen …</option>';
-    printerSel.disabled = true;
-    fetch('/api/printers').then(r => r.ok ? r.json() : null).then(info => {
-      if (!modal.classList.contains('show')) return;  // Dialog inzwischen zu
-      const names = (info && info.printers) || [];
-      const current = (info && info.current) || prev.printer;
-      const envDefault = (info && info.env_default) || null;
-      const sysDefault = (info && info.default) || null;
-      // Gar nichts gefunden (keine Geräteliste, kein System-/.env-Standard,
-      // kein gesetzter Drucker): Auswahl deaktiviert lassen.
-      if (!names.length && !envDefault && !sysDefault && !current) {
-        printerSel.innerHTML = '<option value="">Kein Drucker gefunden</option>';
-        return;
-      }
-      let defLabel = 'Standard';
-      if (envDefault) defLabel += ` (${envDefault})`;
-      else if (sysDefault) defLabel += ` (${sysDefault})`;
-      printerSel.innerHTML = '';
-      printerSel.add(new Option(defLabel, ''));
-      for (const n of names) printerSel.add(new Option(n, n));
-      // Aktuell gewählten Drucker anzeigen, auch wenn er (gerade) nicht in der Liste ist.
-      if (current && !names.includes(current)) printerSel.add(new Option(`${current} (nicht gefunden)`, current));
-      printerSel.value = prev.printer;
-      printerSel.disabled = false;
-    }).catch(() => {
-      if (!modal.classList.contains('show')) return;
-      printerSel.innerHTML = '<option value="">Standard (Liste nicht verfügbar)</option>';
-      printerSel.disabled = false;
-    });
+    const prev = { ts: tsCb.checked, pdf: pdfCb.checked, fix: fixCb.checked, slip: slipCb.checked };
+    // Drucker-Pool-Reiter aufbauen (rein lesend vom Server; Mutationen gehen
+    // sofort über eigene Endpunkte, nicht über den „Speichern"-Fluss).
+    initPrinterPoolUI();
+    addBtn.onclick = () => openPrinterAddRow((state.printers || []).map(p => p.name));
+    addConfirm.onclick = async () => {
+      const v = addSel.value;
+      if (v === '' && !(addSel.options.length && addSel.options[0].value === '')) return;  // „keine verfügbar"-Platzhalter
+      await addPrinter(v === '' ? null : v);
+      addRow.style.display = 'none';
+    };
+    addCancel.onclick = () => { addRow.style.display = 'none'; };
     // Bücherlisten des Schuljahrs laden und als Reiter aufbauen (rein lesend).
     loadBooklistTabs();
     const onKey = (e) => {
@@ -1145,7 +1299,6 @@ window.__host = window.__host || {};
         if (slipCb.checked !== prev.slip) {
           pushSlipDefault(slipCb.checked);  // Server-Truth setzen → Broadcast an alle Hosts + Helfer
         }
-        if (!printerSel.disabled && printerSel.value !== prev.printer) setPrinter(printerSel.value);
         saveChangedBooklistOrders();
       } else {
         tsCb.checked = prev.ts;
@@ -1517,7 +1670,6 @@ window.__host.renderStatusBar = renderStatusBar;
 window.__host.setForceTailscaleIp = setForceTailscaleIp;
 window.__host.pushSavePdfLocally = pushSavePdfLocally;
 window.__host.pushFixClassOnSlip = pushFixClassOnSlip;
-window.__host.setPrinter = setPrinter;
 window.__host.renderWorkerStatus = renderWorkerStatus;
 window.__host.renderHelpers = renderHelpers;
 window.__host.setHelperClass = setHelperClass;

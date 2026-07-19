@@ -48,10 +48,10 @@ async def set_force_tailscale_ip(body: BoolToggleRequest, request: Request) -> d
 # Whitelist für POST /api/settings/{key} — bündelt die drei strukturell
 # gleichen Bool-Toggles (setzen genau ein Attribut im Serverstate, broadcasten
 # an alle Hosts). `force-tailscale-ip` (baut zusätzlich den Modus-B-QR neu,
-# braucht `Request`) und `printer` (String-Wert, andere Semantik: leer =
-# .env-Default) bleiben bewusst eigenständige Endpunkte — reinquetschen würde
-# den gemeinsamen Rumpf nur mit Sonderfällen vollstopfen, ohne echte
-# Duplikation zu sparen.
+# braucht `Request`) bleibt bewusst ein eigenständiger Endpunkt — reinquetschen
+# würde den gemeinsamen Rumpf nur mit einem Sonderfall vollstopfen, ohne echte
+# Duplikation zu sparen. Der Drucker-Pool (`RuntimeSettings.printers`) hat
+# eigene Endpunkte in `routes/slips.py` (Liste + add/remove/duplex/reorder).
 # key -> (state-Attribut, Body-Feldname auf `SettingsToggleRequest`)
 _BOOL_SETTINGS: dict[str, tuple[str, str]] = {
     "save-pdf-locally": ("save_pdf_locally", "enabled"),

@@ -445,3 +445,42 @@
       border-top: 1px solid var(--border);
     }
     #settings-dialog .settings-tab-panel.active { display: flex; }
+    /* Abschnitts-Überschrift innerhalb eines Einstellungs-Reiters (z. B. „Drucker-Pool") */
+    #settings-dialog .settings-subhead { font-size: .8rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); border-top: 1px solid var(--border); padding-top: 12px; margin-top: 4px; }
+    /* Bestätigungs-Dialog muss über dem Settings-Dialog stehen (gleicher z-index
+       sonst, und #confirm-modal liegt im DOM VOR #settings-dialog → würde
+       übermalt). Beim Drucker-Entfernen per × aus dem Settings-Dialog gerufen. */
+    #confirm-modal { z-index: 250; }
+    /* Drucker-Pool-Reiter — bewusst Spiegel der Klassen-Tab-Leiste (#tab-bar):
+       gleiche Button-Form (unten abgerundet, Border-bottom transparent → bei
+       aktiv/hover Border), gleiche × Schließen-Markierung hinter dem Namen. */
+    #settings-dialog .printer-tabs-bar {
+      display: flex; align-items: stretch; gap: 2px; flex-wrap: wrap;
+      border-bottom: 1px solid var(--border);
+    }
+    #settings-dialog .printer-tabs-bar #printer-tabs { display: inline-flex; flex-wrap: wrap; gap: 2px; }
+    #settings-dialog .printer-tabs-bar .ptab {
+      background: transparent; color: var(--text-muted);
+      padding: 8px 16px; font-size: .9rem; cursor: pointer;
+      border: 1px solid transparent; border-bottom: none; border-radius: 8px 8px 0 0;
+      display: inline-flex; align-items: center; gap: 8px;
+    }
+    #settings-dialog .printer-tabs-bar .ptab:hover { background: var(--surface-2); color: var(--text); }
+    #settings-dialog .printer-tabs-bar .ptab.active { background: var(--surface-2); color: var(--text); border-color: var(--border); }
+    #settings-dialog .printer-tabs-bar .ptab-close {
+      background: transparent; border: none; color: var(--text-muted);
+      cursor: pointer; font-size: 1.1rem; line-height: 1; padding: 0 2px; border-radius: 4px;
+    }
+    #settings-dialog .printer-tabs-bar .ptab-close:hover { color: var(--danger); background: var(--surface-3); }
+    #settings-dialog .printer-tabs-bar .ptab-close.is-busy { opacity: .4; cursor: not-allowed; }
+    #settings-dialog .printer-tabs-bar .ptab-close.is-busy:hover { color: var(--text-muted); background: transparent; }
+    #settings-dialog .printer-tabs-bar .ptab-add {
+      background: transparent; color: var(--text-muted);
+      font-size: 1.2rem; padding: 8px 14px; cursor: pointer;
+      border: 1px solid transparent; border-bottom: none; border-radius: 8px 8px 0 0;
+    }
+    #settings-dialog .printer-tabs-bar .ptab-add:hover { background: var(--surface-2); color: var(--text); }
+    #settings-dialog #printer-add-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+    #settings-dialog #printer-add-row select { flex: 1 1 200px; }
+    #settings-dialog .printer-panel { display: flex; flex-direction: column; gap: 10px; padding: 14px 0 4px; }
+    #settings-dialog .printer-panel-name { font-weight: 600; }

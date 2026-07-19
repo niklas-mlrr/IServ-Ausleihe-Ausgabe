@@ -20,6 +20,32 @@ StudentSessionState = Literal[
     "revoked",  # vom Host abgebrochen / Ausgabe geschlossen
 ]
 
+# Duplex-Modus eines Druckers (nur gespeichert, nicht ans Backend weitergereicht —
+# die Druck-Backends können Duplex CLI-seitig nicht zuverlässig steuern).
+# `one_sided` = einseitig, `two_sided_long` = doppelseitig über lange Seite,
+# `two_sided_short` = doppelseitig über kurze Seite.
+DuplexMode = Literal["one_sided", "two_sided_long", "two_sided_short"]
+DUPLEX_MODES: tuple[str, ...] = ("one_sided", "two_sided_long", "two_sided_short")
+
+
+def _new_printer_id() -> str:
+    """Stabile Druckerkennung (für Slot-Zuordnung im Pool-Scheduler)."""
+    return uuid.uuid4().hex[:12]
+
+
+@dataclass
+class PrinterConfig:
+    """Ein Drucker im Leihschein-Drucker-Pool.
+
+    `name=None` bedeutet den Standarddrucker des Geräts (OS-/.env-Default).
+    `duplex` wird pro Drucker konfiguriert, aber derzeit nur gespeichert
+    (s. DuplexMode-Kommentar oben). Die Reihenfolge in `RuntimeSettings.printers`
+    bestimmt die Verteilungspriorität (linkester freie Drucker zuerst)."""
+
+    id: str = field(default_factory=_new_printer_id)
+    name: str | None = None
+    duplex: DuplexMode = "one_sided"
+
 
 @dataclass
 class QueueStudent:
@@ -271,10 +297,10 @@ class DisplaySession:
 
 @dataclass
 class RuntimeSettings:
-    """Die fünf Host-/Entwickler-Toggles + der Drucker-Override — im
+    """Die vier Host-/Entwickler-Bool-Toggles + der Drucker-Pool — im
     Einstellungen-Dialog gesetzt, gemeinsam in `routes/settings.py::_BOOL_SETTINGS`
-    (die vier Bool-Toggles) verwaltet. Zugriff ausschließlich über
-    `state.settings.<name>`."""
+    (die Bool-Toggles) bzw. `routes/slips.py` (der Pool) verwaltet. Zugriff
+    ausschließlich über `state.settings.<name>`."""
 
     # Header-Toggle „Tailscale-IP": erzwingt die Tailscale/CGNAT-IP in
     # QR-/Join-URLs statt der Auto-Auswahl (LAN-first). False = Auto.
@@ -288,9 +314,13 @@ class RuntimeSettings:
     # Host-Toggle „Schüler-Leihschein" (2. Seite): Default für den Druck-
     # Dialog im Helferclient. Wird vom Host gesetzt und an Helfer gesynct.
     slip_second_page_default: bool = False
-    # Einstellungen-Dialog: am Host gewählter Leihschein-Drucker. None =
-    # PRINTER_NAME aus der .env bzw. Systemstandard. Reiner In-Memory-State.
-    printer_name_override: str | None = None
+    # Leihschein-Drucker-Pool (geordnet; linkester freier Drucker bekommt den
+    # nächsten Auftrag). Leer = kein Drucker → Druck verweigert. Default beim
+    # ersten Start (vor Persistenz-Load): nur der Standarddrucker (name=None).
+    # Persistiert in `data/printers.json` (server/printer_store.py).
+    printers: list[PrinterConfig] = field(
+        default_factory=lambda: [PrinterConfig(name=None)]
+    )
 
 
 @dataclass
@@ -579,7 +609,8 @@ class AppState:
             "save_pdf_locally": self.settings.save_pdf_locally,
             "fix_class_on_slip": self.settings.fix_class_on_slip,
             "slip_second_page_default": self.settings.slip_second_page_default,
-            "printer_name": self.settings.printer_name_override,
+            "printers": self.print_queue.pool_printers(self.settings.printers),
+            "print_queue_summary": self.print_queue.pool_summary(),
             "book_order": list(ctx.book_order) if ctx else [],
         }
 

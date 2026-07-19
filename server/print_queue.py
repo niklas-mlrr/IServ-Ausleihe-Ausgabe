@@ -1,21 +1,30 @@
-"""Server-interne Druckerwarteschlange mit Rollen-Rangfolge und 2-in-flight.
+"""Server-interne Druckerwarteschlange mit Drucker-Pool-Verteilung.
 
-Serialisiert alle Leihschein-Druckaufträge (Host, Helfer, künftig Schüler) an
-einen physischen Drucker und ordnet sie rollen-gerecht: HOST > HELFER > SCHÜLER.
+Serialisiert alle Leihschein-Druckaufträge (Host, Helfer, künftig Schüler) und
+verteilt sie auf den konfigurierten Drucker-Pool (`RuntimeSettings.printers`):
 
-Pipeline (2-in-flight, Geschwindigkeit vor strikter Rangfolge):
-  Position 0  — druckt gerade (am OS, „Wird gedruckt")
-  Position 1  — schon an den Drucker gespoolt, wartet auf den Drucker
-  Position 2+ — intern, noch nicht an den Drucker gesendet (rollen-gerecht geordnet)
+  - Zentrale Warteschlange (`waiting`): rollen-gerecht geordnet
+    (HOST > HELFER > SCHÜLER), Aufträge ohne zugewiesenen Drucker.
+  - Pro Drucker 2-Slots-Pipeline: Slot 0 = druckt gerade (am OS, „Wird
+    gedruckt"), Slot 1 = schon an den Drucker gespoolt, wartet auf den Drucker.
+  - Verteilung: der linkeste Drucker mit der niedrigsten Last bekommt den
+    nächsten Auftrag (Round-Robin-Füllung: erst alle Drucker auf Last 1, dann
+    auf Last 2). Sind alle Drucker voll (Last 2), warten weitere Aufträge
+    zentral, bis ein Drucker wieder Kapazität hat.
 
 „gedruckt" = physisches Ende, erkannt per OS-Queue-Polling
-(`printing.await_print_completion`). Bewusster Trade-off: ein später eintreffender
-HOST-Auftrag reiht sich hinter einen *bereits gespoolten* (Position 1) niedriger-
-rangigen Auftrag, weil wir am OS nicht umsortieren — nur der druckende Auftrag ist
-verbindlich, alle intern Wartenden bleiben rollen-gerecht geordnet.
+(`printing.await_print_completion`). Bewusster Trade-off: ein später
+eintreffender HOST-Auftrag reiht sich in `waiting` vor niedriger-rangige
+Aufträge ein, aber bereits gespoolte/druckende Aufträge sind am OS verbindlich
+und werden von der Umsortierung nicht mehr berührt.
+
+Leerer Pool (`state.settings.printers == []`): der Scheduler dispatcht nichts —
+Aufträge bleiben in `waiting`. Die Enqueue-Stellen (Host-Endpoint / Scanner-WS)
+verweigern den Druck vorab mit „Kein Drucker konfiguriert", damit kein Auftrag
+endlos wartet.
 
 Notifications (nur an den jeweiligen Urheber):
-  Helfer-WS  — `print_progress` (status/position) + `print_result` (ok/fehlgeschlagen)
+  Helfer-WS  — `print_progress` (status/position/printer) + `print_result` (ok/fehlgeschlagen)
   Host-WS    — zielgerichtet an den startenden Host (`host_sid`), gleiche Payload
 """
 
@@ -32,11 +41,15 @@ log = logging.getLogger(__name__)
 
 Role = Literal["host", "helper", "student"]
 JobStatus = Literal["queued", "dispatching", "spooled", "printing", "done", "failed"]
+_SlotType = Literal["printing", "spooled"]
 
-# Rangfolge für die Einfügung unter den *noch nicht gespoolten* Aufträgen:
+# Rangfolge für die Einfügung in die zentrale Warteschlange (`waiting`):
 # niedrigerer Wert = höherer Vorrang. Bereits gespoolte/druckende Aufträge sind
 # am OS verbindlich und werden von der Umsortierung nicht mehr berührt.
 _RANK: dict[Role, int] = {"host": 0, "helper": 1, "student": 2}
+
+# Kapazität je Drucker: 1 druckend (Slot 0) + 1 gespoolt (Slot 1).
+_PRINTER_CAPACITY = 2
 
 
 def slip_name(lastname: str | None, firstname: str | None, form: str | None) -> str:
@@ -62,6 +75,7 @@ class PrintJob:
     status: JobStatus = "queued"
     result: dict | None = None  # Druck-Result (mit job_handle); Finalresult für HTTP
     job_handle: dict | None = None  # OS-Job-Handle für Completion-Polling
+    assigned_printer_id: str | None = None  # None = in zentraler Warteschlange
     created_at: datetime = field(default_factory=datetime.now)
     done: asyncio.Event = field(default_factory=asyncio.Event)
 
@@ -71,11 +85,24 @@ class PrintJob:
         return cls(**kw)
 
 
+@dataclass
+class _Slots:
+    """2-Slots-Pipeline eines Druckers: Slot 0 druckt, Slot 1 ist gespoolt."""
+
+    printing: PrintJob | None = None
+    spooled: PrintJob | None = None
+
+    @property
+    def load(self) -> int:
+        return (1 if self.printing else 0) + (1 if self.spooled else 0)
+
+
 class PrintQueue:
-    """Einzige Serialisierungsstelle für Leihschein-Drucke."""
+    """Einzige Serialisierungs-/Verteilungsstelle für Leihschein-Drucke."""
 
     def __init__(self) -> None:
-        self.jobs: list[PrintJob] = []
+        self.waiting: list[PrintJob] = []
+        self.slots: dict[str, _Slots] = {}
         self._lock = asyncio.Lock()
         self._wake = asyncio.Event()
         self._task: asyncio.Task | None = None
@@ -104,23 +131,24 @@ class PrintQueue:
     # ---- Enqueue -------------------------------------------------------
 
     async def enqueue(self, job: PrintJob) -> int:
-        """Auftrag rollen-gerecht einreihen; 0-basierte Position zurückgeben.
-
-        Eingefügt wird vor dem ersten *noch nicht gespoolten* (queued) Auftrag
-        niedrigeren Rangs; sonst ans Ende. Bereits gespoolte/druckende Aufträge
-        bleiben unangetastet am Kopf (am OS verbindlich).
-        """
+        """Auftrag rollen-gerecht in die zentrale Warteschlange einreihen;
+        0-basierte Position in `waiting` zurückgeben."""
         async with self._lock:
-            idx = len(self.jobs)
-            for i, j in enumerate(self.jobs):
-                if j.status == "queued" and _RANK[j.role] > _RANK[job.role]:
+            idx = len(self.waiting)
+            for i, j in enumerate(self.waiting):
+                if _RANK[j.role] > _RANK[job.role]:
                     idx = i
                     break
-            self.jobs.insert(idx, job)
+            self.waiting.insert(idx, job)
             position = idx
         self._wake.set()
-        await self._notify_all()  # neuen Auftrag + ggf. verschobene Positionen live
+        await self._notify_all()
         return position
+
+    def wake(self) -> None:
+        """Scheduler wecken — aufrufen, wenn ein Drucker hinzugefügt wurde
+        (wartende Aufträge können jetzt verteilt werden)."""
+        self._wake.set()
 
     # ---- Worker --------------------------------------------------------
 
@@ -135,118 +163,251 @@ class PrintQueue:
                 await asyncio.sleep(1)
 
     async def _step(self) -> None:
-        # (1) Beförderung: ein spooled-Kopf (Index 0) wird zum druckenden Kopf,
-        # falls kein `printing`-Auftrag existiert (passiert nach Finalize des
-        # vorigen Kopfes).
+        from .state import get_state
+
+        printers = list(get_state().settings.printers)
+
+        # (1) Befördern: pro Drucker mit leerem printing- aber belegtem
+        #     spooled-Slot → spooled wird printing (Status spooled→printing).
         async with self._lock:
-            promote: PrintJob | None = None
-            if self.jobs:
-                head = self.jobs[0]
-                if head.status == "spooled":
-                    head.status = "printing"
-                    promote = head
-        if promote is not None:
+            self._reconcile(printers)
+            promoted = self._promote_all()
+        if promoted:
             await self._notify_all()
 
-        # (2) Pipeline füllen: Kopf (falls queued) dispatchen → printing;
-        #     zweiten (falls queued) dispatchen → spooled. Dispatch ist langsam
-        #     (IServ-GET + Subprocess) → außerhalb des Locks, per `dispatching`-
-        #     Marker gegen Doppel-Dispatch gesichert.
+        # (2) Pipeline füllen: wartende Aufträge auf freie Drucker-Slots
+        #     verteilen (niedrigste Last, linkester Tie-Break). Claims sammeln
+        #     (langsame Dispatches erfolgen außerhalb des Locks).
         async with self._lock:
-            head = self.jobs[0] if self.jobs else None
-            second = self.jobs[1] if len(self.jobs) > 1 else None
-            head_claim = head if head is not None and head.status == "queued" else None
-            second_claim = second if second is not None and second.status == "queued" else None
-            if head_claim is not None:
-                head_claim.status = "dispatching"
-            if second_claim is not None:
-                second_claim.status = "dispatching"
-        if head_claim is not None:
-            await self._dispatch_to(head_claim, "printing")
-        if second_claim is not None:
-            await self._dispatch_to(second_claim, "spooled")
+            claims = self._claim_fills(printers)
+        if claims:
+            await asyncio.gather(
+                *(self._dispatch_to(c) for c in claims), return_exceptions=True
+            )
+            await self._notify_all()
 
-        # (3) Druckenden Kopf auf physisches Ende pollen.
+        # (3) Druckende Aufträge auf physisches Ende pollen (parallel).
         async with self._lock:
-            head = self.jobs[0] if self.jobs else None
-            if head is None or head.status not in ("printing", "spooled"):
-                # nichts im Flug → auf neuen Auftrag warten
-                wait = True
-                handle = None
-                failed = False
-            else:
-                wait = False
-                handle = head.job_handle
-                failed = bool(head.result and not head.result.get("ok"))
-        if wait:
+            polls = self._collect_polls(printers)
+        if polls:
+            await asyncio.gather(
+                *(self._poll_one(pid, job) for pid, job in polls),
+                return_exceptions=True,
+            )
+            return  # finalize ist in _poll_one; nächster Schritt befördert/füllt neu
+
+        # (4) Nichts im Flug und nichts befüllbar → auf neuen Auftrag /
+        #     Config-Wechsel warten.
+        if not promoted and not claims:
             await self._wait_for_work()
-            return
 
-        if not failed:
-            from .printing import await_print_completion
+    # ---- Reconcile -----------------------------------------------------
 
-            await await_print_completion(handle)
+    def _reconcile(self, printers: list) -> None:
+        """Slots an die aktuelle Drucker-Konfiguration anpassen: für jeden
+        konfigurierten Drucker einen Slot-Eintrag sicherstellen. Entfernte
+        Drucker mit noch aktiven Jobs bleiben als verwaiste Slots erhalten,
+        bis sie ausgedrained sind (neue Zuweisungen bekommen sie nicht, da
+        `_claim_fills`/`_collect_polls` nur über `printers` iterieren). Leer
+        laufende verwaiste Slots werden aufgeräumt."""
+        for p in printers:
+            self.slots.setdefault(p.id, _Slots())
+        # Verwaiste, leere Slots entfernen (Drucker nicht mehr konfiguriert).
+        configured_ids = {p.id for p in printers}
+        orphaned_empty = [
+            pid for pid, s in self.slots.items()
+            if pid not in configured_ids and s.load == 0
+        ]
+        for pid in orphaned_empty:
+            del self.slots[pid]
 
-        # (4) Kopf finalisieren (done/failed), entfernen, Notify; daraufhin
-        #     rückt der spooled-Kopf im nächsten Schritt nach (printing).
-        async with self._lock:
-            head = self.jobs[0] if self.jobs else None
-            if head is None:
-                return
-            res = head.result or {}
-            head.status = "done" if res.get("ok") else "failed"
-            finalized = head
-            self.jobs.remove(head)
-            head.done.set()
-        await self._notify_result(finalized)
-        await self._notify_all()  # Positionen der Verbleibenden rücken nach
+    # ---- Befördern / Füllen / Pollen / Finalisieren --------------------
 
-    async def _dispatch_to(self, job: PrintJob, head_status: JobStatus) -> None:
-        """`print_loan_slip_for` rufen (langsam), dann Status setzen + notify."""
-        res = await self._dispatch(job)
+    def _promote_all(self) -> list[str]:
+        """Pro Drucker: printing leer & spooled belegt → spooled rückt auf
+        printing. Liefert die Druckerkennungen, bei denen befördert wurde."""
+        promoted: list[str] = []
+        for pid, s in self.slots.items():
+            if s.printing is None and s.spooled is not None:
+                s.printing = s.spooled
+                s.spooled = None
+                s.printing.status = "printing"
+                promoted.append(pid)
+        return promoted
+
+    def _claim_fills(self, printers: list) -> list[tuple[str, str | None, PrintJob, _SlotType]]:
+        """Wartende Aufträge auf freie Drucker-Slots verteilen (einer pro
+        Durchlauf pro Drucker, bis `waiting` leer oder alle Drucker voll).
+        Liefert Claims `(printer_id, printer_name, job, slot_type)`; der Job
+        wird aus `waiting` entfernt, in den Slot gelegt und auf `dispatching`
+        gesetzt. Dispatch erfolgt außerhalb des Locks. Fehlende Slots (z. B. vor
+        dem ersten Reconcile) gelten als leer."""
+        claims: list[tuple[str, str | None, PrintJob, _SlotType]] = []
+        while self.waiting:
+            # Niedrigste Last, linkester Tie-Break.
+            best = None  # (index, printer, slot_type, load)
+            for idx, p in enumerate(printers):
+                s = self.slots.get(p.id)
+                load = s.load if s else 0
+                if load >= _PRINTER_CAPACITY:
+                    continue
+                if best is None or load < best[3]:
+                    slot_type = "printing" if (s is None or s.printing is None) else "spooled"
+                    best = (idx, p, slot_type, load)
+            if best is None:
+                break  # kein Drucker mit freier Kapazität
+            _, printer, slot_type, _ = best
+            job = self.waiting.pop(0)  # ranghöchster (waiting ist rollen-gerecht geordnet)
+            job.assigned_printer_id = printer.id
+            job.status = "dispatching"
+            slots = self.slots.setdefault(printer.id, _Slots())
+            if slot_type == "printing":
+                slots.printing = job
+            else:
+                slots.spooled = job
+            claims.append((printer.id, printer.name, job, slot_type))
+        return claims
+
+    async def _dispatch_to(self, claim: tuple[str, str | None, PrintJob, _SlotType]) -> None:
+        """`print_loan_slip_for` rufen (langsam), dann Status + Handle setzen."""
+        _pid, printer_name, job, slot_type = claim
+        res = await self._dispatch(job, printer_name=printer_name)
         async with self._lock:
             job.result = res
             job.job_handle = res.get("job_handle") if res.get("ok") else None
-            job.status = head_status  # `printing` (Kopf) oder `spooled` (zweiter)
+            job.status = slot_type  # `printing` (Slot 0) oder `spooled` (Slot 1)
         await self._notify_all()
 
-    async def _dispatch(self, job: PrintJob) -> dict:
+    async def _dispatch(self, job: PrintJob, *, printer_name: str | None) -> dict:
         """`print_loan_slip_for` aufrufen, Exceptions in ein ok=False-Result wandeln."""
         from .sessions import print_loan_slip_for
         from .state import get_state
 
         try:
-            return await print_loan_slip_for(get_state(), job.student_id, pages=job.pages)
+            return await print_loan_slip_for(
+                get_state(), job.student_id, pages=job.pages, printer_name=printer_name
+            )
         except Exception as e:  # noqa: BLE001 — Fehler als Ergebnis weiterreichen
             log.exception("Druckauftrag dispatch fehlgeschlagen (student_id=%s)", job.student_id)
             return {"ok": False, "msg": str(e)}
+
+    def _collect_polls(self, printers: list) -> list[tuple[str, PrintJob]]:
+        """Druckende Aufträge (Slot 0) sammeln, die Completion-Polling brauchen.
+        Bereits fehlgeschlagene (ok=False) werden hier nicht gepollt — sie werden
+        im nächsten Schritt finalisiert (Status steht auf `printing`, aber
+        result.ok=False); finalize erkennt das am Result."""
+        polls: list[tuple[str, PrintJob]] = []
+        for p in printers:
+            s = self.slots.get(p.id)
+            if s and s.printing is not None and s.printing.status == "printing":
+                polls.append((p.id, s.printing))
+        return polls
+
+    async def _poll_one(self, printer_id: str, job: PrintJob) -> None:
+        """Auf physisches Druckende pollen, dann finalisieren."""
+        from .printing import await_print_completion
+
+        res = job.result or {}
+        if res.get("ok"):
+            await await_print_completion(job.job_handle)
+        await self._finalize(printer_id, job)
+
+    async def _finalize(self, printer_id: str, job: PrintJob) -> None:
+        """Erledigten printing-Job aus dem Slot nehmen, done/failed setzen,
+        Urheber benachrichtigen. Sein evtl. spooled-Nachbar rückt im nächsten
+        Schritt auf printing (Beförderung)."""
+        async with self._lock:
+            s = self.slots.get(printer_id)
+            if s is None or s.printing is not job:
+                return  # zwischenzeitlich entfernt/verschieben — nichts zu tun
+            res = job.result or {}
+            job.status = "done" if res.get("ok") else "failed"
+            s.printing = None
+            job.done.set()
+            finalized = job
+        await self._notify_result(finalized)
+        await self._notify_all()  # Positionen der Verbleibenden rücken nach
 
     async def _wait_for_work(self) -> None:
         self._wake.clear()
         await self._wake.wait()
 
+    # ---- Pool-Snapshot (für state_snapshot) ---------------------------
+
+    def pool_printers(self, printers: list) -> list[dict]:
+        """Pro Drucker den Live-Status für den Host-Snapshot: Last, belegte
+        Slots (Job-Name) und Duplex. Iteriert in der konfigurierten Reihenfolge
+        (bestimmt die Verteilungspriorität).
+
+        Lock-frei (synchrone Lesefunktion, aufgerufen vom sync `state_snapshot`
+        — das async-Lock ist dort nicht verfügbar). Konsistenz ist für die
+        Statusanzeige ausreichend: Referenz-Reads sind in CPython atomar, ein
+        konkurrierender Scheduler-Schritt liefert allenfalls einen minimal
+        veralteten, aber nie zerrissenen Stand."""
+        out: list[dict] = []
+        for p in printers:
+            s = self.slots.get(p.id)
+            out.append(
+                {
+                    "id": p.id,
+                    "name": p.name,
+                    "duplex": p.duplex,
+                    "is_default": p.name is None,
+                    "load": s.load if s else 0,
+                    "printing_name": (s.printing.name if s and s.printing else None),
+                    "spooled_name": (s.spooled.name if s and s.spooled else None),
+                }
+            )
+        return out
+
+    def pool_summary(self) -> dict:
+        """Aggregat über die Warteschlange (für den Host-Snapshot)."""
+        # Kein Lock nötig — `len()` ist atomar genug für die Anzeige; ein
+        # gleichzeitiger Druckauftrag kann die Zahl um 1 verfälschen, was für
+        # die Statusanzeige irrelevant ist.
+        return {"waiting": len(self.waiting)}
+
     # ---- Notifications -------------------------------------------------
 
     async def _notify_all(self) -> None:
-        """Allen verbleibenden Aufträgen ihre aktuelle Position + Status pushen.
-
-        Nur die jeweils eigene `print_progress`-Nachricht (status/position/name)
-        an den Urheber (Helfer-Token / Host-sid). Idempotent — Client setzt den
-        Text einfach neu."""
+        """Allen Aufträgen ihre aktuelle Position + Status pushen (nur an den
+        jeweiligen Urheber). Position: Index in `waiting` (zentrale
+        Warteschlange) bzw. 0 für druckende/gespoolte Aufträge am Drucker."""
         from .hub import get_hub
         from .state import get_state
 
         async with self._lock:
-            snapshot = [
-                (j, idx, j.status) for idx, j in enumerate(self.jobs)
-            ]
+            snapshot: list[tuple[PrintJob, int, JobStatus, str | None]] = []
+            for idx, j in enumerate(self.waiting):
+                snapshot.append((j, idx, j.status, self._printer_name(j.assigned_printer_id)))
+            for s in self.slots.values():
+                if s.printing is not None:
+                    pjob = s.printing
+                    pname = self._printer_name(pjob.assigned_printer_id)
+                    snapshot.append((pjob, 0, pjob.status, pname))
+                if s.spooled is not None:
+                    sjob = s.spooled
+                    sname = self._printer_name(sjob.assigned_printer_id)
+                    snapshot.append((sjob, 1, sjob.status, sname))
         hub = get_hub()
         state = get_state()
-        for job, position, status in snapshot:
-            await self._send_progress(hub, state, job, position, status)
+        for job, position, status, printer in snapshot:
+            await self._send_progress(hub, state, job, position, status, printer)
+
+    def _printer_name(self, printer_id: str | None) -> str | None:
+        """Druckername zur Kennung (für Notifications). None = Standarddrucker
+        (Name None). Verwaiste Kennungen → None."""
+        if printer_id is None:
+            return None
+        from .state import get_state
+
+        for p in get_state().settings.printers:
+            if p.id == printer_id:
+                return p.name
+        return None
 
     async def _send_progress(
-        self, hub, state, job: PrintJob, position: int, status: JobStatus
+        self, hub, state, job: PrintJob, position: int, status: JobStatus, printer: str | None
     ) -> None:
         msg = {
             "type": "print_progress",
@@ -254,6 +415,7 @@ class PrintQueue:
             "status": status,
             "position": position,
             "name": job.name,
+            "printer": printer,
         }
         if job.helper_token:
             await hub.send_scanner(job.helper_token, msg)

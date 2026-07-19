@@ -51,6 +51,23 @@ async def lifespan(app: FastAPI):
     except Exception:
         log.exception("Aufräumen alter Druck-Temp-PDFs fehlgeschlagen (non-fatal)")
 
+    # Drucker-Pool aus letzter Sitzung laden (Persistenz): reine Datei-IO +
+    # Validierung gegen die Geräte-Druckerliste, non-fatal — Fehler lässt den
+    # State beim ersten-Start-Default ([Standarddrucker]).
+    from .printer_store import load as load_printer_state
+    from .printing import list_printers
+
+    try:
+        info = await list_printers(cfg.print_backend)
+        state.settings.printers = load_printer_state(info.get("printers") or [])
+        log.info(
+            "Drucker-Pool geladen: %d Drucker (%d dem Gerät bekannt)",
+            len(state.settings.printers),
+            len(info.get("printers") or []),
+        )
+    except Exception:
+        log.exception("Laden der Drucker-Persistenz fehlgeschlagen (non-fatal)")
+
     from automation.worker import WorkerPool
 
     pool = WorkerPool(

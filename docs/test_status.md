@@ -41,8 +41,33 @@
 | V22 | **Search→Queue kein Doppel-Aktiv** — Lupe (`search_call`) auf einen Schüler, der zusätzlich als `pending` in einer Klassen-Queue steht, übernimmt jetzt den ECHTEN Queue-Eintrag (`active` + zugewiesen) statt einen transienten Doppelgänger zu bauen. Ohne Claim blieb der Queue-Eintrag `pending` → ein zweiter Helfer konnte ihn via `call` regulär übernehmen → derselbe Schüler zwei aktive Helfer/Worker. Mit Claim läuft der `call` in die Spectator-Warteliste („Warten bis Schüler frei…"). Invariante: nie zwei aktive Helfer auf demselben Schüler. Nebeneffekt: `end_student` löst den Helfer beim Abschluss sauber (vorher stale `student_id`/Worker-Leak). | `tests/test_ws_scanner.py::test_search_call_claims_existing_queue_entry_preventing_double_active` | 2026-07-13 | grün, 223 Tests |
 | V23 | **Ausblenden wirkt sofort auf den Clients (Live-Repush)** — das Ausblenden einer Buchreihe im Einstellungen-Dialog schickt den aktiven Helfern (Modus A) UND gepaarten Schüler-Sessions (Modus B) desselben Jahrgangs eine `booklist_update`-Nachricht mit der neu gefilterten Liste + Reihenfolge; die Reihe fällt live aus der Geräteliste, ohne den Worker-Neuaufbau und ohne den clientseitigen Scan-Fortschritt zu löschen (`scannedIsbns`/`scanOrder` bleiben). Server: `repush_booklist` (`server/sessions.py`) holt die Schülerinfo frisch, rechnet die ISBN-Vorabmengen neu (damit `evaluate_scan_for_booking` den neuen Hidden-Stand sieht) und bewahrt die X/Y-Zählung für sichtbare Bücher; `/api/booklist-hidden` repusht per `asyncio.gather` parallel + `broadcast_host`. | `tests/test_booklist_repush.py` (4 Tests: Filter + Vormerk-Neuerung, Scan-Fortschritt erhalten für sichtbare Bücher, Modus-B ws=None-Skip, IServ-Fehler-resilient) | 2026-07-18 | grün, 238 Tests. **Live-Check am echten Gerät noch offen** (s. „Offen" unten) |
 | V24 | **Interne Druckerwarteschlange (Logik)** — Rollen-gerechte Einfügung (HOST>HELFER>SCHÜLER, „hinter letzte Gleichrangige"), bereits gespoolte/druckende Aufträge bleiben am Kopf gepinnt (am OS verbindlich); 2-in-flight-Pipeline (B→`spooled` Pos 1, C→`queued` Pos 2, nach A fertig rückt B→`printing` Pos 0); Fehler-Fall wird `failed` mit `ok=False`; `print_pdf` liefert CUPS-`job_handle` („request id is X-123"), `file`-Backend `None`; `await_print_completion(None)` sofort fertig. | `tests/test_print_queue.py` (7 Tests) + `tests/test_printing.py` (3 neue: `job_handle` CUPS, `file` None, Completion-None) | 2026-07-19 | grün, 248 Tests. **Echte-Drucker-Verifizierung (OS-Polling, 2-in-flight am Live-System, Host-Popup nur am startenden Host) noch offen** (s. „Offen" unten) |
+| V25 | **Drucker-Pool (Logik + Persistenz)** — Reiter-Verwaltung wie Klassen-Tabs; Round-Robin-Füllung (niedrigste Last, linkester Tie-Break) verteilt 4 Aufträge auf 2 Drucker als `[(p1,printing),(p2,printing),(p1,spooled),(p2,spooled)]`; leerer Pool lässt Aufträge in der zentralen Warteschlange (Scheduler dispatcht nichts); `pool_printers`/`pool_summary` liefern die Snapshot-Form (`is_default`/`load`/`printing_name`/`spooled_name`/`waiting`); Persistenz `data/printers.json` round-trip + Drop fehlender benannter Drucker (gegen Geräte-Liste, inkl. JSON-Bereinigung) + erster-Start-Default `[Standarddrucker]` + unbekannter Duplex-Modus → `one_sided`; Snapshot-Schema `printers`+`print_queue_summary` statt `printer_name` (mitgeführter Charakterisierungs-Test). | `tests/test_print_queue.py` (3 neue: Round-Robin-Füllung, leerer Pool, Snapshot-Form) + `tests/test_printer_store.py` (5: erster Start, Roundtrip, Drop fehlend, leere Geräteliste, unbekannter Duplex) + `tests/test_state_contract.py` (Schema mitgeführt) | 2026-07-19 | grün, 256 Tests. **Live-Mehrdrucker-Smoke (Verteilung am echten Gerät) noch offen** (s. „Offen" unten) |
 
 ## Offen / zu testen
+
+### Offen 2026-07-19 (Drucker-Pool: Live-Mehrdrucker-Smoke)
+
+Der Drucker-Pool (V25) ist per Unit-Test logisch + persistenz-seitig abgesichert
+(Round-Robin-Füllung, leerer Pool, Snapshot-Form, JSON-Roundtrip + Drop fehlender
+Drucker). Das Live-Verhalten am echten Gerät (Verteilung auf mehrere Drucker,
+Reiter-UI, Drag-Reorder, Persistenz über Neustart) ist offen. Auf dem Dev-VPS
+(`file`-Backend) meldet `list_printers` keine Geräte → nur der Standarddrucker
+ist wählbar; echte Mehrdrucker-Verteilung braucht einen CUPS/Sumatra-Rechner.
+
+- [ ] **Reiter-UI (Einstellungen):** Drucker-Reiter wie Klassen-Tabs;
+      Standarddrucker zu Anfang vorhanden, entfernbar; „+" fügt Geräte-Drucker
+      hinzu; Drag umsortieren; Duplex-Dropdown pro Drucker (nur speichern).
+- [ ] **Leerer Pool:** Standarddrucker entfernen → Pool leer → Druck-Versuch
+      wird mit „Kein Drucker konfiguriert" abgewiesen (Host-Endpoint 400 bzw.
+      Scanner-WS `print_result{ok:false}`); `data/printers.json` spiegelt `[]`.
+- [ ] **Persistenz über Neustart:** gespeicherter Stand wird geladen; ein
+      nicht mehr existierender Drucker wird verworfen + aus JSON gelöscht;
+      leerer Pool bleibt leer; erster Start (keine JSON) → `[Standarddrucker]`.
+- [ ] **Verteilung auf N Drucker** (nur nach Freigabe nach CLAUDE.md §6, mit
+      ausgemusterten Büchern, nicht unbeaufsichtigt): mehrere Leihscheine
+      hintereinander drucken → Round-Robin-Füllung (erst alle auf Last 1, dann
+      Last 2), Rollen-Rangfolge in der zentralen Warteschlange, 2-in-flight
+      pro Drucker (1 druckend + 1 gespoolt).
 
 ### Offen 2026-07-19 (Druckerwarteschlange: Verifizierung am echten Drucker)
 

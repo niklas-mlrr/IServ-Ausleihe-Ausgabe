@@ -8,6 +8,64 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-19 — Drucker-Pool in den Einstellungen (Reiter, Round-Robin-Verteilung, Duplex, Persistenz)
+
+Bisher war in den Einstellungen ein **einzelner** Leihschein-Drucker
+wählbar (`printer_name_override` + `POST /api/printer`). Neu: eine
+**Drucker-Pool-Verwaltung** in den Einstellungen, analog den Klassen-Reitern.
+
+- **Reiter pro Drucker** (wie Klassen-Tabs): Drucker hinzufügen/entfernen, per
+  HTML5-Drag umsortieren. Der Standarddrucker des Geräts ist **nur zu Anfang**
+  als erster Reiter vorhanden — er ist entfernbar wie jeder andere; der Pool
+  darf **leer** sein (dann Druck nicht möglich, s. u.). Kein Drucker ist
+  besonders gesperrt.
+- **Round-Robin-Verteilung** auf den Pool: der linkeste Drucker mit der
+  niedrigsten Last nimmt an, dann der nächste usw. — pro Drucker Kapazität 2
+  (1 druckend + 1 gespoolt). Sind alle Drucker voll (Last 2), warten weitere
+  Aufträge zentral, bis ein Drucker Kapazität hat (klassische Füllung: erst
+  alle auf Last 1, dann auf Last 2). Umsetzung als „niedrigste Last, linkester
+  Tie-Break".
+- **Duplex pro Drucker** per Dropdown (einseitig / doppelseitig lange Seite /
+  doppelseitig kurze Seite) — **nur speichern, nirgends anwenden** (Nutzer-
+  entscheid; Backends können Duplex CLI-seitig ohnehin nicht zuverlässig).
+- **Persistenz** in `data/printers.json` (Spiegel von `booklist_store.py`):
+  Beim Laden wird jeder gespeicherte *benannte* Drucker gegen die Geräte-
+  Druckerliste (`list_printers`) geprüft; fehlt er, wird er nicht geladen
+  **und** aus der JSON gelöscht. Der `name=null`-Eintrag (Standarddrucker)
+  gilt als immer gültig. Erster Start (keine JSON) → `[Standarddrucker]`;
+  danach gilt der gespeicherte Stand (auch `[]`). IDs werden nicht persistiert
+  (nur Laufzeit-stabil für Slot-Zuordnung/Endpoint-Bezug).
+- **Schüler-Leihschein-Auswahl** rückt **über** die Drucker-Reiter (global,
+  nicht pro Drucker).
+- **Leerer Pool:** der Scheduler dispatcht nichts — Aufträge bleiben in der
+  zentralen Warteschlange. Die Enqueue-Stellen (`/api/print-loan-slip`,
+  Scanner-WS `print`) verweigern vorab mit „Kein Drucker konfiguriert" (400
+  bzw. `print_result{ok:false}`), damit kein Auftrag endlos wartet. Sobald ein
+  Drucker hinzugefügt wird, weckt das den Scheduler (`wake`) und die wartenden
+  Aufträge verteilen sich.
+- **Draht-Format-Änderung** (bewusst): `state_snapshot()` liefert jetzt
+  `printers` (Liste von `{id, name, duplex, is_default, load, printing_name,
+  spooled_name}`) + `print_queue_summary {waiting}` statt des alten
+  `printer_name`. `tests/test_state_contract.py` wurde mitgeführt
+  (Schemaänderung, keine unbeabsichtigte Drift).
+
+Dateien: neu `server/printer_store.py`, `tests/test_printer_store.py`;
+geändert `server/state.py` (`PrinterConfig`, `RuntimeSettings.printers`,
+`state_snapshot`), `server/print_queue.py` (Pool-Scheduler-Rewrite: zentrale
+`waiting` + `slots` dict pro Drucker, 2-Slots-Pipeline, Round-Robin-Füllung,
+`wake`), `server/app.py` (lifespan lädt Pool), `server/sessions.py`
+(`print_loan_slip_for(printer_name=…)`), `server/routes/slips.py`
+(`/api/printers` erweitert, `/api/printer` entfernt, neue Pool-Endpoints
+`add`/`remove`/`duplex`/`reorder`), `server/routes/_deps.py` (neue Request-
+Models), `server/routes/ws.py` (Leer-Pool-Gate), `web/host.html`,
+`web/host-render.js`, `web/host.css` (Reiter + Panels + Duplex-Dropdown +
+Drag-Reorder). Tests: `tests/test_print_queue.py` (Pool-Round-Robin, leerer
+Pool, Snapshot-Form), `tests/test_state_contract.py` (Snapshot-Schema),
+`tests/test_printer_store.py` (Roundtrip, Drop fehlender Drucker, erster
+Start, unbekannter Duplex). Verifikation: `256 passed`, `ruff check` sauber.
+Offen: manueller Smoke mit `lp`-Backend auf CUPS-Rechner + ausgemusterten
+Büchern (nur nach Freigabe nach CLAUDE.md §6) — Verteilung auf mehrere Drucker.
+
 ## 2026-07-19 — Interne Druckerwarteschlange (Rollen-Rangfolge, 2-in-flight, Live-Status)
 
 Bisher war der Leihschein-Druck Fire-and-Forget: `print_pdf` schickt das PDF

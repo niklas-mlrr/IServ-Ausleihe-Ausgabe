@@ -31,7 +31,9 @@ from .booklists import _ensure_class_catalog
 log = logging.getLogger(__name__)
 
 # Beim Klassen-Laden wählbare Sofort-fertig-Filter, s. `_load_student_flags`.
-_AUTO_DONE_FILTERS = {"not_enrolled", "unpaid", "remission_pending", "exemption_pending", "all_lent"}
+_AUTO_DONE_FILTERS = {
+    "not_enrolled", "unpaid", "remission_pending", "exemption_pending", "all_lent",
+}
 
 
 async def _load_student_flags(state: AppState, ctx: ClassContext, auto_done: list[str]) -> None:

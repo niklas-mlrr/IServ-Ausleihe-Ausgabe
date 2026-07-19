@@ -186,15 +186,24 @@
     </div>
 
     <div class="settings-tab-panel active" id="settings-tab-drucker">
-      <label class="settings-row settings-field" for="printer-select" title="Drucker, über den die Leihscheine gedruckt werden. Standard = PRINTER_NAME aus der .env bzw. Systemstandard.">
-        Drucker
-        <select id="printer-select"><option value="">Standard</option></select>
-      </label>
-      <label class="switch settings-row" title="Zusätzlich die 2. Seite (Schüler-Leihschein) drucken — Seite 1 wird immer gedruckt">
+      <label class="switch settings-row" title="Zusätzlich die 2. Seite (Schüler-Leihschein) drucken — Seite 1 wird immer gedruckt. Globaler Default für den Helfer-Druckdialog.">
         <input type="checkbox" id="slip-second-page">
         <span class="track"></span>
         Schüler-Leihschein
       </label>
+
+      <div class="settings-subhead">Drucker-Pool</div>
+      <p class="settings-hint">Pro Drucker ein Reiter — Drucker hinzufügen/entfernen, Duplex pro Drucker. Aufträge werden verteilt: der linkeste freie Drucker nimmt an, dann der nächste; pro Drucker ein druckender + ein wartender Auftrag. Reihenfolge = Priorität (verschiebbar).</p>
+      <div class="printer-tabs-bar" id="printer-tabs-bar">
+        <span id="printer-tabs"></span>
+        <button class="ptab-add" id="printer-add-btn" title="Drucker hinzufügen">+</button>
+      </div>
+      <div id="printer-add-row" style="display:none">
+        <select id="printer-add-select"></select>
+        <button class="secondary" id="printer-add-confirm">Hinzufügen</button>
+        <button class="ghost" id="printer-add-cancel">Abbrechen</button>
+      </div>
+      <div id="printer-panels"></div>
     </div>
 
     <div class="settings-tab-panel" id="settings-tab-buecherliste">
