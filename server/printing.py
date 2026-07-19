@@ -30,6 +30,7 @@ import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
 log = logging.getLogger(__name__)
 
@@ -324,6 +325,107 @@ async def _await_win(printer: str | None, doc: str | None, *, timeout_s: float) 
         await asyncio.sleep(_COMPLETION_POLL_S)
     log.warning("Windows-Completion-Polling Timeout für Doc %s — werte als fertig", doc)
     return True
+
+
+# ---- OS-Druckstatus single-shot (für den Print-Queue-Tracker) ------------
+# `read_job_state` liefert je gesendetem OS-Job seinen aktuellen Zustand in
+# einem Poll: ``absent`` (Job weg = physisch fertig/abgebrochen → finalisieren),
+# ``printing`` (OS druckt aktiv → „wird gedruckt"), ``spooled`` (an OS gesendet,
+# aber noch nicht aktiv am Drucker → „gesendet, wartet"). Der Print-Queue-Tracker
+# (`print_queue._track_job`) ruft das zyklisch auf und treibt daraus den Job-
+# Status, statt ihn logisch per Slot-Beförderung zu schätzen.
+
+JobState = Literal["absent", "spooled", "printing"]
+
+
+async def read_job_state(handle: dict | None) -> JobState:
+    """Aktuellen OS-Druckstatus eines gesendeten Jobs einmal lesen (single shot,
+    nicht blockierend). ``handle`` aus ``print_pdf``-Result (`job_handle`).
+
+    ``handle is None`` (Backends ``file``/``win-default``) → ``absent`` (kein
+    OS-Job nachverfolgbar → der Tracker wertet sofort als fertig; entspricht dem
+    bisherigen „gespoolt = gedruckt"-Fallback). Unbekanntes Handle → ``absent``.
+    """
+    if not handle:
+        return "absent"
+    kind = handle.get("kind")
+    if kind == "cups":
+        return await _read_cups_job_state(handle.get("job_id"))
+    if kind == "win":
+        # Standarddrucker (SumatraPDF `-print-to-default`) einmal auflösen und
+        # am Handle cachen, damit wiederholte Polls nicht jedes Mal per PowerShell
+        # neu auflösen.
+        printer = handle.get("printer")
+        if not printer:
+            printer = await _resolve_default_printer_win()
+            if printer:
+                handle["printer"] = printer
+        return await _read_win_job_state(printer, handle.get("doc"))
+    return "absent"
+
+
+async def _read_cups_job_state(job_id: str | None) -> JobState:
+    """CUPS: `lpstat -o` einmal auswerten. Job-ID nicht mehr im Output →
+    ``absent``; Zeile mit ``active`` (Rang = druckt gerade) → ``printing``;
+    sonst → ``spooled``. ``lpstat`` fehlt / keine Job-ID → ``absent`` (nicht
+    nachverfolgbar = wie bisher sofort fertig). Best-effort, am Dev-VPS ohne
+    CUPS nicht getestet."""
+    if not job_id or not shutil.which("lpstat"):
+        return "absent"
+    try:
+        rc, out = await _run(["lpstat", "-o"])
+    except Exception:  # noqa: BLE001 — niemals werfen, Tracker sonst tot
+        return "spooled"
+    if rc != 0:
+        return "spooled"
+    out = out or ""
+    if job_id not in out:
+        return "absent"
+    for ln in out.splitlines():
+        if job_id in ln and "active" in ln.lower():
+            return "printing"
+    return "spooled"
+
+
+async def _read_win_job_state(printer: str | None, doc: str | None) -> JobState:
+    """Windows/SumatraPDF: `Get-PrintJob` für den Drucker, Treffer per
+    DocumentName `-like` (SumatraPDF setzt den Dateinamen als Job-Namen), davon
+    `JobStatus` lesen. Kein Treffer → ``absent``; JobStatus enthält ``Printing``
+    → ``printing``; sonst (Spooling/Pending/Sent/…) → ``spooled``. Fehler /
+    Drucker nicht ermittelbar → ``spooled`` (niemals ``absent``, damit der
+    Tracker nicht aus einem Lesefehler heraus vorzeitig finalisiert; das
+    Tracker-Timeout sichert den Endzustand ab).
+
+    ``printer`` sollte vom Aufrufer (``read_job_state``) bereits aufgelöst und
+    am Handle gecacht sein; hier verbleibt nur der defensive ``None``-Check."""
+    if not doc or not printer:
+        return "spooled"
+    pattern = f"*{doc}*"
+    cmd = [
+        "powershell",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        _PS_UTF8_PREFIX
+        + (
+            f"@(Get-PrintJob -PrinterName '{printer}' | "
+            f"Where-Object {{ $_.DocumentName -like '{pattern}' }} | "
+            f"Select-Object -ExpandProperty JobStatus)"
+        ),
+    ]
+    try:
+        rc, out = await _run(cmd)
+    except Exception:  # noqa: BLE001
+        return "spooled"
+    if rc != 0:
+        return "spooled"
+    lines = [ln.strip() for ln in (out or "").splitlines() if ln.strip()]
+    if not lines:
+        return "absent"
+    for st in lines:
+        if "printing" in st.lower():
+            return "printing"
+    return "spooled"
 
 
 def _monotonic() -> float:

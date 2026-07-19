@@ -911,8 +911,11 @@ window.__host = window.__host || {};
     const panel = document.createElement('div');
     panel.className = 'printer-panel';
     const busy = p.load > 0;
+    const spooledList = Array.isArray(p.spooled_names) && p.spooled_names.length
+      ? p.spooled_names
+      : (p.spooled_name ? [p.spooled_name] : []);
     const statusLine = busy
-      ? `<p class="hint">Belegt: ${p.load}/2 — ${p.printing_name ? 'druckt „' + escapeHtml(p.printing_name) + '"' : 'wartend'}${p.spooled_name ? ' · wartet „' + escapeHtml(p.spooled_name) + '"' : ''}</p>`
+      ? `<p class="hint">Belegt: ${p.load}/2 — ${p.printing_name ? 'druckt „' + escapeHtml(p.printing_name) + '"' : 'wartend'}${spooledList.length ? ' · gesendet, wartet: ' + spooledList.map(n => '„' + escapeHtml(n) + '"').join(', ') : ''}</p>`
       : '';
     const opts = DUPLEX_OPTIONS.map(o => `<option value="${o.v}"${o.v === p.duplex ? ' selected' : ''}>${o.l}</option>`).join('');
     panel.innerHTML = `
@@ -1039,17 +1042,23 @@ window.__host = window.__host || {};
     }
     const rows = pool.map(p => {
       const printing = p.printing_name;
-      const spooled = p.spooled_name;
+      // Alle an OS gesendeten, aber (noch) nicht aktiv druckenden Jobs
+      // (Spiegel von `_Slots.jobs` ohne den printing-Job). `spooled_names`
+      // ist die vollständige Liste; `spooled_name` der älteste (Kompat).
+      const spooledList = Array.isArray(p.spooled_names) && p.spooled_names.length
+        ? p.spooled_names
+        : (p.spooled_name ? [p.spooled_name] : []);
+      const spooledNames = spooledList.map(n => `„${escapeHtml(n)}"`).join(', ');
       let dot, status;
-      if (printing && spooled) {
+      if (printing && spooledNames) {
         dot = 'busy';
-        status = `druckt „${escapeHtml(printing)}" · als nächstes „${escapeHtml(spooled)}"`;
+        status = `druckt „${escapeHtml(printing)}" · als nächstes ${spooledNames}`;
       } else if (printing) {
         dot = 'busy';
         status = `druckt „${escapeHtml(printing)}"`;
-      } else if (spooled) {
+      } else if (spooledNames) {
         dot = 'busy';
-        status = `wartet auf Drucker: „${escapeHtml(spooled)}"`;
+        status = `gesendet, wartet auf Druck: ${spooledNames}`;
       } else {
         dot = 'idle';
         status = '<span style="opacity:.5">bereit</span>';
@@ -1062,7 +1071,9 @@ window.__host = window.__host || {};
     // Zentrale Warteschlange: jeder wartende Auftrag mit Schüler, Klasse,
     // Auftraggeber (Host / Helfer namentlich) + erlaubte Drucker (Allowlist
     // der Klasse zum Enqueue-Zeitpunkt; „alle" = kein Filter). Position =
-    // Reihenfolge im Drucker-Pool (rollen-gerecht, HOST vor HELFER vor SCHÜLER).
+    // Minimum über alle erlaubten Drucker, wie viele Aufträge dort noch vor
+    // diesem liegen (0 = druckt, 1 = gesendet/wartet, 2 = erster zentraler
+    // Wartender bei vollem Drucker). Rollen-gerecht geordnet (HOST>HELFER>SCHÜLER).
     const waitRows = waitingList.map(w => {
       const printers = w.all_allowed
         ? 'alle'
@@ -1070,7 +1081,7 @@ window.__host = window.__host || {};
             ? w.allowed_printers.map(escapeHtml).join(', ')
             : '<span class="txt-danger">kein Drucker im Pool</span>');
       return `<tr>
-        <td class="pq-pos">${w.position + 1}</td>
+        <td class="pq-pos">${w.position}</td>
         <td>${escapeHtml(w.student || '–')}</td>
         <td>${w.form ? escapeHtml(w.form) : '–'}</td>
         <td>${escapeHtml(w.originator || '–')}</td>
@@ -1286,7 +1297,10 @@ window.__host = window.__host || {};
     if (finalOk === true) return `Leihschein ${who}gedruckt`;
     if (finalOk === false) return `Leihschein ${who}— Druck fehlgeschlagen: ${msg.msg || ''}`;
     if (msg.status === 'printing' || msg.position === 0) return `Leihschein ${who}wird gedruckt`;
-    if (typeof msg.position === 'number' && msg.position >= 1) {
+    if (typeof msg.position === 'number' && msg.position === 1) {
+      return `Leihschein ${who}gesendet, wartet auf Druck`;
+    }
+    if (typeof msg.position === 'number' && msg.position >= 2) {
       return `Leihschein ${who}an ${msg.position}. Druckerwarteschlangenposition`;
     }
     return `Leihschein ${who}in Druckerwarteschlange`;

@@ -43,8 +43,34 @@
 | V24 | **Interne Druckerwarteschlange (Logik)** — Rollen-gerechte Einfügung (HOST>HELFER>SCHÜLER, „hinter letzte Gleichrangige"), bereits gespoolte/druckende Aufträge bleiben am Kopf gepinnt (am OS verbindlich); 2-in-flight-Pipeline (B→`spooled` Pos 1, C→`queued` Pos 2, nach A fertig rückt B→`printing` Pos 0); Fehler-Fall wird `failed` mit `ok=False`; `print_pdf` liefert CUPS-`job_handle` („request id is X-123"), `file`-Backend `None`; `await_print_completion(None)` sofort fertig. | `tests/test_print_queue.py` (7 Tests) + `tests/test_printing.py` (3 neue: `job_handle` CUPS, `file` None, Completion-None) | 2026-07-19 | grün, 248 Tests. **Echte-Drucker-Verifizierung (OS-Polling, 2-in-flight am Live-System, Host-Popup nur am startenden Host) noch offen** (s. „Offen" unten) |
 | V25 | **Drucker-Pool (Logik + Persistenz)** — Reiter-Verwaltung wie Klassen-Tabs; Round-Robin-Füllung (niedrigste Last, linkester Tie-Break) verteilt 4 Aufträge auf 2 Drucker als `[(p1,printing),(p2,printing),(p1,spooled),(p2,spooled)]`; leerer Pool lässt Aufträge in der zentralen Warteschlange (Scheduler dispatcht nichts); `pool_printers`/`pool_summary` liefern die Snapshot-Form (`is_default`/`load`/`printing_name`/`spooled_name`/`waiting`); Persistenz `data/printers.json` round-trip + Drop fehlender benannter Drucker (gegen Geräte-Liste, inkl. JSON-Bereinigung) + erster-Start-Default `[Standarddrucker]` + unbekannter Duplex-Modus → `one_sided`; Snapshot-Schema `printers`+`print_queue_summary` statt `printer_name` (mitgeführter Charakterisierungs-Test). | `tests/test_print_queue.py` (3 neue: Round-Robin-Füllung, leerer Pool, Snapshot-Form) + `tests/test_printer_store.py` (5: erster Start, Roundtrip, Drop fehlend, leere Geräteliste, unbekannter Duplex) + `tests/test_state_contract.py` (Schema mitgeführt) | 2026-07-19 | grün, 256 Tests. **Live-Mehrdrucker-Smoke (Verteilung am echten Gerät) noch offen** (s. „Offen" unten) |
 | V26 | **Pro-Klasse Drucker-Allowlist + pool-gerechte Verteilung** — `ClassContext.allowed_printer_ids: set[str]\|None` (`None`=alle); `PrintJob.allowed_printers`-Snapshot reist mit in die zentrale Warteschlange. Scheduler `_claim_fills` **level-weise** (erst alle Last-0-Drucker, dann Last-1) statt „niedrigste Last": Auftrag erlaubt nur p2 → geht an p2 (p1 bleibt frei, obwohl idle + linkester); Kopf erlaubt p1+p2, beide idle → p1 (linkester); p1 Last 1 + p2 idle, Auftrag beide erlaubt → p2 (Parallelismus, nicht p1s 2. Slot); Kopf nur p2, p1 idle → p1 zieht nächst-erlaubten (späteren), Kopf geht an p2; `allowed=set()` → bleibt waiting (Scheduler-Grace zusätzlich zur Enqueue-Verweigerung). `allowed=None` ≡ alt → bestehende Round-Robin-Tests grün. Vorab-Verweigerung: explizite Allowlist ohne einzigen Pool-Drucker → 400 (HTTP) / `print_result{ok:false}` (WS). `POST /api/context-printers` setzt Allowlist nachträglich + `wake()` + Broadcast. | `tests/test_print_queue.py` (5 neue: nur-p2, linkester-beide-idle, Parallelismus-idle-bevor-2.-Slot, Kopf-überspringen-nicht-erlaubt, leere Menge bleibt waiting) | 2026-07-19 | grün, 261 Tests. **Live-Check (Allowlist-Verteilung + UI-Checkboxen am echten Gerät) noch offen** (s. „Offen" unten) |
+| V27 | **Parallele Drucker-Verteilung + OS-echter Druckstatus + Positionen** — drei Live-Bugs behoben: (1) Worker blockierte seriell im Completion-Poll → nur ein Drucker wurde genutzt; neu läuft je gesendeter Auftrag ein eigener Tracker-Task (`_track_job`), der Worker dispatcht nicht-blockierend → mehrere Drucker drucken parallel (Test `test_parallel_dispatch_two_printers` beobachtet beide Drucker gleichzeitig Last 1). (2) „wird gedruckt" war rein logisch gesetzt; neu OS-getrieben via `printing.read_job_state` (Windows `Get-PrintJob.JobStatus`, CUPS `lpstat` „active"): `spooled`=gesendet/wartet, `printing`=OS druckt aktiv, `done`=OS-Job weg; logische Slot-Beförderung entfällt. (3) Positionen waren globaler Index; neu `_compute_positions` = Minimum über alle erlaubten Drucker, wie viele Aufträge dort noch vorliegen (0=druckt, 1=gesendet/wartet, 2=erster zentraler Wartender bei vollem Drucker). `print_queue.py` Rewrite auf Tracker-Architektur (`_Slots.jobs`, 3-Tupel-Claims), `printing.py` neu `read_job_state`; UI zeigt 0-basierte Position + „gesendet, wartet auf Druck". | `tests/test_print_queue.py` (Worker-Tests auf `read_job_state` umgestellt + 1 neuer Parallel-Test) + `tests/test_printing.py` (+3: `read_job_state` None/cups/win) | 2026-07-19 | grün, 266 Tests. **Live-Verifikation am echten Windows-Gerät (≥ 2 Drucker, nur nach Freigabe nach CLAUDE.md §6) noch offen** (s. „Offen" unten) |
 
 ## Offen / zu testen
+
+### Offen 2026-07-19 (Parallele Verteilung + OS-Status + Positionen: Live-Check)
+
+Die Tracker-Architektur, das OS-getriebene `read_job_state` und die min-über-
+erlaubte-Drucker-Positionen sind per Unit-Test logisch abgesichert (parallele
+2-Drucker-Verteilung, OS-Übergänge spooled→printing→done, Position 0/1/2,
+Draht-Format unverändert). Das Live-Verhalten am echten Windows-Gerät
+(≥ 2 Pool-Drucker) ist offen — nur nach Freigabe nach CLAUDE.md §6 mit
+ausgemusterten Büchern + schriftlichem Rückbau-Plan.
+
+- [ ] **Parallele Verteilung:** 2 (oder mehr) Drucker konfigurieren, mehrere
+      Leihschein-Drucke schnell hintereinander anstoßen → beide Drucker werden
+      **gleichzeitig** belegt (Druckerwarteschlangen-Box zeigt beide Last 1),
+      nicht nacheinander (war der „nur ein Drucker"-Bug).
+- [ ] **OS-Status-Übergänge:** Statusfolge je Auftrag `gesendet, wartet auf
+      Druck` (spooled) → `wird gedruckt` (OS druckt aktiv, `Get-PrintJob`
+      JobStatus=Printing) → `gedruckt` (OS-Job weg). „wird gedruckt" erscheint
+      erst, wenn das OS wirklich druckt — nicht schon beim Senden.
+- [ ] **Positionen:** zentrale Warteschlange zeigt `#` = 0-basierte Position
+      (2 = erster zentraler Wartender bei vollem Drucker); Helfer-Scanner
+      „an X. Druckerwarteschlangenposition" für Pos ≥2, „gesendet, wartet auf
+      Druck" für Pos 1.
+- [ ] **Kapazität 2 + Nachrücken:** ein Drucker hat 2 gesendete Aufträge
+      (druckt + wartet); nach Fertigstellung rückt der Wartende auf „wird
+      gedruckt" und der nächste erlaubte zentrale Auftrag wird gesendet.
 
 ### Offen 2026-07-19 (Pro-Klasse Drucker-Allowlist: Live-Check)
 

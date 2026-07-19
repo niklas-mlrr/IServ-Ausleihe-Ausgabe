@@ -8,6 +8,62 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-19 — Parallele Drucker-Verteilung + OS-echter Druckstatus + Positionen
+
+Am Live-Gerät (Windows/SumatraPDF) funktionierte die Verteilung trotz grüner
+Unit-Logik nicht wie entworfen — drei Wurzelursachen, behoben in einem Umbau
+der `server/print_queue.py` + `server/printing.py`:
+
+- **„Nur ein Drucker wurde genutzt":** der Worker war eine serielle Schleife,
+  die in `asyncio.gather` über alle Completion-Polls blockte. Während ein
+  Druck auf Drucker A pollte, konnte kein neuer Auftrag an einen anderen
+  idle-Drucker dispatcht werden. **Fix:** jeder gesendete Auftrag läuft in
+  einem eigenen Hintergrund-Task (`_track_job`); der Worker dispatcht
+  nicht-blockierend und schläft, bis ein finalisierter Tracker ihn weckt. So
+  drucken mehrere Drucker wirklich parallel.
+- **„Wird gedruckt" wurde zu früh gezeigt:** `_promote_all` hatte den Status
+  rein logisch gesetzt, sobald der Slot frei wurde. **Fix:** Status ist jetzt
+  OS-getrieben — `printing.read_job_state` pollt den echten Druckstatus (Windows
+  `Get-PrintJob.JobStatus`, CUPS `lpstat` „active"); `spooled` = an OS gesendet
+  (wartet), `printing` = OS druckt aktiv, `done` = OS-Job weg. Logische
+  Slot-Beförderung entfällt.
+- **Positionen waren falsch:** zentrale-Warteschlangen-Jobs bekamen ihren
+  globalen Index. **Fix:** `_compute_positions` liefert je Job das Minimum
+  über alle *erlaubten* Drucker, wie viele Aufträge dort noch vor ihm liegen
+  (0 = druckt, 1 = gesendet/wartet, 2 = erster zentraler Wartender bei vollem
+  Drucker). Host- und Scanner-UI zeigen die 0-basierte Position; „gesendet,
+  wartet auf Druck" für Pos 1.
+
+Änderungen im Detail:
+
+- **`server/print_queue.py`** — Rewrite auf Tracker-Architektur: `_Slots.jobs`
+  (FIFO, max 2) statt `printing`/`spooled`-Slots; `_claim_fills` liefert
+  3-Tupel (kein `slot_type`); `_step` nicht-blockierend + `_spawn_tracker`;
+  `_track_job` (Dispatch → `spooled` → OS-Poll-Loop → `done`/`failed`); neu
+  `_compute_positions` (min über erlaubte Drucker); `_remove_from_slot`;
+  `pool_printers` liefert zusätzlich `spooled_names` (Liste aller gesendeten
+  Nicht-Druck-Jobs); `waiting_list.position` = berechnetes Minimum.
+- **`server/printing.py`** — neu `read_job_state(handle) -> absent|spooled|
+  printing` (single shot) + `_read_cups_job_state` / `_read_win_job_state`;
+  `await_print_completion` bleibt als Kompatibilitätssymbol (intern ungenutzt).
+  Windows-Standarddrucker wird einmal aufgelöst und am Handle gecacht.
+- **`web/host-render.js`** — `renderPrintQueue` unterscheidet „druckt" (OS-
+  aktiv) vs „gesendet, wartet auf Druck"; `#` der zentralen Queue = 0-basierte
+  Position; `buildPrinterPanel` entsprechend. `printToastText` Pos-1-Text.
+- **`web/scan-ws.js`** — Pos 0 = „Wird gedruckt", Pos 1 = „gesendet, wartet
+  auf Druck", Pos ≥2 = „an X. Druckerwarteschlangenposition".
+- **Tests:** `tests/test_print_queue.py` Worker-Tests auf `read_job_state`-
+  Mock umgestellt + 1 neuer parallele-2-Drucker-Test (beide Drucker
+  gleichzeitig belegt, nicht serialisiert); `tests/test_printing.py` +3
+  (`read_job_state` None/cups/win). Suite 261 → 266 grün.
+- **Draht-Format** (`test_state_contract.py`): Top-Level-Keys + Default-
+  Drucker-Form unverändert; `printers[].spooled_names` zusätzlich (abwärts-
+  kompatibel, nicht vertraglich eingefroren).
+
+**Offen:** Live-Verifikation am echten Windows-Gerät (≥ 2 Drucker) — parallele
+Verteilung, OS-Status-Übergänge spooled→printing→done, Position 0/1/2 — nur
+nach Freigabe nach CLAUDE.md §6 mit ausgemusterten Büchern + Rückbau-Plan.
+
 ## 2026-07-19 — Pro-Klasse Drucker-Allowlist + pool-gerechte Verteilung
 
 Bisher druckte die interne Warteschlange jeden Auftrag auf *irgendeinen*

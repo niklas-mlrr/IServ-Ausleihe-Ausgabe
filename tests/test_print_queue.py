@@ -1,10 +1,11 @@
 """Unit-Tests für die interne Druckerwarteschlange (server/print_queue.py).
 
 Drucker-Pool-Verteilung: rollen-gerechte Einfügung in die zentrale
-Warteschlange (HOST > HELFER > SCHÜLER), 2-Slots-pro-Drucker-Pipeline
-(printing + spooled) und Positions-Notifications — alles gegen frische
-`AppState`-Instanzen (Default-Pool = ein Standarddrucker) mit gemocktem
-`print_loan_slip_for` / `await_print_completion`; kein IServ, kein echter Drucker.
+Warteschlange (HOST > HELFER > SCHÜLER), Kapazität 2 je Drucker (max 2 gesendete
+Aufträge) und OS-getriebene Status-Übergänge spooled→printing→done über
+einzelne Tracker-Tasks — alles gegen frische `AppState`-Instanzen (Default-Pool
+= ein Standarddrucker) mit gemocktem `print_loan_slip_for` /
+`printing.read_job_state`; kein IServ, kein echter Drucker.
 """
 
 from __future__ import annotations
@@ -97,13 +98,12 @@ def test_enqueue_dispatched_jobs_pinned():
     printing_job.status = "printing"
     spooled_job = _job("helper", 2)
     spooled_job.status = "spooled"
-    pq.slots["p1"] = print_queue._Slots(printing=printing_job, spooled=spooled_job)
+    pq.slots["p1"] = print_queue._Slots(jobs=[printing_job, spooled_job])
     # Ein HELFER wartet, dann kommt ein späterer HOST → vorne in `waiting`,
     # Slots unangetastet.
     asyncio.run(pq.enqueue(_job("helper", 3)))
     pos = asyncio.run(pq.enqueue(_job("host", 4)))
-    assert pq.slots["p1"].printing is printing_job
-    assert pq.slots["p1"].spooled is spooled_job
+    assert pq.slots["p1"].jobs == [printing_job, spooled_job]
     assert _roles(pq.waiting) == ["host", "helper"]
     assert pos == 0
 
@@ -112,24 +112,30 @@ def test_enqueue_dispatched_jobs_pinned():
 
 
 def _patch(monkeypatch, st: AppState):
-    """Worker auf frische AppState lenken + Druck/Completion mocken.
+    """Worker auf frische AppState lenken + Druck/OS-Status mocken.
 
     `hub.py` importiert `get_state` modul-lokal (`from .state import get_state`),
     daher muss es zusätzlich auf hub-Ebene gepatcht werden, sonst liefert
     `hub.send_scanner` die echte Singleton-State ohne unsere Helfer-Sessions.
+    Der Tracker pollt `printing.read_job_state` — Default: sofort „absent"
+    (file-Backend-Verhalten, Aufträge schließen zügig ab). Tests, die
+    Zwischenstände prüfen, überschreiben `read_job_state` selbst.
     """
     monkeypatch.setattr(state_mod, "get_state", lambda: st)
     monkeypatch.setattr(hub, "get_state", lambda: st)
     monkeypatch.setattr(sessions, "print_loan_slip_for", _fake_print)
-    monkeypatch.setattr(printing, "await_print_completion", _fake_completion)
+    monkeypatch.setattr(printing, "read_job_state", _fake_read_state)
+    # Schnelles Poll-Intervall im Tracker, damit die Tests nicht Sekunden warten.
+    monkeypatch.setattr(print_queue, "_TRACK_POLL_S", 0.01)
 
 
 async def _fake_print(state, student_id, *, pages=None, printer_name=None):
     return {"ok": True, "backend": "file", "detail": "gedruckt", "job_handle": None}
 
 
-async def _fake_completion(handle, *, timeout_s=90.0):
-    return True
+async def _fake_read_state(handle):
+    # file-Backend (handle None) → sofort fertig (kein OS-Polling möglich).
+    return "absent"
 
 
 def test_pipeline_completes_all_in_order(monkeypatch):
@@ -154,10 +160,10 @@ def test_pipeline_completes_all_in_order(monkeypatch):
 
 
 def test_pipeline_2_in_flight_positions(monkeypatch):
-    """Mit blockierendem Druck-Completion: 2-in-flight sichtbar —
-    Auftrag B wird als `spooled` (Position 1) gemeldet, C bleibt `queued`
-    (Position 0 in der zentralen Warteschlange), nach Fertigstellung von A
-    rückt B auf `printing` (Pos 0)."""
+    """OS-getrieben (read_job_state-Mock): 2-in-flight sichtbar —
+    A druckt (printing, Pos 0), B ist gesendet (spooled, Pos 1), C ist der erste
+    zentrale Wartende (queued, Pos 2). Nach A-Fertigstellung rückt B auf
+    printing (Pos 0), C wird gesendet (spooled, Pos 1)."""
     st = AppState()
     _patch(monkeypatch, st)
     pq = st.print_queue
@@ -170,15 +176,22 @@ def test_pipeline_2_in_flight_positions(monkeypatch):
         st.helper_sessions[f"tok-{key}"] = h
         helpers[key] = h
 
-    gates = {"a": asyncio.Event()}
-    completion_calls = []
+    # OS-Job-Handle mit student_id, damit der Mock den Zustand pro Auftrag steuert.
+    async def fake_print(state, student_id, *, pages=None, printer_name=None):
+        return {
+            "ok": True, "backend": "sumatra", "detail": "an Drucker gesendet",
+            "job_handle": {"kind": "test", "sid": student_id},
+        }
 
-    async def gated_completion(handle, *, timeout_s=90.0):
-        completion_calls.append(handle)
-        await gates["a"].wait()  # Auftrag A „druckt", bis der Test die Freigabe erteilt
-        return True
+    # OS-Zustand pro student_id, vom Test gesteuert (Default „spooled").
+    os_states: dict[int, str] = {}
 
-    monkeypatch.setattr(printing, "await_print_completion", gated_completion)
+    async def fake_read_state(handle):
+        sid = handle.get("sid") if handle else None
+        return os_states.get(sid, "spooled")
+
+    monkeypatch.setattr(sessions, "print_loan_slip_for", fake_print)
+    monkeypatch.setattr(printing, "read_job_state", fake_read_state)
 
     async def run():
         pq.start()
@@ -188,23 +201,35 @@ def test_pipeline_2_in_flight_positions(monkeypatch):
         await pq.enqueue(ja)
         await pq.enqueue(jb)
         await pq.enqueue(jc)
-        # B und C sollten dispatchen, während A „druckt": B → spooled (Pos 1),
-        # C bleibt queued (Pos 2). Kurz warten, dann Stand einfrieren.
-        await asyncio.sleep(0.15)
+        # A druckt aktiv (OS „printing"); B bleibt gesendet („spooled"); C
+        # wartet zentral (Kapazität 1 Drucker = 2 gesendete). Kurz warten, dann
+        # Stand einfrieren.
+        os_states[1] = "printing"
+        await asyncio.sleep(0.1)
+        a_progress = [m for m in helpers["a"].ws.sent if m["type"] == "print_progress"]
         b_progress = [m for m in helpers["b"].ws.sent if m["type"] == "print_progress"]
         c_progress = [m for m in helpers["c"].ws.sent if m["type"] == "print_progress"]
-        assert any(m["status"] == "spooled" and m["position"] == 1 for m in b_progress), b_progress
-        assert any(m["status"] == "queued" and m["position"] == 0 for m in c_progress), c_progress
-        # A druckt (Pos 0, printing)
-        a_progress = [m for m in helpers["a"].ws.sent if m["type"] == "print_progress"]
         assert any(m["status"] == "printing" and m["position"] == 0 for m in a_progress), a_progress
-        # Freigabe: A wird fertig → B rückt auf printing (Pos 0), C auf spooled (Pos 1)
-        gates["a"].set()
+        assert any(m["status"] == "spooled" and m["position"] == 1 for m in b_progress), b_progress
+        assert any(m["status"] == "queued" and m["position"] == 2 for m in c_progress), c_progress
+        # A wird fertig (OS „absent") → A done, B rückt auf printing (Pos 0),
+        # C wird gesendet (spooled, Pos 1).
+        os_states[1] = "absent"
+        os_states[2] = "printing"
         await asyncio.wait_for(ja.done.wait(), timeout=5)
-        await asyncio.sleep(0.15)
+        await asyncio.sleep(0.1)
         b_after = [m for m in helpers["b"].ws.sent if m["type"] == "print_progress"]
+        c_after = [m for m in helpers["c"].ws.sent if m["type"] == "print_progress"]
         assert any(m["status"] == "printing" and m["position"] == 0 for m in b_after), b_after
-        # schließlich alle fertig
+        assert any(m["status"] == "spooled" and m["position"] == 1 for m in c_after), c_after
+        # B und C fertigstellen.
+        os_states[2] = "absent"
+        os_states[3] = "printing"
+        await asyncio.wait_for(jb.done.wait(), timeout=5)
+        await asyncio.sleep(0.1)
+        c_print = [m for m in helpers["c"].ws.sent if m["type"] == "print_progress"]
+        assert any(m["status"] == "printing" and m["position"] == 0 for m in c_print), c_print
+        os_states[3] = "absent"
         await asyncio.wait_for(jc.done.wait(), timeout=5)
         for key in ("a", "b", "c"):
             assert any(m["type"] == "print_result" and m["ok"] for m in helpers[key].ws.sent)
@@ -236,6 +261,62 @@ def test_failed_dispatch_keeps_result_false(monkeypatch):
     asyncio.run(run())
 
 
+def test_parallel_dispatch_two_printers(monkeypatch):
+    """Zwei Drucker, zwei Aufträge: beide werden gleichzeitig dispatcht und
+    gepollt (parallele Tracker-Tasks) — nicht nacheinander. Früher blockierte
+    der serielle Worker im Completion-Poll, sodass der zweite Drucker erst nach
+    dem ersten bedient wurde („nur ein Drucker"-Bug)."""
+    from server.state import PrinterConfig
+
+    st = AppState()
+    st.settings.printers = [
+        PrinterConfig(id="p1", name="P1"),
+        PrinterConfig(id="p2", name="P2"),
+    ]
+    _patch(monkeypatch, st)
+    pq = st.print_queue
+
+    # OS-Job bleibt „spooled" (wartet), bis der Test ihn freigibt — so halten wir
+    # beide Aufträge gleichzeitig in-flight und können die parallele Belegung
+    # beider Drucker beobachten.
+    os_states: dict[int, str] = {}
+
+    async def fake_print(state, student_id, *, pages=None, printer_name=None):
+        return {
+            "ok": True, "backend": "sumatra", "detail": "an Drucker gesendet",
+            "job_handle": {"kind": "test", "sid": student_id},
+        }
+
+    async def fake_read_state(handle):
+        return os_states.get(handle.get("sid") if handle else None, "spooled")
+
+    monkeypatch.setattr(sessions, "print_loan_slip_for", fake_print)
+    monkeypatch.setattr(printing, "read_job_state", fake_read_state)
+
+    async def run():
+        pq.start()
+        j1 = _job("helper", 1)
+        j2 = _job("helper", 2)
+        await pq.enqueue(j1)
+        await pq.enqueue(j2)
+        # Beide Drucker sind jetzt je Last 1 (parallel), keiner wartet auf den
+        # anderen — beide Tracker dispatchen und pollen gleichzeitig.
+        await asyncio.sleep(0.1)
+        assert pq.slots["p1"].load == 1 and pq.slots["p2"].load == 1
+        assert [j.status for j in pq.slots["p1"].jobs + pq.slots["p2"].jobs] == [
+            "spooled", "spooled",
+        ]
+        # Freigabe → beide fertig.
+        os_states[1] = "absent"
+        os_states[2] = "absent"
+        await asyncio.wait_for(j1.done.wait(), timeout=5)
+        await asyncio.wait_for(j2.done.wait(), timeout=5)
+        assert j1.status == "done" and j2.status == "done"
+        await pq.stop()
+
+    asyncio.run(run())
+
+
 # ---- Pool-Verteilung (Round-Robin, Kapazität 2, leerer Pool) ------------
 
 
@@ -260,17 +341,18 @@ def test_pool_round_robin_fill():
     for j in jobs:
         asyncio.run(pq.enqueue(j))
     claims = asyncio.run(_claim(pq, st.settings.printers))
-    # (printer_id, printer_name, job, slot_type)
-    assert [(c[0], c[2].student_id, c[3]) for c in claims] == [
-        ("p1", 1, "printing"),
-        ("p2", 2, "printing"),
-        ("p1", 3, "spooled"),
-        ("p2", 4, "spooled"),
+    # (printer_id, printer_name, job) — level-weise Füllung: erst beide Drucker
+    # auf Last 1 (J1→p1, J2→p2), dann auf Last 2 (J3→p1, J4→p2).
+    assert [(c[0], c[2].student_id) for c in claims] == [
+        ("p1", 1),
+        ("p2", 2),
+        ("p1", 3),
+        ("p2", 4),
     ], claims
     assert pq.waiting == []  # alle verteilt
-    # Slots entsprechen der Verteilung.
-    assert (pq.slots["p1"].printing.student_id, pq.slots["p1"].spooled.student_id) == (1, 3)
-    assert (pq.slots["p2"].printing.student_id, pq.slots["p2"].spooled.student_id) == (2, 4)
+    # Slots entsprechen der Verteilung (FIFO: J1+J3 auf p1, J2+J4 auf p2).
+    assert [j.student_id for j in pq.slots["p1"].jobs] == [1, 3]
+    assert [j.student_id for j in pq.slots["p2"].jobs] == [2, 4]
 
 
 def test_empty_pool_keeps_jobs_waiting():
@@ -377,7 +459,7 @@ def test_pool_respects_allowed_printers():
     j = _job("helper", 1, allowed={"p2"})
     asyncio.run(pq.enqueue(j))
     claims = asyncio.run(_claim(pq, st.settings.printers))
-    assert [(c[0], c[2].student_id, c[3]) for c in claims] == [("p2", 1, "printing")]
+    assert [(c[0], c[2].student_id) for c in claims] == [("p2", 1)]
     assert (pq.slots.get("p1") is None or pq.slots["p1"].load == 0)  # p1 nicht belegt
     assert pq.waiting == []
 
@@ -390,7 +472,7 @@ def test_pool_head_job_leftmost_allowed():
     asyncio.run(pq.enqueue(_job("helper", 1, allowed={"p1", "p2"})))
     claims = asyncio.run(_claim(pq, st.settings.printers))
     assert [(c[0], c[2].student_id) for c in claims] == [("p1", 1)]
-    assert pq.slots["p1"].printing.student_id == 1
+    assert pq.slots["p1"].jobs[0].student_id == 1
     assert pq.slots.get("p2") is None or pq.slots["p2"].load == 0
 
 
@@ -403,13 +485,13 @@ def test_pool_parallelism_idle_preferred():
     # p1 bereits belegt (druckt einen anderen Auftrag).
     running = _job("helper", 9)
     running.status = "printing"
-    pq.slots["p1"] = print_queue._Slots(printing=running)
+    pq.slots["p1"] = print_queue._Slots(jobs=[running])
     asyncio.run(pq.enqueue(_job("helper", 1, allowed={"p1", "p2"})))
     claims = asyncio.run(_claim(pq, st.settings.printers))
-    assert [(c[0], c[2].student_id, c[3]) for c in claims] == [("p2", 1, "printing")]
-    # p1 bleibt bei Last 1 (kein 2. Auftrag), p2 bekommt den neuen als printing.
-    assert pq.slots["p1"].load == 1 and pq.slots["p1"].spooled is None
-    assert pq.slots["p2"].printing.student_id == 1
+    assert [(c[0], c[2].student_id) for c in claims] == [("p2", 1)]
+    # p1 bleibt bei Last 1 (kein 2. Auftrag), p2 bekommt den neuen.
+    assert pq.slots["p1"].load == 1 and len(pq.slots["p1"].jobs) == 1
+    assert pq.slots["p2"].jobs[0].student_id == 1
 
 
 def test_pool_skips_head_when_not_allowed():

@@ -232,3 +232,55 @@ def test_await_print_completion_none_is_immediate():
     """Ohne Handle (file/win-default) kehrt `await_print_completion` sofort
     zurück (True) — kein Polling."""
     assert asyncio.run(printing.await_print_completion(None)) is True
+
+
+def test_read_job_state_none_is_absent():
+    """Ohne Handle (file/win-default) liefert `read_job_state` sofort „absent"
+    → der Tracker finalisiert zügig (kein OS-Polling möglich). Unbekanntes
+    Handle ebenso."""
+    assert asyncio.run(printing.read_job_state(None)) == "absent"
+    assert asyncio.run(printing.read_job_state({"kind": "unbekannt"})) == "absent"
+
+
+def test_read_job_state_cups(monkeypatch):
+    """CUPS: Job-ID nicht mehr im `lpstat -o`-Output → absent; Zeile mit
+    „active" → printing; sonst → spooled. `lpstat` fehlt → absent."""
+    monkeypatch.setattr(printing.shutil, "which", lambda name: "/usr/bin/lpstat")
+
+    seq = iter([
+        (0, "HP-123  root  1024  active"),   # druckt gerade
+        (0, "HP-123  root  1024  1st"),       # nur gespoolt
+        (0, ""),                              # weg → fertig
+    ])
+
+    async def fake_run(cmd):
+        return next(seq)
+
+    monkeypatch.setattr(printing, "_run", fake_run)
+    assert asyncio.run(printing.read_job_state({"kind": "cups", "job_id": "HP-123"})) == "printing"
+    assert asyncio.run(printing.read_job_state({"kind": "cups", "job_id": "HP-123"})) == "spooled"
+    assert asyncio.run(printing.read_job_state({"kind": "cups", "job_id": "HP-123"})) == "absent"
+
+
+def test_read_job_state_win(monkeypatch):
+    """Windows: `Get-PrintJob`-Output mit „Printing" → printing; anderer
+    Status → spooled; kein Treffer (leer) → absent; Druckerfehler → spooled
+    (nie absent, damit der Tracker aus einem Lesefehler nicht vorzeitig
+    finalisiert)."""
+    # Standarddrucker nicht nötig (handle hat bereits printer).
+    seq = iter([
+        (0, "Printing"),    # aktiv
+        (0, "Spooling"),     # gespoolt
+        (0, ""),             # weg
+        (1, "Fehler"),       # rc!=0 → spooled (Sicherheit)
+    ])
+
+    async def fake_run(cmd):
+        return next(seq)
+
+    monkeypatch.setattr(printing, "_run", fake_run)
+    h = {"kind": "win", "printer": "P1", "doc": "leihschein_1_x.pdf"}
+    assert asyncio.run(printing.read_job_state(h)) == "printing"
+    assert asyncio.run(printing.read_job_state(h)) == "spooled"
+    assert asyncio.run(printing.read_job_state(h)) == "absent"
+    assert asyncio.run(printing.read_job_state(h)) == "spooled"

@@ -144,12 +144,15 @@ function handleServerMessage(msg) {
     if (Array.isArray(msg.books)) currentBooks = msg.books;
     if (studentActive) renderBooks(currentBooks);
   } else if (msg.type === 'print_progress') {
-    // Live-Status aus der internen Druckerwarteschlange:
-    //   position 0 (printing)       → „Wird gedruckt …"
-    //   position ≥ 1 (queued/spooled) → „an X. Druckerwarteschlangenposition"
+    // Live-Status aus der internen Druckerwarteschlange (OS-getrieben):
+    //   position 0 (printing)        → „Wird gedruckt …" (OS druckt aktiv)
+    //   position 1 (spooled)         → „gesendet, wartet auf Druck"
+    //   position ≥ 2 (zentral queued) → „an X. Druckerwarteschlangenposition"
     if (msg.status === 'printing' || msg.position === 0) {
       setStatusText('Wird gedruckt …');
-    } else if (typeof msg.position === 'number' && msg.position >= 1) {
+    } else if (typeof msg.position === 'number' && msg.position === 1) {
+      setStatusText('Leihschein gesendet, wartet auf Druck …');
+    } else if (typeof msg.position === 'number' && msg.position >= 2) {
       setStatusText(`Leihschein an ${msg.position}. Druckerwarteschlangenposition`);
     } else {
       setStatusText('Leihschein in Druckerwarteschlange …');
