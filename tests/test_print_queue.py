@@ -518,3 +518,50 @@ def test_allowed_empty_set_no_dispatch():
     claims = asyncio.run(_claim(pq, st.settings.printers))
     assert claims == []
     assert _roles(pq.waiting) == ["helper"]
+
+
+# ---- Positionen (min über erlaubte Drucker, Slot-Index für gesendete) ----
+
+
+def test_positions_two_spooled_first_not_yet_printing():
+    """Regression: zwei gesendete Jobs an einem Drucker, beide noch ``spooled``
+    (OS hat den ersten noch nicht aktiv zu drucken begonnen). Der zweite
+    gesendete Job muss Position 1 zeigen — nicht 2 —, denn genau ein Job liegt
+    vor ihm. Früher zählte `_compute_positions` nur die nicht-druckenden Jobs
+    hoch und schob den zweiten fälschlich auf Position 2."""
+    st = AppState()
+    st.settings.printers = _two_printers()
+    pq = st.print_queue
+    a = _job("helper", 1, name="A")
+    a.status = "spooled"
+    b = _job("helper", 2, name="B")
+    b.status = "spooled"
+    pq.slots["p1"] = print_queue._Slots(jobs=[a, b])  # beide an p1 gesendet
+    # Zentraler Wartender, der NUR p1 erlaubt (p2 idle, aber nicht erlaubt) →
+    # load(p1)=2, kein erlaubter idle-Drucker → Position 2.
+    c = _job("helper", 3, name="C", allowed={"p1"})
+    pq.waiting.append(c)  # direkt einreihen (ohne Notify-Seiteneffekte)
+    positions = pq._compute_positions(list(st.settings.printers))
+    assert positions[a.id] == 0  # ältester gesendeter → 0 (druckt / druckt nächstens)
+    assert positions[b.id] == 1  # zweiter gesendeter → 1 (genau einer vor ihm)
+    assert positions[c.id] == 2  # erster zentraler bei vollem Drucker → 2
+
+
+def test_positions_one_printing_one_spooled():
+    """Soll-Zustand: erster Job druckt aktiv (``printing``) → 0, zweiter
+    gesendet (``spooled``) → 1, erster zentraler Wartender (nur p1 erlaubt,
+    p1 voll) → 2."""
+    st = AppState()
+    st.settings.printers = _two_printers()
+    pq = st.print_queue
+    a = _job("helper", 1, name="A")
+    a.status = "printing"
+    b = _job("helper", 2, name="B")
+    b.status = "spooled"
+    pq.slots["p1"] = print_queue._Slots(jobs=[a, b])
+    c = _job("helper", 3, name="C", allowed={"p1"})
+    pq.waiting.append(c)
+    positions = pq._compute_positions(list(st.settings.printers))
+    assert positions[a.id] == 0
+    assert positions[b.id] == 1
+    assert positions[c.id] == 2

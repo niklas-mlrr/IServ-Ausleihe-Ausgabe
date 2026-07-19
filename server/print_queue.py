@@ -371,28 +371,27 @@ class PrintQueue:
         """Pro Job seine Warteschlangen-Position als Minimum über alle
         erlaubten Drucker, wie viele Aufträge dort noch vor ihm liegen.
 
-        - Gesendete Jobs eines Druckers (FIFO `slots.jobs`): der OS-aktiv
-          druckende (Status ``printing``) → 0; die übrigen gesendeten →
-          1, 2, … in Dispatch-Reihenfolge (bei Kapazität 2: 0 + 1).
+        - Gesendete Jobs eines Druckers (FIFO `slots.jobs`): Position = Slot-
+          Index (0 = ältester gesendeter = druckt / druckt als nächstes,
+          1 = zweiter gesendeter = wartet). **Nicht** OS-Status-abhängig —
+          ob der erste Job schon physisch druckt, bestimmt nur das Label
+          (``printing`` → „wird gedruckt", ``spooled`` → „gesendet, wartet"),
+          nicht die Positionsnummer. Sonst würde ein noch nicht aktiv
+          druckender erster Job den zweiten fälschlich auf Position 2 schieben.
         - Zentrale-Warteschlangen-Job `waiting[i]`: ``min`` über alle erlaubten
           Drucker P von ``load(P) + (Anzahl früherer waiting-Jobs, die für P
           erlaubt sind)``. ``allowed_printers is None`` = alle Pool-Drucker.
           Fallback (kein erlaubter Drucker im Pool): globaler Index in `waiting`.
 
-        Semantik: 0 = druckt, 1 = gesendet/wartet, 2 = erster zentraler Wartender
-        bei vollem Drucker (load 2), usw."""
+        Semantik: 0 = druckt (bzw. druckt als nächstes), 1 = gesendet/wartet,
+        2 = erster zentraler Wartender bei vollem Drucker (load 2), usw."""
         positions: dict[str, int] = {}
         for p in printers:
             s = self.slots.get(p.id)
             if not s:
                 continue
-            idx = 0
-            for j in s.jobs:
-                if j.status == "printing":
-                    positions[j.id] = 0
-                else:
-                    idx += 1
-                    positions[j.id] = idx
+            for idx, j in enumerate(s.jobs):
+                positions[j.id] = idx
         for ci, j in enumerate(self.waiting):
             best: int | None = None
             for p in printers:
