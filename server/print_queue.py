@@ -7,9 +7,13 @@ verteilt sie auf den konfigurierten Drucker-Pool (`RuntimeSettings.printers`):
     (HOST > HELFER > SCHÜLER), Aufträge ohne zugewiesenen Drucker.
   - Pro Drucker 2-Slots-Pipeline: Slot 0 = druckt gerade (am OS, „Wird
     gedruckt"), Slot 1 = schon an den Drucker gespoolt, wartet auf den Drucker.
-  - Verteilung: der linkeste Drucker mit der niedrigsten Last bekommt den
-    nächsten Auftrag (Round-Robin-Füllung: erst alle Drucker auf Last 1, dann
-    auf Last 2). Sind alle Drucker voll (Last 2), warten weitere Aufträge
+  - Verteilung (level-weise, Allowlist-gerecht): erst alle idle-Drucker (Last 0)
+    einen Auftrag bekommen, dann Drucker auf Last 1 — so bekommt kein Drucker
+    einen 2. Auftrag (Slot 1), solange ein anderer *erlaubter* Drucker noch idle
+    ist (Parallelismus statt nacheinander). Pro Level picken die Drucker in der
+    konfigurierten Reihenfolge (linkester zuerst); jeder zieht den ranghöchsten
+    Auftrag, der ihn erlaubt (`job.allowed_printers`: `None` = alle erlaubt,
+    sonst nur IDs darin). Sind alle Drucker voll, warten weitere Aufträge
     zentral, bis ein Drucker wieder Kapazität hat.
 
 „gedruckt" = physisches Ende, erkannt per OS-Queue-Polling
@@ -76,6 +80,12 @@ class PrintJob:
     result: dict | None = None  # Druck-Result (mit job_handle); Finalresult für HTTP
     job_handle: dict | None = None  # OS-Job-Handle für Completion-Polling
     assigned_printer_id: str | None = None  # None = in zentraler Warteschlange
+    # Erlaubte Drucker für diesen Auftrag (Snapshot der Klassen-Allowlist zum
+    # Enqueue-Zeitpunkt). `None` = jeder Pool-Drucker erlaubt (Default, keine
+    # Einschränkung); eine Menge (auch leer) beschränkt auf genau diese IDs.
+    # Bereits wartende Aufträge behalten ihre Allowlist, auch wenn die Klasse
+    # später umkonfiguriert wird (gewollt: „mit in der Warteschlange gespeichert").
+    allowed_printers: set[str] | None = None
     created_at: datetime = field(default_factory=datetime.now)
     done: asyncio.Event = field(default_factory=asyncio.Event)
 
@@ -236,36 +246,47 @@ class PrintQueue:
         return promoted
 
     def _claim_fills(self, printers: list) -> list[tuple[str, str | None, PrintJob, _SlotType]]:
-        """Wartende Aufträge auf freie Drucker-Slots verteilen (einer pro
-        Durchlauf pro Drucker, bis `waiting` leer oder alle Drucker voll).
-        Liefert Claims `(printer_id, printer_name, job, slot_type)`; der Job
-        wird aus `waiting` entfernt, in den Slot gelegt und auf `dispatching`
-        gesetzt. Dispatch erfolgt außerhalb des Locks. Fehlende Slots (z. B. vor
-        dem ersten Reconcile) gelten als leer."""
+        """Wartende Aufträge auf freie Drucker-Slots verteilen — level-weise und
+        Allowlist-gerecht (s. Modul-Docstring). Liefert Claims
+        `(printer_id, printer_name, job, slot_type)`; der Job wird aus `waiting`
+        entfernt, in den Slot gelegt und auf `dispatching` gesetzt. Dispatch
+        erfolgt außerhalb des Locks. Fehlende Slots (z. B. vor dem ersten
+        Reconcile) gelten als leer (Last 0).
+
+        Level-weise (erst Last 0, dann Last 1): so bekommt kein Drucker einen
+        2. Auftrag, solange ein anderer *erlaubter* Drucker noch idle ist
+        (Parallelismus). Pro Level in der konfigurierten Reihenfolge
+        (linkester zuerst); jeder Drucker zieht den ranghöchsten Auftrag, der
+        ihn erlaubt (`allowed_printers is None` = alle, sonst ID darin). Ist der
+        Kopf der Warteschlange für mehrere freie Drucker erlaubt, druckt der
+        linkeste — weil er zuerst pickt."""
         claims: list[tuple[str, str | None, PrintJob, _SlotType]] = []
-        while self.waiting:
-            # Niedrigste Last, linkester Tie-Break.
-            best = None  # (index, printer, slot_type, load)
-            for idx, p in enumerate(printers):
-                s = self.slots.get(p.id)
+        # Level 0 (idle) vor Level 1: verhindert, dass ein Drucker einen 2. Auftrag
+        # bekommt, während ein anderer erlaubter Drucker noch idle ist.
+        for target_load in range(_PRINTER_CAPACITY):
+            for printer in printers:
+                s = self.slots.get(printer.id)
                 load = s.load if s else 0
-                if load >= _PRINTER_CAPACITY:
-                    continue
-                if best is None or load < best[3]:
-                    slot_type = "printing" if (s is None or s.printing is None) else "spooled"
-                    best = (idx, p, slot_type, load)
-            if best is None:
-                break  # kein Drucker mit freier Kapazität
-            _, printer, slot_type, _ = best
-            job = self.waiting.pop(0)  # ranghöchster (waiting ist rollen-gerecht geordnet)
-            job.assigned_printer_id = printer.id
-            job.status = "dispatching"
-            slots = self.slots.setdefault(printer.id, _Slots())
-            if slot_type == "printing":
-                slots.printing = job
-            else:
-                slots.spooled = job
-            claims.append((printer.id, printer.name, job, slot_type))
+                if load != target_load or load >= _PRINTER_CAPACITY:
+                    continue  # nur Drucker auf diesem Füll-Level, mit Kapazität
+                # ersten ranghöchsten Auftrag suchen, der diesen Drucker erlaubt.
+                picked = None
+                for i, job in enumerate(self.waiting):
+                    if job.allowed_printers is None or printer.id in job.allowed_printers:
+                        picked = i
+                        break
+                if picked is None:
+                    continue  # kein Auftrag erlaubt diesen Drucker → idle bleiben
+                job = self.waiting.pop(picked)
+                job.assigned_printer_id = printer.id
+                job.status = "dispatching"
+                slots = self.slots.setdefault(printer.id, _Slots())
+                slot_type: _SlotType = "printing" if slots.printing is None else "spooled"
+                if slot_type == "printing":
+                    slots.printing = job
+                else:
+                    slots.spooled = job
+                claims.append((printer.id, printer.name, job, slot_type))
         return claims
 
     async def _dispatch_to(self, claim: tuple[str, str | None, PrintJob, _SlotType]) -> None:

@@ -10,7 +10,7 @@ from fastapi import Depends, HTTPException
 from ..config import get_config
 from ..hub import get_hub
 from ..print_queue import PrintJob, slip_name
-from ..sessions import handle_commit
+from ..sessions import allowed_printers_for, handle_commit
 from ..state import get_state
 from ._deps import (
     CommitBookRequest,
@@ -53,6 +53,15 @@ async def print_loan_slip(body: PrintLoanSlipRequest, sid: str = Depends(require
     state = get_state()
     if not state.settings.printers:
         raise HTTPException(400, "Kein Drucker konfiguriert")
+    # Drucker-Allowlist der Klasse des Schülers (Snapshot zum Enqueue-Zeitpunkt).
+    # `None` = alle Pool-Drucker; eine Menge beschränkt auf diese Drucker. Ist die
+    # Menge explizit, aber kein erlaubter Drucker im Pool (z. B. alle entfernt),
+    # verweigern: sonst hinge der Auftrag endlos in der Warteschlange.
+    allowed = allowed_printers_for(state, student_id)
+    if allowed is not None:
+        pool_ids = {p.id for p in state.settings.printers}
+        if not (allowed & pool_ids):
+            raise HTTPException(400, "Kein erlaubter Drucker im Pool für diese Klasse")
     # Seite 1 wird immer gedruckt; Seite 2 (Schüler-Leihschein) nur, wenn der
     # Host-Toggle gesetzt ist.
     pages = None if body.second_page else "1"
@@ -69,6 +78,7 @@ async def print_loan_slip(body: PrintLoanSlipRequest, sid: str = Depends(require
         pages=pages,
         name=name,
         host_sid=sid,
+        allowed_printers=allowed,
     )
     await state.print_queue.enqueue(job)
     # Bis der Worker den Auftrag finalisiert hat (physisch gedruckt / fehl-

@@ -22,6 +22,7 @@ from ._deps import (
     AddStudentRequest,
     CloseClassRequest,
     ContextIdBody,
+    ContextPrintersRequest,
     OpenClassRequest,
     SelectSchoolyearRequest,
     host_router,
@@ -34,6 +35,16 @@ log = logging.getLogger(__name__)
 _AUTO_DONE_FILTERS = {
     "not_enrolled", "unpaid", "remission_pending", "exemption_pending", "all_lent",
 }
+
+
+def _resolve_allowed_printers(printers: list[str] | None) -> set[str] | None:
+    """Client-Druckerauswahl → Allowlist. `None` oder leere Liste = kein Filter
+    (alle Pool-Drucker, Default, kompatibel mit Test-Config / Öffnen ohne
+    Auswahl). Sonst Menge der übergebenen Drucker-IDs (Dubletten/Leerstring
+    herausgefiltert)."""
+    if not printers:
+        return None
+    return {pid.strip() for pid in printers if pid and pid.strip()}
 
 
 async def _load_student_flags(state: AppState, ctx: ClassContext, auto_done: list[str]) -> None:
@@ -201,6 +212,9 @@ async def open_class(body: OpenClassRequest) -> dict:
     existing = next((c for c in state.contexts.values() if c.form == form), None)
     if existing is not None:
         state.set_active_context(existing.id)
+        # Erneutes Öffnen aktualisiert die Druck-Allowlist („Öffnen" ist der
+        # Bedienpunkt dafür); leer/None = alle Pool-Drucker.
+        existing.allowed_printer_ids = _resolve_allowed_printers(body.printers)
         await hub.broadcast_host(state.state_snapshot())
         return {"ok": True, "context_id": existing.id, "count": len(existing.queue), "reused": True}
 
@@ -211,6 +225,7 @@ async def open_class(body: OpenClassRequest) -> dict:
         raise HTTPException(502, f"IServ-Fehler: {e}") from e
 
     ctx = state.open_context(form)
+    ctx.allowed_printer_ids = _resolve_allowed_printers(body.printers)
     ctx.queue = [QueueStudent.from_iserv(s, form=form) for s in students]
     # Immer (nicht nur bei gewählten Auto-Fertig-Filtern): der Abruf füllt auch
     # die Info-Flags für die Queue-Anzeige. Fehler sind pro Schüler gekapselt.
@@ -276,6 +291,29 @@ async def set_active_context(body: ContextIdBody) -> dict:
     state.set_active_context(context_id)
     await get_hub().broadcast_host(state.state_snapshot())
     return {"ok": True, "active_context_id": state.active_context_id}
+
+
+@host_router.post("/api/context-printers")
+async def set_context_printers(body: ContextPrintersRequest) -> dict:
+    """Druck-Allowlist einer bereits geöffneten Klasse nachträglich setzen
+    (Checkboxen im Klassen-Tab). `printers` = Drucker-IDs; `None`/leer = kein
+    Filter (alle Pool-Drucker). Wirkt ab dem nächsten Druckauftrag (bereits
+    wartende behalten ihre Allowlist — s. print_queue `PrintJob.allowed_printers`).
+
+    Reiner In-Memory-State, kein DB-/IServ-Zugriff. Weckt den Scheduler, damit
+    künftige Aufträge sofort verteilt werden können."""
+    state = get_state()
+    hub = get_hub()
+    context_id = body.context_id.strip()
+    ctx = state.contexts.get(context_id)
+    if ctx is None:
+        raise HTTPException(404, "Kontext unbekannt")
+    ctx.allowed_printer_ids = _resolve_allowed_printers(body.printers)
+    state.print_queue.wake()
+    await hub.broadcast_host(state.state_snapshot())
+    return {"ok": True, "context_id": context_id, "allowed_printers": (
+        None if ctx.allowed_printer_ids is None else sorted(ctx.allowed_printer_ids)
+    )}
 
 
 @host_router.get("/api/students-for-class")

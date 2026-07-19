@@ -8,6 +8,51 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-19 — Pro-Klasse Drucker-Allowlist + pool-gerechte Verteilung
+
+Bisher druckte die interne Warteschlange jeden Auftrag auf *irgendeinen*
+Pool-Drucker (niedrigste Last, linkester Tie-Break) — ohne Bindung
+Auftrag→Drucker. Neu: pro Klasse wählbare **Drucker-Allowlist** und eine
+Verteilung, die sie respektiert (Nutzer-Vorgabe).
+
+- **UI:** Im „Neue Klasse öffnen"-Menü (dort wo schon die Auto-Fertig-Filter
+  stehen) eine Checkbox-Liste der Pool-Drucker; angehakte Drucker sind für
+  diese Klasse erlaubt. **Nachträglich änderbar** im Klassen-Reiter (eigene
+  „Drucker für {Klasse}"-Karte). Leere Auswahl = **alle** Pool-Drucker
+  (Default, kompatibel mit Test-Config / Öffnen ohne Auswahl). Auswahl im
+  panel-new wird für das nächste Öffnen gemerkt (`localStorage`).
+- **State:** `ClassContext.allowed_printer_ids: set[str] | None` (`None` =
+  alle). `OpenClassRequest.printers` setzt sie beim Öffnen (auch beim
+  erneuten Öffnen desselben Kontexts = Aktualisierung). Neuer Endpoint
+  `POST /api/context-printers` ändert sie an der laufenden Klasse + weckt
+  den Scheduler. Reiner In-Memory-State (Kontexte nicht persistiert), kein
+  DB-/IServ-Zugriff. Im `state_snapshot` führt jeder Kontext nun
+  `allowed_printers` (`null` | sortierte ID-Liste).
+- **Auftrag:** `PrintJob.allowed_printers` snapshottet die Klassen-Allowlist
+  zum Enqueue-Zeitpunkt — bereits wartende Aufträge behalten ihre Allowlist,
+  auch wenn die Klasse später umkonfiguriert wird (gewollt: „mit in der
+  Warteschlange gespeichert"). `slips.py::print_loan_slip` und
+  `ws.py::_handle_print` kopieren sie beim Enqueue (`sessions.
+  allowed_printers_for`). Explizite Allowlist ohne Treffer im Pool → Druck
+  wird vorab verweigert (HTTP 400 / WS `print_result ok:false`).
+- **Scheduler (`print_queue._claim_fills`)** neu **level-weise + allowlist-
+  gerecht**: erst alle idle-Drucker (Last 0) einen Auftrag bekommen, dann
+  Last-1-Drucker — damit bekommt **kein Drucker einen 2. Auftrag (Slot 1)**,
+  solange ein anderer *erlaubter* Drucker noch idle ist (Parallelismus
+  statt nacheinander). Pro Level picken die Drucker in der konfigurierten
+  Reihenfolge (linkester zuerst); jeder zieht den ranghöchsten Auftrag, der
+  ihn erlaubt (`None` = alle, sonst ID darin). Ist der Kopf der Warteschlange
+  für mehrere freie Drucker erlaubt, druckt der linkeste. `waiting` bleibt
+  rollen-gerecht geordnet. Verhalten bei `allowed_printers=None` identisch
+  zum bisherigen (bestehende Pool-Tests grün).
+- **Tests:** `tests/test_print_queue.py` +5 (Allowlist-Verteilung: nur-p2,
+  linkester-bei-mehrfach-erlaubt, idle-Vorrang-gegen-2.-Slot, Kopf-überspringen-
+  wenn-nicht-erlaubt, leere-Menge-bleibt-waiting). `tests/test_state_contract.py`
+  unangetastet (Top-Level-Keys + Default-Drucker-Form identisch). Suite 261 grün.
+- **Offen:** Live-Verifikation am echten Drucker (read-only Druck mit
+  `save_pdf_locally`-Sicherheitsnetz möglich). Modus-B-Schüler-Druck hat keine
+  UI, der Allowlist-Pfad greift aber bereits.
+
 ## 2026-07-19 — Drucker-Pool in den Einstellungen (Reiter, Round-Robin-Verteilung, Duplex, Persistenz)
 
 Bisher war in den Einstellungen ein **einzelner** Leihschein-Drucker

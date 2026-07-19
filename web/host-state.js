@@ -50,6 +50,37 @@ window.__host = window.__host || {};
 
   const AUTO_DONE_KEYS = ['not_enrolled', 'unpaid', 'remission_pending', 'exemption_pending', 'all_lent'];
   const AUTO_DONE_STORAGE_KEY = 'autoDoneFilters';
+
+  // Druck-Allowlist für neu zu öffnende Klassen (panel-new): Menge der
+  // angehakten Drucker-IDs, die mit `/api/open-class` als `printers` geschickt
+  // wird. Leere Auswahl = alle Pool-Drucker (Server interpretiert None/[] als
+  // „alle"). Default: alle angehakt. Wird für das nächste Öffnen gemerkt.
+  const CLASS_PRINTERS_STORAGE_KEY = 'classPrinters';
+
+  // Angehakte Drucker-IDs aus dem panel-new (`#new-class-printers`) lesen.
+  function getSelectedClassPrinters() {
+    const out = [];
+    document.querySelectorAll('#new-class-printers input[data-pid]').forEach(el => {
+      if (el.checked) out.push(el.dataset.pid);
+    });
+    return out;
+  }
+
+  // Gespeicherte Auswahl laden (Set der IDs; null = „alle", Default). Legt
+  // keine Annahme über aktuell konfigurierte Drucker — beim Render werden nur
+  // IDs gecheckt, die im Pool UND im gespeicherten Set stehen (oder alle, wenn
+  // gespeichert null/leer ist).
+  function loadClassPrintersSelection() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(CLASS_PRINTERS_STORAGE_KEY) || 'null');
+      if (raw === null) return null;
+      return new Set(Array.isArray(raw) ? raw : []);
+    } catch { return null; }
+  }
+
+  function saveClassPrintersSelection(ids) {
+    localStorage.setItem(CLASS_PRINTERS_STORAGE_KEY, JSON.stringify(ids || []));
+  }
   // ---- Bücherlisten ordnen (Einstellungen-Dialog, Reiter je Jahrgang) ----
   // Analog zur Klassen-Bücher-Reihenfolge, aber jahrgangsweit und vorab: pro
   // Booklist ein Reiter, Katalog wird beim Anklicken lazy geladen. Änderungen

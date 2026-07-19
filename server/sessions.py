@@ -481,6 +481,21 @@ def _student_form(state: AppState, student_id: int) -> str | None:
     return ctx.form if ctx and ctx.form else None
 
 
+def allowed_printers_for(state: AppState, student_id: int) -> set[str] | None:
+    """Drucker-Allowlist der Klasse eines Schülers — für den Druckauftrag
+    (`PrintJob.allowed_printers`). Sucht den besitzenden Klassen-Kontext via
+    `find_student_with_ctx` (Schüler lebt in genau einem). `None` = kein Filter
+    (alle Pool-Drucker erlaubt, Default); eine Menge beschränkt auf diese IDs.
+    Ohne Kontext (Schüler in keiner Klasse-Queue) → `None` (alle). Rein lesend."""
+    found = state.find_student_with_ctx(student_id)
+    if found is None:
+        return None
+    ctx, _s = found
+    # None bleibt None (alle); kopieren, damit der Snapshot im Job stabil ist,
+    # auch wenn die Klasse nach dem Enqueue umkonfiguriert wird.
+    return None if ctx.allowed_printer_ids is None else set(ctx.allowed_printer_ids)
+
+
 async def print_loan_slip_for(
     state: AppState,
     student_id: int,

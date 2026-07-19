@@ -99,6 +99,11 @@ class OpenClassRequest(BaseModel):
     # sollen — Werte aus {"not_enrolled", "unpaid", "remission_pending",
     # "exemption_pending", "all_lent"}, s. classes.py `_AUTO_DONE_FILTERS`.
     auto_done: list[str] | None = None
+    # Druck-Allowlist für diese Klasse: Drucker-IDs (`RuntimeSettings.printers`
+    # -IDs), auf die der Leihschein-Druck dieser Klasse beschränkt wird. `None`
+    # oder leer = kein Filter (alle Pool-Drucker, Default). s. classes.py
+    # `open_class` + `set_context_printers`.
+    printers: list[str] | None = None
 
 
 class CloseClassRequest(BaseModel):
@@ -110,6 +115,15 @@ class ContextIdBody(BaseModel):
     Request → Default-Instanz, `context_id=None` → aktiver Kontext)."""
 
     context_id: str | None = None
+
+
+class ContextPrintersRequest(BaseModel):
+    """Body für `POST /api/context-printers`: Druck-Allowlist einer bereits
+    geöffneten Klasse nachträglich setzen. `printers` = Drucker-IDs; `None` oder
+    leer = kein Filter (alle Pool-Drucker)."""
+
+    context_id: str = ""
+    printers: list[str] | None = None
 
 
 # Modul-Level-Singleton als Body-Default (statt `= ContextIdBody()` direkt im

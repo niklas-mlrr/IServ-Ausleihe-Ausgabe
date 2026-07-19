@@ -370,6 +370,15 @@ class ClassContext:
     class_catalog: list[dict] = field(default_factory=list)
     class_catalog_form: str | None = None
     class_catalog_grade: int | None = None
+    # Druck-Allowlist für diese Klasse: Menge der erlaubten Drucker-IDs
+    # (`RuntimeSettings.printers`-IDs). `None` = kein Filter, alle Pool-Drucker
+    # erlaubt (Default, kompatibel mit Test-Config / Öffnen ohne Auswahl). Eine
+    # explizite Menge (auch leer) beschränkt den Leihschein-Druck dieser Klasse
+    # auf genau diese Drucker. Beim Enqueue eines Druckauftrags wird die Allowlist
+    # in den `PrintJob.allowed_printers` snapshotted (s. print_queue.py) — Ändern
+    # der Klasse wirkt erst auf künftige Drucke. Rein In-Memory (Kontexte leben
+    # nicht persistiert), kein DB-/IServ-Zugriff.
+    allowed_printer_ids: set[str] | None = None
 
 
 class AppState:
@@ -589,6 +598,12 @@ class AppState:
                 "id": c.id,
                 "form": c.form,
                 "queue": [s.as_dict() for s in c.queue],
+                # Drucker-Allowlist dieser Klasse — `None` = alle Pool-Drucker
+                # (Default), sonst sortierte ID-Liste der erlaubten Drucker.
+                # Der Host-Client rendert daraus die Checkboxen im Klassen-Tab.
+                "allowed_printers": (
+                    None if c.allowed_printer_ids is None else sorted(c.allowed_printer_ids)
+                ),
             }
             for c in self.contexts.values()
         }

@@ -14,6 +14,7 @@ from ..print_queue import PrintJob
 from ..print_queue import slip_name as _slip_name
 from ..sessions import (
     advance_helper,
+    allowed_printers_for,
     assign_student_to_helper,
     broadcast_student_info_to_spectators,
     end_student,
@@ -510,6 +511,21 @@ async def _handle_print(state, hub, helper, websocket, raw) -> None:
             {"type": "print_result", "ok": False, "msg": "Kein Drucker konfiguriert"},
         )
         return
+    # Drucker-Allowlist der Klasse des Schülers (Snapshot zum Enqueue-Zeitpunkt).
+    # `None` = alle Pool-Drucker; explizite Menge ohne Treffer im Pool → verweigern.
+    allowed = allowed_printers_for(state, helper.student_id)
+    if allowed is not None:
+        pool_ids = {p.id for p in state.settings.printers}
+        if not (allowed & pool_ids):
+            await hub.send_websocket(
+                websocket,
+                {
+                    "type": "print_result",
+                    "ok": False,
+                    "msg": "Kein erlaubter Drucker im Pool für diese Klasse",
+                },
+            )
+            return
     # Seite 1 wird immer gedruckt; Seite 2 (Schüler-Leihschein) nur,
     # wenn der Helfer sie im Druck-Dialog aktiviert hat.
     second_page = bool(raw.get("second_page"))
@@ -527,6 +543,7 @@ async def _handle_print(state, hub, helper, websocket, raw) -> None:
         pages=pages,
         name=name,
         helper_token=helper.token,
+        allowed_printers=allowed,
     )
     await state.print_queue.enqueue(job)
 

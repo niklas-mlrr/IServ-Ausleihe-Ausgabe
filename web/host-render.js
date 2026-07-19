@@ -163,6 +163,11 @@ window.__host = window.__host || {};
             <div class="ctx-codes" data-ctx-id="${id}"></div>
           </div>
           <div class="card">
+            <h2 style="margin:0 0 8px">Drucker für ${form}</h2>
+            <div data-ctx-printers="${id}" style="display:flex;flex-direction:column;gap:10px"></div>
+            <p class="hint" style="margin-top:8px">Auf welche Drucker der Leihschein dieser Klasse gedruckt wird. Kein Haken = alle.</p>
+          </div>
+          <div class="card">
             <h2 style="margin:0 0 8px">Schüler-Queue <span class="queue-count" data-ctx-qc="${id}"></span></h2>
             <div class="row" style="align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px">
               <button class="ghost" data-action="ctx-reset" data-ctx-id="${id}"><span class="ghost-ico">${ICO_RESET}</span> Status zurücksetzen</button>
@@ -201,8 +206,10 @@ window.__host = window.__host || {};
     if (!form) return;
     const auto_done = getAutoDoneSelection();
     localStorage.setItem(AUTO_DONE_STORAGE_KEY, JSON.stringify(auto_done));
+    const printers = getSelectedClassPrinters();
+    saveClassPrintersSelection(printers);
     showMsg('Lade Schüler…');
-    const r = await fetch('/api/open-class', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ form, force, auto_done }) });
+    const r = await fetch('/api/open-class', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ form, force, auto_done, printers }) });
     const d = await r.json();
     if (r.status === 409 && d.detail && d.detail.reason === 'active_sessions') {
       if (await confirmDialog(`${d.detail.msg}\n\nTrotzdem öffnen?`, 'Öffnen')) return openClass(true);
@@ -620,6 +627,66 @@ window.__host = window.__host || {};
     renderCtxNowServing(id);
     renderCtxQueue(id);
     renderCtxPairing(id);
+    renderCtxPrinters(id);
+  }
+
+  // ---- Drucker-Allowlist pro Klasse (panel-new + Klassen-Tab) ------------
+  // Checkbox-Liste der Pool-Drucker. Im panel-new wird die Auswahl mit
+  // `/api/open-class` geschickt; im Klassen-Tab live per `/api/context-printers`
+  // gesetzt. Leere Auswahl = alle Pool-Drucker (Server-Seite None).
+
+  function _printerCheckboxHTML(p, checked, dataCtxId) {
+    const pid = escapeHtml(p.id);
+    const lbl = escapeHtml(printerLabel(p));
+    const ctxAttr = dataCtxId ? ` data-ctx-id="${escapeHtml(dataCtxId)}"` : '';
+    return `<label class="check-line" title="Leihschein dieser Klasse auf „${lbl}" drucken${checked ? '' : ' (abgewählt)'}">
+      <input type="checkbox" class="printer-check" data-pid="${pid}"${ctxAttr}${checked ? ' checked' : ''}>
+      <span>${lbl}</span>
+    </label>`;
+  }
+
+  // panel-new: Drucker-Checkboxen für die nächste zu öffnende Klasse. Default
+  // alle angehakt (entspricht „alle"); gespeicherte Auswahl (eingeschränkt)
+  // bleibt erhalten. Kein Pool → Hinweis, dass Druck nicht möglich ist.
+  function renderNewClassPrinters() {
+    const host = document.getElementById('new-class-printers');
+    if (!host) return;
+    const pool = state.printers || [];
+    if (!pool.length) {
+      host.innerHTML = '<p class="hint">Kein Drucker konfiguriert — Druck nicht möglich. In den Einstellungen Drucker hinzufügen.</p>';
+      return;
+    }
+    const saved = loadClassPrintersSelection();  // Set | null (null = alle)
+    host.innerHTML = pool.map(p => _printerCheckboxHTML(p, saved === null || saved.has(p.id), null)).join('');
+  }
+
+  // Klassen-Tab: Checkboxen je Kontext aus `ctx.allowed_printers` (Snapshot).
+  // `null` = alle Pool-Drucker (alle angehakt); sonst nur die IDs in der Menge.
+  function renderCtxPrinters(id) {
+    const host = document.querySelector(`[data-ctx-printers="${id}"]`);
+    if (!host) return;
+    const ctx = (state.contexts || {})[id];
+    if (!ctx) return;
+    const pool = state.printers || [];
+    const allowed = ctx.allowed_printers;  // null | string[]
+    const allowedSet = allowed === null ? null : new Set(allowed);
+    if (!pool.length) {
+      host.innerHTML = '<p class="hint">Kein Drucker konfiguriert.</p>';
+      return;
+    }
+    host.innerHTML = pool.map(p => _printerCheckboxHTML(p, allowedSet === null || allowedSet.has(p.id), id)).join('');
+  }
+
+  // Checkbox-Änderung im Klassen-Tab → Allowlist sofort ans Server senden.
+  // Leere Auswahl = alle (Server None), s. _resolve_allowed_printers.
+  async function setContextPrinters(id) {
+    const host = document.querySelector(`[data-ctx-printers="${id}"]`);
+    if (!host) return;
+    const ids = Array.from(host.querySelectorAll('input[data-pid]')).filter(el => el.checked).map(el => el.dataset.pid);
+    await fetch('/api/context-printers', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ context_id: id, printers: ids }),
+    }).catch(() => showMsg('Drucker-Auswahl konnte nicht gespeichert werden'));
   }
 
 
@@ -1590,6 +1657,7 @@ window.__host = window.__host || {};
     const el = e.target;
     if (el.classList.contains('ctx-single-class')) ctxLoadStudents(el.dataset.ctxId);
     else if (el.classList.contains('ctx-single-student')) ctxOnStudentChange(el.dataset.ctxId);
+    else if (el.classList.contains('printer-check')) setContextPrinters(el.dataset.ctxId);
   });
   document.getElementById('helper-tbody').addEventListener('click', handleDelegatedAction);
   document.getElementById('helper-tbody').addEventListener('change', (e) => {

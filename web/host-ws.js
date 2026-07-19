@@ -81,6 +81,7 @@ window.__host = window.__host || {};
     maybeCloseQrOnScan();
     renderTabBar();
     renderPanels();
+    renderNewClassPrinters();
     renderWorkerStatus();
     renderStatusBar();
   }

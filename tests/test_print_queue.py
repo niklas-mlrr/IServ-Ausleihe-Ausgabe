@@ -32,7 +32,7 @@ class _FakeWS:
         self.sent.append(msg)
 
 
-def _job(role, student_id, *, helper_token=None, host_sid=None, name="x"):
+def _job(role, student_id, *, helper_token=None, host_sid=None, name="x", allowed=None):
     return PrintJob.create(
         role=role,
         student_id=student_id,
@@ -40,6 +40,7 @@ def _job(role, student_id, *, helper_token=None, host_sid=None, name="x"):
         name=name,
         helper_token=helper_token,
         host_sid=host_sid,
+        allowed_printers=allowed,
     )
 
 
@@ -299,3 +300,85 @@ def test_pool_snapshot_shape():
     assert p["load"] == 0 and p["printing_name"] is None and p["spooled_name"] is None
     assert p["duplex"] == "one_sided"
     assert st.print_queue.pool_summary() == {"waiting": 0}
+
+
+# ---- Pool-Verteilung mit pro-Klasse Drucker-Allowlist -------------------
+
+
+def _two_printers():
+    from server.state import PrinterConfig
+
+    return [
+        PrinterConfig(id="p1", name="P1"),
+        PrinterConfig(id="p2", name="P2"),
+    ]
+
+
+def test_pool_respects_allowed_printers():
+    """Ein Auftrag, der nur Drucker p2 erlaubt, geht an p2 — p1 bleibt frei,
+    obwohl er idle und linkester ist."""
+    st = AppState()
+    st.settings.printers = _two_printers()
+    pq = st.print_queue
+    j = _job("helper", 1, allowed={"p2"})
+    asyncio.run(pq.enqueue(j))
+    claims = asyncio.run(_claim(pq, st.settings.printers))
+    assert [(c[0], c[2].student_id, c[3]) for c in claims] == [("p2", 1, "printing")]
+    assert (pq.slots.get("p1") is None or pq.slots["p1"].load == 0)  # p1 nicht belegt
+    assert pq.waiting == []
+
+
+def test_pool_head_job_leftmost_allowed():
+    """Kopf-Auftrag erlaubt p1+p2, beide idle → linkester (p1) druckt."""
+    st = AppState()
+    st.settings.printers = _two_printers()
+    pq = st.print_queue
+    asyncio.run(pq.enqueue(_job("helper", 1, allowed={"p1", "p2"})))
+    claims = asyncio.run(_claim(pq, st.settings.printers))
+    assert [(c[0], c[2].student_id) for c in claims] == [("p1", 1)]
+    assert pq.slots["p1"].printing.student_id == 1
+    assert pq.slots.get("p2") is None or pq.slots["p2"].load == 0
+
+
+def test_pool_parallelism_idle_preferred():
+    """p1 druckt bereits (Last 1), p2 idle. Ein beide-erlaubender Auftrag geht
+    an den idle p2 — nicht an p1s 2. Slot (Parallelismus statt nacheinander)."""
+    st = AppState()
+    st.settings.printers = _two_printers()
+    pq = st.print_queue
+    # p1 bereits belegt (druckt einen anderen Auftrag).
+    running = _job("helper", 9)
+    running.status = "printing"
+    pq.slots["p1"] = print_queue._Slots(printing=running)
+    asyncio.run(pq.enqueue(_job("helper", 1, allowed={"p1", "p2"})))
+    claims = asyncio.run(_claim(pq, st.settings.printers))
+    assert [(c[0], c[2].student_id, c[3]) for c in claims] == [("p2", 1, "printing")]
+    # p1 bleibt bei Last 1 (kein 2. Auftrag), p2 bekommt den neuen als printing.
+    assert pq.slots["p1"].load == 1 and pq.slots["p1"].spooled is None
+    assert pq.slots["p2"].printing.student_id == 1
+
+
+def test_pool_skips_head_when_not_allowed():
+    """Kopf-Auftrag erlaubt nur p2. Der linkeste idle Drucker p1 überspringt ihn
+    und zieht den nächsten, der ihn erlaubt; der Kopf geht an p2."""
+    st = AppState()
+    st.settings.printers = _two_printers()
+    pq = st.print_queue
+    asyncio.run(pq.enqueue(_job("helper", 1, allowed={"p2"})))   # Kopf, nur p2
+    asyncio.run(pq.enqueue(_job("helper", 2, allowed={"p1", "p2"})))  # nächster, beide
+    claims = asyncio.run(_claim(pq, st.settings.printers))
+    by_pid = {c[0]: c[2].student_id for c in claims}
+    assert by_pid == {"p1": 2, "p2": 1}  # p1 zieht J2, p2 zieht den Kopf J1
+    assert pq.waiting == []
+
+
+def test_allowed_empty_set_no_dispatch():
+    """Explizit leere Allowlist → kein Drucker erlaubt; Auftrag bleibt in der
+    zentralen Warteschlange (Scheduler-Grace zusätzlich zur Enqueue-Verweigerung)."""
+    st = AppState()
+    st.settings.printers = _two_printers()
+    pq = st.print_queue
+    asyncio.run(pq.enqueue(_job("helper", 1, allowed=set())))
+    claims = asyncio.run(_claim(pq, st.settings.printers))
+    assert claims == []
+    assert _roles(pq.waiting) == ["helper"]
