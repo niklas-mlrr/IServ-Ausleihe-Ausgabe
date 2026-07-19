@@ -143,13 +143,22 @@ function handleServerMessage(msg) {
     if (Array.isArray(msg.book_order)) bookOrder = msg.book_order;
     if (Array.isArray(msg.books)) currentBooks = msg.books;
     if (studentActive) renderBooks(currentBooks);
+  } else if (msg.type === 'print_progress') {
+    // Live-Status aus der internen Druckerwarteschlange:
+    //   position 0 (printing)       → „Wird gedruckt …"
+    //   position ≥ 1 (queued/spooled) → „an X. Druckerwarteschlangenposition"
+    if (msg.status === 'printing' || msg.position === 0) {
+      setStatusText('Wird gedruckt …');
+    } else if (typeof msg.position === 'number' && msg.position >= 1) {
+      setStatusText(`Leihschein an ${msg.position}. Druckerwarteschlangenposition`);
+    } else {
+      setStatusText('Leihschein in Druckerwarteschlange …');
+    }
   } else if (msg.type === 'print_result') {
     printBtn.disabled = false;
-    const detail = msg.ok
-      ? `Leihschein: ${msg.detail || 'gedruckt'}`
-      : `Druck fehlgeschlagen: ${msg.msg || ''}`;
-    setStatusText(detail);
-    // „Drucken & nächster Schüler": nur bei erfolgreichem Druck weiterschalten.
+    setStatusText(msg.ok ? 'Gedruckt' : `Druck fehlgeschlagen: ${msg.msg || ''}`);
+    // „Drucken & nächster Schüler": nur bei erfolgreichem Druck weiterschalten
+    // (Schüler bleibt sonst stehen — s. Plan, Fehler-Verhalten).
     if (printThenNext) {
       printThenNext = false;
       if (msg.ok) advanceToNext();

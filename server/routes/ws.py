@@ -10,6 +10,8 @@ from datetime import datetime
 from fastapi import APIRouter, Cookie, WebSocket, WebSocketDisconnect
 
 from ..hub import get_hub
+from ..print_queue import PrintJob
+from ..print_queue import slip_name as _slip_name
 from ..sessions import (
     advance_helper,
     assign_student_to_helper,
@@ -17,7 +19,6 @@ from ..sessions import (
     end_student,
     gen_registration_code,
     hydrate_student_info,
-    print_loan_slip_for,
     process_scan,
     rebind_helper_to_context,
     send_display_update,
@@ -109,6 +110,10 @@ async def ws_host(websocket: WebSocket, session_id: str | None = Cookie(default=
 
     await websocket.accept()
     state.host_ws_connections.append(websocket)
+    # sid→WS registrieren, damit Druck-Status-Popups gezielt an den Host gehen,
+    # der den Druck gestartet hat (s. print_queue / state.host_ws_by_sid).
+    if session_id:
+        state.host_ws_by_sid.setdefault(session_id, []).append(websocket)
     try:
         await hub.send_websocket(websocket, state.state_snapshot())
         while True:
@@ -120,6 +125,15 @@ async def ws_host(websocket: WebSocket, session_id: str | None = Cookie(default=
             state.host_ws_connections.remove(websocket)
         except ValueError:
             pass
+        if session_id:
+            conns = state.host_ws_by_sid.get(session_id)
+            if conns is not None:
+                try:
+                    conns.remove(websocket)
+                except ValueError:
+                    pass
+                if not conns:
+                    state.host_ws_by_sid.pop(session_id, None)
 
 
 # ---------------------------------------------------------------------------
@@ -478,8 +492,10 @@ async def _handle_clear_book_alert(state, hub, helper, websocket, raw) -> None:
 
 
 async def _handle_print(state, hub, helper, websocket, raw) -> None:
-    # Leihschein des aktuell zugewiesenen Schülers drucken.
-    # Read-only PDF-Abruf + lokaler Druck (kein IServ-Submit).
+    # Leihschein des aktuell zugewiesenen Schülers drucken — über die interne
+    # Druckerwarteschlange (Rollen-Rangfolge, 2-in-flight). Read-only PDF-Abruf
+    # + lokaler Druck (kein IServ-Submit). Status/Position/Ergebnis kommen live
+    # via `print_progress`/`print_result` vom Worker, nicht synchron hier.
     if helper.student_id is None:
         await hub.send_websocket(
             websocket,
@@ -490,12 +506,21 @@ async def _handle_print(state, hub, helper, websocket, raw) -> None:
     # wenn der Helfer sie im Druck-Dialog aktiviert hat.
     second_page = bool(raw.get("second_page"))
     pages = None if second_page else "1"
-    try:
-        result = await print_loan_slip_for(state, helper.student_id, pages=pages)
-        await hub.send_websocket(websocket, {"type": "print_result", **result})
-    except Exception as e:  # noqa: BLE001 — Fehler dem Client melden
-        log.exception("Leihschein-Druck (Scanner) fehlgeschlagen")
-        await hub.send_websocket(websocket, {"type": "print_result", "ok": False, "msg": str(e)})
+    # Name/Klasse für die eigene Statusanzeige (Helfer bekommt kein Popup, nur
+    # Statustext — `name` dient dort als Fallback, falls der Worker es liefert).
+    student = state.find_student(helper.student_id)
+    if student is not None:
+        name = _slip_name(student.lastname, student.firstname, student.form)
+    else:
+        name = _slip_name(helper.student_lastname, helper.student_firstname, helper.student_form)
+    job = PrintJob.create(
+        role="helper",
+        student_id=helper.student_id,
+        pages=pages,
+        name=name,
+        helper_token=helper.token,
+    )
+    await state.print_queue.enqueue(job)
 
 
 async def _handle_scan(state, hub, helper, websocket, raw) -> None:

@@ -8,6 +8,50 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-19 — Interne Druckerwarteschlange (Rollen-Rangfolge, 2-in-flight, Live-Status)
+
+Bisher war der Leihschein-Druck Fire-and-Forget: `print_pdf` schickt das PDF
+an `lp`/`SumatraPDF` und kehrt zurück, sobald der **OS-Spooler** den Auftrag
+angenommen hat — mehrere Aufrufer feuerten nebeneinander, ohne Serialisierung
+am Drucker und ohne Rangfolge zwischen Host/Helfer/Schüler. Neu: eine
+**server-interne Warteschlange** (`server/print_queue.py`) serialisiert alle
+Drucke und ordnet sie rollen-gerecht (HOST > HELFER > SCHÜLER).
+
+- **2-in-flight-Pipeline:** Position 0 druckt gerade, Position 1 ist schon an
+  den Drucker gespoolt (wartet), Position 2+ ist intern noch nicht gesendet.
+  Der nächste Auftrag geht bereits ans OS, bevor der vorige physisch fertig ist
+  — der Drucker bleibt ohne Lücke beschäftigt (Geschwindigkeit vor strikter
+  Rangfolge). Bewusster Trade-off: ein späterer HOST-Auftrag reiht sich hinter
+  einen *bereits gespoolten* niedrigerrangigen Auftrag (am OS nicht umsortierbar);
+  alle intern Wartenden bleiben aber rollen-gerecht geordnet.
+- **„gedruckt" = auf Papier fertig**, erkannt per OS-Queue-Polling
+  (`printing.await_print_completion`): CUPS `lpstat` bis die Job-ID
+  verschwindet, Windows `Get-PrintJob` per DocumentName-Match; `file`- und
+  `win-default`-Backend ohne Polling (sofort „gedruckt", dokumentierter
+  Fallback). Timeout-Fallback 90 s, damit die Queue nie blockiert.
+- **Helfer-Statuszeile** zeigt live `Leihschein an X. Druckerwarteschlangen-
+  position` → `Wird gedruckt …` → `Gedruckt` (neue WS-Nachricht `print_progress`
+  + vorhandenes `print_result`). „Drucken & nächster Schüler" lädt den neuen
+  Schüler erst nach „Gedruckt"; bei Fehler bleibt der Schüler stehen
+  (`Druck fehlgeschlagen: …`).
+- **Host-Popup** unten rechts, persistenter Toast (keyed per `job_id`):
+  `Leihschein von <Nachname>, <Vorname> (<Klasse ohne „Klasse "-Präfix>) an X.
+  Druckerwarteschlangenposition` → `… wird gedruckt` → `… gedruckt`, auto-
+  dismiss 4 s nach fertig. Erscheint **nur am startenden Host** — neu
+  `state.host_ws_by_sid` (sid→WS-Map, da HTTP und WS denselben `session_id`-
+  Cookie teilen).
+- `print_pdf` liefert ein `job_handle` im Result (CUPS-Job-ID bzw. SumatraPDF-
+  DocumentName); `/api/print-loan-slip` enqueued + blockiert bis fertig
+  (HTTP als Rückversicherung, falls der WS nicht live ist).
+
+Dateien: neu `server/print_queue.py`; geändert `server/printing.py`,
+`server/state.py`, `server/app.py`, `server/routes/ws.py`, `server/routes/
+slips.py`, `web/scan-ws.js`, `web/scan-render.js`, `web/host-ws.js`,
+`web/host-render.js`. Tests: `tests/test_print_queue.py` (Einfüge-Logik,
+2-in-flight, Positionen, Fehler-Fall), `tests/test_printing.py` (job_handle,
+Completion-None). Offen: Schüler-Druck (Modus B) als `role="student"` ist
+angelegt, aber ohne UI; Rangfolgen-Schlupf bei 2-in-flight dokumentiert.
+
 ## 2026-07-18 — Helfer-Queue-Info-Icons: Feinschliff (Kästchen, Drucker/X-Y exklusiv)
 
 Zwei Nachschärf-Runden auf den vorigen Eintrag (Helfer-Queue-Info-Icons):

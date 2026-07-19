@@ -40,8 +40,37 @@
 | V21 | **Aktive Schüler aufrufbar (Spectator auch bei Modus B)** — aktive Schüler in der Warteschlangen-Ansicht des Helferclients bekommen einen „Aufrufen"-Button und werden beim Klick Zuschauer (warten bis frei). Server: `_handle_call`/`_handle_search_call` machen den Aufrufer jetzt auch dann zum Spectator, wenn der aktive Schüler KEINEN Helfer-Owner hat (Modus-B-Pairing setzt `status='active'` ohne `assigned_helper`) — bisheriger Fehler „Schüler nicht (mehr) in der Warteschlange" bzw. Doppel-Aktiv-Konflikt bei der Lupe. `test_call_non_pending_student_errors` nutzt jetzt `skipped` (aktive → Spectator ist Soll-Zustand) | `tests/test_ws_scanner.py::test_call_helper_becomes_spectator_of_modus_b_active_student` (+ `test_call_non_pending_student_errors` umgestellt) | 2026-07-13 | grün, 222 Tests |
 | V22 | **Search→Queue kein Doppel-Aktiv** — Lupe (`search_call`) auf einen Schüler, der zusätzlich als `pending` in einer Klassen-Queue steht, übernimmt jetzt den ECHTEN Queue-Eintrag (`active` + zugewiesen) statt einen transienten Doppelgänger zu bauen. Ohne Claim blieb der Queue-Eintrag `pending` → ein zweiter Helfer konnte ihn via `call` regulär übernehmen → derselbe Schüler zwei aktive Helfer/Worker. Mit Claim läuft der `call` in die Spectator-Warteliste („Warten bis Schüler frei…"). Invariante: nie zwei aktive Helfer auf demselben Schüler. Nebeneffekt: `end_student` löst den Helfer beim Abschluss sauber (vorher stale `student_id`/Worker-Leak). | `tests/test_ws_scanner.py::test_search_call_claims_existing_queue_entry_preventing_double_active` | 2026-07-13 | grün, 223 Tests |
 | V23 | **Ausblenden wirkt sofort auf den Clients (Live-Repush)** — das Ausblenden einer Buchreihe im Einstellungen-Dialog schickt den aktiven Helfern (Modus A) UND gepaarten Schüler-Sessions (Modus B) desselben Jahrgangs eine `booklist_update`-Nachricht mit der neu gefilterten Liste + Reihenfolge; die Reihe fällt live aus der Geräteliste, ohne den Worker-Neuaufbau und ohne den clientseitigen Scan-Fortschritt zu löschen (`scannedIsbns`/`scanOrder` bleiben). Server: `repush_booklist` (`server/sessions.py`) holt die Schülerinfo frisch, rechnet die ISBN-Vorabmengen neu (damit `evaluate_scan_for_booking` den neuen Hidden-Stand sieht) und bewahrt die X/Y-Zählung für sichtbare Bücher; `/api/booklist-hidden` repusht per `asyncio.gather` parallel + `broadcast_host`. | `tests/test_booklist_repush.py` (4 Tests: Filter + Vormerk-Neuerung, Scan-Fortschritt erhalten für sichtbare Bücher, Modus-B ws=None-Skip, IServ-Fehler-resilient) | 2026-07-18 | grün, 238 Tests. **Live-Check am echten Gerät noch offen** (s. „Offen" unten) |
+| V24 | **Interne Druckerwarteschlange (Logik)** — Rollen-gerechte Einfügung (HOST>HELFER>SCHÜLER, „hinter letzte Gleichrangige"), bereits gespoolte/druckende Aufträge bleiben am Kopf gepinnt (am OS verbindlich); 2-in-flight-Pipeline (B→`spooled` Pos 1, C→`queued` Pos 2, nach A fertig rückt B→`printing` Pos 0); Fehler-Fall wird `failed` mit `ok=False`; `print_pdf` liefert CUPS-`job_handle` („request id is X-123"), `file`-Backend `None`; `await_print_completion(None)` sofort fertig. | `tests/test_print_queue.py` (7 Tests) + `tests/test_printing.py` (3 neue: `job_handle` CUPS, `file` None, Completion-None) | 2026-07-19 | grün, 248 Tests. **Echte-Drucker-Verifizierung (OS-Polling, 2-in-flight am Live-System, Host-Popup nur am startenden Host) noch offen** (s. „Offen" unten) |
 
 ## Offen / zu testen
+
+### Offen 2026-07-19 (Druckerwarteschlange: Verifizierung am echten Drucker)
+
+Die interne Druckerwarteschlange (V24) ist per Unit-Test logisch abgesichert
+(Rollen-Einfügung, 2-in-flight-Pipeline, Positionen, Fehler-Fall) — aber das
+OS-Completion-Polling und das Live-Verhalten am echten Drucker sind offen. Auf
+dem Dev-VPS (`file`-Backend) gibt es keinen physischen Druck, daher ist dort
+nur die Pipeline-Logik testbar („gedruckt" sofort).
+
+- [ ] **CUPS `lp`-Pfad (macOS/Linux):** `lpstat`-Polling erkennt das physische
+      Druckende (Job-ID verschwindet) → Helfer-Status wechselt auf „Gedruckt",
+      „Drucken & nächster Schüler" lädt erst dann den nächsten.
+- [ ] **Windows `sumatra`-Pfad:** `Get-PrintJob` per DocumentName-Match erkennt
+      das Druckende (SumatraPDF setzt Job-Name = Dateiname; `mkstemp`-Prefix
+      `leihschein_<student_id>_` macht ihn eindeutig).
+- [ ] **2-in-flight am Live-Drucker:** zweiter Auftrag wird vorspooled, während
+      der erste druckt — Positions-Anzeige 0/1/2 wie spezifiziert.
+- [ ] **Host-Popup nur am startenden Host:** von zwei eingeloggt-verbundenen
+      Host-Rechnern (unterschiedliche `sid`) sieht nur der, der auf das
+      Drucker-Icon geklickt hat, das Popup (Position / „wird gedruckt" /
+      „gedruckt"); der andere nicht.
+- [ ] **Rangfolgen-Schlupf** (dokumentierter Trade-off): HOST-Klick, während ein
+      HELFER-Auftrag bereits `spooled` (Pos 1) ist → HOST rückt auf Pos 2
+      (hinter den gespoolten HELFER), nicht vor ihn.
+- [ ] `win-default`-Backend: kein Polling → „gespoolt = gedruckt" (sofort
+      „Gedruckt" nach `os.startfile`), dokumentierter Fallback.
+- [ ] Timeout-Fallback (90 s): bleibt ein OS-Job hängen, wird er trotzdem als
+      „gedruckt" gewertet (Queue blockiert nicht).
 
 ### Offen 2026-07-18 (Ausblenden-Live-Repush: Verifizierung am echten Gerät)
 

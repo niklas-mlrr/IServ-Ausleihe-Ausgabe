@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from automation.worker import StudentSession, WorkerPool
 
     from .iserv_client import IsServClient
+    from .print_queue import PrintQueue
 
 # Modus-B-Lebenszyklus einer Schüler-Session.
 StudentSessionState = Literal[
@@ -355,9 +356,22 @@ class AppState:
         # session_id -> letzter Zugriff (für gleitendes TTL, siehe Methoden unten).
         self.host_sessions: dict[str, datetime] = {}
         self.host_ws_connections: list[object] = []
+        # sid -> verbundene Host-WebSockets (mehrere Tabs/Rechner pro sid möglich).
+        # Zwingend für zielgerichtete Druck-Status-Popups: nur der Host, der den
+        # Druck gestartet hat, soll das „an X. Position / wird gedruckt / gedruckt"-
+        # Popup sehen — nicht alle eingeloggt-Verbundenen. HTTP-Endpoint und WS
+        # authentifizieren beide über denselben `session_id`-Cookie, sodass die sid
+        # den Urheber eindeutig identifiziert (s. routes/_deps.py / routes/ws.py).
+        self.host_ws_by_sid: dict[str, list[object]] = {}
         self.worker_pool: WorkerPool | None = None
         self.iserv: IsServClient | None = None
         self.student_worker_sessions: dict[int, StudentSession] = {}  # student_id -> Session
+        # Server-interne Druckerwarteschlange (Rollen-Rangfolge, 2-in-flight,
+        # OS-Completion-Polling). Lebenszyklus in app.lifespan (start/stop).
+        # Zugriff ausschließlich über `state.print_queue`.
+        from .print_queue import PrintQueue
+
+        self.print_queue: PrintQueue = PrintQueue()
         # FIFO-Warteliste je Schüler: Helfer, die einen bei einem ANDEREN
         # Helfer aktiven Schüler nur zuschauen (spectate_student in
         # sessions.py), geordnet nach Anmeldereihenfolge.

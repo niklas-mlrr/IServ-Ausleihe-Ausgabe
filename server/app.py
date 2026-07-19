@@ -77,6 +77,11 @@ async def lifespan(app: FastAPI):
     sweeper = asyncio.create_task(sweep_expired_sessions())
     log.info("Modus-B-Timeout-Sweeper gestartet")
 
+    # Interne Druckerwarteschlange (Rollen-Rangfolge, 2-in-flight, OS-Completion-
+    # Polling) — startet den Worker-Task, der Druckaufträge serialisiert.
+    state.print_queue.start()
+    log.info("Druckerwarteschlange gestartet")
+
     yield
 
     sweeper.cancel()
@@ -84,6 +89,9 @@ async def lifespan(app: FastAPI):
         await sweeper
     except asyncio.CancelledError:
         pass
+
+    await state.print_queue.stop()
+    log.info("Druckerwarteschlange gestoppt")
 
     if state.worker_pool:
         await state.worker_pool.stop()

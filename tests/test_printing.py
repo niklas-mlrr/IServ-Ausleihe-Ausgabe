@@ -202,3 +202,33 @@ def test_print_pdf_lp_without_pages_prints_all(monkeypatch):
 
     asyncio.run(printing.print_pdf(b"%PDF-1.4\n", backend="lp"))
     assert not any("page-ranges" in str(a) for a in captured["cmd"])
+
+
+def test_print_pdf_lp_returns_cups_job_handle(monkeypatch):
+    """`lp` meldet „request id is <dest>-<n>" — das wird als `job_handle`
+    durchgereicht, damit der Poller das physische Druckende erkennen kann."""
+    monkeypatch.setattr(printing.shutil, "which", lambda name: "/usr/bin/lp")
+
+    async def fake_run(cmd):
+        return 0, "request id is HP-123"
+
+    monkeypatch.setattr(printing, "_run", fake_run)
+    res = asyncio.run(printing.print_pdf(b"%PDF-1.4\n", backend="lp"))
+    assert res["ok"] is True
+    assert res["job_handle"] == {"kind": "cups", "job_id": "HP-123"}
+
+
+def test_print_pdf_file_has_no_job_handle(tmp_path):
+    """`file`-Backend: kein physischer Drucker → `job_handle` None (sofort
+    „gedruckt", kein OS-Polling)."""
+    res = asyncio.run(
+        printing.print_pdf(b"%PDF-1.4\n", backend="file", output_dir=tmp_path)
+    )
+    assert res["ok"] is True
+    assert res["job_handle"] is None
+
+
+def test_await_print_completion_none_is_immediate():
+    """Ohne Handle (file/win-default) kehrt `await_print_completion` sofort
+    zurück (True) — kein Polling."""
+    assert asyncio.run(printing.await_print_completion(None)) is True

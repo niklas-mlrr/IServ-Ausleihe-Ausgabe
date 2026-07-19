@@ -26,6 +26,8 @@ window.__host = window.__host || {};
         if (msg.type === 'state') applyState(msg);
         else if (msg.type === 'book_alert') showBookAlert(msg);
         else if (msg.type === 'loan_slip_download') downloadLoanSlip(msg);
+        else if (msg.type === 'print_progress') showPrintProgress(msg);
+        else if (msg.type === 'print_result') showPrintResult(msg);
       },
     });
   }

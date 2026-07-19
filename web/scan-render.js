@@ -509,13 +509,14 @@ function renderOpenWarning(el, vorgemerkt, offen) {
   }
 }
 
-// Leihschein drucken. Der Server holt das PDF read-only und druckt lokal
-// (kein IServ-Submit); Ergebnis kommt als 'print_result' zurück.
+// Leihschein drucken — geht über die server-interne Druckerwarteschlange
+// (Rollen-Rangfolge, 2-in-flight). Live-Status/Position/Ergebnis kommen als
+// 'print_progress' / 'print_result' vom Worker (kein IServ-Submit).
 function sendPrint(thenNext) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   printThenNext = thenNext;
   printBtn.disabled = true;
-  setStatusText('Leihschein wird gedruckt …');
+  setStatusText('Leihschein in Druckerwarteschlange …');
   ws.send(JSON.stringify({ type: 'print', second_page: slipCheck.checked }));
   closePrintModal();
 }

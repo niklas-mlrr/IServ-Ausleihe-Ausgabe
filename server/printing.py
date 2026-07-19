@@ -27,6 +27,7 @@ import re
 import secrets
 import shutil
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -114,7 +115,21 @@ async def _print_lp(tmp_pdf: Path, printer_name: str | None, pages: str | None =
     rc, out = await _run(cmd)
     if rc != 0:
         raise RuntimeError(f"lp fehlgeschlagen (rc={rc}): {out}")
-    return {"ok": True, "backend": "lp", "detail": out or "an Drucker gesendet"}
+    # CUPS meldet auf stdout "request id is <dest>-<id>" — die Job-ID brauchen
+    # wir, um später per `lpstat -o` das physische Druckende zu erkennen. Liefert
+    # lp keine ID (exotische CUPS-Variante), fällt `job_handle` auf None → dann
+    # gilt der Auftrag sofort als „gespoolt = gedruckt" (kein Polling möglich).
+    job_id = None
+    m = re.search(r"request id is (\S+)", out or "")
+    if m:
+        job_id = m.group(1).rstrip(".")
+    handle = {"kind": "cups", "job_id": job_id} if job_id else None
+    return {
+        "ok": True,
+        "backend": "lp",
+        "detail": out or "an Drucker gesendet",
+        "job_handle": handle,
+    }
 
 
 async def _print_sumatra(
@@ -137,7 +152,18 @@ async def _print_sumatra(
     rc, out = await _run(cmd)
     if rc != 0:
         raise RuntimeError(f"SumatraPDF fehlgeschlagen (rc={rc}): {out}")
-    return {"ok": True, "backend": "sumatra", "detail": "an Drucker gesendet"}
+    # SumatraPDF setzt den Print-Job-Namen auf den Dateinamen (Basename) — der
+    # `mkstemp`-Prefix `leihschein_<student_id>_` macht ihn eindeutig. Daran
+    # erkennen wir per `Get-PrintJob` das physische Druckende. Ohne expliziten
+    # Drucker (`-print-to-default`) merken wir uns None und lösen den
+    # Standarddrucker erst beim Pollen auf.
+    handle = {"kind": "win", "printer": printer_name, "doc": tmp_pdf.name}
+    return {
+        "ok": True,
+        "backend": "sumatra",
+        "detail": "an Drucker gesendet",
+        "job_handle": handle,
+    }
 
 
 async def list_printers(backend: str = "auto") -> dict:
@@ -192,7 +218,118 @@ def _print_win_default(tmp_pdf: Path) -> dict:
     # os.startfile gibt es nur unter Windows; druckt über das verknüpfte
     # PDF-Programm (öffnet ggf. kurz dessen Fenster).
     os.startfile(str(tmp_pdf), "print")  # type: ignore[attr-defined]  # noqa: S606
-    return {"ok": True, "backend": "win-default", "detail": "an Standard-PDF-Handler gesendet"}
+    # Kein zuverlässiges Job-Handle (keine Job-ID vom verknüpften PDF-Handler) →
+    # kein OS-Polling; der Worker wertet den Auftrag sofort als „gedruckt"
+    # (dokumentierter „gespoolt = gedruckt"-Fallback für win-default).
+    return {
+        "ok": True,
+        "backend": "win-default",
+        "detail": "an Standard-PDF-Handler gesendet",
+        "job_handle": None,
+    }
+
+
+_COMPLETION_POLL_S = 0.7
+_COMPLETION_TIMEOUT_S = 90.0
+
+
+async def _resolve_default_printer_win() -> str | None:
+    """Standarddrucker unter Windows ermitteln (PowerShell, rein lesend).
+
+    Für den Polling-Pfad, wenn SumatraPDF mit `-print-to-default` aufgerufen
+    wurde und wir keinen Druckernamen haben — `Get-PrintJob` braucht ihn aber.
+    Gibt None zurück, wenn sich der Standarddrucker nicht ermitteln lässt.
+    """
+    rc, out = await _run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            _PS_UTF8_PREFIX + "(Get-CimInstance Win32_Printer -Filter 'Default=TRUE').Name",
+        ]
+    )
+    if rc == 0 and out.strip():
+        return out.strip().splitlines()[0].strip() or None
+    return None
+
+
+async def await_print_completion(
+    handle: dict | None, *, timeout_s: float = _COMPLETION_TIMEOUT_S
+) -> bool:
+    """Auf das **physische** Druckende warten (OS-Queue-Polling).
+
+    ``handle`` kommt aus ``print_pdf``-Result (`job_handle`). Rückgabe:
+    ``True`` = Auftrag ist aus der OS-Warteschlange verschwunden (auf Papier
+    fertig oder abgebrochen); ``False`` = Timeout (wir werten dann trotzdem
+    als „fertig", damit die interne Warteschlange nicht blockiert — der
+    physische Druck läuft am OS ohnehin weiter).
+
+    ``handle is None`` (Backends ``file``/``win-default``) → sofort ``True``
+    (kein Polling möglich / nötig).
+    """
+    if not handle:
+        return True
+    kind = handle.get("kind")
+    if kind == "cups":
+        return await _await_cups(handle.get("job_id"), timeout_s=timeout_s)
+    if kind == "win":
+        return await _await_win(handle.get("printer"), handle.get("doc"), timeout_s=timeout_s)
+    # Unbekanntes Handle → kein Polling, sofort fertig.
+    return True
+
+
+async def _await_cups(job_id: str | None, *, timeout_s: float) -> bool:
+    """CUPS: `lpstat -o` pollen, bis die `job_id` nicht mehr auftaucht."""
+    if not job_id or not shutil.which("lpstat"):
+        return True
+    deadline = _monotonic() + timeout_s
+    while _monotonic() < deadline:
+        rc, out = await _run(["lpstat", "-o"])
+        if rc == 0 and job_id not in (out or ""):
+            return True
+        await asyncio.sleep(_COMPLETION_POLL_S)
+    log.warning("CUPS-Completion-Polling Timeout für Job %s — werte als fertig", job_id)
+    return True
+
+
+async def _await_win(printer: str | None, doc: str | None, *, timeout_s: float) -> bool:
+    """Windows: `Get-PrintJob` pollen, bis kein Job mehr mit unserem
+    DocumentName (Basename) in der Druckerwarteschlange liegt."""
+    if not doc:
+        return True
+    name = printer or await _resolve_default_printer_win()
+    if not name:
+        log.warning("Windows-Completion-Polling: Drucker nicht ermittelbar — werte als fertig")
+        return True
+    # DocumentName per `-like` matchen: SumatraPDF setzt i. d. R. den Dateinamen
+    # als Job-Namen; `-like "*<doc>*"` ist robust gegen Pfad-/Erweiterungs-Drift.
+    pattern = f"*{doc}*"
+    deadline = _monotonic() + timeout_s
+    while _monotonic() < deadline:
+        cmd = [
+            "powershell",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            _PS_UTF8_PREFIX
+            + (
+                f"@(Get-PrintJob -PrinterName '{name}' | "
+                f"Where-Object {{ $_.DocumentName -like '{pattern}' }}).Count"
+            ),
+        ]
+        rc, out = await _run(cmd)
+        if rc == 0 and (out or "").strip() in ("0", ""):
+            return True
+        await asyncio.sleep(_COMPLETION_POLL_S)
+    log.warning("Windows-Completion-Polling Timeout für Doc %s — werte als fertig", doc)
+    return True
+
+
+def _monotonic() -> float:
+    """Monotone Zeit (Wanduhr-Sprünge sollen das Polling-Deadline nicht
+    verfälschen)."""
+    return time.monotonic()
 
 
 def cleanup_stale_print_tempfiles(max_age_h: float = 6.0) -> int:
@@ -253,7 +390,15 @@ async def print_pdf(
     if resolved == "file":
         path = _write_pdf(data, out_dir, prefix=label)
         log.info("Leihschein gespeichert (Backend 'file'): %s", path)
-        return {"ok": True, "backend": "file", "detail": f"gespeichert: {path}", "path": str(path)}
+        # Kein physischer Drucker → kein Polling; der Worker wertet den Auftrag
+        # sofort als „gedruckt" (Dev-VPS / `save_pdf_locally`-Sicherheitsnetz).
+        return {
+            "ok": True,
+            "backend": "file",
+            "detail": f"gespeichert: {path}",
+            "path": str(path),
+            "job_handle": None,
+        }
 
     # Sonst: in eine Temp-Datei schreiben und an das Druck-Backend übergeben.
     fd, tmp_name = tempfile.mkstemp(suffix=".pdf", prefix=f"{label}_")

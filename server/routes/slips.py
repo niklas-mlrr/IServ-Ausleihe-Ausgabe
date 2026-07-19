@@ -5,13 +5,20 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import HTTPException
+from fastapi import Depends, HTTPException
 
 from ..config import get_config
 from ..hub import get_hub
+from ..print_queue import PrintJob, slip_name
 from ..sessions import handle_commit
 from ..state import get_state
-from ._deps import CommitBookRequest, PrinterRequest, PrintLoanSlipRequest, host_router
+from ._deps import (
+    CommitBookRequest,
+    PrinterRequest,
+    PrintLoanSlipRequest,
+    host_router,
+    require_host,
+)
 
 log = logging.getLogger(__name__)
 
@@ -22,11 +29,18 @@ log = logging.getLogger(__name__)
 
 
 @host_router.post("/api/print-loan-slip")
-async def print_loan_slip(body: PrintLoanSlipRequest) -> dict:
-    """Leihschein eines Schülers holen (read-only) und lokal drucken.
+async def print_loan_slip(body: PrintLoanSlipRequest, sid: str = Depends(require_host)) -> dict:
+    """Leihschein eines Schülers holen (read-only) und lokal drucken — über die
+    interne Druckerwarteschlange (Rollen-Rangfolge, 2-in-flight).
 
     Kein Schreibzugriff auf IServ — `get_loan_slip_pdf` ist ein reiner GET, das
     Drucken passiert am Laptop/Macbook (siehe server/printing.py).
+
+    Der Endpoint enqueued den Auftrag und **blockiert** bis der Worker ihn
+    abgearbeitet hat (gedruckt/fehlgeschlagen) — die HTTP-Antwort ist Rückversicherung
+    für den Fall, dass der Host-WS gerade nicht live ist. Das Live-Popup
+    (Position / „wird gedruckt" / „gedruckt") läuft parallel via WS und erscheint
+    nur an diesem Host (`sid`), nicht an allen eingeloggt-Verbundenen.
     """
     if body.student_id is None:
         raise HTTPException(400, "student_id fehlt")
@@ -35,14 +49,31 @@ async def print_loan_slip(body: PrintLoanSlipRequest) -> dict:
     # Host-Toggle gesetzt ist.
     pages = None if body.second_page else "1"
 
-    from ..sessions import print_loan_slip_for
-
     state = get_state()
-    try:
-        return await print_loan_slip_for(state, student_id, pages=pages)
-    except Exception as e:
-        log.exception("Leihschein-Druck für %s fehlgeschlagen", student_id)
-        raise HTTPException(502, f"Leihschein-Druck fehlgeschlagen: {e}") from e
+    student = state.find_student(student_id)
+    name = slip_name(
+        student.lastname if student else None,
+        student.firstname if student else None,
+        student.form if student else None,
+    )
+    job = PrintJob.create(
+        role="host",
+        student_id=student_id,
+        pages=pages,
+        name=name,
+        host_sid=sid,
+    )
+    await state.print_queue.enqueue(job)
+    # Bis der Worker den Auftrag finalisiert hat (physisch gedruckt / fehl-
+    # geschlagen). `done` wird im Worker gesetzt, sobald der Kopf abgearbeitet ist.
+    await job.done.wait()
+    res = dict(job.result or {})
+    res.pop("job_handle", None)  # internes OS-Handle nicht nach außen reichen
+    if not res.get("ok"):
+        # 502 wie vor der Queue-Umstellung (Contract erhalten); das Live-Popup
+        # läuft parallel via WS (`print_result` mit ok:false → toast-warn).
+        raise HTTPException(502, res.get("msg") or res.get("detail") or "Druck fehlgeschlagen")
+    return res
 
 
 @host_router.get("/api/printers")

@@ -440,11 +440,17 @@ window.__host = window.__host || {};
     const secondPage = await openPrintDialog();
     if (secondPage === null) return;
     await busy(btn, async () => {
-      showMsg('Leihschein wird geholt …');
+      // Der Druck geht durch die server-interne Druckerwarteschlange; der
+      // Endpoint blockiert bis „gedruckt"/Fehler. Live-Popup (Position /
+      // „wird gedruckt" / „gedruckt") kommt via WS (showPrintProgress/
+      // showPrintResult) — nur hier am startenden Host. Die HTTP-Antwort ist
+      // Rückversicherung für den Fall, dass der WS gerade nicht live ist.
       const r = await fetch('/api/print-loan-slip', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ student_id: studentId, second_page: secondPage }) });
-      const d = await r.json().catch(() => ({}));
-      if (r.ok) showMsg(`Leihschein: ${d.detail || 'gedruckt'} (${d.backend})`);
-      else showMsg(d.detail || 'Druck fehlgeschlagen');
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        showMsg(d.detail || 'Druck fehlgeschlagen', 'warn');
+      }
+      // Bei r.ok liefert der WS das Popup; nichts weiter tun.
     });
   }
 
@@ -955,6 +961,57 @@ window.__host = window.__host || {};
       const drop = () => t.remove();
       t.addEventListener('transitionend', drop, { once: true });
       setTimeout(drop, 400);  // Fallback, falls keine Transition feuert (reduced-motion)
+    }, 4000);
+  }
+
+  // ---- Persistenter Druck-Status-Toast (keyed per job_id) ----
+  // Live aus der internen Druckerwarteschlange: Position / „wird gedruckt" /
+  // „gedruckt". Bleibt stehen, solange der Auftrag wartet oder druckt, und
+  // auto-dismissed 4 s nach „gedruckt"/Fehler (wie showMsg). Erscheint nur am
+  // startenden Host — der Server adressiert per sid (state.host_ws_by_sid).
+  const printToasts = {};  // job_id -> { el, timer }
+
+  function printToastText(msg, finalOk) {
+    const who = msg.name ? `von ${msg.name} ` : '';
+    if (finalOk === true) return `Leihschein ${who}gedruckt`;
+    if (finalOk === false) return `Leihschein ${who}— Druck fehlgeschlagen: ${msg.msg || ''}`;
+    if (msg.status === 'printing' || msg.position === 0) return `Leihschein ${who}wird gedruckt`;
+    if (typeof msg.position === 'number' && msg.position >= 1) {
+      return `Leihschein ${who}an ${msg.position}. Druckerwarteschlangenposition`;
+    }
+    return `Leihschein ${who}in Druckerwarteschlange`;
+  }
+
+  function _printToastEl(jobId, warn) {
+    let entry = printToasts[jobId];
+    if (!entry) {
+      const stack = document.getElementById('toast-stack');
+      const t = document.createElement('div');
+      t.className = 'toast' + (warn ? ' toast-warn' : '');
+      stack.appendChild(t);
+      requestAnimationFrame(() => t.classList.add('show'));
+      entry = { el: t, timer: null };
+      printToasts[jobId] = entry;
+    } else if (warn) {
+      entry.el.classList.add('toast-warn');
+    }
+    return entry;
+  }
+
+  function showPrintProgress(msg) {
+    const entry = _printToastEl(msg.job_id, false);
+    entry.el.textContent = printToastText(msg, null);
+  }
+
+  function showPrintResult(msg) {
+    const entry = _printToastEl(msg.job_id, !msg.ok);
+    entry.el.textContent = printToastText(msg, msg.ok);
+    if (entry.timer) clearTimeout(entry.timer);
+    entry.timer = setTimeout(() => {
+      entry.el.classList.remove('show');
+      const drop = () => { entry.el.remove(); delete printToasts[msg.job_id]; };
+      entry.el.addEventListener('transitionend', drop, { once: true });
+      setTimeout(drop, 400);  // Fallback (reduced-motion)
     }, 4000);
   }
 
@@ -1488,3 +1545,5 @@ window.__host.saveChangedBooklistOrders = saveChangedBooklistOrders;
 window.__host.saveBooklistOrder = saveBooklistOrder;
 window.__host.saveBooklistHidden = saveBooklistHidden;
 window.__host.handleDelegatedAction = handleDelegatedAction;
+window.__host.showPrintProgress = showPrintProgress;
+window.__host.showPrintResult = showPrintResult;
