@@ -414,6 +414,15 @@ class PrintQueue:
         state = get_state()
         for job, position, status, printer in snapshot:
             await self._send_progress(hub, state, job, position, status, printer)
+        # Druck-Übergänge (dispatch/spool/druckt/fertig) als vollen State an
+        # alle verbundenen Hosts pushen, damit deren Druckerwarteschlangen-Box
+        # live folgt — der Snapshot spiegelt über `pool_printers`/`pool_summary`
+        # Last und zentrale Warteschlange. `send_all_hosts` (ohne Queue-Size-
+        # Folgebroadcast) hält die Helfer-WS frei von Zustands-Pushes, die nur
+        # den Host interessieren. Ohne verbundene Hosts (auch im Test) entfällt
+        # der Snapshot-Aufwand komplett.
+        if state.host_ws_connections:
+            await hub.send_all_hosts(state.state_snapshot())
 
     def _printer_name(self, printer_id: str | None) -> str | None:
         """Druckername zur Kennung (für Notifications). None = Standarddrucker

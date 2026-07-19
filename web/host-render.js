@@ -620,7 +620,7 @@ window.__host = window.__host || {};
 
   // Host-Tab (Helfer + Modus-B-Kontrolle) und Klassen-Tab (Now-Serving + Queue
   // + Pairing) getrennt rendern.
-  function renderHostTab() { renderHelpers(); renderModusBControl(); }
+  function renderHostTab() { renderHelpers(); renderModusBControl(); renderPrintQueue(); }
   function renderClassTab(id) {
     if (!(state.contexts || {})[id]) return;
     if (!document.getElementById('panel-ctx-' + id)) return;
@@ -1017,6 +1017,53 @@ window.__host = window.__host || {};
       el.innerHTML = `Worker <b>${wp.available}/${wp.total}</b> frei`;
       if (wp.available === 0) el.classList.add('txt-warn');
     }
+  }
+
+  // ---- Druckerwarteschlange (Host-Tab) ----
+  // Live-Status des Drucker-Pools (Last, druckt/wartet je Drucker) plus die
+  // zentrale Warteschlange (Aufträge ohne zugewiesenen Drucker). Daten aus dem
+  // State-Snapshot (`state.printers`/`state.print_queue_summary`); der Server
+  // pusht auf jeden Druck-Übergang einen frischen Snapshot (print_queue.
+  // _notify_all), darum folgt die Box ohne Polling.
+  function renderPrintQueue() {
+    const box = document.getElementById('print-queue-box');
+    if (!box) return;
+    const pool = state.printers || [];
+    const waiting = (state.print_queue_summary && state.print_queue_summary.waiting) || 0;
+    if (!pool.length) {
+      box.innerHTML = '<p class="hint">Kein Drucker konfiguriert — Druck nicht möglich. In den Einstellungen Drucker hinzufügen.</p>';
+      return;
+    }
+    const waitLine = waiting > 0
+      ? `<div class="pq-waiting">In zentraler Warteschlange: <b>${waiting}</b> ${waiting === 1 ? 'Auftrag' : 'Aufträge'}</div>`
+      : '';
+    const rows = pool.map(p => {
+      const printing = p.printing_name;
+      const spooled = p.spooled_name;
+      let dot, status;
+      if (printing && spooled) {
+        dot = 'busy';
+        status = `druckt „${escapeHtml(printing)}" · als nächstes „${escapeHtml(spooled)}"`;
+      } else if (printing) {
+        dot = 'busy';
+        status = `druckt „${escapeHtml(printing)}"`;
+      } else if (spooled) {
+        dot = 'busy';
+        status = `wartet auf Drucker: „${escapeHtml(spooled)}"`;
+      } else {
+        dot = 'idle';
+        status = '<span style="opacity:.5">bereit</span>';
+      }
+      return `<tr>
+        <td>${escapeHtml(printerLabel(p))}</td>
+        <td><span class="pq-dot pq-${dot}" aria-hidden="true"></span> ${status}</td>
+      </tr>`;
+    }).join('');
+    box.innerHTML = `${waitLine}
+      <table class="pq-table">
+        <thead><tr><th>Drucker</th><th>Status</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
   }
 
   function renderHelpers() {
@@ -1732,6 +1779,7 @@ window.__host.cancelArm = cancelArm;
 window.__host.renderModusBControl = renderModusBControl;
 window.__host.renderCtxPairing = renderCtxPairing;
 window.__host.renderHostTab = renderHostTab;
+window.__host.renderPrintQueue = renderPrintQueue;
 window.__host.renderClassTab = renderClassTab;
 window.__host.renderCtxNowServing = renderCtxNowServing;
 window.__host.renderStatusBar = renderStatusBar;
