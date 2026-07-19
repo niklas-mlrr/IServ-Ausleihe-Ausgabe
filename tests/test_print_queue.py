@@ -303,9 +303,10 @@ def test_pool_snapshot_shape():
 
 
 def test_waiting_list_originator_and_form(monkeypatch):
-    """`waiting_list` liefert pro wartendem Auftrag Position, Schüler, Klasse
-    und Auftraggeber (Host / Helfer namentlich / Schüler). Schüler-Lookup live
-    aus dem State; ohne aktive Kontext-Queue Fallback auf den job.name."""
+    """`waiting_list` liefert pro wartendem Auftrag Position, Schüler, Klasse,
+    Auftraggeber (Host / Helfer namentlich / Schüler) und die erlaubten Drucker
+    (Allowlist zum Enqueue-Zeitpunkt). Schüler-Lookup live aus dem State; ohne
+    aktive Kontext-Queue Fallback auf den job.name."""
     from server.state import QueueStudent
 
     st = AppState()
@@ -318,16 +319,24 @@ def test_waiting_list_originator_and_form(monkeypatch):
     ctx.queue.append(
         QueueStudent(student_id=1, lastname="Müller", firstname="Max", form="Klasse 5a")
     )
+    # Default-Pool = ein Standarddrucker (name=None); dessen ID für die Allowlist.
+    default_pid = st.settings.printers[0].id
     pq = st.print_queue
     # Worker nicht starten → Aufträge bleiben in `waiting` (kein Dispatch).
     asyncio.run(pq.enqueue(_job("host", 1, host_sid="s1", name="Müller, Max (Klasse 5a)")))
     asyncio.run(pq.enqueue(_job("helper", 2, helper_token="tok-h1", name="Schmidt, Anna (6b)")))
     asyncio.run(pq.enqueue(_job("helper", 3, helper_token="tok-x", name="Karl (7c)")))
+    # Allowlist eingeschränkt auf den Default-Drucker bzw. auf einen verwaisten ID
+    # (Drucker nach Enqueue entfernt → kein erlaubter Drucker mehr im Pool).
+    asyncio.run(pq.enqueue(_job(
+        "helper", 5, helper_token="tok-h1", name="Roth, Leo (9c)", allowed={default_pid},
+    )))
     asyncio.run(pq.enqueue(_job("student", 4, name="Wolf, Tom (8d)")))
+    asyncio.run(pq.enqueue(_job("student", 6, name="Bach, Sam (10d)", allowed={"orphan"})))
 
     wl = pq.waiting_list(st)
-    # Rollen-gerechte Reihenfolge: HOST vor HELFER vor SCHÜLER.
-    assert [w["position"] for w in wl] == [0, 1, 2, 3]
+    # Rollen-gerechte Reihenfolge: HOST vor HELFER (3×) vor SCHÜLER (2×).
+    assert [w["position"] for w in wl] == [0, 1, 2, 3, 4, 5]
     # Schüler 1 aus Kontext-Queue: Name ohne Form, Form bereinigt („Klasse " gestrippt).
     assert wl[0]["student"] == "Müller, Max"
     assert wl[0]["form"] == "5a"
@@ -335,9 +344,16 @@ def test_waiting_list_originator_and_form(monkeypatch):
     # Helfer namentlich; unbekannter Token → Fallback „Helfer".
     assert wl[1]["originator"] == "Lukas"
     assert wl[2]["originator"] == "Helfer"
-    assert wl[3]["originator"] == "Schüler"
-    # Schüler 2–4 nicht in aktiver Kontext-Queue → Fallback auf job.name, form None.
+    assert wl[3]["originator"] == "Lukas"  # zweiter Auftrag desselben Helfers
+    assert wl[4]["originator"] == "Schüler"
+    assert wl[5]["originator"] == "Schüler"
+    # Schüler 2–6 nicht in aktiver Kontext-Queue → Fallback auf job.name, form None.
     assert wl[1]["student"] == "Schmidt, Anna (6b)" and wl[1]["form"] is None
+    # Allowlist: None = alle Pool-Drucker („Standarddrucker"); eingeschränkt = nur
+    # die benannten; verwaiste ID ohne Treffer im Pool → leere Liste.
+    assert wl[0]["all_allowed"] is True and wl[0]["allowed_printers"] == ["Standarddrucker"]
+    assert wl[3]["all_allowed"] is False and wl[3]["allowed_printers"] == ["Standarddrucker"]
+    assert wl[5]["all_allowed"] is False and wl[5]["allowed_printers"] == []
 
 
 # ---- Pool-Verteilung mit pro-Klasse Drucker-Allowlist -------------------

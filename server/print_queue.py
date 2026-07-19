@@ -390,13 +390,17 @@ class PrintQueue:
 
     def waiting_list(self, state) -> list[dict]:
         """Wartende Aufträge (zentrale Warteschlange, noch ohne zugewiesenen
-        Drucker) für den Host-Snapshot: Position, Schüler, Klasse und
-        Auftraggeber. Lock-frei (Anzeige-Konsistenz reicht, s. `pool_printers`).
+        Drucker) für den Host-Snapshot: Position, Schüler, Klasse, Auftraggeber
+        und die erlaubten Drucker (Allowlist der Klasse zum Enqueue-Zeitpunkt).
+        Lock-frei (Anzeige-Konsistenz reicht, s. `pool_printers`).
 
         Schüler-/Klassen-/Urheber-Lookup live aus dem State, nicht zum
         Enqueue-Zeitpunkt eingefroren — ein Helfer kann sich zwischenzeitlich
         umbenannt haben, ein Schüler aus der Kontext-Queue gerutscht sein
-        (dann Fallback auf den am Auftrag gespeicherten `name`)."""
+        (dann Fallback auf den am Auftrag gespeicherten `name`). Die Allowlist
+        hingegen ist am Auftrag gespeichert und bleibt stabil, auch wenn die
+        Klasse später umkonfiguriert wird (s. PrintJob.allowed_printers)."""
+        pool = list(state.settings.printers)
         out: list[dict] = []
         for idx, j in enumerate(self.waiting):
             student = state.find_student(j.student_id)
@@ -409,15 +413,35 @@ class PrintQueue:
                 # Auftrag hinterlegte `name` trägt die Form in Klammern.
                 student_name = j.name
                 form = None
+            # Erlaubte Drucker in Pool-Priorität (linkester zuerst). `None` =
+            # alle Pool-Drucker; sonst nur die IDs darin. Verwaiste IDs (Drucker
+            # nach dem Enqueue entfernt) fallen raus — `all_allowed=False` mit
+            # leerer Liste signalisiert dem Host einen nicht bedienbaren Auftrag.
+            if j.allowed_printers is None:
+                all_allowed = True
+                allowed_names = [self._printer_display(p) for p in pool]
+            else:
+                all_allowed = False
+                allowed_names = [
+                    self._printer_display(p) for p in pool if p.id in j.allowed_printers
+                ]
             out.append(
                 {
                     "position": idx,
                     "student": student_name,
                     "form": form,
                     "originator": self._originator_label(state, j),
+                    "all_allowed": all_allowed,
+                    "allowed_printers": allowed_names,
                 }
             )
         return out
+
+    @staticmethod
+    def _printer_display(p) -> str:
+        """Anzeige-Label eines Pool-Druckers für die Warteschlangen-Liste:
+        `name=None` ist der Standarddrucker des Geräts (s. PrinterConfig)."""
+        return "Standarddrucker" if p.name is None else p.name
 
     def _originator_label(self, state, job: PrintJob) -> str:
         """Auftraggeber für die Warteschlangen-Anzeige: Helfer namentlich

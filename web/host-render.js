@@ -1060,17 +1060,26 @@ window.__host = window.__host || {};
       </tr>`;
     }).join('');
     // Zentrale Warteschlange: jeder wartende Auftrag mit Schüler, Klasse,
-    // Auftraggeber (Host / Helfer namentlich). Position = Reihenfolge im
-    // Drucker-Pool (rollen-gerecht, HOST vor HELFER vor SCHÜLER).
-    const waitRows = waitingList.map(w => `<tr>
-      <td class="pq-pos">${w.position + 1}</td>
-      <td>${escapeHtml(w.student || '–')}</td>
-      <td>${w.form ? escapeHtml(w.form) : '–'}</td>
-      <td>${escapeHtml(w.originator || '–')}</td>
-    </tr>`).join('');
+    // Auftraggeber (Host / Helfer namentlich) + erlaubte Drucker (Allowlist
+    // der Klasse zum Enqueue-Zeitpunkt; „alle" = kein Filter). Position =
+    // Reihenfolge im Drucker-Pool (rollen-gerecht, HOST vor HELFER vor SCHÜLER).
+    const waitRows = waitingList.map(w => {
+      const printers = w.all_allowed
+        ? 'alle'
+        : (w.allowed_printers && w.allowed_printers.length
+            ? w.allowed_printers.map(escapeHtml).join(', ')
+            : '<span class="txt-danger">kein Drucker im Pool</span>');
+      return `<tr>
+        <td class="pq-pos">${w.position + 1}</td>
+        <td>${escapeHtml(w.student || '–')}</td>
+        <td>${w.form ? escapeHtml(w.form) : '–'}</td>
+        <td>${escapeHtml(w.originator || '–')}</td>
+        <td>${printers}</td>
+      </tr>`;
+    }).join('');
     const waitBlock = waitingList.length
       ? `<table class="pq-wait-table">
-          <thead><tr><th>#</th><th>Schüler</th><th>Klasse</th><th>Auftraggeber</th></tr></thead>
+          <thead><tr><th>#</th><th>Schüler</th><th>Klasse</th><th>Auftraggeber</th><th>Drucker</th></tr></thead>
           <tbody>${waitRows}</tbody>
         </table>`
       : '<p class="hint" style="margin:0">Zentrale Warteschlange leer.</p>';
