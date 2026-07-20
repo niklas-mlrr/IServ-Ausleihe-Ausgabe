@@ -878,11 +878,14 @@ window.__host = window.__host || {};
       btn.className = 'ptab' + (active ? ' active' : '');
       btn.dataset.pid = p.id;
       btn.draggable = true;
-      btn.title = 'Drucker-Reiter (ziehen zum Umsortieren)';
+      btn.title = p.faulty
+        ? 'Drucker fehlerhaft (ziehen zum Umsortieren)'
+        : 'Drucker-Reiter (ziehen zum Umsortieren)';
       // × hinter dem Namen (Spiegel der Klassen-Tab-Schließen-Markierung).
       const closeTitle = busy ? 'Drucker noch beschäftigt — Entfernen gesperrt' : 'Drucker entfernen';
       const closeCls = busy ? 'ptab-close is-busy' : 'ptab-close';
-      btn.innerHTML = `${escapeHtml(printerLabel(p))} <span class="${closeCls}" data-close="${p.id}" title="${closeTitle}">×</span>`;
+      const faultMark = p.faulty ? ' <span class="ptab-fault" title="Fehlerhaft">⚠</span>' : '';
+      btn.innerHTML = `${escapeHtml(printerLabel(p))}${faultMark} <span class="${closeCls}" data-close="${p.id}" title="${closeTitle}">×</span>`;
       // Klick auf den Tab-Körper (nicht auf ×) aktiviert den Reiter.
       btn.onclick = (e) => {
         if (e.target.closest('[data-close]')) return;
@@ -911,12 +914,16 @@ window.__host = window.__host || {};
     const panel = document.createElement('div');
     panel.className = 'printer-panel';
     const busy = p.load > 0;
+    const faulty = !!p.faulty;
     const spooledList = Array.isArray(p.spooled_names) && p.spooled_names.length
       ? p.spooled_names
       : (p.spooled_name ? [p.spooled_name] : []);
-    const statusLine = busy
-      ? `<p class="hint">Belegt: ${p.load}/2 — ${p.printing_name ? 'druckt „' + escapeHtml(p.printing_name) + '"' : 'wartend'}${spooledList.length ? ' · gesendet, wartet: ' + spooledList.map(n => '„' + escapeHtml(n) + '"').join(', ') : ''}</p>`
-      : '';
+    const statusLine = faulty
+      ? `<p class="hint" style="color:var(--warn,#b00)">Fehlerhaft — keine neuen Aufträge. Drucker nach Inaktivität blockiert.</p>
+         <button class="secondary" data-act="reactivate" style="margin-top:6px">Wieder aktivieren</button>`
+      : (busy
+        ? `<p class="hint">Belegt: ${p.load}/2 — ${p.printing_name ? 'druckt „' + escapeHtml(p.printing_name) + '"' : 'wartend'}${spooledList.length ? ' · gesendet, wartet: ' + spooledList.map(n => '„' + escapeHtml(n) + '"').join(', ') : ''}</p>`
+        : '');
     const opts = DUPLEX_OPTIONS.map(o => `<option value="${o.v}"${o.v === p.duplex ? ' selected' : ''}>${o.l}</option>`).join('');
     panel.innerHTML = `
       <div class="printer-panel-name">${escapeHtml(printerLabel(p))}</div>
@@ -927,6 +934,8 @@ window.__host = window.__host || {};
       ${statusLine}
     `;
     panel.querySelector('[data-act="duplex"]').onchange = (e) => setPrinterDuplex(p.id, e.target.value);
+    const reactivateBtn = panel.querySelector('[data-act="reactivate"]');
+    if (reactivateBtn) reactivateBtn.onclick = () => reactivatePrinter(p.id);
     return panel;
   }
 
@@ -972,6 +981,17 @@ window.__host = window.__host || {};
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ids}),
     });
+    await refreshPrinterPool();
+  }
+
+  async function reactivatePrinter(id) {
+    const r = await fetch('/api/printers/reactivate', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({id}),
+    });
+    if (r.ok) showMsg('Drucker wieder aktiv');
+    else if (r.status === 400) showMsg('Drucker ist nicht fehlerhaft');
+    else showMsg('Aktivieren fehlgeschlagen');
     await refreshPrinterPool();
   }
 
@@ -1294,13 +1314,26 @@ window.__host = window.__host || {};
 
   function printToastText(msg, finalOk) {
     const who = msg.name ? `von ${msg.name} ` : '';
+    // Peer-Fehler (Auftrag am hängenden Drucker / kein Ersatzdrucker) —
+    // bleibt stehen, Position 1-basiert.
+    if (msg.peer_error) {
+      const pos = typeof msg.position === 'number' ? msg.position + 1 : 1;
+      return `Fehler bei vorigem Auftrag - ${pos}. Warteschlangenposition`;
+    }
     if (finalOk === true) return `Leihschein ${who}gedruckt`;
-    if (finalOk === false) return `Leihschein ${who}— Druck fehlgeschlagen: ${msg.msg || ''}`;
-    if (msg.status === 'printing' || msg.position === 0) return `Leihschein ${who}wird gedruckt`;
-    if (typeof msg.position === 'number' && msg.position === 1) {
+    if (finalOk === false) {
+      // Stall (Inaktivität): lange Hinweismeldung direkt anzeigen.
+      if (msg.stalled) return msg.msg || 'Druck dauert ungewöhnlich lange';
+      return `Leihschein ${who}— Druck fehlgeschlagen: ${msg.msg || ''}`;
+    }
+    // „Wird gedruckt" erst, wenn das OS aktiv druckt — nicht schon bei Slot-
+    // Position 0 (dort: „gesendet, wartet auf Druck"). Position 1 zeigt die
+    // Warteschlangenposition (nicht mehr „gesendet, wartet auf Druck").
+    if (msg.status === 'printing') return `Leihschein ${who}wird gedruckt`;
+    if (typeof msg.position === 'number' && msg.position === 0) {
       return `Leihschein ${who}gesendet, wartet auf Druck`;
     }
-    if (typeof msg.position === 'number' && msg.position >= 2) {
+    if (typeof msg.position === 'number' && msg.position >= 1) {
       return `Leihschein ${who}an ${msg.position}. Druckerwarteschlangenposition`;
     }
     return `Leihschein ${who}in Druckerwarteschlange`;
@@ -1323,7 +1356,7 @@ window.__host = window.__host || {};
   }
 
   function showPrintProgress(msg) {
-    const entry = _printToastEl(msg.job_id, false);
+    const entry = _printToastEl(msg.job_id, !!msg.peer_error);
     entry.el.textContent = printToastText(msg, null);
   }
 
@@ -1331,6 +1364,10 @@ window.__host = window.__host || {};
     const entry = _printToastEl(msg.job_id, !msg.ok);
     entry.el.textContent = printToastText(msg, msg.ok);
     if (entry.timer) clearTimeout(entry.timer);
+    // peer_error („Fehler bei vorigem Auftrag") und stalled (Inaktivität)
+    // bleiben stehen, bis ein neuer Druck kommt oder die Seite neu lädt —
+    // kein Auto-Dismiss wie bei „gedruckt"/generischem Fehler.
+    if (msg.peer_error || msg.stalled) return;
     entry.timer = setTimeout(() => {
       entry.el.classList.remove('show');
       const drop = () => { entry.el.remove(); delete printToasts[msg.job_id]; };

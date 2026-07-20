@@ -565,3 +565,186 @@ def test_positions_one_printing_one_spooled():
     assert positions[a.id] == 0
     assert positions[b.id] == 1
     assert positions[c.id] == 2
+
+
+# ---- Inaktivitäts-Stall + Peer-Error + fehlerhafte Drucker ----------------
+
+
+def test_stall_marks_printer_faulty_and_notifies_originator(monkeypatch):
+    """Bleibt der OS-Status länger als `_INACTIVITY_TIMEOUT_S` auf „spooled",
+    wird der Auftrag `stalled` (ok=False, stalled=True), der Drucker als
+    fehlerhaft markiert und der Urheber erhält die lange Hinweismeldung."""
+    st = AppState()
+    _patch(monkeypatch, st)
+    pq = st.print_queue
+    monkeypatch.setattr(print_queue, "_INACTIVITY_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(print_queue, "_TRACK_TIMEOUT_S", 1.0)
+
+    async def fake_print(state, student_id, *, pages=None, printer_name=None):
+        return {"ok": True, "backend": "sumatra", "detail": "gesendet",
+                "job_handle": {"kind": "test", "sid": student_id}}
+
+    async def fake_read_state(handle):
+        return "spooled"  # nie Fortschritt → Inaktivität
+
+    monkeypatch.setattr(sessions, "print_loan_slip_for", fake_print)
+    monkeypatch.setattr(printing, "read_job_state", fake_read_state)
+
+    h = HelperSession(token="tok-a", name="T")
+    h.ws = _FakeWS()
+    st.helper_sessions["tok-a"] = h
+
+    async def run():
+        pq.start()
+        j = _job("helper", 1, helper_token="tok-a", name="A")
+        await pq.enqueue(j)
+        await asyncio.wait_for(j.done.wait(), timeout=5)
+        # done ist vor der result-Notification gesetzt → kurz warten, bis der
+        # Tracker die print_result-Nachricht gesendet hat.
+        await asyncio.sleep(0.1)
+        assert j.status == "stalled"
+        assert (j.result or {}).get("ok") is False
+        assert (j.result or {}).get("stalled") is True
+        msg = (j.result or {}).get("msg", "")
+        assert "ungewöhnlich lange" in msg
+        # Drucker ist fehlerhaft markiert (Default-Drucker des Pools).
+        assert st.settings.printers[0].id in pq.faulty_printers
+        # Urheber hat print_result mit stalled=True bekommen.
+        results = [m for m in h.ws.sent if m["type"] == "print_result"]
+        assert results and results[-1]["ok"] is False and results[-1].get("stalled") is True
+        await pq.stop()
+
+    asyncio.run(run())
+
+
+def test_stall_peer_at_same_printer_gets_peer_error(monkeypatch):
+    """Ein zweiter Auftrag am selben Drucker (Slot 1) wird beim Stall als
+    `peer_error` finalisiert (ok=False) mit „Fehler bei vorigem Auftrag",
+    sein Tracker wird cancelt."""
+    st = AppState()
+    _patch(monkeypatch, st)
+    pq = st.print_queue
+    monkeypatch.setattr(print_queue, "_INACTIVITY_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(print_queue, "_TRACK_TIMEOUT_S", 1.0)
+    # Kapazität 1 Drucker, beide Aufträge landen darauf (Slot 0 + 1).
+
+    async def fake_print(state, student_id, *, pages=None, printer_name=None):
+        return {"ok": True, "backend": "sumatra", "detail": "gesendet",
+                "job_handle": {"kind": "test", "sid": student_id}}
+
+    async def fake_read_state(handle):
+        return "spooled"
+
+    monkeypatch.setattr(sessions, "print_loan_slip_for", fake_print)
+    monkeypatch.setattr(printing, "read_job_state", fake_read_state)
+
+    helpers = {}
+    for key in ("a", "b"):
+        hh = HelperSession(token=f"tok-{key}", name="T")
+        hh.ws = _FakeWS()
+        st.helper_sessions[f"tok-{key}"] = hh
+        helpers[key] = hh
+
+    async def run():
+        pq.start()
+        ja = _job("helper", 1, helper_token="tok-a", name="A")
+        jb = _job("helper", 2, helper_token="tok-b", name="B")
+        await pq.enqueue(ja)
+        await pq.enqueue(jb)
+        # Beide finalisieren (Stall bzw. Peer-Error).
+        await asyncio.wait_for(ja.done.wait(), timeout=5)
+        await asyncio.wait_for(jb.done.wait(), timeout=5)
+        # done ist vor den result-Notifications gesetzt (Stall-Pfad: erst
+        # canceln/joinen, dann benachrichtigen) → kurz warten, bis die
+        # Tracker ihre print_result-Nachrichten gesendet haben.
+        await asyncio.sleep(0.1)
+        assert ja.status == "stalled"
+        assert jb.status == "peer_error"
+        assert (jb.result or {}).get("ok") is False
+        assert (jb.result or {}).get("peer_error") is True
+        assert "Fehler bei vorigem Auftrag" in (jb.result or {}).get("msg", "")
+        # Peer-Tracker wurde cancelt → kein aktiver Task mehr für jb.
+        assert jb.id not in pq._job_tasks
+        # Beide Ergebnisse wurden an den jeweiligen Helfer geliefert.
+        b_results = [m for m in helpers["b"].ws.sent if m["type"] == "print_result"]
+        assert b_results and b_results[-1].get("peer_error") is True
+        await pq.stop()
+
+    asyncio.run(run())
+
+
+def test_compute_positions_excludes_faulty_for_replacement_jobs():
+    """Ein zentraler Wartender mit Ersatzdrucker bekommt seine Position ohne
+    den fehlerhaften Drucker gezählt; ein No-Alternative-Job bekommt seine
+    Position relativ zum fehlerhaften Drucker."""
+    st = AppState()
+    st.settings.printers = _two_printers()
+    pq = st.print_queue
+    p1, p2 = st.settings.printers
+    # p1 fehlerhaft; ein gesendeter Job blockiert p1 (Load 1).
+    pq.faulty_printers.add("p1")
+    blocking = _job("helper", 9, name="X")
+    blocking.status = "spooled"
+    pq.slots["p1"] = print_queue._Slots(jobs=[blocking])
+    # Job mit Ersatzdrucker p2 (p2 idle) → Position 0 (p1 zählt nicht).
+    with_alt = _job("helper", 1, name="A", allowed={"p2"})
+    pq.waiting.append(with_alt)
+    # Job, der NUR p1 erlaubt (kein Ersatzdrucker) → Position = load(p1)=1.
+    only_faulty = _job("helper", 2, name="B", allowed={"p1"})
+    pq.waiting.append(only_faulty)
+    positions = pq._compute_positions(list(st.settings.printers), faulty_ids={"p1"})
+    assert positions[with_alt.id] == 0  # p2 idle, p1 zählt nicht
+    assert positions[only_faulty.id] == 1  # hinter blockierendem Job auf p1
+
+
+def test_notify_all_peer_error_for_no_alternative_central_job(monkeypatch):
+    """Zentraler Wartender ohne Ersatzdrucker (Allowlist nur auf dem
+    fehlerhaften Drucker) bekommt im `_notify_all`-Snapshot `peer_error=True`."""
+    st = AppState()
+    st.settings.printers = _two_printers()
+    _patch(monkeypatch, st)
+    pq = st.print_queue
+    p1, p2 = st.settings.printers
+    pq.faulty_printers.add("p1")
+    # No-Alternative-Job (nur p1) und Ersatzdrucker-Job (nur p2).
+    no_alt = _job("helper", 1, helper_token="tok-a", name="A", allowed={"p1"})
+    with_alt = _job("helper", 2, helper_token="tok-b", name="B", allowed={"p2"})
+    ha = HelperSession(token="tok-a", name="T")
+    ha.ws = _FakeWS()
+    hb = HelperSession(token="tok-b", name="T")
+    hb.ws = _FakeWS()
+    st.helper_sessions["tok-a"] = ha
+    st.helper_sessions["tok-b"] = hb
+    pq.waiting.extend([no_alt, with_alt])
+
+    async def run():
+        await pq._notify_all()
+        no_alt_prog = [m for m in ha.ws.sent if m["type"] == "print_progress"]
+        with_alt_prog = [m for m in hb.ws.sent if m["type"] == "print_progress"]
+        assert no_alt_prog and no_alt_prog[-1].get("peer_error") is True
+        assert with_alt_prog and with_alt_prog[-1].get("peer_error") is False
+
+    asyncio.run(run())
+
+
+def test_reactivate_clears_faulty_and_redispatches(monkeypatch):
+    """Nach `reactivate(pid)` ist die fehlerhaft-Marke weg und `_claim_fills`
+    dispatcht wieder dorthin."""
+    from server.state import PrinterConfig
+
+    st = AppState()
+    st.settings.printers = [PrinterConfig(id="p1", name="P1")]
+    _patch(monkeypatch, st)
+    pq = st.print_queue
+    pq.faulty_printers.add("p1")
+    # Wartender Auftrag → wird nicht dispatcht, solange p1 fehlerhaft.
+    j = _job("helper", 1, name="A")
+    asyncio.run(pq.enqueue(j))
+    claims = asyncio.run(_claim(pq, st.settings.printers))
+    assert claims == []
+    assert "p1" in pq.faulty_printers
+    # Reactivate → Marke weg, Auftrag wird dispatcht.
+    assert pq.reactivate("p1") is True
+    assert "p1" not in pq.faulty_printers
+    claims = asyncio.run(_claim(pq, st.settings.printers))
+    assert [(c[0], c[2].student_id) for c in claims] == [("p1", 1)]

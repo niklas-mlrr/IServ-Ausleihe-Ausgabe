@@ -8,6 +8,51 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-19 — Hängender Drucker: Inaktivitäts-Fehler, Peer-Benachrichtigung, Label-Korrektur
+
+Bisher wertete der Print-Queue-Tracker das OS-Polling nach 90 s still als
+„gedruckt" — ein hängender Drucker führte also dazu, dass der Helfer nach
+Ablauf automatisch den **nächsten Schüler aufrief**, ohne dass jemand den
+Fehler bemerkte. Zudem zeigte der Client „Wird gedruckt" bereits an Slot-
+Position 0 (statt erst bei aktivem OS-Druck), und die „gesendet, wartet auf
+Druck"-Meldung erschien an der Stelle, die „Pos. 1" heißen sollte. Umbau in
+`server/print_queue.py` + `server/routes/slips.py` + Web-Clients:
+
+- **Inaktivitäts-Fehler statt stillfertig:** neuer `_INACTIVITY_TIMEOUT_S`
+  (30 s) im Tracker — bleibt der OS-Status (`spooled`/`printing`) länger ohne
+  Wechsel, gilt der Drucker als hängend. Der Urheber bekommt
+  `print_result{ok:false, stalled:true}` mit „Es dauert ungewöhnlich lange … -
+  <aktueller Status>", der Helfer rückt **nicht** zum nächsten Schüler vor
+  (`printThenNext` advanced nur bei `ok:true`). Absolut-Cap `_TRACK_TIMEOUT_S`
+  bleibt als „wird als fertig gewertet"-Backstop für langsame (nicht hängende)
+  Drucker.
+- **Peer-Benachrichtigung am selben Drucker:** beim ersten Stall werden alle
+  **anderen** Aufträge im fehlerhaften Drucker-Slot als `peer_error`
+  finalisiert (`ok:false, peer_error:true`, „Fehler bei vorigem Auftrag -
+  <Position>") und deren Tracker cancelt. Zentrale-Warteschlangen-Jobs **ohne
+  Ersatzdrucker** bekommen `peer_error` via `_notify_all` und bleiben stehen,
+  bis der Drucker reaktiviert wird.
+- **Ersatzdrucker-Positionen:** `_compute_positions(printers, faulty_ids=)`
+  zählt den fehlerhaften Drucker für Aufträge mit Ersatzdrucker **nicht** mit
+  (reduzierte Position); No-Alternative-Jobs bekommen ihre Position relativ
+  zum fehlerhaften Drucker. `_claim_fills` überspringt fehlerhafte Drucker
+  (keine neuen Dispatches dorthin).
+- **„Wieder aktivieren":** fehlerhafte Drucker werden im Pool-Snapshot als
+  `faulty:true` markiert; die Host-Einstellungen zeigen einen „Wieder
+  aktivieren"-Button + ⚠-Marker am Reiter. `POST /api/printers/reactivate`
+  (`PrinterReactivateRequest`) nimmt die Marke zurück und weckt den Scheduler.
+  Entfernen/Verwaisten-Lauf des Druckers räumt die Marke ebenfalls ab.
+- **Label-Korrektur (scan-ws + host-render):** „Wird gedruckt" nur noch bei
+  OS-Status `printing`; Slot-Pos. 0 + `spooled` → „Leihschein gesendet, wartet
+  auf Druck …"; Pos. ≥ 1 → „an X. Druckerwarteschlangenposition" (vorher
+  zeigte Pos. 1 fälschlich „gesendet, wartet auf Druck"). `peer_error`/
+  `stalled`-Toasts am Host werden nicht auto-dismissed.
+
+Tests: `tests/test_print_queue.py` um fünf Fälle erweitert (Stall-Urheber,
+Peer am selben Drucker, Ersatzdrucker-Position, No-Alternative-`peer_error`,
+Reactivate); `tests/test_state_contract.py` sichert `faulty:false` im
+Erststart-Snapshot. Suite grün, Ruff clean.
+
 ## 2026-07-19 — Parallele Drucker-Verteilung + OS-echter Druckstatus + Positionen
 
 Am Live-Gerät (Windows/SumatraPDF) funktionierte die Verteilung trotz grüner

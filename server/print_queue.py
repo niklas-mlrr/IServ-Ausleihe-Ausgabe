@@ -56,7 +56,9 @@ from typing import Literal
 log = logging.getLogger(__name__)
 
 Role = Literal["host", "helper", "student"]
-JobStatus = Literal["queued", "dispatching", "spooled", "printing", "done", "failed"]
+JobStatus = Literal[
+    "queued", "dispatching", "spooled", "printing", "done", "failed", "stalled", "peer_error"
+]
 JobState = Literal["absent", "spooled", "printing"]
 
 # Rangfolge für die Einfügung in die zentrale Warteschlange (`waiting`):
@@ -72,6 +74,15 @@ _PRINTER_CAPACITY = 2
 # nicht blockiert — der physische Druck läuft am OS ohnehin weiter).
 _TRACK_POLL_S = 0.7
 _TRACK_TIMEOUT_S = 90.0
+
+# Inaktivitäts-Schwelle: bleibt der OS-Status eines gesendeten Auftrags länger
+# als diese Zeit ohne Wechsel (spooled→printing→absent) stehen, gilt der
+# Drucker als hängend → `_handle_stall` markiert ihn fehlerhaft, der Urheber
+# bekommt „Es dauert ungewöhnlich lange …", Mit-Betroffene am selben Drucker
+# „Fehler bei vorigem Auftrag - <Position>". Kürzer als `_TRACK_TIMEOUT_S`,
+# damit ein hängender (nicht nur langsamer) Drucker als Fehler erkannt wird,
+# bevor der Absolute-Cap ihn stillfertig-wertet.
+_INACTIVITY_TIMEOUT_S = 30.0
 
 
 def slip_name(lastname: str | None, firstname: str | None, form: str | None) -> str:
@@ -136,7 +147,15 @@ class PrintQueue:
         self._wake = asyncio.Event()
         self._task: asyncio.Task | None = None
         self._tasks: set[asyncio.Task] = set()  # laufende Tracker-Tasks
+        # Job-Id → Tracker-Task, um Peer-Tracker beim Stall gezielt zu canceln.
+        self._job_tasks: dict[str, asyncio.Task] = {}
         self._stopped = False
+        # Als fehlerhaft (hängend) markierte Drucker-IDs: der Scheduler
+        # dispatcht nichts mehr dorthin (`_claim_fills` überspringt sie), und
+        # `_compute_positions` zählt sie für Aufträge mit Ersatzdrucker nicht
+        # mit. Wird per `reactivate()` (Host-Einstellungen „Wieder aktivieren")
+        # oder beim Entfernen/Verwaisten-Lauf des Druckers zurückgesetzt.
+        self.faulty_printers: set[str] = set()
 
     # ---- Lebenszyklus --------------------------------------------------
 
@@ -155,6 +174,7 @@ class PrintQueue:
         if self._tasks:
             await asyncio.gather(*self._tasks, return_exceptions=True)
             self._tasks.clear()
+            self._job_tasks.clear()
         if self._task is not None:
             self._task.cancel()
             try:
@@ -224,7 +244,16 @@ class PrintQueue:
             self._track_job(printer_id, job), name=f"print-track-{job.id}"
         )
         self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+        self._job_tasks[job.id] = task
+
+        def _done(t: asyncio.Task) -> None:
+            self._tasks.discard(t)
+            # Nur löschen, wenn noch derselbe Task eingetragen ist (ein
+            # ggf. neuer Resume-Tracker würde sonst weggekickt).
+            if self._job_tasks.get(job.id) is t:
+                self._job_tasks.pop(job.id, None)
+
+        task.add_done_callback(_done)
 
     # ---- Reconcile -----------------------------------------------------
 
@@ -244,6 +273,7 @@ class PrintQueue:
         ]
         for pid in orphaned_empty:
             del self.slots[pid]
+            self.faulty_printers.discard(pid)  # verwaister Drucker → Marke weg
 
     # ---- Füllen --------------------------------------------------------
 
@@ -265,6 +295,8 @@ class PrintQueue:
         claims: list[tuple[str, str | None, PrintJob]] = []
         for target_load in range(_PRINTER_CAPACITY):
             for printer in printers:
+                if printer.id in self.faulty_printers:
+                    continue  # hängend — keine neuen Aufträge dorthin
                 s = self.slots.get(printer.id)
                 load = s.load if s else 0
                 if load != target_load or load >= _PRINTER_CAPACITY:
@@ -309,7 +341,11 @@ class PrintQueue:
             self._wake.set()
             return
 
-        # OS-Status pollen, bis der Job weg ist (absent) oder Timeout.
+        # OS-Status pollen, bis der Job weg ist (absent) oder Inaktivität/
+        # Absolute-Cap zuschlagen. Inaktivität = der OS-Status wechselt länger
+        # als `_INACTIVITY_TIMEOUT_S` nicht („es passiert nichts") → Stall.
+        last_state: JobState = "spooled"
+        last_change = time.monotonic()
         deadline = time.monotonic() + _TRACK_TIMEOUT_S
         while time.monotonic() < deadline:
             await asyncio.sleep(_TRACK_POLL_S)
@@ -322,10 +358,17 @@ class PrintQueue:
                 continue
             if state == "absent":
                 break
-            if state == "printing" and job.status != "printing":
-                async with self._lock:
-                    job.status = "printing"
-                await self._notify_all()
+            if state != last_state:
+                last_state = state
+                last_change = time.monotonic()
+                if state == "printing" and job.status != "printing":
+                    async with self._lock:
+                        job.status = "printing"
+                    await self._notify_all()
+            elif time.monotonic() - last_change > _INACTIVITY_TIMEOUT_S:
+                # Hängender Drucker: kein Statuswechsel seit `_INACTIVITY_TIMEOUT_S`.
+                await self._handle_stall(printer_id, job, last_state)
+                return
 
         # Finalize: Job ist aus der OS-Queue verschwunden → gedruckt.
         async with self._lock:
@@ -348,6 +391,86 @@ class PrintQueue:
         except ValueError:
             pass
 
+    async def _handle_stall(self, printer_id: str, job: PrintJob, last_state: JobState) -> None:
+        """Inaktivität auf `printer_id`: der Drucker gilt ab hier als hängend
+        („es dauert ungewöhnlich lange"). Der Urheber bekommt die lange
+        Fehlermeldung, alle **anderen** Aufträge am selben Drucker (Slot 1 etc.)
+        werden als ``peer_error`` finalisiert („Fehler bei vorigem Auftrag -
+        <Position>") und deren Tracker cancelt. Zentrale-Warteschlangen-Jobs
+        ohne Ersatzdrucker bekommen ihr ``peer_error`` über das anschließende
+        ``_notify_all`` (sie bleiben in `waiting`, bis der Drucker reaktiviert
+        wird); Aufträge mit Ersatzdrucker werden mit um den fehlerhaften Drucker
+        reduzierter Position bedient."""
+        pname = self._printer_name_by_id(printer_id)
+        status_label = {
+            "spooled": "gesendet, wartet auf Druck",
+            "printing": "wird gedruckt",
+        }.get(last_state, last_state)
+        printer_ctx = f"Drucker {pname}: {status_label}" if pname else status_label
+        stalled_msg = (
+            "Es dauert ungewöhnlich lange, vielleicht liegt ein Fehler vor. "
+            f"Bitte überprüfe dies. - {printer_ctx}"
+        )
+
+        cancelled: list[asyncio.Task] = []
+        peer_results: list[PrintJob] = []
+        async with self._lock:
+            # Idempotent: falls ein Parallel-Staller den Drucker schon markiert
+            # hat, behandeln wir diesen Job trotzdem als ersten (er ist ja auch
+            # inaktiv) — Doppelmarkierung ist harmlos.
+            self.faulty_printers.add(printer_id)
+            # Urheber-Stall: lang melden, aus Slot, finalisieren.
+            job.status = "stalled"
+            job.result = {"ok": False, "stalled": True, "msg": stalled_msg}
+            self._remove_from_slot(printer_id, job)
+            job.done.set()
+            # Peer-Slot-Jobs: finalisieren als peer_error, Tracker canceln.
+            s = self.slots.get(printer_id)
+            if s:
+                # Positionen einmalig im fehlerhaften Kontext berechnen.
+                from .state import get_state
+                printers = list(get_state().settings.printers)
+                positions = self._compute_positions(printers, faulty_ids={printer_id})
+                for other in list(s.jobs):
+                    pos = positions.get(other.id, 0)
+                    other.status = "peer_error"
+                    other.result = {
+                        "ok": False,
+                        "peer_error": True,
+                        "msg": f"Fehler bei vorigem Auftrag - {pos + 1}. Warteschlangenposition",
+                    }
+                    self._remove_from_slot(printer_id, other)
+                    other.done.set()
+                    peer_results.append(other)
+                    t = self._job_tasks.pop(other.id, None)
+                    if t is not None:
+                        cancelled.append(t)
+        # Tracker außerhalb des Locks canceln + joinen.
+        for t in cancelled:
+            t.cancel()
+        if cancelled:
+            await asyncio.gather(*cancelled, return_exceptions=True)
+        # Urheber + Peers über ihr Ergebnis benachrichtigen (jeweils nur an
+        # den eigenen Urheber adressiert).
+        await self._notify_result_if(job)
+        for peer in peer_results:
+            await self._notify_result_if(peer)
+        # Zentrale Warteschlange aktualisieren (Ersatzdrucker-Positionen +
+        # peer_error für No-Alternative-Jobs) + Snapshot an alle Hosts.
+        await self._notify_all()
+        self._wake.set()  # Scheduler füllt Ersatzdrucker nach.
+
+    def reactivate(self, printer_id: str) -> bool:
+        """Fehlerhafte Drucker-Marke zurücknehmen (Host-Einstellungen
+        „Wieder aktivieren"). Weckt den Scheduler, sodass wartende Aufträge
+        wieder dorthin dispatcht werden. Liefert True, wenn die Marke aktiv
+        war (und jetzt entfernt wurde)."""
+        was_faulty = printer_id in self.faulty_printers
+        self.faulty_printers.discard(printer_id)
+        if was_faulty:
+            self._wake.set()
+        return was_faulty
+
     async def _dispatch(self, job: PrintJob, *, printer_name: str | None) -> dict:
         """`print_loan_slip_for` aufrufen, Exceptions in ein ok=False-Result wandeln."""
         from .sessions import print_loan_slip_for
@@ -367,9 +490,12 @@ class PrintQueue:
 
     # ---- Positionen ----------------------------------------------------
 
-    def _compute_positions(self, printers: list) -> dict[str, int]:
-        """Pro Job seine Warteschlangen-Position als Minimum über alle
-        erlaubten Drucker, wie viele Aufträge dort noch vor ihm liegen.
+    def _compute_positions(
+        self, printers: list, faulty_ids: set[str] | None = None
+    ) -> dict[str, int]:
+        """Pro Job seine Warteschlangen-Position als Minimum über die
+        relevanten erlaubten Drucker, wie viele Aufträge dort noch vor ihm
+        liegen.
 
         - Gesendete Jobs eines Druckers (FIFO `slots.jobs`): Position = Slot-
           Index (0 = ältester gesendeter = druckt / druckt als nächstes,
@@ -378,13 +504,24 @@ class PrintQueue:
           (``printing`` → „wird gedruckt", ``spooled`` → „gesendet, wartet"),
           nicht die Positionsnummer. Sonst würde ein noch nicht aktiv
           druckender erster Job den zweiten fälschlich auf Position 2 schieben.
-        - Zentrale-Warteschlangen-Job `waiting[i]`: ``min`` über alle erlaubten
-          Drucker P von ``load(P) + (Anzahl früherer waiting-Jobs, die für P
-          erlaubt sind)``. ``allowed_printers is None`` = alle Pool-Drucker.
-          Fallback (kein erlaubter Drucker im Pool): globaler Index in `waiting`.
+        - Zentrale-Warteschlangen-Job `waiting[i]`: ``min`` über die
+          **nicht-fehlerhaften** erlaubten Drucker P von ``load(P) + (Anzahl
+          früherer waiting-Jobs, die für P erlaubt sind)``. Hat der Job
+          *keinen* Ersatzdrucker (alle erlaubten Drucker sind fehlerhaft),
+          wird die Position stattdessen über die fehlerhaften erlaubten
+          Drucker berechnet (seine Position in der hängenden Schlange —
+          informativ, da er ohnehin nicht bedient wird, solange der Drucker
+          fehlerhaft ist). ``allowed_printers is None`` = alle Pool-Drucker.
+          Fallback (gar kein erlaubter Drucker im Pool): globaler Index in
+          `waiting`.
+
+        ``faulty_ids`` leer/None = Normalbetrieb (alle Drucker zählen). So
+        zählt ein hängender Drucker für Aufträge mit Ersatzdrucker **nicht**
+        mit, für No-Alternative-Jobs liefert er ihre Warteposition.
 
         Semantik: 0 = druckt (bzw. druckt als nächstes), 1 = gesendet/wartet,
         2 = erster zentraler Wartender bei vollem Drucker (load 2), usw."""
+        faulty = faulty_ids or set()
         positions: dict[str, int] = {}
         for p in printers:
             s = self.slots.get(p.id)
@@ -393,10 +530,24 @@ class PrintQueue:
             for idx, j in enumerate(s.jobs):
                 positions[j.id] = idx
         for ci, j in enumerate(self.waiting):
+            # Nicht-fehlerhafte Drucker, die dieser Job erlaubt (Ersatzdrucker).
+            usable = [
+                p for p in printers
+                if p.id not in faulty
+                and (j.allowed_printers is None or p.id in j.allowed_printers)
+            ]
+            if usable:
+                consider = usable
+            else:
+                # Kein Ersatzdrucker → nur fehlerhafte erlaubte Drucker zählen
+                # (Position in der hängenden Schlange).
+                consider = [
+                    p for p in printers
+                    if p.id in faulty
+                    and (j.allowed_printers is None or p.id in j.allowed_printers)
+                ]
             best: int | None = None
-            for p in printers:
-                if j.allowed_printers is not None and p.id not in j.allowed_printers:
-                    continue
+            for p in consider:
                 s = self.slots.get(p.id)
                 load = s.load if s else 0
                 ahead = 0
@@ -445,6 +596,7 @@ class PrintQueue:
                     "printing_name": printing_name,
                     "spooled_name": spooled_names[0] if spooled_names else None,
                     "spooled_names": spooled_names,
+                    "faulty": p.id in self.faulty_printers,
                 }
             )
         return out
@@ -471,7 +623,7 @@ class PrintQueue:
         Klasse später umkonfiguriert wird (s. PrintJob.allowed_printers)."""
 
         printers = list(state.settings.printers)
-        positions = self._compute_positions(printers)
+        positions = self._compute_positions(printers, faulty_ids=self.faulty_printers)
         out: list[dict] = []
         for j in self.waiting:
             student = state.find_student(j.student_id)
@@ -532,25 +684,32 @@ class PrintQueue:
 
     async def _notify_all(self) -> None:
         """Allen Aufträgen ihre aktuelle Position + Status pushen (nur an den
-        jeweiligen Urheber). Position aus `_compute_positions`."""
+        jeweiligen Urheber). Position aus `_compute_positions`; für Jobs an
+        fehlerhaften Druckern bzw. ohne Ersatzdrucker wird `peer_error` wahr
+        → der Client zeigt „Fehler bei vorigem Auftrag - <Position>" statt
+        einer normalen Warteposition."""
         from .hub import get_hub
         from .state import get_state
 
         state = get_state()
         printers = list(state.settings.printers)
         async with self._lock:
-            positions = self._compute_positions(printers)
-            snapshot: list[tuple[PrintJob, int, JobStatus, str | None]] = []
+            positions = self._compute_positions(printers, faulty_ids=self.faulty_printers)
+            snapshot: list[tuple[PrintJob, int, JobStatus, str | None, bool]] = []
             for j in self.waiting:
                 pname = self._printer_name(j.assigned_printer_id)
-                snapshot.append((j, positions.get(j.id, 0), j.status, pname))
+                peer = self._is_peer_error(j, printers, in_slot=False)
+                snapshot.append((j, positions.get(j.id, 0), j.status, pname, peer))
             for s in self.slots.values():
                 for j in s.jobs:
                     pname = self._printer_name(j.assigned_printer_id)
-                    snapshot.append((j, positions.get(j.id, 0), j.status, pname))
+                    # Slot-Job an fehlerhaftem Drucker → peer_error (kurzes
+                    # Fenster, bis der Stall ihn finalisiert aus dem Slot nimmt).
+                    peer = j.assigned_printer_id in self.faulty_printers
+                    snapshot.append((j, positions.get(j.id, 0), j.status, pname, peer))
         hub = get_hub()
-        for job, position, status, printer in snapshot:
-            await self._send_progress(hub, state, job, position, status, printer)
+        for job, position, status, printer, peer_error in snapshot:
+            await self._send_progress(hub, state, job, position, status, printer, peer_error)
         # Druck-Übergänge (dispatch/spool/druckt/fertig) als vollen State an
         # alle verbundenen Hosts pushen, damit deren Druckerwarteschlangen-Box
         # live folgt — der Snapshot spiegelt über `pool_printers`/`pool_summary`
@@ -558,6 +717,20 @@ class PrintQueue:
         # entfällt der Snapshot-Aufwand komplett.
         if state.host_ws_connections:
             await hub.send_all_hosts(state.state_snapshot())
+
+    def _is_peer_error(self, job: PrintJob, printers: list, *, in_slot: bool) -> bool:
+        """Zentraler Wartender ohne Ersatzdrucker (alle erlaubten Drucker sind
+        fehlerhaft) → peer_error. Slot-Jobs werden gesondert behandelt
+        (`assigned_printer_id in faulty_printers`), daher hier nur für
+        `waiting`-Jobs verwendet."""
+        faulty = self.faulty_printers
+        if not faulty:
+            return False
+        return not any(
+            p.id not in faulty
+            and (job.allowed_printers is None or p.id in job.allowed_printers)
+            for p in printers
+        )
 
     def _printer_name(self, printer_id: str | None) -> str | None:
         """Druckername zur Kennung (für Notifications). None = Standarddrucker
@@ -575,7 +748,8 @@ class PrintQueue:
         return None
 
     async def _send_progress(
-        self, hub, state, job: PrintJob, position: int, status: JobStatus, printer: str | None
+        self, hub, state, job: PrintJob, position: int, status: JobStatus, printer: str | None,
+        peer_error: bool = False,
     ) -> None:
         msg = {
             "type": "print_progress",
@@ -584,6 +758,7 @@ class PrintQueue:
             "position": position,
             "name": job.name,
             "printer": printer,
+            "peer_error": peer_error,
         }
         if job.helper_token:
             await hub.send_scanner(job.helper_token, msg)
@@ -609,6 +784,13 @@ class PrintQueue:
             "ok": bool(res.get("ok")),
             "name": job.name,
         }
+        # Spezielle Fehlerarten durchreichen, damit der Client sie gesondert
+        # darstellt (lang Stall-Text bzw. „Fehler bei vorigem Auftrag") und
+        # nicht als generisches „Druck fehlgeschlagen" + Auto-Advance-Pfad.
+        if res.get("stalled"):
+            base["stalled"] = True
+        if res.get("peer_error"):
+            base["peer_error"] = True
         if res.get("ok"):
             base["detail"] = res.get("detail", "gedruckt")
         else:

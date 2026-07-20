@@ -16,6 +16,7 @@ from ._deps import (
     CommitBookRequest,
     PrinterAddRequest,
     PrinterDuplexRequest,
+    PrinterReactivateRequest,
     PrinterRemoveRequest,
     PrinterReorderRequest,
     PrintLoanSlipRequest,
@@ -211,6 +212,23 @@ async def reorder_printers(body: PrinterReorderRequest) -> dict:
     if set(body.ids) != set(by_id) or len(body.ids) != len(by_id):
         raise HTTPException(400, "IDs passen nicht zum aktuellen Pool")
     state.settings.printers = [by_id[i] for i in body.ids]
+    return await _after_pool_change(state, wake=True)
+
+
+@host_router.post("/api/printers/reactivate")
+async def reactivate_printer(body: PrinterReactivateRequest) -> dict:
+    """Einen als hängend markierten Drucker wieder für neue Aufträge zulassen
+    („Wieder aktivieren"-Button in den Drucker-Einstellungen, sichtbar sobald
+    der Drucker nach Inaktivität fehlerhaft wurde). Entfernt die Marke und weckt
+    den Scheduler, damit wartende Aufträge wieder dorthin dispatcht werden.
+    Rein in-memory — kein Persistenz-/IServ-Zugriff."""
+    state = get_state()
+    pid = body.id.strip()
+    printer = next((p for p in state.settings.printers if p.id == pid), None)
+    if printer is None:
+        raise HTTPException(404, "Drucker nicht gefunden")
+    if not state.print_queue.reactivate(pid):
+        raise HTTPException(400, "Drucker ist nicht fehlerhaft")
     return await _after_pool_change(state, wake=True)
 
 

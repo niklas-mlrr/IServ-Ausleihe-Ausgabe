@@ -145,23 +145,39 @@ function handleServerMessage(msg) {
     if (studentActive) renderBooks(currentBooks);
   } else if (msg.type === 'print_progress') {
     // Live-Status aus der internen Druckerwarteschlange (OS-getrieben):
-    //   position 0 (printing)        → „Wird gedruckt …" (OS druckt aktiv)
-    //   position 1 (spooled)         → „gesendet, wartet auf Druck"
-    //   position ≥ 2 (zentral queued) → „an X. Druckerwarteschlangenposition"
-    if (msg.status === 'printing' || msg.position === 0) {
+    //   peer_error                  → „Fehler bei vorigem Auftrag - <Pos>"
+    //                                (Auftrag am hängenden Drucker / kein
+    //                                Ersatzdrucker — Position 1-basiert)
+    //   status printing             → „Wird gedruckt …" (OS druckt aktiv —
+    //                                erst jetzt, nicht schon bei Slot-Pos. 0)
+    //   position 0 (spooled)        → „gesendet, wartet auf Druck"
+    //   position ≥ 1 (zentral queued) → „an X. Druckerwarteschlangenposition"
+    if (msg.peer_error) {
+      const pos = typeof msg.position === 'number' ? msg.position + 1 : 1;
+      setStatusText(`Fehler bei vorigem Auftrag - ${pos}. Warteschlangenposition`);
+    } else if (msg.status === 'printing') {
       setStatusText('Wird gedruckt …');
-    } else if (typeof msg.position === 'number' && msg.position === 1) {
+    } else if (typeof msg.position === 'number' && msg.position === 0) {
       setStatusText('Leihschein gesendet, wartet auf Druck …');
-    } else if (typeof msg.position === 'number' && msg.position >= 2) {
+    } else if (typeof msg.position === 'number' && msg.position >= 1) {
       setStatusText(`Leihschein an ${msg.position}. Druckerwarteschlangenposition`);
     } else {
       setStatusText('Leihschein in Druckerwarteschlange …');
     }
   } else if (msg.type === 'print_result') {
     printBtn.disabled = false;
-    setStatusText(msg.ok ? 'Gedruckt' : `Druck fehlgeschlagen: ${msg.msg || ''}`);
+    if (msg.stalled) {
+      setStatusText(msg.msg || 'Druck dauert ungewöhnlich lange');
+    } else if (msg.peer_error) {
+      setStatusText(msg.msg || 'Fehler bei vorigem Auftrag');
+    } else if (msg.ok) {
+      setStatusText('Gedruckt');
+    } else {
+      setStatusText(`Druck fehlgeschlagen: ${msg.msg || ''}`);
+    }
     // „Drucken & nächster Schüler": nur bei erfolgreichem Druck weiterschalten
-    // (Schüler bleibt sonst stehen — s. Plan, Fehler-Verhalten).
+    // (Schüler bleibt sonst stehen — s. Plan, Fehler-Verhalten). stalled/
+    // peer_error liefern ok=false → kein Auto-Advance.
     if (printThenNext) {
       printThenNext = false;
       if (msg.ok) advanceToNext();

@@ -191,6 +191,14 @@ class PrinterReorderRequest(BaseModel):
     ids: list[str] = []
 
 
+class PrinterReactivateRequest(BaseModel):
+    """Body für `POST /api/printers/reactivate` — einen als hängend markierten
+    Drucker wieder für neue Aufträge zulassen („Wieder aktivieren"-Button in
+    den Einstellungen)."""
+
+    id: str = ""
+
+
 class AddHelperRequest(BaseModel):
     name: str = "Helfer"
     context_id: str | None = None

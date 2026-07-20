@@ -494,6 +494,7 @@
     #settings-dialog .printer-tabs-bar .ptab-close:hover { color: var(--danger); background: var(--surface-3); }
     #settings-dialog .printer-tabs-bar .ptab-close.is-busy { opacity: .4; cursor: not-allowed; }
     #settings-dialog .printer-tabs-bar .ptab-close.is-busy:hover { color: var(--text-muted); background: transparent; }
+    #settings-dialog .printer-tabs-bar .ptab-fault { color: #c0392b; margin-left: 4px; font-size: .95em; }
     #settings-dialog .printer-tabs-bar .ptab-add {
       background: transparent; color: var(--text-muted);
       font-size: 1.2rem; padding: 8px 14px; cursor: pointer;

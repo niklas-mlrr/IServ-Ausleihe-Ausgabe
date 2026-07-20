@@ -88,4 +88,5 @@ def test_toggle_defaults_are_off():
     assert printers[0]["name"] is None
     assert printers[0]["is_default"] is True
     assert printers[0]["load"] == 0
+    assert printers[0]["faulty"] is False
     assert snap["print_queue_summary"] == {"waiting": 0, "waiting_list": []}
