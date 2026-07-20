@@ -263,7 +263,13 @@ class PrintQueue:
         Drucker mit noch aktiven Jobs bleiben als verwaiste Slots erhalten,
         bis sie ausgedrained sind (neue Zuweisungen bekommen sie nicht, da
         `_claim_fills` nur über `printers` iteriert). Leer laufende verwaiste
-        Slots werden aufgeräumt."""
+        Slots werden aufgeräumt.
+
+        Reaktivierte Drucker: beim Stall im Slot belassene Aufträge
+        (``stalled``/``peer_error``) werden hier weggeräumt, sobald der Drucker
+        nicht mehr fehlerhaft ist — so erhält er seine Kapazität zurück und der
+        Scheduler kann neue Aufträge dorthin dispatchen. Läuft unter dem Lock,
+        daher raced es nicht gegen `_claim_fills` (das ebenfalls das Lock hält)."""
         for p in printers:
             self.slots.setdefault(p.id, _Slots())
         configured_ids = {p.id for p in printers}
@@ -274,6 +280,15 @@ class PrintQueue:
         for pid in orphaned_empty:
             del self.slots[pid]
             self.faulty_printers.discard(pid)  # verwaister Drucker → Marke weg
+        # Tote Aufträge (Stall/Peer-Error) aus reaktivierten Slots räumen.
+        for pid in configured_ids:
+            if pid in self.faulty_printers:
+                continue  # noch fehlerhaft → blockierte Aufträge stehen lassen
+            s = self.slots.get(pid)
+            if not s:
+                continue
+            if any(j.status in ("stalled", "peer_error", "failed") for j in s.jobs):
+                s.jobs = [j for j in s.jobs if j.status not in ("stalled", "peer_error", "failed")]
 
     # ---- Füllen --------------------------------------------------------
 
@@ -396,11 +411,16 @@ class PrintQueue:
         („es dauert ungewöhnlich lange"). Der Urheber bekommt die lange
         Fehlermeldung, alle **anderen** Aufträge am selben Drucker (Slot 1 etc.)
         werden als ``peer_error`` finalisiert („Fehler bei vorigem Auftrag -
-        <Position>") und deren Tracker cancelt. Zentrale-Warteschlangen-Jobs
-        ohne Ersatzdrucker bekommen ihr ``peer_error`` über das anschließende
-        ``_notify_all`` (sie bleiben in `waiting`, bis der Drucker reaktiviert
-        wird); Aufträge mit Ersatzdrucker werden mit um den fehlerhaften Drucker
-        reduzierter Position bedient."""
+        <Position>") und deren Tracker cancelt. Die Aufträge bleiben **im Slot**
+        des Druckers (werden nicht entfernt), damit sie für die Warteschlange
+        weiter mitzählen — Last und Positionen der No-Alternative-Jobs (Allowlist
+        nur auf diesen fehlerhaften Drucker) beruhen auf der unverändert vollen
+        Slot-Belegung. Weggeräumt werden sie erst bei der Reaktivierung
+        (``_reconcile`` für nicht-fehlerhafte Drucker). Zentrale-Warteschlangen-
+        Jobs ohne Ersatzdrucker bekommen ihr ``peer_error`` über das
+        anschließende ``_notify_all`` (sie bleiben in `waiting`, bis der Drucker
+        reaktiviert wird); Aufträge mit Ersatzdrucker werden mit um den
+        fehlerhaften Drucker reduzierter Position bedient."""
         pname = self._printer_name_by_id(printer_id)
         status_label = {
             "spooled": "gesendet, wartet auf Druck",
@@ -419,12 +439,16 @@ class PrintQueue:
             # hat, behandeln wir diesen Job trotzdem als ersten (er ist ja auch
             # inaktiv) — Doppelmarkierung ist harmlos.
             self.faulty_printers.add(printer_id)
-            # Urheber-Stall: lang melden, aus Slot, finalisieren.
+            # Urheber-Stall: lang melden, finalisieren — aber **im Slot belassen**,
+            # damit der Drucker für die Warteschlange weiter mitzählt (Last und
+            # Positionen der No-Alternative-Jobs). Weggeräumt wird erst bei der
+            # Reaktivierung (`_reconcile` für nicht-fehlerhafte Drucker).
             job.status = "stalled"
             job.result = {"ok": False, "stalled": True, "msg": stalled_msg}
-            self._remove_from_slot(printer_id, job)
             job.done.set()
-            # Peer-Slot-Jobs: finalisieren als peer_error, Tracker canceln.
+            # Peer-Slot-Jobs: finalisieren als peer_error, Tracker canceln —
+            # ebenfalls im Slot belassen (mitzählen). Den Urheber überspringen
+            # (er steht noch vorne in s.jobs und ist oben schon stalled).
             s = self.slots.get(printer_id)
             if s:
                 # Positionen einmalig im fehlerhaften Kontext berechnen.
@@ -432,6 +456,8 @@ class PrintQueue:
                 printers = list(get_state().settings.printers)
                 positions = self._compute_positions(printers, faulty_ids={printer_id})
                 for other in list(s.jobs):
+                    if other is job:
+                        continue
                     pos = positions.get(other.id, 0)
                     other.status = "peer_error"
                     other.result = {
@@ -439,7 +465,6 @@ class PrintQueue:
                         "peer_error": True,
                         "msg": f"Fehler bei vorigem Auftrag - {pos + 1}. Warteschlangenposition",
                     }
-                    self._remove_from_slot(printer_id, other)
                     other.done.set()
                     peer_results.append(other)
                     t = self._job_tasks.pop(other.id, None)
@@ -463,8 +488,10 @@ class PrintQueue:
     def reactivate(self, printer_id: str) -> bool:
         """Fehlerhafte Drucker-Marke zurücknehmen (Host-Einstellungen
         „Wieder aktivieren"). Weckt den Scheduler, sodass wartende Aufträge
-        wieder dorthin dispatcht werden. Liefert True, wenn die Marke aktiv
-        war (und jetzt entfernt wurde)."""
+        wieder dorthin dispatcht werden; der nächste `_reconcile`-Lauf räumt
+        die beim Stall im Slot belassenen (blockierten) Aufträge und gibt so
+        die Kapazität frei. Liefert True, wenn die Marke aktiv war (und jetzt
+        entfernt wurde)."""
         was_faulty = printer_id in self.faulty_printers
         self.faulty_printers.discard(printer_id)
         if was_faulty:
@@ -584,6 +611,12 @@ class PrintQueue:
                 for j in s.jobs:
                     if j.status == "printing":
                         printing_name = j.name
+                    elif j.status in ("stalled", "peer_error", "failed"):
+                        # Blockierte (fehlgeschlagene) Aufträge zählen über
+                        # `load` mit, werden aber nicht als aktiv druckend /
+                        # wartend gelistet — der Drucker ist `faulty`, die
+                        # Blockade zeigt das Host-UI separat an.
+                        continue
                     else:
                         spooled_names.append(j.name)
             out.append(
@@ -702,6 +735,12 @@ class PrintQueue:
                 snapshot.append((j, positions.get(j.id, 0), j.status, pname, peer))
             for s in self.slots.values():
                 for j in s.jobs:
+                    # Finalisierte (blockierte) Aufträge nicht mehr mit Progress
+                    # pushen — sie haben ihr print_result bereits und bleiben
+                    # nur zum Mitzählen im Slot (werden bei Reaktivierung
+                    # geräumt).
+                    if j.status in ("stalled", "peer_error", "failed"):
+                        continue
                     pname = self._printer_name(j.assigned_printer_id)
                     # Slot-Job an fehlerhaftem Drucker → peer_error (kurzes
                     # Fenster, bis der Stall ihn finalisiert aus dem Slot nimmt).

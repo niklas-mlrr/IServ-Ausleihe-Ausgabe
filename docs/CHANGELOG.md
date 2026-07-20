@@ -8,6 +8,51 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-20 — Stall-Aufträge im Drucker-Slot belassen (für Warteschlange mitzählen)
+
+Bisher hat `_handle_stall` den Urheber-Auftrag (`stalled`) und alle Peer-Aufträge
+am selben Drucker (`peer_error`) **aus dem Slot entfernt** — die Last des
+hängenden Druckers fiel damit auf 0, und die Warteschlangen-Positionen der
+noch wartenden Aufträge stürzten ein (No-Alternative-Jobs sprangen auf Pos. 0,
+obwohl blockierte Aufträge vor ihnen standen). Gewünschtes Verhalten: die
+fehlgeschlagenen Aufträge sollen im Slot bleiben und für die Warteschlange
+weiter mitzählen — nur so bleiben die Positions-Nummern stabil. Umbau in
+`server/print_queue.py` + `web/host-render.js`/`web/host.css`:
+
+- **Im Slot belassen, mitzählen:** `_handle_stall` entfernt Urheber und Peers
+  nicht mehr aus `slots[pid].jobs`; sie behalten ihren Status (`stalled`/
+  `peer_error`) und ihre Slot-Position (Urheber vorne, Peers dahinter). Die
+  Last des Druckers bleibt unverändert, und `_compute_positions` zählt sie für
+  No-Alternative-Jobs (Allowlist nur auf den fehlerhaften Drucker) als
+  vordrängelnde Aufträge mit — deren Position bleibt hinter den Blockierten.
+  Peers werden im Peer-Durchlauf übersprungen, damit der Urheber nicht
+  versehentlich als Peer doppelt finalisiert wird.
+- **Reaktivierung räumt den Slot:** `reactivate()` nimmt nur die
+  fehlerhaft-Marke zurück; der folgende `_reconcile`-Lauf (unter Lock, raced
+  nicht gegen `_claim_fills`) räumt für nicht-fehlerhafte Drucker die
+  blockierten Aufträge aus dem Slot und gibt so die Kapazität frei — der
+  Scheduler dispatcht danach wieder dorthin. Fehlerhafte Drucker behalten
+  ihre Blockierten bis zur Reaktivierung.
+- **Ersatzdrucker-Position unverändert:** Aufträge mit Ersatzdrucker
+  (Allowlist umfasst auch andere Drucker) bekommen weiterhin die reduzierte
+  Position ohne den fehlerhaften Drucker (`_compute_positions` schließt
+  fehlerhafte Drucker für `usable` aus) — sie springen auf die freie Position
+  des Ersatzdruckers, anstatt hinter die Blockierten zu warten.
+- **Anzeige (Host-Druckerwarteschlangen-Box):** `pool_printers` zählt
+  blockierte Aufträge in `load` mit, listet sie aber nicht als
+  druckend/wartend (`printing_name`/`spooled_names` bleiben leer). Die Box
+  zeigt fehlerhafte Drucker mit rotem Punkt + „⚠ fehlerhaft — N blockiert";
+  ein kurz nach der Reaktivierung belegter, aber aktiver-freier Slot zeigt
+  „N blockiert (wird geräumt)" (Transient bis zum nächsten Scheduler-Schritt).
+  `.pq-dot.pq-fault` in `web/host.css`.
+- **`_notify_all`** überspringt blockierte Slot-Aufträge (kein Progress-Push
+  für finalisierte Jobs — sie haben ihr `print_result` bereits).
+
+Tests: `tests/test_print_queue.py` um drei Fälle erweitert
+(No-Alternative-mitzählen, `pool_printers`-Load-vs-Anzeige, `_reconcile`-
+Räumung nach Reaktivierung); die bestehenden Stall-/Peer-Tests asserten
+zusätzlich die verbleibende Slot-Belegung. Suite grün, Ruff clean.
+
 ## 2026-07-19 — Hängender Drucker: Inaktivitäts-Fehler, Peer-Benachrichtigung, Label-Korrektur
 
 Bisher wertete der Print-Queue-Tracker das OS-Polling nach 90 s still als

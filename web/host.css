@@ -152,6 +152,7 @@
     }
     .pq-dot.pq-busy { background: var(--info); }
     .pq-dot.pq-idle { background: var(--ok); opacity: .6; }
+    .pq-dot.pq-fault { background: var(--danger-text, #c0392b); }
     .badge {
       display: inline-block;
       padding: 2px 8px;

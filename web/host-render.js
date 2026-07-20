@@ -1070,7 +1070,13 @@ window.__host = window.__host || {};
         : (p.spooled_name ? [p.spooled_name] : []);
       const spooledNames = spooledList.map(n => `„${escapeHtml(n)}"`).join(', ');
       let dot, status;
-      if (printing && spooledNames) {
+      if (p.faulty) {
+        // Hängender Drucker: blockierte Aufträge zählen über `load` mit, werden
+        // aber nicht als druckend/wartend gelistet (serverseitig ausgeschlossen).
+        dot = 'fault';
+        status = `<span class="txt-danger">⚠ fehlerhaft</span>` +
+          (p.load > 0 ? ` — ${p.load} blockiert` : '');
+      } else if (printing && spooledNames) {
         dot = 'busy';
         status = `druckt „${escapeHtml(printing)}" · als nächstes ${spooledNames}`;
       } else if (printing) {
@@ -1079,6 +1085,11 @@ window.__host = window.__host || {};
       } else if (spooledNames) {
         dot = 'busy';
         status = `gesendet, wartet auf Druck: ${spooledNames}`;
+      } else if (p.load > 0) {
+        // Kein aktiver Druck, aber Slot belegt → blockierte Aufträge, die bei
+        // der Reaktivierung gerade vom Scheduler geräumt werden (Transient).
+        dot = 'busy';
+        status = `${p.load} blockiert (wird geräumt)`;
       } else {
         dot = 'idle';
         status = '<span style="opacity:.5">bereit</span>';

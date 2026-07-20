@@ -609,6 +609,11 @@ def test_stall_marks_printer_faulty_and_notifies_originator(monkeypatch):
         assert "ungewöhnlich lange" in msg
         # Drucker ist fehlerhaft markiert (Default-Drucker des Pools).
         assert st.settings.printers[0].id in pq.faulty_printers
+        # Urheber-Auftrag bleibt im Slot (wird nicht entfernt) und zählt für
+        # die Warteschlange weiter mit — Last bleibt 1, nicht 0.
+        pid = st.settings.printers[0].id
+        assert j in pq.slots[pid].jobs
+        assert pq.slots[pid].load == 1
         # Urheber hat print_result mit stalled=True bekommen.
         results = [m for m in h.ws.sent if m["type"] == "print_result"]
         assert results and results[-1]["ok"] is False and results[-1].get("stalled") is True
@@ -665,6 +670,11 @@ def test_stall_peer_at_same_printer_gets_peer_error(monkeypatch):
         assert "Fehler bei vorigem Auftrag" in (jb.result or {}).get("msg", "")
         # Peer-Tracker wurde cancelt → kein aktiver Task mehr für jb.
         assert jb.id not in pq._job_tasks
+        # Beide Aufträge bleiben im Slot (werden nicht entfernt) und zählen
+        # weiter mit — Last bleibt 2, Reihenfolge Urheber vor Peer.
+        pid = st.settings.printers[0].id
+        assert pq.slots[pid].jobs == [ja, jb]
+        assert pq.slots[pid].load == 2
         # Beide Ergebnisse wurden an den jeweiligen Helfer geliefert.
         b_results = [m for m in helpers["b"].ws.sent if m["type"] == "print_result"]
         assert b_results and b_results[-1].get("peer_error") is True
@@ -748,3 +758,75 @@ def test_reactivate_clears_faulty_and_redispatches(monkeypatch):
     assert "p1" not in pq.faulty_printers
     claims = asyncio.run(_claim(pq, st.settings.printers))
     assert [(c[0], c[2].student_id) for c in claims] == [("p1", 1)]
+
+
+def test_blocked_jobs_count_for_no_alternative_waiting_job():
+    """Stall-Jobs bleiben im fehlerhaften Drucker-Slot und zählen für
+    No-Alternative-Wartende (Allowlist nur auf den fehlerhaften Drucker) mit —
+    deren Position bleibt hinter den blockierten Aufträgen (nicht 0). Ein
+    Ersatzdrucker-Job bekommt weiterhin die reduzierte Position ohne den
+    fehlerhaften Drucker."""
+    st = AppState()
+    st.settings.printers = _two_printers()
+    pq = st.print_queue
+    # P1 fehlerhaft mit zwei blockierten Aufträgen im Slot (Stall + Peer).
+    pq.faulty_printers.add("p1")
+    blocked_a = _job("helper", 9, name="A")
+    blocked_a.status = "stalled"
+    blocked_b = _job("helper", 8, name="B")
+    blocked_b.status = "peer_error"
+    pq.slots["p1"] = print_queue._Slots(jobs=[blocked_a, blocked_b])
+    # No-Alternative-Job (nur p1) → Position hinter beiden Blockierten = 2.
+    no_alt = _job("helper", 1, name="C", allowed={"p1"})
+    pq.waiting.append(no_alt)
+    # Ersatzdrucker-Job (nur p2, p2 idle) → reduzierte Position 0.
+    with_alt = _job("helper", 2, name="D", allowed={"p2"})
+    pq.waiting.append(with_alt)
+    positions = pq._compute_positions(list(st.settings.printers), faulty_ids={"p1"})
+    assert positions[no_alt.id] == 2  # load(p1)=2 zählt mit
+    assert positions[with_alt.id] == 0  # p1 zählt für Ersatzdrucker nicht
+
+
+def test_pool_printers_counts_blocked_in_load_but_not_as_spooled():
+    """`pool_printers` zählt blockierte (stalled/peer_error) Aufträge in `load`,
+    listet sie aber nicht als druckend/wartend — `printing_name`/`spooled_names`
+    bleiben leer, der Drucker ist `faulty`."""
+    st = AppState()
+    st.settings.printers = _two_printers()
+    pq = st.print_queue
+    pq.faulty_printers.add("p1")
+    blocked_a = _job("helper", 9, name="A")
+    blocked_a.status = "stalled"
+    blocked_b = _job("helper", 8, name="B")
+    blocked_b.status = "peer_error"
+    pq.slots["p1"] = print_queue._Slots(jobs=[blocked_a, blocked_b])
+    rendered = {p["id"]: p for p in pq.pool_printers(list(st.settings.printers))}
+    assert rendered["p1"]["load"] == 2  # blockierte Aufträge zählen mit
+    assert rendered["p1"]["faulty"] is True
+    assert rendered["p1"]["printing_name"] is None
+    assert rendered["p1"]["spooled_names"] == []  # nicht als wartend gelistet
+
+
+def test_reconcile_clears_blocked_jobs_after_reactivate():
+    """Nach `reactivate` (Marke weg) räumt `_reconcile` die beim Stall im Slot
+    belassenen blockierten Aufträge — der Drucker erhält seine Kapazität
+    zurück, der Scheduler kann wieder dorthin dispatchen."""
+    from server.state import PrinterConfig
+
+    st = AppState()
+    st.settings.printers = [PrinterConfig(id="p1", name="P1")]
+    pq = st.print_queue
+    pq.faulty_printers.add("p1")
+    blocked = _job("helper", 9, name="A")
+    blocked.status = "stalled"
+    peer = _job("helper", 8, name="B")
+    peer.status = "peer_error"
+    pq.slots["p1"] = print_queue._Slots(jobs=[blocked, peer])
+    # Noch fehlerhaft → _reconcile lässt die Blockierten stehen.
+    pq._reconcile(list(st.settings.printers))
+    assert pq.slots["p1"].jobs == [blocked, peer]
+    # Reactivate → Marke weg; nächstes _reconcile räumt die blockierten Aufträge.
+    assert pq.reactivate("p1") is True
+    pq._reconcile(list(st.settings.printers))
+    assert pq.slots["p1"].jobs == []
+    assert pq.slots["p1"].load == 0
