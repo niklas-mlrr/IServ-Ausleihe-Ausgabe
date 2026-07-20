@@ -1326,10 +1326,10 @@ window.__host = window.__host || {};
   function printToastText(msg, finalOk) {
     const who = msg.name ? `von ${msg.name} ` : '';
     // Peer-Fehler (Auftrag am hängenden Drucker / kein Ersatzdrucker) —
-    // bleibt stehen, Position 1-basiert.
+    // bleibt stehen. Text vom Server („Es dauert ungewöhnlich lange … -
+    // <Label>"), keine clientseitige +1-Hochzählung der Position mehr.
     if (msg.peer_error) {
-      const pos = typeof msg.position === 'number' ? msg.position + 1 : 1;
-      return `Fehler bei vorigem Auftrag - ${pos}. Warteschlangenposition`;
+      return msg.msg || 'Es dauert ungewöhnlich lange, vielleicht liegt ein Fehler vor.';
     }
     if (finalOk === true) return `Leihschein ${who}gedruckt`;
     if (finalOk === false) {

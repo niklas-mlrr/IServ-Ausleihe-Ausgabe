@@ -145,16 +145,16 @@ function handleServerMessage(msg) {
     if (studentActive) renderBooks(currentBooks);
   } else if (msg.type === 'print_progress') {
     // Live-Status aus der internen Druckerwarteschlange (OS-getrieben):
-    //   peer_error                  → „Fehler bei vorigem Auftrag - <Pos>"
+    //   peer_error                  → „Es dauert ungewöhnlich lange … - <Label>"
     //                                (Auftrag am hängenden Drucker / kein
-    //                                Ersatzdrucker — Position 1-basiert)
+    //                                Ersatzdrucker — Label aus der Position,
+    //                                keine +1-Hochzählung; Text vom Server)
     //   status printing             → „Wird gedruckt …" (OS druckt aktiv —
-    //                                erst jetzt, nicht schon bei Slot-Pos. 0)
+    //                                erst jetzt, nicht schon bei slot-Pos. 0)
     //   position 0 (spooled)        → „gesendet, wartet auf Druck"
     //   position ≥ 1 (zentral queued) → „an X. Druckerwarteschlangenposition"
     if (msg.peer_error) {
-      const pos = typeof msg.position === 'number' ? msg.position + 1 : 1;
-      setStatusText(`Fehler bei vorigem Auftrag - ${pos}. Warteschlangenposition`);
+      setStatusText(msg.msg || 'Es dauert ungewöhnlich lange, vielleicht liegt ein Fehler vor.');
     } else if (msg.status === 'printing') {
       setStatusText('Wird gedruckt …');
     } else if (typeof msg.position === 'number' && msg.position === 0) {
@@ -169,7 +169,7 @@ function handleServerMessage(msg) {
     if (msg.stalled) {
       setStatusText(msg.msg || 'Druck dauert ungewöhnlich lange');
     } else if (msg.peer_error) {
-      setStatusText(msg.msg || 'Fehler bei vorigem Auftrag');
+      setStatusText(msg.msg || 'Es dauert ungewöhnlich lange, vielleicht liegt ein Fehler vor.');
     } else if (msg.ok) {
       setStatusText('Gedruckt');
     } else {

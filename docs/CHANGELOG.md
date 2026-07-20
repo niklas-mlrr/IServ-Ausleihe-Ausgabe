@@ -8,6 +8,38 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-20 — Stall-/Peer-Meldung: Positionsnummer stabil (keine +1-Hochzählung)
+
+Bisher zeigte die Peer-Error-Meldung „Fehler bei vorigem Auftrag -
+(Position+1). Warteschlangenposition" — der vordere Job (Slot 0, bisher
+„wird gedruckt"/„gesendet") rutschte beim Fehler seines Hintermannes auf
+„1. Warteschlangenposition" hoch, und alle folgenden Jobs wurden eine
+Position hochgezählt. Gewünschtes Verhalten: die Positionsnummer eines
+Auftrags bleibt beim Fehler stabil (der an Pos. 0 war, bleibt an 0). Umbau
+in `server/print_queue.py` + `web/scan-ws.js`/`web/host-render.js`:
+
+- **Einheitliche Inaktivitäts-Meldung:** Urheber (`stalled`) und Peers
+  (`peer_error`) zeigen beide „Es dauert ungewöhnlich lange, vielleicht
+  liegt ein Fehler vor. Bitte überprüfe dies. - Drucker <Name>: <Label>"
+  (vorher: Peers „Fehler bei vorigem Auftrag …"). Das Label ist das normale
+  Warteschlangen-Label des Auftrags, gebaut aus Position + Pre-Error-Status
+  (`_stall_label`/`_stall_msg`): Pos. 0 + `printing` → „wird gedruckt",
+  Pos. 0 + `spooled` → „gesendet, wartet auf Druck" (keine Nummer), Pos. ≥ 1
+  → „an X. Druckerwarteschlangenposition" (X = Position, **ohne +1**). So
+  bleibt der an Pos. 0 wartende/druckende Job an 0 statt auf 1 hochgezählt.
+- **Server liefert den Text, der Client zeigt ihn nur:** `print_progress`
+  bekommt für `peer_error`-Jobs ein `msg`-Feld (gebaut in `_notify_all` für
+  zentrale No-Alternative-Jobs via `_peer_pname`; Slot-Peers erhalten ihr
+  `msg` über `print_result`). `scan-ws.js`/`host-render.js` zeigen für
+  `peer_error` nur noch `msg.msg` statt die Position selbst +1 hochzuzählen.
+- **Zentrale No-Alternative-Jobs** bekommen die gleiche Inaktivitäts-Meldung
+  (vorher „Fehler bei vorigem Auftrag - (Pos+1). Warteschlangenposition") —
+  Positionsnummer ohne +1.
+
+Tests: `tests/test_print_queue.py` (+3: `_stall_label` ohne +1, `_stall_msg`
+mit Label, Pos.-0-Peer zeigt Pos.-0-Label statt „1."); bestehende Peer-Test-
+Assertion auf die neue Meldung umgestellt. Suite grün, Ruff clean.
+
 ## 2026-07-20 — Stall-Aufträge im Drucker-Slot belassen (für Warteschlange mitzählen)
 
 Bisher hat `_handle_stall` den Urheber-Auftrag (`stalled`) und alle Peer-Aufträge

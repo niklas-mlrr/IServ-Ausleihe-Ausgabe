@@ -667,7 +667,11 @@ def test_stall_peer_at_same_printer_gets_peer_error(monkeypatch):
         assert jb.status == "peer_error"
         assert (jb.result or {}).get("ok") is False
         assert (jb.result or {}).get("peer_error") is True
-        assert "Fehler bei vorigem Auftrag" in (jb.result or {}).get("msg", "")
+        # Peer-Meldung ist die Inaktivitäts-Hinweismeldung mit dem Positions-Label
+        # (keine +1-Hochzählung): B ist an Slot-Pos. 1 → „an 1. …" (nicht „2.").
+        jb_msg = (jb.result or {}).get("msg", "")
+        assert "ungewöhnlich lange" in jb_msg
+        assert "an 1. Druckerwarteschlangenposition" in jb_msg
         # Peer-Tracker wurde cancelt → kein aktiver Task mehr für jb.
         assert jb.id not in pq._job_tasks
         # Beide Aufträge bleiben im Slot (werden nicht entfernt) und zählen
@@ -830,3 +834,73 @@ def test_reconcile_clears_blocked_jobs_after_reactivate():
     pq._reconcile(list(st.settings.printers))
     assert pq.slots["p1"].jobs == []
     assert pq.slots["p1"].load == 0
+
+
+# ---- Inaktivitäts-Meldung: Positions-Label ohne +1 --------------------------
+
+
+def test_stall_label_position_without_plus_one():
+    """`_stall_label` liefert das normale Warteschlangen-Label ohne +1:
+    Pos. 0 + printing → „wird gedruckt", Pos. 0 + spooled → „gesendet, wartet
+    auf Druck" (keine Nummer), Pos. ≥ 1 → „an X. Druckerwarteschlangenposition"
+    (X = Position, nicht Position+1). So bleibt die Positionsnummer eines
+    Auftrags beim Fehler stabil statt hochgezählt zu werden."""
+    label = print_queue.PrintQueue._stall_label
+    assert label("printing", 0) == "wird gedruckt"
+    assert label("spooled", 0) == "gesendet, wartet auf Druck"
+    assert label("spooled", 1) == "an 1. Druckerwarteschlangenposition"
+    assert label("printing", 2) == "an 2. Druckerwarteschlangenposition"
+
+
+def test_stall_msg_uses_label_and_no_position_plus_one():
+    """`_stall_msg` baut die Inaktivitäts-Meldung mit dem Positions-Label —
+    kein „Fehler bei vorigem Auftrag - (Pos+1). Warteschlangenposition" mehr,
+    sondern „Es dauert ungewöhnlich lange … - Drucker <Name>: <Label>". Ein
+    Peer an Pos. 1 zeigt „an 1. …" (nicht „2."), ein Peer an Pos. 0 zeigt das
+    Pos.-0-Label ohne Nummer."""
+    pq = print_queue.PrintQueue()
+    # Pos. 0 (druckt) am Standarddrucker (name=None → kein Drucker-Präfix).
+    m0 = pq._stall_msg("printing", 0, None)
+    assert m0.startswith("Es dauert ungewöhnlich lange")
+    assert m0.endswith("- wird gedruckt")
+    assert "Warteschlangenposition" not in m0  # Pos. 0 ohne Positionsnummer
+    # Pos. 1 am benannten Drucker → „Drucker P1: an 1. Druckerwarteschlangenposition".
+    m1 = pq._stall_msg("spooled", 1, "P1")
+    assert "Drucker P1: an 1. Druckerwarteschlangenposition" in m1
+    assert "2." not in m1  # keine +1-Hochzählung
+
+
+def test_stall_peer_at_position_zero_shows_pos_zero_label(monkeypatch):
+    """Hängt der **hintere** Job (Slot 1) und wird damit zum Stall-Urheber,
+    rückt der vordere Job (Slot 0, bisher „wird gedruckt"/„gesendet") in die
+    Peer-Error-Rolle — seine Meldung zeigt weiterhin das Pos.-0-Label (keine
+    „1. Warteschlangenposition"), bleibt also an Position 0 statt hochgezählt."""
+    from server.state import PrinterConfig
+
+    st = AppState()
+    st.settings.printers = [PrinterConfig(id="p1", name="P1")]
+    _patch(monkeypatch, st)
+    pq = st.print_queue
+    # Slot: A (Slot 0, druckt aktiv), B (Slot 1, gesendet/wartet).
+    a = _job("helper", 1, name="A")
+    a.status = "printing"
+    b = _job("helper", 2, name="B")
+    b.status = "spooled"
+    pq.slots["p1"] = print_queue._Slots(jobs=[a, b])
+    # B (Slot 1) ist der Stall-Urheber (Inaktivität auf „spooled"); A (Slot 0)
+    # wird zum Peer — bleibt an Pos. 0, Meldung zeigt „wird gedruckt" (keine „1.").
+    asyncio.run(pq._handle_stall("p1", b, "spooled"))
+    assert b.status == "stalled"
+    assert a.status == "peer_error"
+    # A war an Pos. 0 („wird gedruckt") → Peer-Meldung zeigt weiterhin das
+    # Pos.-0-Label, KEINE „Warteschlangenposition"-Nummer (keine +1).
+    a_msg = (a.result or {}).get("msg", "")
+    assert "ungewöhnlich lange" in a_msg
+    assert "wird gedruckt" in a_msg
+    assert "Warteschlangenposition" not in a_msg
+    # B (Urheber, Slot 1) zeigt „an 1. …" (keine +1 → nicht „2.").
+    b_msg = (b.result or {}).get("msg", "")
+    assert "an 1. Druckerwarteschlangenposition" in b_msg
+    assert "2." not in b_msg
+    # Beide bleiben im Slot (mitzählen).
+    assert pq.slots["p1"].jobs == [a, b]

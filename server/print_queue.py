@@ -406,31 +406,52 @@ class PrintQueue:
         except ValueError:
             pass
 
+    @staticmethod
+    def _stall_label(job_status: str, pos: int) -> str:
+        """Warteschlangen-Label eines Auftrags für die Inaktivitäts-Meldung,
+        konsistent mit dem clientseitigen `print_progress`-Label (keine +1):
+        Pos. 0 + ``printing`` → „wird gedruckt", Pos. 0 sonst → „gesendet,
+        wartet auf Druck", Pos. ≥ 1 → „an X. Druckerwarteschlangenposition"
+        (X = Position). So bleibt die Positionsnummer beim Fehler stabil —
+        der Auftrag, der an Position 0 war, bleibt an 0, statt auf 1 hoch-
+        gezählt zu werden."""
+        if pos == 0:
+            return "wird gedruckt" if job_status == "printing" else "gesendet, wartet auf Druck"
+        return f"an {pos}. Druckerwarteschlangenposition"
+
+    def _stall_msg(self, job_status: str, pos: int, pname: str | None) -> str:
+        """Vollständige Inaktivitäts-Meldung für einen Auftrag am hängenden
+        Drucker: „Es dauert ungewöhnlich lange … - Drucker <Name>: <Label>"
+        (bzw. ohne Drucker-Präfix, wenn kein Name gegeben). `job_status` ist
+        der Pre-Error-Status (für Pos. 0), `pos` die Warteschlangen-Position."""
+        label = self._stall_label(job_status, pos)
+        ctx = f"Drucker {pname}: {label}" if pname else label
+        return (
+            "Es dauert ungewöhnlich lange, vielleicht liegt ein Fehler vor. "
+            f"Bitte überprüfe dies. - {ctx}"
+        )
+
     async def _handle_stall(self, printer_id: str, job: PrintJob, last_state: JobState) -> None:
         """Inaktivität auf `printer_id`: der Drucker gilt ab hier als hängend
-        („es dauert ungewöhnlich lange"). Der Urheber bekommt die lange
-        Fehlermeldung, alle **anderen** Aufträge am selben Drucker (Slot 1 etc.)
-        werden als ``peer_error`` finalisiert („Fehler bei vorigem Auftrag -
-        <Position>") und deren Tracker cancelt. Die Aufträge bleiben **im Slot**
+        („es dauert ungewöhnlich lange"). Der Urheber und alle **anderen**
+        Aufträge am selben Drucker (Slot 1 etc.) bekommen die lange
+        Inaktivitäts-Hinweismeldung — der Urheber als ``stalled``, die Peers als
+        ``peer_error`` (Tracker cancelt). Die Meldung trägt das normale
+        Warteschlangen-Label des jeweiligen Auftrags (Pos. 0 + ``printing`` →
+        „wird gedruckt", Pos. 0 + ``spooled`` → „gesendet, wartet auf Druck",
+        Pos. ≥ 1 → „an X. Druckerwarteschlangenposition" — X = Position, ohne
+        +1), sodass die Positionsnummer eines Auftrags beim Fehler stabil
+        bleibt statt hochgezählt zu werden. Die Aufträge bleiben **im Slot**
         des Druckers (werden nicht entfernt), damit sie für die Warteschlange
         weiter mitzählen — Last und Positionen der No-Alternative-Jobs (Allowlist
         nur auf diesen fehlerhaften Drucker) beruhen auf der unverändert vollen
         Slot-Belegung. Weggeräumt werden sie erst bei der Reaktivierung
         (``_reconcile`` für nicht-fehlerhafte Drucker). Zentrale-Warteschlangen-
-        Jobs ohne Ersatzdrucker bekommen ihr ``peer_error`` über das
-        anschließende ``_notify_all`` (sie bleiben in `waiting`, bis der Drucker
-        reaktiviert wird); Aufträge mit Ersatzdrucker werden mit um den
-        fehlerhaften Drucker reduzierter Position bedient."""
+        Jobs ohne Ersatzdrucker bekommen ihr ``peer_error`` (gleiche Meldung)
+        über das anschließende ``_notify_all`` (sie bleiben in `waiting`, bis
+        der Drucker reaktiviert wird); Aufträge mit Ersatzdrucker werden mit um
+        den fehlerhaften Drucker reduzierter Position bedient."""
         pname = self._printer_name_by_id(printer_id)
-        status_label = {
-            "spooled": "gesendet, wartet auf Druck",
-            "printing": "wird gedruckt",
-        }.get(last_state, last_state)
-        printer_ctx = f"Drucker {pname}: {status_label}" if pname else status_label
-        stalled_msg = (
-            "Es dauert ungewöhnlich lange, vielleicht liegt ein Fehler vor. "
-            f"Bitte überprüfe dies. - {printer_ctx}"
-        )
 
         cancelled: list[asyncio.Task] = []
         peer_results: list[PrintJob] = []
@@ -439,31 +460,39 @@ class PrintQueue:
             # hat, behandeln wir diesen Job trotzdem als ersten (er ist ja auch
             # inaktiv) — Doppelmarkierung ist harmlos.
             self.faulty_printers.add(printer_id)
+            # Positionen einmalig im fehlerhaften Kontext berechnen (für Urheber
+            # + Peers — Label und Positionsnummer daraus).
+            from .state import get_state
+            printers = list(get_state().settings.printers)
+            positions = self._compute_positions(printers, faulty_ids={printer_id})
             # Urheber-Stall: lang melden, finalisieren — aber **im Slot belassen**,
             # damit der Drucker für die Warteschlange weiter mitzählt (Last und
             # Positionen der No-Alternative-Jobs). Weggeräumt wird erst bei der
             # Reaktivierung (`_reconcile` für nicht-fehlerhafte Drucker).
             job.status = "stalled"
-            job.result = {"ok": False, "stalled": True, "msg": stalled_msg}
+            job.result = {
+                "ok": False,
+                "stalled": True,
+                "msg": self._stall_msg(last_state, positions.get(job.id, 0), pname),
+            }
             job.done.set()
             # Peer-Slot-Jobs: finalisieren als peer_error, Tracker canceln —
             # ebenfalls im Slot belassen (mitzählen). Den Urheber überspringen
-            # (er steht noch vorne in s.jobs und ist oben schon stalled).
+            # (er steht noch vorne in s.jobs und ist oben schon stalled). Die
+            # Peer-Meldung übernimmt das Label aus der Position VOR dem Fehler
+            # (Pre-Error-Status, bevor wir ihn überschreiben).
             s = self.slots.get(printer_id)
             if s:
-                # Positionen einmalig im fehlerhaften Kontext berechnen.
-                from .state import get_state
-                printers = list(get_state().settings.printers)
-                positions = self._compute_positions(printers, faulty_ids={printer_id})
                 for other in list(s.jobs):
                     if other is job:
                         continue
+                    pre_status = other.status
                     pos = positions.get(other.id, 0)
                     other.status = "peer_error"
                     other.result = {
                         "ok": False,
                         "peer_error": True,
-                        "msg": f"Fehler bei vorigem Auftrag - {pos + 1}. Warteschlangenposition",
+                        "msg": self._stall_msg(pre_status, pos, pname),
                     }
                     other.done.set()
                     peer_results.append(other)
@@ -719,8 +748,10 @@ class PrintQueue:
         """Allen Aufträgen ihre aktuelle Position + Status pushen (nur an den
         jeweiligen Urheber). Position aus `_compute_positions`; für Jobs an
         fehlerhaften Druckern bzw. ohne Ersatzdrucker wird `peer_error` wahr
-        → der Client zeigt „Fehler bei vorigem Auftrag - <Position>" statt
-        einer normalen Warteposition."""
+        → der Client zeigt die Inaktivitäts-Meldung („Es dauert ungewöhnlich
+        lange … - <Label>") statt einer normalen Warteposition. Die Meldung
+        liefert der Server im `msg`-Feld; der Client baut sie nicht mehr aus
+        der Position zusammen (keine +1-Hochzählung mehr)."""
         from .hub import get_hub
         from .state import get_state
 
@@ -728,11 +759,15 @@ class PrintQueue:
         printers = list(state.settings.printers)
         async with self._lock:
             positions = self._compute_positions(printers, faulty_ids=self.faulty_printers)
-            snapshot: list[tuple[PrintJob, int, JobStatus, str | None, bool]] = []
+            snapshot: list[tuple[PrintJob, int, JobStatus, str | None, bool, str | None]] = []
             for j in self.waiting:
                 pname = self._printer_name(j.assigned_printer_id)
                 peer = self._is_peer_error(j, printers, in_slot=False)
-                snapshot.append((j, positions.get(j.id, 0), j.status, pname, peer))
+                msg = (
+                    self._stall_msg(j.status, positions.get(j.id, 0), self._peer_pname(j, printers))
+                    if peer else None
+                )
+                snapshot.append((j, positions.get(j.id, 0), j.status, pname, peer, msg))
             for s in self.slots.values():
                 for j in s.jobs:
                     # Finalisierte (blockierte) Aufträge nicht mehr mit Progress
@@ -745,10 +780,16 @@ class PrintQueue:
                     # Slot-Job an fehlerhaftem Drucker → peer_error (kurzes
                     # Fenster, bis der Stall ihn finalisiert aus dem Slot nimmt).
                     peer = j.assigned_printer_id in self.faulty_printers
-                    snapshot.append((j, positions.get(j.id, 0), j.status, pname, peer))
+                    msg = (
+                        self._stall_msg(j.status, positions.get(j.id, 0), pname)
+                        if peer else None
+                    )
+                    snapshot.append((j, positions.get(j.id, 0), j.status, pname, peer, msg))
         hub = get_hub()
-        for job, position, status, printer, peer_error in snapshot:
-            await self._send_progress(hub, state, job, position, status, printer, peer_error)
+        for job, position, status, printer, peer_error, msg in snapshot:
+            await self._send_progress(
+                hub, state, job, position, status, printer, peer_error, msg
+            )
         # Druck-Übergänge (dispatch/spool/druckt/fertig) als vollen State an
         # alle verbundenen Hosts pushen, damit deren Druckerwarteschlangen-Box
         # live folgt — der Snapshot spiegelt über `pool_printers`/`pool_summary`
@@ -771,6 +812,21 @@ class PrintQueue:
             for p in printers
         )
 
+    def _peer_pname(self, job: PrintJob, printers: list) -> str | None:
+        """Druckername für die Inaktivitäts-Meldung eines zentralen
+        No-Alternative-Jobs: der (einzige) erlaubte fehlerhafte Drucker, wenn
+        eindeutig bestimmbar; sonst None (die Meldung zeigt dann nur die
+        Warteschlangenposition ohne Drucker-Präfix)."""
+        allowed = job.allowed_printers
+        if allowed is not None:
+            if len(allowed) == 1:
+                return self._printer_name_by_id(next(iter(allowed)))
+            return None  # mehrere erlaubte Drucker → kein einzelner Name
+        # allowed=None (alle Pool-Drucker erlaubt): nur eindeutig bei Pool-Größe 1.
+        if len(printers) == 1:
+            return self._printer_name_by_id(printers[0].id)
+        return None
+
     def _printer_name(self, printer_id: str | None) -> str | None:
         """Druckername zur Kennung (für Notifications). None = Standarddrucker
         (Name None). Verwaiste Kennungen → None."""
@@ -788,7 +844,7 @@ class PrintQueue:
 
     async def _send_progress(
         self, hub, state, job: PrintJob, position: int, status: JobStatus, printer: str | None,
-        peer_error: bool = False,
+        peer_error: bool = False, text: str | None = None,
     ) -> None:
         msg = {
             "type": "print_progress",
@@ -799,6 +855,8 @@ class PrintQueue:
             "printer": printer,
             "peer_error": peer_error,
         }
+        if text is not None:
+            msg["msg"] = text
         if job.helper_token:
             await hub.send_scanner(job.helper_token, msg)
         if job.host_sid:
