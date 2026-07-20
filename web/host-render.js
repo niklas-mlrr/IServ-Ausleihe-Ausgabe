@@ -1331,7 +1331,6 @@ window.__host = window.__host || {};
     if (msg.peer_error) {
       return msg.msg || 'Es dauert ungewöhnlich lange, vielleicht liegt ein Fehler vor.';
     }
-    if (finalOk === true) return `Leihschein ${who}gedruckt`;
     if (finalOk === false) {
       // Stall (Inaktivität): lange Hinweismeldung direkt anzeigen.
       if (msg.stalled) return msg.msg || 'Druck dauert ungewöhnlich lange';
@@ -1340,14 +1339,24 @@ window.__host = window.__host || {};
     // „Wird gedruckt" erst, wenn das OS aktiv druckt — nicht schon bei Slot-
     // Position 0 (dort: „gesendet, wartet auf Druck"). Position 1 zeigt die
     // Warteschlangenposition (nicht mehr „gesendet, wartet auf Druck").
-    if (msg.status === 'printing') return `Leihschein ${who}wird gedruckt`;
-    if (typeof msg.position === 'number' && msg.position === 0) {
-      return `Leihschein ${who}gesendet, wartet auf Druck`;
+    let text;
+    if (finalOk === true) {
+      text = `Leihschein ${who}gedruckt`;
+    } else if (msg.status === 'printing') {
+      text = `Leihschein ${who}wird gedruckt`;
+    } else if (typeof msg.position === 'number' && msg.position === 0) {
+      text = `Leihschein ${who}gesendet, wartet auf Druck`;
+    } else if (typeof msg.position === 'number' && msg.position >= 1) {
+      text = `Leihschein ${who}an ${msg.position}. Druckerwarteschlangenposition`;
+    } else {
+      text = `Leihschein ${who}in Druckerwarteschlange`;
     }
-    if (typeof msg.position === 'number' && msg.position >= 1) {
-      return `Leihschein ${who}an ${msg.position}. Druckerwarteschlangenposition`;
-    }
-    return `Leihschein ${who}in Druckerwarteschlange`;
+    // Sobald der Auftrag an einen Drucker gesendet wurde (msg.printer gesetzt),
+    // den Drucker ergänzen — damit der Host weiß, welcher Drucker druckt /
+    // gedruckt hat. Für Fehlerfälle (peer_error/stalled/generisch) oben schon
+    // ohne Zusatz zurückgegeben; zentrale Warteschlange ohne Drucker → kein Zusatz.
+    if (msg.printer) text += ` — Drucker ${msg.printer}`;
+    return text;
   }
 
   function _printToastEl(jobId, warn) {

@@ -261,6 +261,67 @@ def test_failed_dispatch_keeps_result_false(monkeypatch):
     asyncio.run(run())
 
 
+def test_progress_and_result_carry_printer_name(monkeypatch):
+    """Sobald ein Auftrag an einen Drucker gesendet wurde, trägt `print_progress`
+    den Druckername (`printer`-Feld) — und auch `print_result` („Gedruckt"),
+    damit der Auftraggeber sieht, welcher Drucker gedruckt hat. Ein zentral
+    wartender Auftrag (noch nicht dispatcht, `assigned_printer_id` None) hat
+    `printer` null in `print_progress`."""
+    from server.state import PrinterConfig
+
+    st = AppState()
+    st.settings.printers = [PrinterConfig(id="p1", name="P1")]
+    _patch(monkeypatch, st)
+    pq = st.print_queue
+
+    h = HelperSession(token="tok-a", name="T")
+    h.ws = _FakeWS()
+    st.helper_sessions["tok-a"] = h
+
+    os_states: dict[int, str] = {}
+
+    async def fake_print(state, student_id, *, pages=None, printer_name=None):
+        return {"ok": True, "backend": "sumatra", "detail": "an Drucker gesendet",
+                "job_handle": {"kind": "test", "sid": student_id}}
+
+    async def fake_read_state(handle):
+        sid = handle.get("sid") if handle else None
+        return os_states.get(sid, "spooled")
+
+    monkeypatch.setattr(sessions, "print_loan_slip_for", fake_print)
+    monkeypatch.setattr(printing, "read_job_state", fake_read_state)
+
+    async def run():
+        pq.start()
+        ja = _job("helper", 1, helper_token="tok-a", name="A")
+        jb = _job("helper", 2, helper_token="tok-a", name="B")
+        await pq.enqueue(ja)
+        await pq.enqueue(jb)
+        # A druckt (printing, Pos 0), B gesendet (spooled, Pos 1) — beide an p1.
+        os_states[1] = "printing"
+        await asyncio.sleep(0.1)
+        a_progress = [m for m in h.ws.sent
+                      if m["type"] == "print_progress" and m["job_id"] == ja.id]
+        b_progress = [m for m in h.ws.sent
+                      if m["type"] == "print_progress" and m["job_id"] == jb.id]
+        # Beide sind an den Drucker gesendet → printer == "P1".
+        assert any(m.get("printer") == "P1" for m in a_progress), a_progress
+        assert any(m.get("printer") == "P1" for m in b_progress), b_progress
+        # A fertig → A done mit print_result, printer == "P1".
+        os_states[1] = "absent"
+        await asyncio.wait_for(ja.done.wait(), timeout=5)
+        await asyncio.sleep(0.1)
+        a_result = [m for m in h.ws.sent if m["type"] == "print_result" and m["job_id"] == ja.id]
+        assert a_result and a_result[-1].get("ok") is True
+        assert a_result[-1].get("printer") == "P1", a_result[-1]
+        # Aufräumen: B fertigstellen.
+        os_states[2] = "absent"
+        await asyncio.wait_for(jb.done.wait(), timeout=5)
+        await pq.stop()
+
+    asyncio.run(run())
+
+
 def test_parallel_dispatch_two_printers(monkeypatch):
     """Zwei Drucker, zwei Aufträge: beide werden gleichzeitig dispatcht und
     gepollt (parallele Tracker-Tasks) — nicht nacheinander. Früher blockierte

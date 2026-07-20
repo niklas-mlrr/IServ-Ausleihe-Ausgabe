@@ -902,6 +902,9 @@ class PrintQueue:
             "job_id": job.id,
             "ok": bool(res.get("ok")),
             "name": job.name,
+            # Druckername (wenn zugewiesen) — damit der Auftraggeber im
+            # „Gedruckt"-Status sieht, welcher Drucker gedruckt hat.
+            "printer": self._printer_name(job.assigned_printer_id),
         }
         # Spezielle Fehlerarten durchreichen, damit der Client sie gesondert
         # darstellt (lang Stall-Text bzw. „Fehler bei vorigem Auftrag") und

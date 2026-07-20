@@ -153,16 +153,27 @@ function handleServerMessage(msg) {
     //                                erst jetzt, nicht schon bei slot-Pos. 0)
     //   position 0 (spooled)        → „gesendet, wartet auf Druck"
     //   position ≥ 1 (zentral queued) → „an X. Druckerwarteschlangenposition"
+    // Sobald der Auftrag an einen Drucker gesendet wurde (msg.printer gesetzt),
+    // wird „ von Drucker <Name>" ergänzt, damit der Auftraggeber weiß, welcher
+    // Drucker seinen Leihschein druckt. Zentrale-Warteschlangen-Jobs ohne
+    // zugewiesenen Drucker (msg.printer null) bekommen keinen Zusatz. Für
+    // peer_error übernimmt der Server den Text (Pos.-0-Hinweis nennt den Drucker
+    // bereits, Pos.≥1 ist eine andere Semantik) — kein Zusatz.
     if (msg.peer_error) {
       setStatusText(msg.msg || 'Es dauert ungewöhnlich lange, vielleicht liegt ein Fehler vor.');
-    } else if (msg.status === 'printing') {
-      setStatusText('Wird gedruckt …');
-    } else if (typeof msg.position === 'number' && msg.position === 0) {
-      setStatusText('Leihschein gesendet, wartet auf Druck …');
-    } else if (typeof msg.position === 'number' && msg.position >= 1) {
-      setStatusText(`Leihschein an ${msg.position}. Druckerwarteschlangenposition`);
     } else {
-      setStatusText('Leihschein in Druckerwarteschlange …');
+      let text;
+      if (msg.status === 'printing') {
+        text = 'Wird gedruckt …';
+      } else if (typeof msg.position === 'number' && msg.position === 0) {
+        text = 'Leihschein gesendet, wartet auf Druck …';
+      } else if (typeof msg.position === 'number' && msg.position >= 1) {
+        text = `Leihschein an ${msg.position}. Druckerwarteschlangenposition`;
+      } else {
+        text = 'Leihschein in Druckerwarteschlange …';
+      }
+      if (msg.printer) text += ` von Drucker ${msg.printer}`;
+      setStatusText(text);
     }
   } else if (msg.type === 'print_result') {
     printBtn.disabled = false;
@@ -171,7 +182,7 @@ function handleServerMessage(msg) {
     } else if (msg.peer_error) {
       setStatusText(msg.msg || 'Es dauert ungewöhnlich lange, vielleicht liegt ein Fehler vor.');
     } else if (msg.ok) {
-      setStatusText('Gedruckt');
+      setStatusText(msg.printer ? `Gedruckt von Drucker ${msg.printer}` : 'Gedruckt');
     } else {
       setStatusText(`Druck fehlgeschlagen: ${msg.msg || ''}`);
     }

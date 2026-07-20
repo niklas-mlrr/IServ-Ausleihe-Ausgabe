@@ -8,6 +8,30 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-20 — Statusanzeige ergänzt „von Drucker <Name>" nach Versand
+
+Sobald ein Auftrag an einen Drucker gesendet wurde, zeigt die Statusanzeige
+des Auftraggebers den Druckername — damit er weiß, welcher Drucker seinen
+Leihschein druckt. Änderung in `server/print_queue.py` + `web/scan-ws.js` +
+`web/host-render.js`:
+
+- **`print_progress`** trägt bereits das `printer`-Feld (Druckername); der
+  Helfer-Client (`scan-ws.js`) hängt für nicht-`peer_error`-Status jetzt
+  „ von Drucker <Name>" an den Statustext an (z. B. „Wird gedruckt … von
+  Drucker P1", „Leihschein gesendet, wartet auf Druck … von Drucker P1",
+  „Leihschein an 1. Druckerwarteschlangenposition von Drucker P1"). Der Host-
+  Toast (`printToastText` in `host-render.js`) hängt analog „ — Drucker
+  <Name>" an (z. B. „Leihschein von A wird gedruckt — Drucker P1", „… gedruckt
+  — Drucker P1"). Zentrale-Warteschlangen-Jobs ohne zugewiesenen Drucker
+  (`printer` null) bekommen keinen Zusatz. Für `peer_error`/`stalled` übernimmt
+  der Server den Text (Pos.-0-Hinweis nennt den Drucker bereits) — kein Zusatz.
+- **`print_result`** bekommt neu ein `printer`-Feld (aus `assigned_printer_id`
+  via `_printer_name`); der Helfer zeigt bei Erfolg „Gedruckt von Drucker
+  <Name>", der Host-Toast „… gedruckt — Drucker <Name>" (statt nur „gedruckt").
+
+Tests: `tests/test_print_queue.py` (+1: `print_progress` + `print_result`
+tragen `printer` für gesendete Aufträge). Suite grün, Ruff clean.
+
 ## 2026-07-20 — Fehlermeldung positionsbasiert: nur Pos. 0 bekommt den Inaktivitäts-Hinweis
 
 Aufbauend auf der „keine +1-Hochzählung"-Änderung (s. u.): Die Fehlermeldung am
