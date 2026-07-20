@@ -8,6 +8,31 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-07-20 — Fehlermeldung positionsbasiert: nur Pos. 0 bekommt den Inaktivitäts-Hinweis
+
+Aufbauend auf der „keine +1-Hochzählung"-Änderung (s. u.): Die Fehlermeldung am
+hängenden Drucker ist jetzt **positionsbasiert**, nicht mehr nach Urheber/Peer
+getrennt. Neu in `server/print_queue.py` (`_error_msg`, verwendet in
+`_handle_stall` + `_notify_all`):
+
+- **Pos. 0 (der vorn am Drucker druckende/gesendete Auftrag)** bekommt den
+  Inaktivitäts-Hinweis „Es dauert ungewöhnlich lange, vielleicht liegt ein
+  Fehler vor. Bitte überprüfe dies. - Drucker <Name>: <Label>" (Label aus
+  `_stall_label`: „wird gedruckt"/„gesendet, wartet auf Druck").
+- **Pos. ≥ 1 (die dahinter wartenden Aufträge)** bekommt die gewohnte Peer-
+  Formulierung „Fehler bei vorigem Druckauftrag - X. Warteschlangenposition"
+  (X = Position, ohne +1) zurück — nur der **erste** Auftrag zeigt also
+  „es dauert ungewöhnlich lange", alle weiteren die Peer-Formulierung.
+- **Ersatzdrucker-Aufträge** bekommen weiterhin keine Fehlermeldung, sobald
+  ein erlaubter Drucker nicht fehlerhaft ist (s. `_is_peer_error`/Slot-
+  Markierung) — nur wenn *alle* erlaubten Drucker fehlerhaft sind, greift die
+  obige Regel.
+
+Tests: `tests/test_print_queue.py` (+1: `_error_msg` positionsbasiert);
+`test_stall_peer_at_same_printer_gets_peer_error` und
+`test_stall_peer_at_position_zero_shows_pos_zero_label` auf die neue
+Pos.≥1-Formulierung umgestellt. Suite grün, Ruff clean.
+
 ## 2026-07-20 — Stall-/Peer-Meldung: Positionsnummer stabil (keine +1-Hochzählung)
 
 Bisher zeigte die Peer-Error-Meldung „Fehler bei vorigem Auftrag -

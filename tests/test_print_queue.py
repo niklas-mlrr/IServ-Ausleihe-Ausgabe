@@ -667,11 +667,18 @@ def test_stall_peer_at_same_printer_gets_peer_error(monkeypatch):
         assert jb.status == "peer_error"
         assert (jb.result or {}).get("ok") is False
         assert (jb.result or {}).get("peer_error") is True
-        # Peer-Meldung ist die Inaktivitäts-Hinweismeldung mit dem Positions-Label
-        # (keine +1-Hochzählung): B ist an Slot-Pos. 1 → „an 1. …" (nicht „2.").
+        # Meldungen sind positionsbasiert (keine +1-Hochzählung):
+        # A ist Urheber an Slot-Pos. 0 → Inaktivitäts-Hinweis „Es dauert
+        # ungewöhnlich lange … - <Label>" (Label für Pre-Status „spooled" =
+        # „gesendet, wartet auf Druck"); B ist Peer an Slot-Pos. 1 →
+        # „Fehler bei vorigem Druckauftrag - 1. Warteschlangenposition".
+        ja_msg = (ja.result or {}).get("msg", "")
         jb_msg = (jb.result or {}).get("msg", "")
-        assert "ungewöhnlich lange" in jb_msg
-        assert "an 1. Druckerwarteschlangenposition" in jb_msg
+        assert "ungewöhnlich lange" in ja_msg
+        assert "gesendet, wartet auf Druck" in ja_msg
+        assert "Fehler bei vorigem Druckauftrag - 1. Warteschlangenposition" in jb_msg
+        assert "ungewöhnlich lange" not in jb_msg
+        assert "2." not in jb_msg
         # Peer-Tracker wurde cancelt → kein aktiver Task mehr für jb.
         assert jb.id not in pq._job_tasks
         # Beide Aufträge bleiben im Slot (werden nicht entfernt) und zählen
@@ -870,6 +877,30 @@ def test_stall_msg_uses_label_and_no_position_plus_one():
     assert "2." not in m1  # keine +1-Hochzählung
 
 
+def test_error_msg_position_based():
+    """`_error_msg` wählt die Meldung nach Position (nicht nach Urheber/Peer):
+    Pos. 0 → Inaktivitäts-Hinweis („Es dauert ungewöhnlich lange … - <Label>"),
+    Pos. ≥ 1 → „Fehler bei vorigem Druckauftrag - X. Warteschlangenposition"
+    (X = Position, ohne +1). So bekommt nur der vordere, druckende Auftrag den
+    Hinweis, alle dahinter wartenden die Peer-Formulierung — die Nummer bleibt
+    beim Fehler stabil statt hochgezählt zu werden."""
+    pq = print_queue.PrintQueue()
+    # Pos. 0 → Inaktivitäts-Hinweis mit Pos.-0-Label (hier: „wird gedruckt").
+    m0 = pq._error_msg("printing", 0, "P1")
+    assert m0.startswith("Es dauert ungewöhnlich lange")
+    assert "Drucker P1: wird gedruckt" in m0
+    assert "Warteschlangenposition" not in m0
+    # Pos. 1 → Peer-Formulierung, X=1 (keine +1).
+    m1 = pq._error_msg("spooled", 1, "P1")
+    assert m1 == "Fehler bei vorigem Druckauftrag - 1. Warteschlangenposition"
+    assert "ungewöhnlich lange" not in m1
+    assert "2." not in m1
+    # Pos. 2 → X=2.
+    m2 = pq._error_msg("spooled", 2, None)
+    assert m2 == "Fehler bei vorigem Druckauftrag - 2. Warteschlangenposition"
+    assert "3." not in m2
+
+
 def test_stall_peer_at_position_zero_shows_pos_zero_label(monkeypatch):
     """Hängt der **hintere** Job (Slot 1) und wird damit zum Stall-Urheber,
     rückt der vordere Job (Slot 0, bisher „wird gedruckt"/„gesendet") in die
@@ -898,9 +929,12 @@ def test_stall_peer_at_position_zero_shows_pos_zero_label(monkeypatch):
     assert "ungewöhnlich lange" in a_msg
     assert "wird gedruckt" in a_msg
     assert "Warteschlangenposition" not in a_msg
-    # B (Urheber, Slot 1) zeigt „an 1. …" (keine +1 → nicht „2.").
+    # B (Urheber, Slot 1) zeigt „Fehler bei vorigem Druckauftrag - 1. …"
+    # (positionsabhängig: nur Pos. 0 bekommt den Inaktivitäts-Hinweis; Pos. ≥ 1
+    # die Peer-Formulierung — keine +1 → nicht „2.").
     b_msg = (b.result or {}).get("msg", "")
-    assert "an 1. Druckerwarteschlangenposition" in b_msg
+    assert "Fehler bei vorigem Druckauftrag - 1. Warteschlangenposition" in b_msg
+    assert "ungewöhnlich lange" not in b_msg
     assert "2." not in b_msg
     # Beide bleiben im Slot (mitzählen).
     assert pq.slots["p1"].jobs == [a, b]

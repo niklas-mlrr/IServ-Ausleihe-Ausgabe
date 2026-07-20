@@ -431,26 +431,47 @@ class PrintQueue:
             f"Bitte überprüfe dies. - {ctx}"
         )
 
+    def _error_msg(self, job_status: str, pos: int, pname: str | None) -> str:
+        """Fehlermeldung für einen Auftrag am hängenden Drucker,
+        positionsbasiert (nicht nach Urheber/Peer):
+
+        - Pos. 0 (der vordere, druckende/gesendete Auftrag am Drucker) →
+          Inaktivitäts-Hinweismeldung „Es dauert ungewöhnlich lange … -
+          Drucker <Name>: <Label>" (Label aus `_stall_msg`).
+        - Pos. ≥ 1 (die dahinter wartenden Aufträge) → „Fehler bei vorigem
+          Druckauftrag - X. Warteschlangenposition" (X = Position, ohne +1,
+          konsistent mit der normalen „an X. Druckerwarteschlangenposition"-
+          Anzeige).
+
+        Aufträge mit Ersatzdrucker (ein erlaubter Drucker ist nicht fehlerhaft)
+        gelangen hier gar nicht erst rein — sie werden normal bedient, keine
+        Fehlermeldung (s. `_is_peer_error` / Slot-Markierung)."""
+        if pos == 0:
+            return self._stall_msg(job_status, 0, pname)
+        return f"Fehler bei vorigem Druckauftrag - {pos}. Warteschlangenposition"
+
     async def _handle_stall(self, printer_id: str, job: PrintJob, last_state: JobState) -> None:
         """Inaktivität auf `printer_id`: der Drucker gilt ab hier als hängend
-        („es dauert ungewöhnlich lange"). Der Urheber und alle **anderen**
-        Aufträge am selben Drucker (Slot 1 etc.) bekommen die lange
-        Inaktivitäts-Hinweismeldung — der Urheber als ``stalled``, die Peers als
-        ``peer_error`` (Tracker cancelt). Die Meldung trägt das normale
-        Warteschlangen-Label des jeweiligen Auftrags (Pos. 0 + ``printing`` →
-        „wird gedruckt", Pos. 0 + ``spooled`` → „gesendet, wartet auf Druck",
-        Pos. ≥ 1 → „an X. Druckerwarteschlangenposition" — X = Position, ohne
-        +1), sodass die Positionsnummer eines Auftrags beim Fehler stabil
-        bleibt statt hochgezählt zu werden. Die Aufträge bleiben **im Slot**
-        des Druckers (werden nicht entfernt), damit sie für die Warteschlange
-        weiter mitzählen — Last und Positionen der No-Alternative-Jobs (Allowlist
-        nur auf diesen fehlerhaften Drucker) beruhen auf der unverändert vollen
-        Slot-Belegung. Weggeräumt werden sie erst bei der Reaktivierung
-        (``_reconcile`` für nicht-fehlerhafte Drucker). Zentrale-Warteschlangen-
-        Jobs ohne Ersatzdrucker bekommen ihr ``peer_error`` (gleiche Meldung)
-        über das anschließende ``_notify_all`` (sie bleiben in `waiting`, bis
-        der Drucker reaktiviert wird); Aufträge mit Ersatzdrucker werden mit um
-        den fehlerhaften Drucker reduzierter Position bedient."""
+        („es dauert ungewöhnlich lange"). Der Urheber wird ``stalled``, alle
+        **anderen** Aufträge am selben Drucker (Slot 1 etc.) werden
+        ``peer_error`` (Tracker cancelt). Die Fehlermeldung ist positionsbasiert
+        (`_error_msg`): nur der **erste** Auftrag (Pos. 0, der vorn am Drucker
+        druckende/gesendete) bekommt den Inaktivitäts-Hinweis („Es dauert
+        ungewöhnlich lange … - Drucker <Name>: <Label>"); alle **weiteren**
+        (Pos. ≥ 1) bekommen „Fehler bei vorigem Druckauftrag - X.
+        Warteschlangenposition" (X = Position, ohne +1). So bleibt die
+        Positionsnummer stabil — der an Pos. 0 druckende Auftrag rutscht beim
+        Fehler nicht auf „1." hoch. Die Aufträge bleiben **im Slot** des
+        Druckers (werden nicht entfernt), damit sie für die Warteschlange
+        weiter mitzählen — Last und Positionen der No-Alternative-Jobs
+        (Allowlist nur auf diesen fehlerhaften Drucker) beruhen auf der
+        unverändert vollen Slot-Belegung. Weggeräumt werden sie erst bei der
+        Reaktivierung (``_reconcile`` für nicht-fehlerhafte Drucker). Zentrale-
+        Warteschlangen-Jobs ohne Ersatzdrucker bekommen ihr ``peer_error``
+        (gleiche positionsbasierte Meldung) über das anschließende
+        ``_notify_all`` (sie bleiben in `waiting`, bis der Drucker reaktiviert
+        wird); Aufträge mit Ersatzdrucker werden normal bedient (keine
+        Fehlermeldung)."""
         pname = self._printer_name_by_id(printer_id)
 
         cancelled: list[asyncio.Task] = []
@@ -461,26 +482,27 @@ class PrintQueue:
             # inaktiv) — Doppelmarkierung ist harmlos.
             self.faulty_printers.add(printer_id)
             # Positionen einmalig im fehlerhaften Kontext berechnen (für Urheber
-            # + Peers — Label und Positionsnummer daraus).
+            # + Peers — Meldung und Positionsnummer daraus).
             from .state import get_state
             printers = list(get_state().settings.printers)
             positions = self._compute_positions(printers, faulty_ids={printer_id})
-            # Urheber-Stall: lang melden, finalisieren — aber **im Slot belassen**,
-            # damit der Drucker für die Warteschlange weiter mitzählt (Last und
-            # Positionen der No-Alternative-Jobs). Weggeräumt wird erst bei der
-            # Reaktivierung (`_reconcile` für nicht-fehlerhafte Drucker).
+            # Urheber-Stall: finalisieren — aber **im Slot belassen**, damit der
+            # Drucker für die Warteschlange weiter mitzählt (Last und Positionen
+            # der No-Alternative-Jobs). Weggeräumt wird erst bei der Reaktivierung
+            # (`_reconcile` für nicht-fehlerhafte Drucker). Meldung positionsbasiert.
+            job_pos = positions.get(job.id, 0)
             job.status = "stalled"
             job.result = {
                 "ok": False,
                 "stalled": True,
-                "msg": self._stall_msg(last_state, positions.get(job.id, 0), pname),
+                "msg": self._error_msg(last_state, job_pos, pname),
             }
             job.done.set()
             # Peer-Slot-Jobs: finalisieren als peer_error, Tracker canceln —
             # ebenfalls im Slot belassen (mitzählen). Den Urheber überspringen
             # (er steht noch vorne in s.jobs und ist oben schon stalled). Die
-            # Peer-Meldung übernimmt das Label aus der Position VOR dem Fehler
-            # (Pre-Error-Status, bevor wir ihn überschreiben).
+            # Peer-Meldung ist positionsbasiert (`_error_msg`); das Label für
+            # Pos. 0 nutzt den Pre-Error-Status (vor dem Überschreiben).
             s = self.slots.get(printer_id)
             if s:
                 for other in list(s.jobs):
@@ -492,7 +514,7 @@ class PrintQueue:
                     other.result = {
                         "ok": False,
                         "peer_error": True,
-                        "msg": self._stall_msg(pre_status, pos, pname),
+                        "msg": self._error_msg(pre_status, pos, pname),
                     }
                     other.done.set()
                     peer_results.append(other)
@@ -764,7 +786,7 @@ class PrintQueue:
                 pname = self._printer_name(j.assigned_printer_id)
                 peer = self._is_peer_error(j, printers, in_slot=False)
                 msg = (
-                    self._stall_msg(j.status, positions.get(j.id, 0), self._peer_pname(j, printers))
+                    self._error_msg(j.status, positions.get(j.id, 0), self._peer_pname(j, printers))
                     if peer else None
                 )
                 snapshot.append((j, positions.get(j.id, 0), j.status, pname, peer, msg))
@@ -781,7 +803,7 @@ class PrintQueue:
                     # Fenster, bis der Stall ihn finalisiert aus dem Slot nimmt).
                     peer = j.assigned_printer_id in self.faulty_printers
                     msg = (
-                        self._stall_msg(j.status, positions.get(j.id, 0), pname)
+                        self._error_msg(j.status, positions.get(j.id, 0), pname)
                         if peer else None
                     )
                     snapshot.append((j, positions.get(j.id, 0), j.status, pname, peer, msg))
