@@ -34,6 +34,28 @@ Ausleihe-Datenbank** — alle Buchungen laufen durch das offizielle IServ-Fronte
 ausschließlich lesend genutzt. Das bestehende System (USB-Handscanner) bleibt
 jederzeit als Fallback nutzbar.
 
+## Für Nachfolger — hier beginnen
+
+Wenn du das Projekt **ohne die ursprünglichen Entwickler (Niklas & Lukas)
+weiterbetreiben** willst, liegt die komplette Schritt-für-Schritt-Anleitung unter
+**[`docs/nachfolge-anleitung.md`](docs/nachfolge-anleitung.md)** (als PDF-Handout
+ebenfalls im Schulbuchausleihe-Team). Sie erklärt Ersteinrichtung, Normalbetrieb
+(Modus A), das jährliche Bestand-Excel-Skript und typische Fehler — ohne
+Technikvorkenntnisse.
+
+**Kurzform:**
+- Einmalig: `setup.bat` ausführen, `.env` ausfüllen (IServ-Zugangsdaten +
+  `HOST_PASSWORD`), USB-Drucker als Standarddrucker setzen.
+- Jeder Einsatz: `start.bat` doppelklicken, Host unter
+  `https://localhost:3443/host` öffnen, Helfer per QR verbinden.
+- Fällt die App einmal (z. B. nach einer IServ-Aktualisierung), arbeitet die
+  Schulbuchausleihe weiter wie vorher mit dem USB-Handscanner am offiziellen
+  IServ-Frontend — das ist kein Scheitern, sondern der dauerhafte Notnagel.
+
+Modus B (Live-Ausgabe-Pilot) ist **nicht** Teil der Nachfolge-Dokumentation; er
+benötigt technische Betreuung, die nach dem Abgang der Entwickler nicht mehr
+sichergestellt ist.
+
 ## Setup
 
 Voraussetzungen: [uv](https://docs.astral.sh/uv/) (bringt Python ≥ 3.12 bei

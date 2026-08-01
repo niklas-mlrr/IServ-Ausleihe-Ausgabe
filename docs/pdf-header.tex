@@ -1,0 +1,99 @@
+% Gestaltungsvorlage für den Export der Nachfolge-Anleitung.
+% Verwendung: siehe Hinweis am Ende von nachfolge-anleitung.md.
+
+\usepackage{tgadventor}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{microtype}
+\usepackage[table]{xcolor}
+\usepackage{titlesec}
+\usepackage{fancyhdr}
+\usepackage{lastpage}
+\usepackage[most]{tcolorbox}
+
+\definecolor{sbaNavy}{HTML}{16324F}
+\definecolor{sbaBlue}{HTML}{1F6F8B}
+\definecolor{sbaMint}{HTML}{E8F3F5}
+\definecolor{sbaGold}{HTML}{E5A23A}
+\definecolor{sbaInk}{HTML}{263238}
+\definecolor{sbaRule}{HTML}{C9D9DE}
+
+\color{sbaInk}
+\AtBeginDocument{\hypersetup{colorlinks=true, linkcolor=sbaNavy, urlcolor=sbaBlue, citecolor=sbaBlue}}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.45em}
+\renewcommand{\arraystretch}{1.25}
+\arrayrulecolor{sbaRule}
+
+\titleformat{\section}
+  {\color{sbaNavy}\Large\bfseries}
+  {\colorbox{sbaNavy}{\textcolor{white}{\strut\thesection}}}
+  {0.7em}{\MakeUppercase}
+\titlespacing*{\section}{0pt}{2.2ex plus .5ex minus .2ex}{1.0ex}
+\titleformat{\subsection}
+  {\color{sbaBlue}\large\bfseries}
+  {}{0pt}{}
+\titlespacing*{\subsection}{0pt}{1.8ex plus .4ex minus .2ex}{0.7ex}
+\titleformat{\subsubsection}
+  {\color{sbaNavy}\normalsize\bfseries}
+  {}{0pt}{}
+
+\tcolorboxenvironment{quote}{
+  enhanced,
+  breakable,
+  colback=sbaMint,
+  colframe=sbaBlue,
+  boxrule=0pt,
+  borderline west={3pt}{0pt}{sbaBlue},
+  arc=1.5mm,
+  left=1.1em,
+  right=1.1em,
+  top=0.75em,
+  bottom=0.75em,
+  before skip=1em,
+  after skip=1em
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\color{sbaNavy}\small\bfseries SBA \textbar\ Schulbuchausleihe}
+\fancyhead[R]{\color{sbaBlue}\small Nachfolge-Anleitung}
+\fancyfoot[L]{\color{sbaBlue}\footnotesize Stand: August 2026}
+\fancyfoot[R]{\color{sbaBlue}\footnotesize Seite \thepage\ von \pageref{LastPage}}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\headrule}{\hbox to\headwidth{\color{sbaRule}\leaders\hrule height \headrulewidth\hfill}}
+\renewcommand{\footrulewidth}{0pt}
+
+\makeatletter
+\renewcommand{\maketitle}{%
+  \newgeometry{margin=3cm}%
+  \begin{titlepage}
+    \thispagestyle{empty}
+    \vspace*{1.3cm}
+    {\color{sbaBlue}\large\bfseries SBA \textbar\ SCHULBUCHAUSLEIHE\par}
+    \vspace{0.35cm}
+    {\color{sbaGold}\rule{0.23\textwidth}{3pt}\par}
+    \vfill
+    \begin{minipage}{0.84\textwidth}
+      \raggedright
+      {\color{sbaNavy}\fontsize{16}{21}\selectfont\bfseries \@title\par}
+    \end{minipage}\par
+    \vspace{0.8cm}
+    \begin{minipage}{0.88\textwidth}
+      \raggedright
+      {\color{sbaInk}\Large Der verlässliche Leitfaden für Modus A und die jährliche Bestandspflege.\par}
+    \end{minipage}\par
+    \vfill
+    \begin{tcolorbox}[colback=sbaMint,colframe=sbaMint,arc=2mm,boxsep=1em]
+      \color{sbaNavy}\large\bfseries Für künftige SBA-Teams\par
+      \vspace{0.3em}
+      \color{sbaInk}\normalsize Alltagstauglich. Schritt für Schritt. Mit einem klaren Fallback, falls das Tool einmal nicht läuft.
+    \end{tcolorbox}
+    \vspace{0.9cm}
+    {\color{sbaBlue}\large \@author\par}
+    \vspace{0.35cm}
+    {\color{sbaInk}\normalsize \@date\par}
+  \end{titlepage}
+  \restoregeometry
+  \setcounter{page}{1}
+}
+\makeatother
