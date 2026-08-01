@@ -87,6 +87,23 @@ def _drain_handshake(ws) -> None:
     _recv_until(ws, "contexts_update")
 
 
+def test_scan_logging_never_contains_helper_token(ws_env, caplog):
+    """Scanner tokens are bearer credentials and must not reach application logs."""
+    state, token = ws_env
+    helper = state.helper_sessions[token]
+
+    class _Hub:
+        async def send_websocket(self, _ws, _message):
+            return True
+
+    caplog.set_level("INFO", logger="server.routes.ws")
+    asyncio.run(ws_module._handle_scan(state, _Hub(), helper, object(), {"value": "B-1"}))
+
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert token not in messages
+    assert "Helper-Handle" in messages
+
+
 # ---------------------------------------------------------------------------
 # Ungültiger Token → Verbindung wird abgewiesen (4004).
 # ---------------------------------------------------------------------------

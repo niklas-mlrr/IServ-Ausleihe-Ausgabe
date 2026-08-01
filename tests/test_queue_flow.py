@@ -173,6 +173,25 @@ def test_end_student_releases_worker_without_session():
     assert worker.closed is True
 
 
+def test_batch_teardown_releases_modus_a_worker_and_detaches_helper():
+    """Reset routes use this shared path instead of clearing helper fields."""
+    st = _state_with_iserv()
+    hub = _FakeHub()
+    student = _add_student(st, 5, status="active")
+    helper = HelperSession(token="h1", name="Helfer", student_id=5)
+    student.assigned_helper = "h1"
+    st.helper_sessions[helper.token] = helper
+    worker = _FakeWorker()
+    st.student_worker_sessions[5] = worker
+
+    asyncio.run(sessions.teardown_students(st, hub, {5}, reason="test-reset"))
+
+    assert helper.student_id is None
+    assert 5 not in st.student_worker_sessions
+    assert worker.closed is True
+    assert hub.host_broadcasts == 0
+
+
 # ---------------------------------------------------------------------------
 # end_student — Beförderung eines wartenden Spectators (Warteliste, s.
 # sessions.spectate_student). Endet der aktive Helfer den Schüler, übernimmt

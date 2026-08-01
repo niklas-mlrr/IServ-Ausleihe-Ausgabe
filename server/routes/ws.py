@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import logging
 import uuid
@@ -554,7 +555,9 @@ async def _handle_scan(state, hub, helper, websocket, raw) -> None:
         return
 
     helper.last_scan = barcode
-    log.info("Scan von Helper %s: %s", helper.token, barcode)
+    # Helper tokens are bearer credentials embedded in scanner URLs; never put
+    # them in logs.  The short hash is sufficient to correlate a scan locally.
+    log.info("Scan von Helper-Handle %s: %s", _token_handle(helper.token), barcode)
 
     student_id = helper.student_id
     if student_id is None:
@@ -765,8 +768,15 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                 # Malformedes Frame (kein valides JSON) — nicht tödlich, Client
                 # bleibt verbunden. Loggen und ignorieren, statt die Schleife
                 # mit einem rohen Traceback sterben zu lassen.
-                log.warning("Ungültiges JSON-Frame vom Scanner-WS (token=%s) — ignoriert", token)
+                log.warning(
+                    "Ungültiges JSON-Frame vom Scanner-WS (token_handle=%s) — ignoriert",
+                    _token_handle(token),
+                )
                 continue
+            # A reconnect may have replaced this socket while a frame was
+            # buffered.  Never let the former owner execute it.
+            if helper.ws is not websocket:
+                break
             mtype = raw.get("type")
 
             handler = _SCANNER_HANDLERS.get(mtype)
@@ -905,10 +915,18 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
                 # Malformedes Frame — loggen und weiterlauschen, statt die
                 # Schleife mit Traceback sterben zu lassen.
                 log.warning(
-                    "Ungültiges JSON-Frame vom Schüler-WS (session=%s) — ignoriert",
-                    getattr(session, "session_token", "?"),
+                    "Ungültiges JSON-Frame vom Schüler-WS (session_handle=%s) — ignoriert",
+                    _token_handle(session_token),
                 )
                 continue
+            # The old socket can still yield an already buffered frame after a
+            # reconnect or invalidation.  Ownership is checked before any
+            # command, especially scan/finish.
+            if (
+                state.student_sessions.get(session_token) is not session
+                or session.ws is not websocket
+            ):
+                break
             session.last_activity = datetime.now()
             mtype = raw.get("type")
 
@@ -977,3 +995,7 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
         if session.ws is websocket:
             session.ws = None
         await safe_broadcast(hub, state)
+
+
+def _token_handle(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()[:8]

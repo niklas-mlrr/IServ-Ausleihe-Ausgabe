@@ -9,6 +9,31 @@ from starlette.testclient import TestClient
 from server.app import create_app
 
 
+class _CookieCompatTestClient(TestClient):
+    """Keep legacy test calls off Starlette's deprecated request-cookie API.
+
+    Existing tests deliberately pass a different host SID per request.  Apply
+    it to the client cookie jar only for that request, then restore the jar.
+    This keeps the old test semantics while using the supported client-level
+    cookie mechanism.
+    """
+
+    def request(self, *args, **kwargs):
+        cookies = kwargs.pop("cookies", None)
+        if cookies is None:
+            return super().request(*args, **kwargs)
+        items = dict(cookies).items()
+        previous = {name: self.cookies.get(name) for name, _value in items}
+        self.cookies.update(cookies)
+        try:
+            return super().request(*args, **kwargs)
+        finally:
+            for name, value in previous.items():
+                self.cookies.delete(name)
+                if value is not None:
+                    self.cookies.set(name, value)
+
+
 @pytest.fixture
 def client() -> TestClient:
     """Echter HTTP-Client (Starlette TestClient) auf einer frischen App-Instanz.
@@ -23,4 +48,4 @@ def client() -> TestClient:
     State beeinflussen, patchen ihn über `monkeypatch.setattr`.
     """
     app = create_app()
-    return TestClient(app)
+    return _CookieCompatTestClient(app)

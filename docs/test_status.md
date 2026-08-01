@@ -5,7 +5,7 @@
 > Risiko hier unter „Offen / zu testen" eintragen; nach erfolgreichem Test in
 > „Verifiziert" verschieben (mit Datum + Skript/Befund). Bezug: `docs/PLAN.md`.
 >
-> Stand: 2026-07-09 (Wartbarkeits-Refactoring, 187 Tests grün).
+> Stand: 2026-08-01 (Sicherheits-/Wartbarkeits-Audit, 294 Tests grün).
 > Alle bisherigen Tests sind **read-only** gegen IServ
 > (kein Submit, keine Buchung — PLAN §6).
 >
@@ -49,8 +49,27 @@
 | V30 | **Stall-/Peer-Meldung: Positionsnummer stabil (keine +1-Hochzählung)** — Peer-Error-Meldung zeigte bisher „Fehler bei vorigem Auftrag - (Position+1). Warteschlangenposition" → der an Pos. 0 druckende/gesendete Job rutschte beim Fehler seines Hintermannes auf „1." hoch, alle folgenden eine Position hoch. Neu zeigen Urheber (`stalled`) und Peers (`peer_error`) einheitlich „Es dauert ungewöhnlich lange … - Drucker <Name>: <Label>" (vorher Peers „Fehler bei vorigem Auftrag …"); das Label ist das normale Warteschlangen-Label aus Position + Pre-Error-Status (`_stall_label`/`_stall_msg`): Pos.0+`printing`→„wird gedruckt", Pos.0+`spooled`→„gesendet, wartet auf Druck" (keine Nummer), Pos.≥1→„an X. Druckerwarteschlangenposition" (X=Position, **ohne +1**). Server liefert den Text im `msg`-Feld (`print_progress` für zentrale No-Alternative-Jobs via `_peer_pname`; Slot-Peers via `print_result`); `scan-ws.js`/`host-render.js` zeigen für `peer_error` nur noch `msg.msg` statt die Position selbst +1 hochzuzählen. | `tests/test_print_queue.py` (+3: `_stall_label` ohne +1, `_stall_msg` mit Label, Pos.-0-Peer zeigt Pos.-0-Label statt „1."; bestehende Peer-Assertion umgestellt) | 2026-07-20 | grün, 279 Tests. **Live-Verifikation (Peer-Meldung + stabile Positionsnummer am echten Gerät) noch offen** (s. „Offen" unten) |
 | V31 | **Fehlermeldung positionsbasiert (nur Pos. 0 bekommt Inaktivitäts-Hinweis)** — Aufbauend auf V30: Die Fehlermeldung am hängenden Drucker ist nicht mehr nach Urheber/Peer getrennt, sondern **positionsbasiert** (neu `_error_msg`, verwendet in `_handle_stall` + `_notify_all`). Pos. 0 (der vorn am Drucker druckende/gesendete Auftrag) bekommt den Inaktivitäts-Hinweis „Es dauert ungewöhnlich lange … - Drucker <Name>: <Label>"; **alle** Pos. ≥ 1 (die dahinter wartenden Aufträge, egal ob Urheber oder Peer) bekommen die gewohnte Peer-Formulierung „Fehler bei vorigem Druckauftrag - X. Warteschlangenposition" zurück (X = Position, ohne +1). Ersatzdrucker-Aufträge bekommen weiterhin keine Fehlermeldung, solange ein erlaubter Drucker nicht fehlerhaft ist (`_is_peer_error`/Slot-Markierung); nur wenn *alle* erlaubten Drucker fehlerhaft sind, greift die positionsbasierte Regel. | `tests/test_print_queue.py` (+1: `_error_msg` positionsbasiert; `test_stall_peer_at_same_printer_gets_peer_error` + `test_stall_peer_at_position_zero_shows_pos_zero_label` auf Pos.≥1-Formulierung umgestellt) | 2026-07-20 | grün, 280 Tests. **Live-Verifikation (Pos.-0-Hinweis vs. Pos.≥1-Peer-Formulierung am echten Gerät) noch offen** (s. „Offen" unten) |
 | V32 | **Statusanzeige ergänzt „von Drucker <Name>" nach Versand** — Sobald ein Auftrag an einen Drucker gesendet wurde (`assigned_printer_id` gesetzt), zeigt die Statusanzeige des Auftraggebers den Druckername. `print_progress` trägt das `printer`-Feld bereits (aus `_printer_name`); `scan-ws.js` hängt für nicht-`peer_error`-Status „ von Drucker <Name>" an den Statustext an („Wird gedruckt … von Drucker P1", „… gesendet, wartet auf Druck … von Drucker P1", „… an X. Druckerwarteschlangenposition von Drucker P1"); der Host-Toast `printToastText` (`host-render.js`) hängt analog „ — Drucker <Name>" an („… wird gedruckt — Drucker P1", „… gedruckt — Drucker P1"). Zentrale Warteschlangen-Jobs ohne zugewiesenen Drucker (`printer` null) bekommen keinen Zusatz; `peer_error`/`stalled` übernehmen den Server-Text (Pos.0 nennt den Drucker bereits). `print_result` bekommt neu ein `printer`-Feld; Helfer zeigt bei Erfolg „Gedruckt von Drucker <Name>", Host-Toast „… gedruckt — Drucker <Name>" statt nur „gedruckt". | `tests/test_print_queue.py` (+1: `print_progress` + `print_result` tragen `printer` für gesendete Aufträge) | 2026-07-20 | grün, 281 Tests. **Live-Verifikation (Druckername in Helfer- + Host-Statusanzeige am echten Gerät) noch offen** (s. „Offen" unten) |
+| V33 | **Audit-Härtung:** `/api/commit-book` nutzt die vollständige Vorabprüfung + per-Schüler-Lock; Queue-/Schuljahr-Reset gibt Worker vollständig frei; Modus-B-Reopen widerruft Pending-Sessions; ersetzte WS verlieren Befehlsrecht; Host-WS schließen bei TTL/Logout; Tokens bleiben aus Logs; App-State/Hub sind je FastAPI-App isoliert; Config/Pfade validiert und CWD-unabhängig. | Neue/erweiterte Tests in `test_booking_precheck.py`, `test_queue_flow.py`, `test_hub.py`, `test_ws_scanner.py`, `test_app_runtime.py`, `test_config.py`, `test_main.py`; `uv run python -W error -m pytest -q`; `uvx ruff check server tests conftest.py` | 2026-08-01 | **294 Tests grün**, 68 % Coverage, Ruff clean, keine Warnungen; ausschließlich offline, kein IServ-Write/Playwright-Enter. |
 
 ## Offen / zu testen
+
+### Offen 2026-08-01 (Schul-WLAN-Smoke nach Audit-Härtung)
+
+Das Netzwerkmodell des Hauptprojekts wurde nicht absichtlich geändert: Server
+weiter auf `0.0.0.0`, Handy-Verbindung weiterhin HTTPS/WSS mit selbstsigniertem
+Zertifikat und einmaliger Browser-Warnung. Automatisierte Tests können jedoch
+weder Schul-WLAN-Routing/Firewall noch die Zertifikatsannahme echter Handys
+beweisen. Vor dem nächsten Einsatz mit `ALLOW_BOOKING=false` prüfen:
+
+- [ ] Host auf dem echten Ausleihe-Laptop starten; QR zeigt die im Schul-WLAN
+      erreichbare IPv4 statt VPN-/Docker-Adresse.
+- [ ] Helfer-Handy per QR verbinden, Zertifikatswarnung akzeptieren, staged Scan
+      durchführen — **kein** Enter/keine Buchung.
+- [ ] Reload/Reconnect und zweites Helfer-Handy prüfen.
+- [ ] Modus B öffnen, Join + Pairing + Reconnect prüfen; Modus B erneut öffnen
+      und bestätigen, dass ein altes noch ungepaartes Pairing ungültig ist.
+- [ ] Host-Logout prüfen: bereits offener Host-Tab verliert seine WebSocket-
+      Verbindung und empfängt keine weiteren Statusdaten.
 
 ### Offen 2026-07-19 (Parallele Verteilung + OS-Status + Positionen: Live-Check)
 

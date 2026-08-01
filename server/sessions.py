@@ -376,6 +376,31 @@ async def process_scan(
     Helfer das eigene Modal selbst (Button im Client), am Schüler-Client hat
     der Client keinen Schließen-Button → nur der Host darf freigeben.
     """
+    # The precheck and the actual browser submit form one critical section.
+    # Without this lock two scans/host commits can both pass the check and use
+    # the same Playwright page concurrently.
+    async with _booking_lock_for(state, student_id):
+        return await _process_scan_locked(
+            state,
+            student_id,
+            vormerk_isbns,
+            lent_isbns,
+            lent_codes,
+            barcode,
+            source,
+        )
+
+
+async def _process_scan_locked(
+    state: AppState,
+    student_id: int,
+    vormerk_isbns: set[str],
+    lent_isbns: set[str],
+    lent_codes: set[str],
+    barcode: str,
+    source: str,
+) -> dict:
+    """Locked implementation of :func:`process_scan`."""
     decision = await evaluate_scan_for_booking(
         state, vormerk_isbns, lent_isbns, lent_codes, barcode
     )
@@ -447,6 +472,71 @@ async def process_scan(
     if result.get("status") in ("booked", "staged"):
         mark_book_done(state, student_id, result.get("isbn"))
     return result
+
+
+def _booking_lock_for(state: AppState, student_id: int) -> asyncio.Lock:
+    """Get the production lock, with a small compatibility seam for test fakes."""
+    method = getattr(state, "booking_lock", None)
+    if method is not None:
+        return method(student_id)
+    locks = getattr(state, "_booking_locks", None)
+    if locks is None:
+        locks = {}
+        state.__dict__["_booking_locks"] = locks
+    return locks.setdefault(student_id, asyncio.Lock())
+
+
+def booking_sets_for_student(
+    state: AppState, student_id: int
+) -> tuple[set[str], set[str], set[str]] | None:
+    """Return the live precheck sets for the student's current owner.
+
+    The host recovery endpoint must not accept arbitrary state supplied by the
+    request.  Only a paired Modus-B session or currently assigned Modus-A
+    helper owns a safely hydrated book list.
+    """
+    session = state.find_session_by_student(student_id)
+    if session is not None and session.state == "paired":
+        return session.vormerk_isbns, session.lent_isbns, session.lent_codes
+    helper = state.find_helper_for_student(student_id)
+    if helper is not None and helper.student_id == student_id:
+        return helper.vormerk_isbns, helper.lent_isbns, helper.lent_codes
+    return None
+
+
+async def commit_book_safely(state: AppState, student_id: int, barcode: str) -> dict:
+    """Precheck and commit a host-confirmed barcode without a bypass.
+
+    This is intentionally separate from the UI scan handler, but has the same
+    fail-closed precheck and state transition.  It is the only function the
+    host ``/api/commit-book`` route may call.
+    """
+    async with _booking_lock_for(state, student_id):
+        sets = booking_sets_for_student(state, student_id)
+        if sets is None:
+            return {"status": "not_ready", "msg": "Kein aktiver Schüler mit geladener Buchliste"}
+        vormerk_isbns, lent_isbns, lent_codes = sets
+        decision = await evaluate_scan_for_booking(
+            state, vormerk_isbns, lent_isbns, lent_codes, barcode
+        )
+        if not decision["ok"]:
+            return {
+                "status": decision["status"],
+                "msg": decision["msg"],
+                "isbn": decision.get("isbn"),
+                "title": decision.get("title"),
+            }
+        result = await handle_commit(state, student_id, barcode)
+        result.setdefault("isbn", decision.get("isbn"))
+        if result.get("status") == "booked":
+            isbn = decision.get("isbn")
+            if isbn:
+                lent_isbns.add(isbn)
+                vormerk_isbns.discard(isbn)
+                if decision.get("code"):
+                    lent_codes.add(decision["code"])
+                mark_book_done(state, student_id, isbn)
+        return result
 
 
 async def handle_commit(state: AppState, student_id: int, barcode: str) -> dict:
@@ -880,6 +970,49 @@ async def end_student(
         await hub.broadcast_host(state.state_snapshot())
 
 
+async def teardown_students(
+    state: AppState,
+    hub,
+    student_ids: set[int] | list[int],
+    *,
+    reason: str,
+    clear_unbound_sessions: bool = False,
+) -> None:
+    """End several live student flows without route-local state mutation.
+
+    Batch resets must cancel in-flight loads and release Modus-A worker pages,
+    not merely clear the helper/session fields.  Intermediate broadcasts and
+    spectator promotion are intentionally suppressed for this terminal flow.
+    """
+    ids = set(student_ids)
+    for helper in state.helper_sessions.values():
+        if helper.student_id is not None and (
+            helper.student_id in ids or clear_unbound_sessions
+        ):
+            ids.add(helper.student_id)
+    for session in state.student_sessions.values():
+        if session.student_id is not None and (
+            session.student_id in ids or clear_unbound_sessions
+        ):
+            ids.add(session.student_id)
+
+    for student_id in ids:
+        state.student_spectators.pop(student_id, None)
+    for student_id in ids:
+        await end_student(
+            state,
+            hub,
+            student_id,
+            queue_status="pending",
+            session_state="revoked",
+            broadcast=False,
+        )
+    if clear_unbound_sessions:
+        for session in list(state.student_sessions.values()):
+            if session.state in ("pending_pairing", "paired") and session.student_id is None:
+                await invalidate_session(state, session, "revoked", reason=reason)
+
+
 async def load_and_push_helper_student(state: AppState, hub, student, helper) -> None:
     """Modus A: Schülerinfo laden, an den Scanner pushen, Worker-Context öffnen.
 
@@ -1309,7 +1442,9 @@ async def sweep_expired_sessions() -> None:
         try:
             join_limiter.sweep()  # Rate-Limit-Buckets aufräumen (kein unbegrenztes Wachstum)
             state = get_state()
-            state.sweep_host_sessions(cfg.host_session_ttl_s)  # abgelaufene Host-Logins entfernen
+            expired_host_sids = state.sweep_host_sessions(cfg.host_session_ttl_s)
+            for host_sid in expired_host_sids:
+                await hub.close_host_session(host_sid, state)
             now = datetime.now()
             expired: list[StudentSessionB] = []
             for session in list(state.student_sessions.values()):

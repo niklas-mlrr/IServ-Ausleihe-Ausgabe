@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
+from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Literal
@@ -405,6 +407,9 @@ class AppState:
         self.worker_pool: WorkerPool | None = None
         self.iserv: IsServClient | None = None
         self.student_worker_sessions: dict[int, StudentSession] = {}  # student_id -> Session
+        # A worker page is stateful.  All production commits for a student must
+        # therefore be serialized from the read-only precheck through Enter.
+        self.booking_locks: dict[int, asyncio.Lock] = {}
         # Server-interne Druckerwarteschlange (Rollen-Rangfolge, 2-in-flight,
         # OS-Completion-Polling). Lebenszyklus in app.lifespan (start/stop).
         # Zugriff ausschließlich über `state.print_queue`.
@@ -750,15 +755,47 @@ class AppState:
         self.host_sessions[sid] = datetime.now()
         return True
 
-    def sweep_host_sessions(self, ttl_s: int) -> None:
+    def sweep_host_sessions(self, ttl_s: int) -> list[str]:
+        """Remove expired host logins and return their session ids.
+
+        Callers use the ids to close already accepted WebSockets as well.  A
+        removed HTTP session alone is not sufficient: an open WS would
+        otherwise continue receiving host snapshots.
+        """
         now = datetime.now()
+        expired: list[str] = []
         for sid, seen in list(self.host_sessions.items()):
             if (now - seen).total_seconds() > ttl_s:
                 del self.host_sessions[sid]
+                expired.append(sid)
+        return expired
+
+    def booking_lock(self, student_id: int) -> asyncio.Lock:
+        """Return the per-student production-booking lock."""
+        lock = self.booking_locks.get(student_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self.booking_locks[student_id] = lock
+        return lock
 
 
-_app_state = AppState()
+_fallback_state = AppState()
+_bound_state: ContextVar[AppState | None] = ContextVar("bound_app_state", default=None)
 
 
 def get_state() -> AppState:
-    return _app_state
+    """Current app's state, or a direct-call compatibility fallback.
+
+    Production requests are bound by ``RuntimeBindingMiddleware``.  The
+    fallback remains only for small direct unit tests during the migration and
+    must not be used by an ASGI request.
+    """
+    return _bound_state.get() or _fallback_state
+
+
+def bind_state(state: AppState) -> Token[AppState | None]:
+    return _bound_state.set(state)
+
+
+def reset_state(token: Token[AppState | None]) -> None:
+    _bound_state.reset(token)

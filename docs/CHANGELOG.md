@@ -8,6 +8,41 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-01 — Sicherheits-/Wartbarkeits-Audit umgesetzt
+
+Repo-weites Audit mit drei GPT-5.6-Terra-Subagents, anschließender
+adversarialer Kreuzprüfung und vollständiger Offline-Verifikation:
+
+- **Buchungs-Sicherheitsgrenze geschlossen:** `/api/commit-book` läuft nicht
+  mehr direkt auf `handle_commit`, sondern über dieselbe fail-closed
+  Lager-/Vormerk-/Bereits-verliehen-Prüfung wie reguläre Scans. Ein
+  studentenspezifischer Lock serialisiert Vorabprüfung, Playwright-Enter und
+  State-Update.
+- **Einheitlicher Teardown:** `clear-queue` und erzwungener Schuljahreswechsel
+  verwenden `teardown_students()`/`end_student()`; Load-Tasks, Helper-State,
+  Modus-B-Credentials und Worker-Contexts werden vollständig und genau einmal
+  aufgeräumt.
+- **Session-/WebSocket-Härtung:** erneutes Öffnen von Modus B widerruft alte
+  Pending-Pairings; ersetzte Scanner-/Schüler-Sockets dürfen keine gepufferten
+  Frames mehr ausführen; abgelaufene bzw. ausgeloggte Host-Sessions schließen
+  ihre offenen WebSockets aktiv. Capability-Tokens erscheinen nicht mehr in
+  Anwendungs- oder Uvicorn-Access-Logs.
+- **App-lokaler Runtime-State:** `server/runtime.py` bindet je FastAPI-App eine
+  eigene `AppState`-/`Hub`-Instanz über ContextVars; Produktion läuft explizit
+  mit einem Uvicorn-Worker. Zwei `create_app()`-Instanzen sind testverifiziert
+  isoliert.
+- **Konfiguration/Pfade:** Port, Workerzahl, TTLs, Slow-Mo, Print-Backend und
+  TLS-Pfade werden beim Start validiert; TLS-, Log-, Persistenz- und
+  Print-Ausgabepfade hängen nicht mehr vom Aufruf-CWD ab.
+- **Test-Infrastruktur:** Starlette-TestClient auf `httpx2` migriert;
+  Cookie-/Import-Deprecations beseitigt. Ergebnis: **294 Tests grün**, Ruff
+  clean, komplette Suite mit `-W error` ohne Warnungen; kein IServ-Write und
+  keine echte Buchung ausgeführt.
+
+Offen bleibt bewusst der Schul-WLAN-/Echtgeräte-Smoke mit `ALLOW_BOOKING=false`
+(QR, Zertifikatswarnung, Scanner-/Modus-B-Reconnect); Unit-Tests können Routing,
+Firewall und Zertifikatsannahme auf den Schulhandys nicht beweisen.
+
 ## 2026-07-20 — Statusanzeige ergänzt „von Drucker <Name>" nach Versand
 
 Sobald ein Auftrag an einen Drucker gesendet wurde, zeigt die Statusanzeige

@@ -45,7 +45,14 @@ die `.html`-Pfade bleiben zusätzlich gültig). Auf den Handys das
 Zertifikat einmal als Ausnahme bestätigen (selbstsigniert, nur Schul-WLAN).
 
 Konfiguration via `.env`: `PORT` (Default 3443), `WORKER_CONTEXTS` (parallele
-Playwright-Contexts), Druck-Variablen (s. u.).
+Playwright-Contexts), die drei Session-TTLs sowie Druck-Variablen (s. u.).
+Relative Pfade in `TLS_CERT`, `TLS_KEY`, `LOG_DIR` und `PRINT_OUTPUT_DIR`
+werden immer gegen den Projektordner aufgelöst; der Start aus einem anderen
+Arbeitsverzeichnis verändert damit keine Datenablage.
+
+Der Dienst muss mit genau **einem** Uvicorn-Worker laufen. Queue, Pairing-
+Sessions und WebSocket-Registry liegen absichtlich im Prozessspeicher; mehrere
+Worker würden voneinander getrennte Ausgaben erzeugen.
 
 ### Playwright-Debug (optional, nur Geräte mit Display)
 

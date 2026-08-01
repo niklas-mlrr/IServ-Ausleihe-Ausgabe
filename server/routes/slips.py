@@ -10,7 +10,7 @@ from fastapi import Depends, HTTPException
 from ..config import get_config
 from ..hub import get_hub
 from ..print_queue import PrintJob, slip_name
-from ..sessions import allowed_printers_for, handle_commit
+from ..sessions import allowed_printers_for, commit_book_safely
 from ..state import get_state
 from ._deps import (
     CommitBookRequest,
@@ -284,7 +284,7 @@ async def commit_book(body: CommitBookRequest) -> dict:
     if not barcode:
         raise HTTPException(400, "Kein Barcode (weder übergeben noch gestaged)")
 
-    result = await handle_commit(state, student_id, barcode)
+    result = await commit_book_safely(state, student_id, barcode)
     await hub.broadcast_host(state.state_snapshot())
     # Nur "booked" gilt als Erfolg. "unknown" (Selektoren unverifiziert) darf
     # KEINE Buchung vortäuschen — der Host muss dann manuell prüfen.

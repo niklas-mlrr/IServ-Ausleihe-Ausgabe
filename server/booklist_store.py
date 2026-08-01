@@ -21,7 +21,7 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-STORE_PATH = Path("data/booklist_settings.json")
+STORE_PATH = Path(__file__).resolve().parent.parent / "data/booklist_settings.json"
 
 _write_lock = threading.Lock()
 

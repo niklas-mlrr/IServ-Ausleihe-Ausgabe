@@ -6,7 +6,7 @@ from __future__ import annotations
 from fastapi import HTTPException
 
 from ..hub import get_hub
-from ..sessions import assign_student_to_helper, end_student, invalidate_session
+from ..sessions import assign_student_to_helper, end_student, teardown_students
 from ..state import get_state
 from ._deps import (
     _EMPTY_CONTEXT_BODY,
@@ -153,17 +153,7 @@ async def clear_queue(body: ContextIdBody = _EMPTY_CONTEXT_BODY) -> dict:
         return {"ok": True, "count": 0}
     count = len(ctx.queue)
     student_ids = {s.student_id for s in ctx.queue}
-    for sess in list(state.student_sessions.values()):
-        if sess.state in ("pending_pairing", "paired") and sess.student_id in student_ids:
-            await invalidate_session(state, sess, "revoked", reason="queue-leeren")
-    for helper in state.helper_sessions.values():
-        if helper.student_id in student_ids:
-            helper.student_id = None
-            helper.expected_isbns = set()
-            helper.vormerk_isbns = set()
-            helper.lent_isbns = set()
-            helper.lent_codes = set()
-            helper.peeking = False
+    await teardown_students(state, hub, student_ids, reason="queue-leeren")
     ctx.queue = []
     # book_order/Katalog bleiben (Klasse/Tab bleibt offen, nur Queue leer).
     await hub.broadcast_host(state.state_snapshot())

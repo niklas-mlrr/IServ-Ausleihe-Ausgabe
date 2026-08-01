@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Literal
 
 log = logging.getLogger(__name__)
+DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent.parent / "automation/out/loan_slips"
 
 # Übliche SumatraPDF-Installationspfade unter Windows (Fallback-Suche).
 _SUMATRA_CANDIDATES = (
@@ -463,7 +464,7 @@ async def print_pdf(
     backend: str = "auto",
     printer_name: str | None = None,
     sumatra_path: str | None = None,
-    output_dir: Path | str = "automation/out/loan_slips",
+    output_dir: Path | str = DEFAULT_OUTPUT_DIR,
     label: str = "leihschein",
     pages: str | None = None,
 ) -> dict:

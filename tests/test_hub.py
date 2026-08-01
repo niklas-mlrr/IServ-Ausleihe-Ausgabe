@@ -28,6 +28,15 @@ class _FakeWS:
         self.sent.append(msg)
 
 
+class _ClosableWS(_FakeWS):
+    def __init__(self) -> None:
+        super().__init__()
+        self.closed: list[tuple[int, str]] = []
+
+    async def close(self, *, code: int, reason: str) -> None:
+        self.closed.append((code, reason))
+
+
 def _state_with_queue(pending: int = 0) -> AppState:
     s = AppState()
     ctx = s.open_context("10a")
@@ -50,6 +59,22 @@ def test_broadcast_host_delivers_and_prunes_dead() -> None:
     # Tote Verbindung wird aus der Liste entfernt, lebende bleibt.
     assert dead not in s.host_ws_connections
     assert live in s.host_ws_connections
+
+
+def test_close_host_session_closes_only_its_registered_sockets() -> None:
+    s = _state_with_queue()
+    old = _ClosableWS()
+    other = _ClosableWS()
+    s.host_ws_connections.extend([old, other])
+    s.host_ws_by_sid = {"expired": [old], "valid": [other]}
+
+    asyncio.run(Hub().close_host_session("expired", s))
+
+    assert old.closed == [(4003, "Sitzung abgelaufen")]
+    assert old not in s.host_ws_connections
+    assert "expired" not in s.host_ws_by_sid
+    assert other in s.host_ws_connections
+    assert other.closed == []
 
 
 def test_broadcast_host_pushes_queue_size_to_unassigned_scanners() -> None:

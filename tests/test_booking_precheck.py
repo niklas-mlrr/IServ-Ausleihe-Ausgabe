@@ -493,3 +493,47 @@ def test_process_scan_deleted_hides_loan_from_student(monkeypatch):
     assert "Max Mustermann" not in (res.get("msg") or "")
     assert hub.broadcasts and hub.broadcasts[0]["loaned_to"] == "Max Mustermann"
     assert hub.broadcasts[0]["kind"] == "book_deleted"
+
+
+# --- Host-Commit: dieselbe fail-closed Vorabprüfung wie der Scan -----------
+
+
+def test_host_commit_rechecks_before_browser_submit(monkeypatch):
+    """The confirmed HTTP escape hatch must not bypass stock/order checks."""
+    from server.state import AppState
+
+    monkeypatch.setattr(sessions, "get_config", lambda: _Cfg(True))
+    worker = _SpyWorker()
+    state = AppState()
+    state.iserv = _FakeIserv(_book(distributed=True))
+    session = sessions.create_student_session(state)
+    session.student_id = 42
+    session.state = "paired"
+    session.vormerk_isbns = {"978-1"}
+    state.student_worker_sessions[42] = worker
+
+    result = asyncio.run(sessions.commit_book_safely(state, 42, "B1"))
+
+    assert result["status"] == "not_in_stock"
+    assert worker.committed is None
+
+
+def test_host_commit_updates_live_sets_after_success(monkeypatch):
+    from server.state import AppState
+
+    monkeypatch.setattr(sessions, "get_config", lambda: _Cfg(True))
+    worker = _SpyWorker()
+    state = AppState()
+    state.iserv = _FakeIserv(_book())
+    session = sessions.create_student_session(state)
+    session.student_id = 42
+    session.state = "paired"
+    session.vormerk_isbns = {"978-1"}
+    state.student_worker_sessions[42] = worker
+
+    result = asyncio.run(sessions.commit_book_safely(state, 42, "B1"))
+
+    assert result["status"] == "booked"
+    assert worker.committed == "B1"
+    assert session.vormerk_isbns == set()
+    assert session.lent_isbns == {"978-1"}

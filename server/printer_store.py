@@ -28,7 +28,7 @@ from .state import DUPLEX_MODES, PrinterConfig, _new_printer_id
 
 log = logging.getLogger(__name__)
 
-STORE_PATH = Path("data/printers.json")
+STORE_PATH = Path(__file__).resolve().parent.parent / "data/printers.json"
 
 _write_lock = threading.Lock()
 

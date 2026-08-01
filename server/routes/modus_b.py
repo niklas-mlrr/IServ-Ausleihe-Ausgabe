@@ -38,6 +38,12 @@ log = logging.getLogger(__name__)
 async def modus_b_open(request: Request) -> dict:
     """Live-Ausgabe öffnen: allgemeines Join-Secret + QR erzeugen und an iPads pushen."""
     state = get_state()
+    # Reopening rotates the join secret.  Pending sessions created with the
+    # previous QR must be revoked as well; otherwise their old pairing code
+    # remains a valid capability even though its QR is obsolete.
+    for session in list(state.student_sessions.values()):
+        if session.state == "pending_pairing":
+            await invalidate_session(state, session, "revoked", reason="ausgabe-neu-geoeffnet")
     state.modus_b_open = True
     # Frisches Join-Secret bei jedem Öffnen → alte Screenshots/QRs aus einer
     # früheren Ausgabe werden ungültig. Innerhalb einer Ausgabe bleibt es konstant

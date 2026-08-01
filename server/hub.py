@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import weakref
+from contextvars import ContextVar, Token
 
 from .book_order import get_book_order_for_form
 from .state import AppState, get_state
@@ -153,7 +155,21 @@ class Hub:
             return
         if not await self._safe_send(helper.ws, msg):
             helper.ws = None
-            log.warning("Scanner WS für Token %s ist tot", token)
+            log.warning("Scanner WS für Token-Handle %s ist tot", _token_handle(token))
+
+    async def close_host_session(self, sid: str, state: AppState | None = None) -> None:
+        """Close and unregister every host WebSocket authenticated by ``sid``."""
+        s = state or get_state()
+        sockets = list(s.host_ws_by_sid.pop(sid, []))
+        for ws in sockets:
+            try:
+                s.host_ws_connections.remove(ws)
+            except ValueError:
+                pass
+            try:
+                await ws.close(code=4003, reason="Sitzung abgelaufen")
+            except Exception:
+                pass
 
     async def send_websocket(self, ws: object, msg: dict) -> bool:
         """Einmaliges Senden an eine konkrete WebSocket-Verbindung, serialisiert
@@ -166,8 +182,23 @@ class Hub:
         return await self._safe_send(ws, msg)
 
 
-_hub = Hub()
+_fallback_hub = Hub()
+_bound_hub: ContextVar[Hub | None] = ContextVar("bound_hub", default=None)
+
+
+def _token_handle(token: str) -> str:
+    """Non-reversible correlation value for capability-token diagnostics."""
+    return hashlib.sha256(token.encode()).hexdigest()[:8]
 
 
 def get_hub() -> Hub:
-    return _hub
+    """Current app's hub, or the direct-call test compatibility fallback."""
+    return _bound_hub.get() or _fallback_hub
+
+
+def bind_hub(hub: Hub) -> Token[Hub | None]:
+    return _bound_hub.set(hub)
+
+
+def reset_hub(token: Token[Hub | None]) -> None:
+    _bound_hub.reset(token)

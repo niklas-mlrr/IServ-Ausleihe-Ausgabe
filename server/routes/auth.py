@@ -8,6 +8,7 @@ import uuid
 from fastapi import Cookie, HTTPException, Request, Response
 
 from ..config import get_config
+from ..hub import get_hub
 from ..ratelimit import login_limiter
 from ..state import get_state
 from ._deps import LoginRequest, router
@@ -42,6 +43,8 @@ async def login(body: LoginRequest, response: Response, request: Request = None)
 @router.post("/api/logout")
 async def logout(response: Response, session_id: str | None = Cookie(default=None)) -> dict:
     if session_id:
-        get_state().remove_host_session(session_id)
+        state = get_state()
+        state.remove_host_session(session_id)
+        await get_hub().close_host_session(session_id, state)
     response.delete_cookie("session_id")
     return {"ok": True}

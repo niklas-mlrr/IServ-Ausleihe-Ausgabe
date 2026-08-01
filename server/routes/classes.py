@@ -15,7 +15,7 @@ from ..sessions import (
     apply_hidden_books,
     booking_isbn_sets_from_info,
     end_student,
-    invalidate_session,
+    teardown_students,
 )
 from ..state import AppState, ClassContext, QueueStudent, get_state
 from ._deps import (
@@ -149,12 +149,17 @@ async def select_schoolyear(body: SelectSchoolyearRequest) -> dict:
             },
         )
 
-    # Laufende Sessions sauber beenden (keine verwaisten Sessions).
-    for sess in list(state.student_sessions.values()):
-        if sess.state in ("pending_pairing", "paired"):
-            await invalidate_session(state, sess, "revoked", reason="schuljahreswechsel")
+    # Kontext noch nicht wegwerfen: end_student benötigt ihn, um Helfer und
+    # Worker vollständig zu lösen.
+    all_ids = {student.student_id for ctx in state.contexts.values() for student in ctx.queue}
+    await teardown_students(
+        state,
+        hub,
+        all_ids,
+        reason="schuljahreswechsel",
+        clear_unbound_sessions=True,
+    )
     for helper in state.helper_sessions.values():
-        helper.student_id = None
         helper.context_id = None  # Klassen-Bindung hinfällig (Kontexte fliegen weg)
 
     state.selected_schoolyear = schoolyear
