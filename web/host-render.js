@@ -847,9 +847,16 @@ window.__host = window.__host || {};
 
   function printerLabel(p) {
     // Anzeigename (falls gesetzt) mit Systemnamen in Klammern — der
-    // Systemname bleibt stets sichtbar zur eindeutigen Zuordnung.
-    const sys = printerSystemLabel(p);
-    return (p.label && p.label.trim()) ? `${p.label} (${sys})` : sys;
+    // Systemname bleibt stets sichtbar zur eindeutigen Zuordnung. Beim
+    // Standarddrucker steht nur „Standarddrucker" in der Klammer (ohne den
+    // Gerätename) — sonst entstünden verschachtelte Klammern wie
+    // „Raum 104 (Standarddrucker (HP-LJ))". Der Gerätename bleibt in der
+    // Panel-Zeile „System:" sichtbar.
+    if (p.label && p.label.trim()) {
+      const sys = (p.name === null || p.name === undefined) ? 'Standarddrucker' : p.name;
+      return `${p.label} (${sys})`;
+    }
+    return printerSystemLabel(p);
   }
 
   async function fetchPrinters() {
@@ -860,11 +867,24 @@ window.__host = window.__host || {};
     return null;
   }
 
-  async function refreshPrinterPool() {
+  async function refreshPrinterDeviceInfo() {
+    // Geräteliste + Default nur beim Öffnen des Einstellungs-Dialogs frisch
+    // holen (OS-Drucker ändern sich selten). Die Live-Last der Pool-Drucker
+    // kommt über den State-Snapshot, nicht über diesen (langsamen) Endpoint,
+    // der serverseitig lpstat/Get-Printer ausführt.
     const info = await fetchPrinters();
     if (!info) return;
     printerDeviceInfo = {printers: info.printers || [], default: info.default || null, backend: info.backend || null};
-    renderPrinterPool(info.pool || []);
+    renderPrinterPool(info.pool || state.printers || []);
+  }
+
+  async function _applyPoolResponse(r) {
+    // Nach einer Pool-Mutation: direkt aus der Endpoint-Antwort (`{ok, pool}`)
+    // rendern — ohne erneuten /api/printers-Roundtrip (kein lpstat). Fallback
+    // auf den Live-Snapshot, falls die Antwort keinen Pool liefert.
+    let pool = null;
+    try { if (r.ok) { const d = await r.json(); pool = d && d.pool; } } catch (_) {}
+    renderPrinterPool(pool || state.printers || []);
   }
 
   function renderPrinterPool(pool) {
@@ -982,7 +1002,7 @@ window.__host = window.__host || {};
     });
     if (r.ok) showMsg('Duplex-Modus gespeichert');
     else showMsg('Duplex konnte nicht gespeichert werden');
-    await refreshPrinterPool();
+    await _applyPoolResponse(r);
   }
 
   async function removePrinter(id) {
@@ -993,7 +1013,7 @@ window.__host = window.__host || {};
     if (r.ok) showMsg('Drucker entfernt');
     else if (r.status === 400) showMsg('Drucker noch beschäftigt — bitte warten');
     else showMsg('Drucker konnte nicht entfernt werden');
-    await refreshPrinterPool();
+    await _applyPoolResponse(r);
   }
 
   async function reorderPrinters(ids) {
@@ -1001,7 +1021,7 @@ window.__host = window.__host || {};
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ids}),
     });
-    await refreshPrinterPool();
+    await _applyPoolResponse(r);
   }
 
   async function reactivatePrinter(id) {
@@ -1012,7 +1032,7 @@ window.__host = window.__host || {};
     if (r.ok) showMsg('Drucker wieder aktiv');
     else if (r.status === 400) showMsg('Drucker ist nicht fehlerhaft');
     else showMsg('Aktivieren fehlgeschlagen');
-    await refreshPrinterPool();
+    await _applyPoolResponse(r);
   }
 
   async function addPrinter(name, label) {
@@ -1022,7 +1042,7 @@ window.__host = window.__host || {};
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(body),
     });
-    if (r.ok) { showMsg('Drucker hinzugefügt'); await refreshPrinterPool(); }
+    if (r.ok) { showMsg('Drucker hinzugefügt'); await _applyPoolResponse(r); }
     else { const t = await r.text().catch(() => ''); showMsg('Hinzufügen fehlgeschlagen' + (t ? ` (${t})` : '')); }
   }
 
@@ -1035,7 +1055,7 @@ window.__host = window.__host || {};
     });
     if (r.ok) showMsg('Anzeigename gespeichert');
     else showMsg('Anzeigename konnte nicht gespeichert werden');
-    await refreshPrinterPool();
+    await _applyPoolResponse(r);
   }
 
   function openPrinterAddRow(pool) {
@@ -1060,7 +1080,7 @@ window.__host = window.__host || {};
   async function initPrinterPoolUI() {
     activePrinterTabId = null;
     document.getElementById('printer-add-row').style.display = 'none';
-    await refreshPrinterPool();
+    await refreshPrinterDeviceInfo();
   }
 
   function renderWorkerStatus() {
