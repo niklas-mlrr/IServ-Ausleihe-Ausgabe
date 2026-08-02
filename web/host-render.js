@@ -887,6 +887,21 @@ window.__host = window.__host || {};
     renderPrinterPool(pool || state.printers || []);
   }
 
+  function maybeRefreshPrinterPoolFromSnapshot() {
+    // Live-Update des Einstellungs-Pools aus dem WS-Snapshot — dieselbe Quelle
+    // wie die Druckerwarteschlange, damit add/remove ohne spürbare Verzögerung
+    // auch im Einstellungs-Dialog auftauchen/verschwinden. Schutz: wird gerade
+    // ein Eingabefeld (Anzeigename) oder das Duplex-Select im Panel fokussiert,
+    // überspringen wir den Re-Render (würde die laufende Eingabe zurücksetzen);
+    // die Mutation selbst rendert via _applyPoolResponse, der nächste Snapshot
+    // ohne Fokus holt nach. Die Add-Row liegt außerhalb #printer-panels und
+    // bleibt von Re-Renders unberührt.
+    if (!settingsOpen()) return;
+    const ae = document.activeElement;
+    if (ae && ae.closest && ae.closest('#printer-panels')) return;
+    renderPrinterPool(state.printers || []);
+  }
+
   function renderPrinterPool(pool) {
     const tabs = document.getElementById('printer-tabs');
     const panels = document.getElementById('printer-panels');
@@ -955,8 +970,8 @@ window.__host = window.__host || {};
     panel.innerHTML = `
       <div class="printer-panel-name">${escapeHtml(printerLabel(p))}</div>
       <div class="printer-panel-sys">System: ${escapeHtml(printerSystemLabel(p))}</div>
-      <label class="settings-row settings-field" title="Frei wählbarer Anzeigename, der überall statt des Systemnamens plus Klammer angezeigt wird. Leer = nur Systemname.">
-        Anzeigename
+      <label class="settings-row settings-field" title="Frei wählbarer Name, der überall (mit Systemname in Klammern) angezeigt wird. Leer = nur Systemname.">
+        Name
         <div class="printer-label-row">
           <input type="text" data-act="label-input" value="${escapeHtml(p.label || '')}" placeholder="z. B. Drucker Raum 104" autocomplete="off">
           <button class="secondary" data-act="label-save">Speichern</button>
@@ -1409,9 +1424,12 @@ window.__host = window.__host || {};
     }
     // Sobald der Auftrag an einen Drucker gesendet wurde (msg.printer gesetzt),
     // den Drucker ergänzen — damit der Host weiß, welcher Drucker druckt /
-    // gedruckt hat. Für Fehlerfälle (peer_error/stalled/generisch) oben schon
-    // ohne Zusatz zurückgegeben; zentrale Warteschlange ohne Drucker → kein Zusatz.
-    if (msg.printer) text += ` — Drucker ${msg.printer}`;
+    // gedruckt hat. Bevorzugt das Anzeige-Label („Label (Systemname)"), Fallback
+    // auf den reinen Systemnamen. Für Fehlerfälle (peer_error/stalled/generisch)
+    // oben schon ohne Zusatz zurückgegeben; zentrale Warteschlange ohne Drucker
+    // → kein Zusatz.
+    const pname = msg.printer_label || msg.printer;
+    if (pname) text += ` — Drucker ${pname}`;
     return text;
   }
 

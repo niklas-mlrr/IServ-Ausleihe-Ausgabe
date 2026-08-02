@@ -84,6 +84,9 @@ window.__host = window.__host || {};
     renderNewClassPrinters();
     renderWorkerStatus();
     renderStatusBar();
+    // Drucker-Pool im Einstellungs-Dialog live aus dem Snapshot nachführen
+    // (selbe Quelle wie die Warteschlange) — geschützt gegen fokussierte Eingaben.
+    maybeRefreshPrinterPoolFromSnapshot();
   }
   // QR-Popup automatisch schließen, sobald der gezeigte Code gescannt wurde
   // (neuer Pairing-Code beim Schüler-QR, neues Display beim iPad-QR, bzw. der

@@ -172,7 +172,8 @@ function handleServerMessage(msg) {
       } else {
         text = 'Leihschein in Druckerwarteschlange …';
       }
-      if (msg.printer) text += ` von Drucker ${msg.printer}`;
+      const pname = msg.printer_label || msg.printer;
+      if (pname) text += ` von Drucker ${pname}`;
       setStatusText(text);
     }
   } else if (msg.type === 'print_result') {
@@ -182,7 +183,8 @@ function handleServerMessage(msg) {
     } else if (msg.peer_error) {
       setStatusText(msg.msg || 'Es dauert ungewöhnlich lange, vielleicht liegt ein Fehler vor.');
     } else if (msg.ok) {
-      setStatusText(msg.printer ? `Gedruckt von Drucker ${msg.printer}` : 'Gedruckt');
+      const pname = msg.printer_label || msg.printer;
+      setStatusText(pname ? `Gedruckt von Drucker ${pname}` : 'Gedruckt');
     } else {
       setStatusText(`Druck fehlgeschlagen: ${msg.msg || ''}`);
     }

@@ -747,9 +747,27 @@ class PrintQueue:
 
     @staticmethod
     def _printer_display(p) -> str:
-        """Anzeige-Label eines Pool-Druckers für die Warteschlangen-Liste:
-        `name=None` ist der Standarddrucker des Geräts (s. PrinterConfig)."""
-        return "Standarddrucker" if p.name is None else p.name
+        """Anzeige-Label eines Pool-Druckers für die Warteschlangen-Liste und
+        Notifications: bei gesetztem Anzeigenamen „<Label> (<Systemname>)",
+        sonst nur der Systemname bzw. „Standarddrucker". `name=None` ist der
+        Standarddrucker des Geräts (s. PrinterConfig)."""
+        sys_label = "Standarddrucker" if p.name is None else p.name
+        if p.label and p.label.strip():
+            return f"{p.label} ({sys_label})"
+        return sys_label
+
+    def _printer_display_by_id(self, printer_id: str | None) -> str | None:
+        """Anzeige-Label („Label (Systemname)") zur Drucker-Kennung — für die
+        `printer_label`-Felder in print_progress/print_result. None bei
+        Verwaistung oder wenn kein Drucker zugewiesen ist."""
+        if printer_id is None:
+            return None
+        from .state import get_state
+
+        for p in get_state().settings.printers:
+            if p.id == printer_id:
+                return self._printer_display(p)
+        return None
 
     def _originator_label(self, state, job: PrintJob) -> str:
         """Auftraggeber für die Warteschlangen-Anzeige: Helfer namentlich
@@ -876,6 +894,9 @@ class PrintQueue:
             "position": position,
             "name": job.name,
             "printer": printer,
+            # Anzeige-Label („Label (Systemname)") für den Toast — der reine
+            # Systemname bleibt in `printer` (u. a. testgefriert).
+            "printer_label": self._printer_display_by_id(job.assigned_printer_id),
             "peer_error": peer_error,
         }
         if text is not None:
@@ -906,6 +927,9 @@ class PrintQueue:
             # Druckername (wenn zugewiesen) — damit der Auftraggeber im
             # „Gedruckt"-Status sieht, welcher Drucker gedruckt hat.
             "printer": self._printer_name(job.assigned_printer_id),
+            # Anzeige-Label („Label (Systemname)") für den Toast; `printer`
+            # bleibt der reine Systemname.
+            "printer_label": self._printer_display_by_id(job.assigned_printer_id),
         }
         # Spezielle Fehlerarten durchreichen, damit der Client sie gesondert
         # darstellt (lang Stall-Text bzw. „Fehler bei vorigem Auftrag") und

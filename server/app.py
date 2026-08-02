@@ -5,7 +5,7 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -147,6 +147,20 @@ def create_app() -> FastAPI:
             if html.is_file():
                 app.add_api_route(f"/{page}", _page_handler(html), include_in_schema=False)
         app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
+
+    @app.middleware("http")
+    async def _no_cache_static(request: Request, call_next):
+        """Statische Web-Dateien (host.js/scan.js/CSS/HTML) dürfen vom Browser
+        nicht heuristic-cachen — sonst kommen Code-Änderungen (z. B. neue
+        Einstellungs-Felder) bei den Host-Rechnern nicht an. `no-cache` erzwingt
+        eine Revalidierung; StaticFiles liefert Last-Modified, so dass unver-
+        änderte Dateien mit 304 beantwortet werden (kein Re-Download nötig).
+        API-/WS-Routen bleiben unangetastet (JSON wird ohnehin nicht gecacht)."""
+        response = await call_next(request)
+        if not request.url.path.startswith("/api"):
+            response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return response
+
     return app
 
 
