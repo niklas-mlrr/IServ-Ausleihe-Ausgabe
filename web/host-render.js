@@ -1395,7 +1395,10 @@ window.__host = window.__host || {};
   const printToasts = {};  // job_id -> { el, timer }
 
   function printToastText(msg, finalOk) {
-    const who = msg.name ? `von ${msg.name} ` : '';
+    // Host-Präfix: „Leihschein von <Name>, <Vorname> (<Klasse>)" — msg.name
+    // ist bereits im Format „Nachname, Vorname (Form)" (server: slip_name).
+    // Fällt kein Schülername an, nur „Leihschein ".
+    const prefix = msg.name ? `Leihschein von ${msg.name} ` : 'Leihschein ';
     // Peer-Fehler (Auftrag am hängenden Drucker / kein Ersatzdrucker) —
     // bleibt stehen. Text vom Server („Es dauert ungewöhnlich lange … -
     // <Label>"), keine clientseitige +1-Hochzählung der Position mehr.
@@ -1405,32 +1408,36 @@ window.__host = window.__host || {};
     if (finalOk === false) {
       // Stall (Inaktivität): lange Hinweismeldung direkt anzeigen.
       if (msg.stalled) return msg.msg || 'Druck dauert ungewöhnlich lange';
-      return `Leihschein ${who}— Druck fehlgeschlagen: ${msg.msg || ''}`;
+      return `${prefix}— Druck fehlgeschlagen: ${msg.msg || ''}`;
     }
+    // <pname> = Anzeige-Label „Label (Systemname)" (msg.printer_label); erst
+    // gesetzt, wenn der Auftrag einem Drucker zugewiesen ist (Slot-Job). Der
+    // Drucker rückt inline in den Satz („… von <pname> gedruckt."), kein
+    // separates „ — Drucker …"-Suffix mehr. Zentrale-Warteschlangen-Jobs ohne
+    // zugewiesenen Drucker → Kurzform ohne Drucker.
+    const pname = msg.printer_label;
     // „Wird gedruckt" erst, wenn das OS aktiv druckt — nicht schon bei Slot-
-    // Position 0 (dort: „gesendet, wartet auf Druck"). Position 1 zeigt die
-    // Warteschlangenposition (nicht mehr „gesendet, wartet auf Druck").
-    let text;
+    // Position 0 (dort: „wartet an <pname> auf Druck"). Position 1 zeigt die
+    // Warteschlangenposition (nicht mehr „wartet auf Druck"). Ab Position 2
+    // Kurzform ohne Drucker.
     if (finalOk === true) {
-      text = `Leihschein ${who}gedruckt`;
-    } else if (msg.status === 'printing') {
-      text = `Leihschein ${who}wird gedruckt`;
-    } else if (typeof msg.position === 'number' && msg.position === 0) {
-      text = `Leihschein ${who}gesendet, wartet auf Druck`;
-    } else if (typeof msg.position === 'number' && msg.position >= 1) {
-      text = `Leihschein ${who}an ${msg.position}. Druckerwarteschlangenposition`;
-    } else {
-      text = `Leihschein ${who}in Druckerwarteschlange`;
+      return pname ? `${prefix}von ${pname} gedruckt.` : `${prefix}gedruckt.`;
     }
-    // Sobald der Auftrag an einen Drucker gesendet wurde (msg.printer gesetzt),
-    // den Drucker ergänzen — damit der Host weiß, welcher Drucker druckt /
-    // gedruckt hat. Bevorzugt das Anzeige-Label („Label (Systemname)"), Fallback
-    // auf den reinen Systemnamen. Für Fehlerfälle (peer_error/stalled/generisch)
-    // oben schon ohne Zusatz zurückgegeben; zentrale Warteschlange ohne Drucker
-    // → kein Zusatz.
-    const pname = msg.printer_label || msg.printer;
-    if (pname) text += ` — Drucker ${pname}`;
-    return text;
+    if (msg.status === 'printing') {
+      return pname ? `${prefix}wird von ${pname} gedruckt…` : `${prefix}wird gedruckt…`;
+    }
+    if (typeof msg.position === 'number' && msg.position === 0) {
+      return pname ? `${prefix}wartet an ${pname} auf Druck…` : `${prefix}wartet auf Druck…`;
+    }
+    if (typeof msg.position === 'number' && msg.position === 1) {
+      return pname
+        ? `${prefix}an 1. Druckerwarteschlangenposition von ${pname}`
+        : `${prefix}an 1. Druckerwarteschlangenposition`;
+    }
+    if (typeof msg.position === 'number' && msg.position >= 2) {
+      return `${prefix}an ${msg.position}. Druckerwarteschlangenposition`;
+    }
+    return `${prefix}in Druckerwarteschlange…`;
   }
 
   function _printToastEl(jobId, warn) {

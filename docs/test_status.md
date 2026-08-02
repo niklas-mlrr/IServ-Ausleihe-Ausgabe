@@ -5,7 +5,7 @@
 > Risiko hier unter „Offen / zu testen" eintragen; nach erfolgreichem Test in
 > „Verifiziert" verschieben (mit Datum + Skript/Befund). Bezug: `docs/PLAN.md`.
 >
-> Stand: 2026-08-02 (Drucker-Anzeigename + vereinheitlichte Anzeige, 295 Tests grün).
+> Stand: 2026-08-02 (Druck-Status-Texte vereinheitlicht + Countdown „Nächster Schüler", 295 Tests grün).
 > Alle bisherigen Tests sind **read-only** gegen IServ
 > (kein Submit, keine Buchung — PLAN §6).
 >
@@ -51,8 +51,35 @@
 | V32 | **Statusanzeige ergänzt „von Drucker <Name>" nach Versand** — Sobald ein Auftrag an einen Drucker gesendet wurde (`assigned_printer_id` gesetzt), zeigt die Statusanzeige des Auftraggebers den Druckername. `print_progress` trägt das `printer`-Feld bereits (aus `_printer_name`); `scan-ws.js` hängt für nicht-`peer_error`-Status „ von Drucker <Name>" an den Statustext an („Wird gedruckt … von Drucker P1", „… gesendet, wartet auf Druck … von Drucker P1", „… an X. Druckerwarteschlangenposition von Drucker P1"); der Host-Toast `printToastText` (`host-render.js`) hängt analog „ — Drucker <Name>" an („… wird gedruckt — Drucker P1", „… gedruckt — Drucker P1"). Zentrale Warteschlangen-Jobs ohne zugewiesenen Drucker (`printer` null) bekommen keinen Zusatz; `peer_error`/`stalled` übernehmen den Server-Text (Pos.0 nennt den Drucker bereits). `print_result` bekommt neu ein `printer`-Feld; Helfer zeigt bei Erfolg „Gedruckt von Drucker <Name>", Host-Toast „… gedruckt — Drucker <Name>" statt nur „gedruckt". | `tests/test_print_queue.py` (+1: `print_progress` + `print_result` tragen `printer` für gesendete Aufträge) | 2026-07-20 | grün, 281 Tests. **Live-Verifikation (Druckername in Helfer- + Host-Statusanzeige am echten Gerät) noch offen** (s. „Offen" unten) |
 | V33 | **Audit-Härtung:** `/api/commit-book` nutzt die vollständige Vorabprüfung + per-Schüler-Lock; Queue-/Schuljahr-Reset gibt Worker vollständig frei; Modus-B-Reopen widerruft Pending-Sessions; ersetzte WS verlieren Befehlsrecht; Host-WS schließen bei TTL/Logout; Tokens bleiben aus Logs; App-State/Hub sind je FastAPI-App isoliert; Config/Pfade validiert und CWD-unabhängig. | Neue/erweiterte Tests in `test_booking_precheck.py`, `test_queue_flow.py`, `test_hub.py`, `test_ws_scanner.py`, `test_app_runtime.py`, `test_config.py`, `test_main.py`; `uv run python -W error -m pytest -q`; `uvx ruff check server tests conftest.py` | 2026-08-01 | **294 Tests grün**, 68 % Coverage, Ruff clean, keine Warnungen; ausschließlich offline, kein IServ-Write/Playwright-Enter. |
 | V34 | **Drucker-Anzeigename + vereinheitlichte „Name (Systemname)"-Anzeige** — `PrinterConfig.label` (rein kosmetisch, `name` bleibt Identität); Persistenz in `data/printers.json` (Roundtrip + Blank→`None`); `POST /api/printers/add` nimmt `label`, neu `POST /api/printers/label` setzt/löscht ihn. `pool_printers` liefert `label`; Host `printerLabel(p)` zeigt überall `<Label> (<Systemname>)` (Reiter/Panel/Warteschlange/Checkboxen; Standarddrucker ohne verschachtelte Klammern). Warteschlangen-Warteliste (`_printer_display`) + Druck-Toast/Scanner nutzen das Format via neuem WS-Feld `printer_label` in `print_progress`/`print_result` (`printer`-Systemname unverändert). Einstellungs-Latenz: Mutationen rendern aus Endpoint-Antwort statt `lpstat`-Re-Fetch; Pool wird aus WS-Snapshot live nachgeführt (Fokus-Schutz). Static-File-Cache-Busting via `Cache-Control: no-cache, must-revalidate`. | `tests/test_printer_store.py` (+1: `test_load_strips_blank_label`; Roundtrip-Test um `label` erweitert); `tests/test_state_contract.py` unverändert | 2026-08-02 | **295 Tests grün**, Ruff clean, ausschließlich offline. **Live-Check (Anzeigename im Echtbetrieb, Persistenz über Neustart, Label in Warteschlange/Toast/Scanner am echten Gerät) noch offen** (s. „Offen" unten) |
+| V35 | **Druck-Status-Texte vereinheitlicht + Countdown „Nächster Schüler"** — Helfer-Client (`scan-ws.js`): Drucker inline als `<Druckername> (<Systemname>)` (`msg.printer_label`), kein „ von Drucker …"-Anhang mehr. `printing`→„… wird von <pname> gedruckt…", Pos.0→„… wartet an <pname> auf Druck…", Pos.1+Drucker→„… an 1. Druckerwarteschlangenposition von <pname>", Pos.1 ohne Drucker (zentraler Wartender)→Kurzform, Pos.≥2→„… an X. Druckerwarteschlangenposition" (kurz), `gedruckt`→„… von <pname> gedruckt." (mit Punkt). Bei „Drucken & nächster Schüler" nach erfolgreichem Druck 4-Sekunden-Countdown „… Nächster Schüler in Xs." (tickt 4→3→2→1, 0 nie sichtbar, dann `advanceToNext`) statt sofortigem Weiterrücken; Dauer entspricht der Host-Toast-Dauer (4000 ms). Generationenzähler schützt vor Doppel-Advance (`cancelNextCountdown` am Anfang von `advanceToNext`). Host-Client (`host-render.js`, `printToastText`): gleiche Texte, aber Präfix „Leihschein von <Name>, <Vorname> (<Klasse>)" (`msg.name`), kein „ — Drucker …"-Suffix, Abschlusspunkt bei „gedruckt."; kein Countdown (Host ohne Auto-Advance). peer_error/stalled/Fehler unverändert. **Keine Server-Änderung** — `printer_label`/`name`/`position`/`status` waren bereits im WS-Payload; `test_state_contract.py` unberührt. | `node --check web/scan-ws.js web/scan-render.js web/host-render.js`; `uvx ruff check`; `uv run pytest -q` | 2026-08-02 | **295 Tests grün**, Ruff clean, `node --check` OK. **Live-Check (alle Status-Phasen + Countdown + Doppel-Advance-Schutz am echten Gerät) noch offen** (s. „Offen" unten) |
 
 ## Offen / zu testen
+
+### Offen 2026-08-02 (Druck-Status-Texte + Countdown „Nächster Schüler": Live-Check)
+
+Die neuen Helfer-/Host-Status-Texte und der Countdown sind per `node --check`
++ Unit-Suite offline abgesichert (V35); sie berühren nur Web-Dateien (keine
+Server-Logik). Am echten Gerät (privater Laptop, nach CLAUDE.md §6) noch offen:
+
+- [ ] **Helfer-Status pro Phase:** Druck starten (oder `save_pdf_locally`-
+      Dev-Toggle) und nacheinander prüfen: Pos.≥2 → „Leihschein an X.
+      Druckerwarteschlangenposition" (ohne Drucker); Pos.1 mit zugewiesenem
+      Drucker → „… an 1. Druckerwarteschlangenposition von <Name> (<System>)";
+      Pos.0/spooled → „… wartet an <Name> (<System>) auf Druck…";
+      `printing` → „… wird von <Name> (<System>) gedruckt…";
+      fertig → „… von <Name> (<System>) gedruckt." (mit Punkt).
+- [ ] **Pos.1 ohne Drucker:** zentraler Wartender an Pos.1 (kein Drucker
+      zugewiesen) zeigt die Kurzform ohne Drucker — prüfen, falls im Setup
+      reproduzierbar.
+- [ ] **Countdown:** „Drucken & nächster Schüler" → nach erfolgreichem Druck
+      erscheint „… gedruckt. Nächster Schüler in 4s." und tickt 4→3→2→1; bei 0
+      wird der nächste Schüler aufgerufen (0 nie sichtbar).
+- [ ] **Doppel-Advance-Schutz:** während des Countdowns manuell „Nächster
+      Schüler" klicken → es rückt nur einmal vor (laufender Timer wird
+      gecancelt), kein zweiter Sprung nach Ablauf.
+- [ ] **Host-Toast:** Druck-Toast zeigt „Leihschein von <Name>, <Vorname>
+      (<Klasse>) …"-Präfix (z. B. „… von Müller, Niklas (10a) von <Name>
+      (<System>) gedruckt."), kein „ — Drucker …"-Suffix, Abschlusspunkt.
 
 ### Offen 2026-08-02 (Drucker-Anzeigename + vereinheitlichte Anzeige: Live-Check)
 

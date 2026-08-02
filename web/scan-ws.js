@@ -147,53 +147,61 @@ function handleServerMessage(msg) {
     // Live-Status aus der internen Druckerwarteschlange (OS-getrieben):
     //   peer_error                  → „Es dauert ungewöhnlich lange … - <Label>"
     //                                (Auftrag am hängenden Drucker / kein
-    //                                Ersatzdrucker — Label aus der Position,
-    //                                keine +1-Hochzählung; Text vom Server)
-    //   status printing             → „Wird gedruckt …" (OS druckt aktiv —
-    //                                erst jetzt, nicht schon bei slot-Pos. 0)
-    //   position 0 (spooled)        → „gesendet, wartet auf Druck"
-    //   position ≥ 1 (zentral queued) → „an X. Druckerwarteschlangenposition"
-    // Sobald der Auftrag an einen Drucker gesendet wurde (msg.printer gesetzt),
-    // wird „ von Drucker <Name>" ergänzt, damit der Auftraggeber weiß, welcher
-    // Drucker seinen Leihschein druckt. Zentrale-Warteschlangen-Jobs ohne
-    // zugewiesenen Drucker (msg.printer null) bekommen keinen Zusatz. Für
-    // peer_error übernimmt der Server den Text (Pos.-0-Hinweis nennt den Drucker
-    // bereits, Pos.≥1 ist eine andere Semantik) — kein Zusatz.
+    //                                Ersatzdrucker — Text vom Server, kein
+    //                                clientseitiger Positions-Zusatz)
+    //   status printing             → „Leihschein wird von <pname> gedruckt…"
+    //                                (OS druckt aktiv — erst jetzt, nicht
+    //                                schon bei slot-Pos. 0)
+    //   position 0 (spooled)        → „Leihschein wartet an <pname> auf Druck…"
+    //   position 1 + pname (Slot)   → „Leihschein an 1. Druckerwarteschlangen-
+    //                                position von <pname>"
+    //   position 1 ohne pname        → Kurzform (zentraler Wartender, Drucker
+    //                                noch nicht zugewiesen)
+    //   position ≥ 2                → „Leihschein an X. Druckerwarteschlangen-
+    //                                position" (kurz, ohne Drucker)
+    // <pname> = Anzeige-Label „Label (Systemname)" (msg.printer_label); erst
+    // gesetzt, wenn der Auftrag einem Drucker zugewiesen ist (Slot-Job).
+    // Zentrale-Warteschlangen-Jobs ohne zugewiesenen Drucker → kein Zusatz.
+    // Für peer_error übernimmt der Server den Text — kein Zusatz.
     if (msg.peer_error) {
       setStatusText(msg.msg || 'Es dauert ungewöhnlich lange, vielleicht liegt ein Fehler vor.');
     } else {
+      const pname = msg.printer_label;
       let text;
       if (msg.status === 'printing') {
-        text = 'Wird gedruckt …';
+        text = pname ? `Leihschein wird von ${pname} gedruckt…` : 'Leihschein wird gedruckt…';
       } else if (typeof msg.position === 'number' && msg.position === 0) {
-        text = 'Leihschein gesendet, wartet auf Druck …';
-      } else if (typeof msg.position === 'number' && msg.position >= 1) {
+        text = pname ? `Leihschein wartet an ${pname} auf Druck…` : 'Leihschein wartet auf Druck…';
+      } else if (typeof msg.position === 'number' && msg.position === 1) {
+        text = pname
+          ? `Leihschein an 1. Druckerwarteschlangenposition von ${pname}`
+          : 'Leihschein an 1. Druckerwarteschlangenposition';
+      } else if (typeof msg.position === 'number' && msg.position >= 2) {
         text = `Leihschein an ${msg.position}. Druckerwarteschlangenposition`;
       } else {
-        text = 'Leihschein in Druckerwarteschlange …';
+        text = 'Leihschein in Druckerwarteschlange…';
       }
-      const pname = msg.printer_label || msg.printer;
-      if (pname) text += ` von Drucker ${pname}`;
       setStatusText(text);
     }
   } else if (msg.type === 'print_result') {
     printBtn.disabled = false;
+    const wasPrintThenNext = printThenNext;
+    printThenNext = false;
     if (msg.stalled) {
       setStatusText(msg.msg || 'Druck dauert ungewöhnlich lange');
     } else if (msg.peer_error) {
       setStatusText(msg.msg || 'Es dauert ungewöhnlich lange, vielleicht liegt ein Fehler vor.');
     } else if (msg.ok) {
-      const pname = msg.printer_label || msg.printer;
-      setStatusText(pname ? `Gedruckt von Drucker ${pname}` : 'Gedruckt');
+      const pname = msg.printer_label;
+      const base = pname ? `Leihschein von ${pname} gedruckt.` : 'Leihschein gedruckt.';
+      setStatusText(base);
+      // „Drucken & nächster Schüler": bei erfolgreichem Druck nicht sofort
+      // weiterschalten, sondern per Countdown (4 s, entspricht der Host-
+      // Toast-Dauer). stalled/peer_error/Fehler → ok=false → kein Auto-
+      // Advance (Schüler bleibt stehen, s. Plan Fehler-Verhalten).
+      if (wasPrintThenNext) startNextCountdown(base);
     } else {
       setStatusText(`Druck fehlgeschlagen: ${msg.msg || ''}`);
-    }
-    // „Drucken & nächster Schüler": nur bei erfolgreichem Druck weiterschalten
-    // (Schüler bleibt sonst stehen — s. Plan, Fehler-Verhalten). stalled/
-    // peer_error liefern ok=false → kein Auto-Advance.
-    if (printThenNext) {
-      printThenNext = false;
-      if (msg.ok) advanceToNext();
     }
   } else if (msg.type === 'waiting') {
     studentActive = false;

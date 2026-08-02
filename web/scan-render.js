@@ -324,11 +324,49 @@ bookRowsEl.addEventListener('click', (e) => {
 
 
 
+// ---- Countdown „Nächster Schüler in Xs" nach „Drucken & nächster Schüler" ----
+// Bei erfolgreichem Druck mit gesetztem printThenNext schaltet der Helfer nicht
+// sofort weiter, sondern zeigt einen Countdown (4 s — solange bleiben die
+// Druck-Toasts im Host unten rechts stehen, s. host-render.js 4000 ms). Tickt
+// 4→3→2→1; die 0 wird nie angezeigt, weil bei Erreichen sofort der nächste
+// Schüler aufgerufen wird (advanceToNext). Ein Generationenzähler schützt
+// vor Doppel-Advance: jeder manuelle „Nächster Schüler"-Klick (der ebenfalls
+// advanceToNext aufruft) cancelt den laufenden Countdown, sodass nicht zweimal
+// weiterschaltet wird.
+const NEXT_STUDENT_COUNTDOWN_S = 4;  // entspricht Host-Toast-Dauer (4000 ms)
+let nextCountdownTimer = null;
+let nextCountdownGen = 0;
+
+function startNextCountdown(baseText) {
+  cancelNextCountdown();
+  const gen = ++nextCountdownGen;
+  let secs = NEXT_STUDENT_COUNTDOWN_S;
+  setStatusText(`${baseText} Nächster Schüler in ${secs}s.`);
+  nextCountdownTimer = setInterval(() => {
+    secs -= 1;
+    if (secs <= 0) {
+      // 0 nie anzeigen → nächsten Schüler aufrufen. advanceToNext cancelt den
+      // Timer (s.u.), daher hier nur clear + Weiterrücken.
+      if (nextCountdownTimer) { clearInterval(nextCountdownTimer); nextCountdownTimer = null; }
+      advanceToNext();
+      return;
+    }
+    if (gen !== nextCountdownGen) return;  // superseded → keine weiteren Updates
+    setStatusText(`${baseText} Nächster Schüler in ${secs}s.`);
+  }, 1000);
+}
+
+function cancelNextCountdown() {
+  if (nextCountdownTimer) { clearInterval(nextCountdownTimer); nextCountdownTimer = null; }
+  nextCountdownGen++;  // laufende Timer-Ticks ungültig machen
+}
+
 // Nächster Schüler: aktuellen abschließen + nächsten aus der Queue laden.
 // Alten Schüler sofort entfernen und "Warten…" zeigen, auch während
 // der neue Schüler serverseitig noch geladen wird (Bücher folgen mit
 // student_info, Scan-Freigabe mit worker_ready).
 function advanceToNext() {
+  cancelNextCountdown();  // laufenden Countdown stoppen (Schutz vor Doppel-Advance)
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   sNameEl.textContent = '';
   sFormEl.textContent = '';
@@ -1332,6 +1370,8 @@ window.__scan.renderQueue = renderQueue;
 window.__scan.updateNextBtnPlacement = updateNextBtnPlacement;
 window.__scan.renderQueueTabs = renderQueueTabs;
 window.__scan.advanceToNext = advanceToNext;
+window.__scan.startNextCountdown = startNextCountdown;
+window.__scan.cancelNextCountdown = cancelNextCountdown;
 window.__scan.closeNextModal = closeNextModal;
 window.__scan.requestNext = requestNext;
 window.__scan.showBookAlertModal = showBookAlertModal;

@@ -8,6 +8,35 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-02 — Druck-Status-Texte vereinheitlicht (Helfer + Host) + Countdown „Nächster Schüler"
+
+- **Helfer-Client (`scan-ws.js`):** Druck-Status-Texte überarbeitet. Drucker
+  jetzt inline als `<Druckername> (<Systemname>)` (`msg.printer_label`), kein
+  „ von Drucker …"-Anhang mehr. Neu:
+  - `printing` → „Leihschein wird von <pname> gedruckt…"
+  - Position 0 (spooled) → „Leihschein wartet an <pname> auf Druck…"
+  - Position 1 mit Drucker (Slot) → „Leihschein an 1. Druckerwarteschlangenposition von <pname>"
+  - Position 1 ohne Drucker (zentraler Wartender) → „Leihschein an 1. Druckerwarteschlangenposition" (Drucker noch nicht zugewiesen)
+  - Position ≥ 2 → „Leihschein an X. Druckerwarteschlangenposition" (kurz, ohne Drucker)
+  - `gedruckt` → „Leihschein von <pname> gedruckt." (mit Abschlusspunkt)
+- **Countdown „Nächster Schüler in Xs" (Helfer):** bei „Drucken & nächster
+  Schüler" wird nach erfolgreichem Druck nicht mehr sofort weitergeschaltet,
+  sondern ein 4-Sekunden-Countdown angezeigt (entspricht der Host-Toast-Dauer
+  von 4000 ms). Tickt 4→3→2→1; die 0 wird nie gezeigt, weil bei Erreichen sofort
+  `advanceToNext()` feuert. Generationenzähler schützt vor Doppel-Advance:
+  ein manueller „Nächster Schüler"-Klick während des Countdowns cancelt den
+  laufenden Timer (`cancelNextCountdown` am Anfang von `advanceToNext`).
+  Konstante `NEXT_STUDENT_COUNTDOWN_S = 4` in `scan-render.js`.
+- **Host-Client (`host-render.js`, `printToastText`):** gleiche Status-Texte,
+  aber Präfix „Leihschein von <Name>, <Vorname> (<Klasse>)" (`msg.name`, bereits
+  im Format „Nachname, Vorname (Form)" vom Server via `slip_name`). Kein
+  „ — Drucker …"-Suffix mehr; Drucker inline. Abschlusspunkt bei „gedruckt.".
+  Host ohne Auto-Advance → kein Countdown-Fall. peer_error/stalled/Fehler
+  unverändert (Server-Text bzw. „— Druck fehlgeschlagen: …").
+- **Keine Server-Änderung:** die nötigen WS-Felder (`printer_label`, `name`,
+  `position`, `status`) waren bereits vorhanden. `test_state_contract.py`
+  (friert `state_snapshot()` ein) unberührt.
+
 ## 2026-08-02 — Drucker-Anzeigename + vereinheitlichte Drucker-Anzeige + Einstellungs-Latenz + Cache-Busting
 
 - **Anzeigename pro Pool-Drucker (`PrinterConfig.label`):** frei wählbarer,
