@@ -8,6 +8,46 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-02 — Drucker-Anzeigename + vereinheitlichte Drucker-Anzeige + Einstellungs-Latenz + Cache-Busting
+
+- **Anzeigename pro Pool-Drucker (`PrinterConfig.label`):** frei wählbarer,
+  rein kosmetischer Name (`name` bleibt die technische Identität für
+  `lp`/Sumatra-Dispatch + Dedup). Beim Hinzufügen angebbar, im Einstellungs-
+  Panel unter „Name" bearbeitbar (Enter/Speichern-Button). Persistiert in
+  `data/printers.json` (Roundtrip + Blank→`None`); `pool_printers` liefert
+  `label` mit. Endpunkte: `POST /api/printers/add` nimmt optional `label`,
+  neu `POST /api/printers/label` `{id, label}` (setzen/löschen).
+- **Drucker überall als „Name (Systemname)" angezeigt:** `printerLabel(p)`
+  im Host (Reiter, Panel, Warteschlangen-Tabelle, Klassen-Drucker-Checkboxen)
+  zeigt `<Label> (<Systemname>)`; ohne Label nur der Systemname. Beim
+  Standarddrucker mit Label steht nur „Standarddrucker" in der Klammer
+  (keine verschachtelten Klammern), der Gerätename bleibt in der Panel-
+  „System:"-Zeile sichtbar. Warteschlangen-Warteliste (`_printer_display`)
+  und Druck-Toast/Scanner nutzen dasselbe Format über das neue WS-Feld
+  `printer_label` in `print_progress`/`print_result` (`printer` als reiner
+  Systemname bleibt erhalten — testgefriert + Dispatch).
+- **Einstellungs-Reiter ohne lpstat-Verzögerung:** nach Pool-Mutationen
+  (add/remove/duplex/label/reorder/reactivate) wurde bisher erneut
+  `GET /api/printers` gerufen (serverseitig `lpstat`/`Get-Printer`) — der
+  langsame Teil, der den Einstellungs-Dialog verzögerte. Neu: Geräte-Liste
+  nur beim Öffnen des Dialogs holen (`refreshPrinterDeviceInfo`);
+  Mutationen rendern direkt aus der Endpoint-Antwort `{ok, pool}`
+  (`_applyPoolResponse`). Zusätzlich wird der Pool aus dem WS-Snapshot live
+  nachgeführt (`maybeRefreshPrinterPoolFromSnapshot` in `applyState`), so
+  dass add/remove im selben Moment auftaucht wie in der Warteschlange —
+  geschützt gegen fokussierte Eingaben im Panel (kein Eingabe-Verlust).
+- **Static-File-Cache-Busting:** statische Web-Dateien (host/scan/student
+  JS/CSS/HTML) bekommen `Cache-Control: no-cache, must-revalidate`
+  (HTTP-Middleware in `server/app.py`, nur für Nicht-`/api`-Pfade). Zuvor
+  konnte der Browser `host-render.js` heuristic-cachen, sodass neue
+  Einstellungs-Felder bei Host-Rechnern nicht ankamen. StaticFiles liefert
+  `Last-Modified`, unveränderte Dateien antworten mit 304. Nach dem
+  nächsten Server-Start einmalig Hard-Refresh nötig.
+- **Tests:** `tests/test_printer_store.py` (+1: Label-Roundtrip +
+  Blank→`None`; bestehender Roundtrip-Test um `label` erweitert).
+  `tests/test_state_contract.py` unverändert (neuer `label`-Schlüssel bricht
+  die Per-Printer-Checks nicht). **295 Tests grün**, Ruff clean.
+
 ## 2026-08-01 — Sicherheits-/Wartbarkeits-Audit umgesetzt
 
 Repo-weites Audit mit drei GPT-5.6-Terra-Subagents, anschließender

@@ -5,7 +5,7 @@
 > Risiko hier unter „Offen / zu testen" eintragen; nach erfolgreichem Test in
 > „Verifiziert" verschieben (mit Datum + Skript/Befund). Bezug: `docs/PLAN.md`.
 >
-> Stand: 2026-08-01 (Sicherheits-/Wartbarkeits-Audit, 294 Tests grün).
+> Stand: 2026-08-02 (Drucker-Anzeigename + vereinheitlichte Anzeige, 295 Tests grün).
 > Alle bisherigen Tests sind **read-only** gegen IServ
 > (kein Submit, keine Buchung — PLAN §6).
 >
@@ -50,8 +50,32 @@
 | V31 | **Fehlermeldung positionsbasiert (nur Pos. 0 bekommt Inaktivitäts-Hinweis)** — Aufbauend auf V30: Die Fehlermeldung am hängenden Drucker ist nicht mehr nach Urheber/Peer getrennt, sondern **positionsbasiert** (neu `_error_msg`, verwendet in `_handle_stall` + `_notify_all`). Pos. 0 (der vorn am Drucker druckende/gesendete Auftrag) bekommt den Inaktivitäts-Hinweis „Es dauert ungewöhnlich lange … - Drucker <Name>: <Label>"; **alle** Pos. ≥ 1 (die dahinter wartenden Aufträge, egal ob Urheber oder Peer) bekommen die gewohnte Peer-Formulierung „Fehler bei vorigem Druckauftrag - X. Warteschlangenposition" zurück (X = Position, ohne +1). Ersatzdrucker-Aufträge bekommen weiterhin keine Fehlermeldung, solange ein erlaubter Drucker nicht fehlerhaft ist (`_is_peer_error`/Slot-Markierung); nur wenn *alle* erlaubten Drucker fehlerhaft sind, greift die positionsbasierte Regel. | `tests/test_print_queue.py` (+1: `_error_msg` positionsbasiert; `test_stall_peer_at_same_printer_gets_peer_error` + `test_stall_peer_at_position_zero_shows_pos_zero_label` auf Pos.≥1-Formulierung umgestellt) | 2026-07-20 | grün, 280 Tests. **Live-Verifikation (Pos.-0-Hinweis vs. Pos.≥1-Peer-Formulierung am echten Gerät) noch offen** (s. „Offen" unten) |
 | V32 | **Statusanzeige ergänzt „von Drucker <Name>" nach Versand** — Sobald ein Auftrag an einen Drucker gesendet wurde (`assigned_printer_id` gesetzt), zeigt die Statusanzeige des Auftraggebers den Druckername. `print_progress` trägt das `printer`-Feld bereits (aus `_printer_name`); `scan-ws.js` hängt für nicht-`peer_error`-Status „ von Drucker <Name>" an den Statustext an („Wird gedruckt … von Drucker P1", „… gesendet, wartet auf Druck … von Drucker P1", „… an X. Druckerwarteschlangenposition von Drucker P1"); der Host-Toast `printToastText` (`host-render.js`) hängt analog „ — Drucker <Name>" an („… wird gedruckt — Drucker P1", „… gedruckt — Drucker P1"). Zentrale Warteschlangen-Jobs ohne zugewiesenen Drucker (`printer` null) bekommen keinen Zusatz; `peer_error`/`stalled` übernehmen den Server-Text (Pos.0 nennt den Drucker bereits). `print_result` bekommt neu ein `printer`-Feld; Helfer zeigt bei Erfolg „Gedruckt von Drucker <Name>", Host-Toast „… gedruckt — Drucker <Name>" statt nur „gedruckt". | `tests/test_print_queue.py` (+1: `print_progress` + `print_result` tragen `printer` für gesendete Aufträge) | 2026-07-20 | grün, 281 Tests. **Live-Verifikation (Druckername in Helfer- + Host-Statusanzeige am echten Gerät) noch offen** (s. „Offen" unten) |
 | V33 | **Audit-Härtung:** `/api/commit-book` nutzt die vollständige Vorabprüfung + per-Schüler-Lock; Queue-/Schuljahr-Reset gibt Worker vollständig frei; Modus-B-Reopen widerruft Pending-Sessions; ersetzte WS verlieren Befehlsrecht; Host-WS schließen bei TTL/Logout; Tokens bleiben aus Logs; App-State/Hub sind je FastAPI-App isoliert; Config/Pfade validiert und CWD-unabhängig. | Neue/erweiterte Tests in `test_booking_precheck.py`, `test_queue_flow.py`, `test_hub.py`, `test_ws_scanner.py`, `test_app_runtime.py`, `test_config.py`, `test_main.py`; `uv run python -W error -m pytest -q`; `uvx ruff check server tests conftest.py` | 2026-08-01 | **294 Tests grün**, 68 % Coverage, Ruff clean, keine Warnungen; ausschließlich offline, kein IServ-Write/Playwright-Enter. |
+| V34 | **Drucker-Anzeigename + vereinheitlichte „Name (Systemname)"-Anzeige** — `PrinterConfig.label` (rein kosmetisch, `name` bleibt Identität); Persistenz in `data/printers.json` (Roundtrip + Blank→`None`); `POST /api/printers/add` nimmt `label`, neu `POST /api/printers/label` setzt/löscht ihn. `pool_printers` liefert `label`; Host `printerLabel(p)` zeigt überall `<Label> (<Systemname>)` (Reiter/Panel/Warteschlange/Checkboxen; Standarddrucker ohne verschachtelte Klammern). Warteschlangen-Warteliste (`_printer_display`) + Druck-Toast/Scanner nutzen das Format via neuem WS-Feld `printer_label` in `print_progress`/`print_result` (`printer`-Systemname unverändert). Einstellungs-Latenz: Mutationen rendern aus Endpoint-Antwort statt `lpstat`-Re-Fetch; Pool wird aus WS-Snapshot live nachgeführt (Fokus-Schutz). Static-File-Cache-Busting via `Cache-Control: no-cache, must-revalidate`. | `tests/test_printer_store.py` (+1: `test_load_strips_blank_label`; Roundtrip-Test um `label` erweitert); `tests/test_state_contract.py` unverändert | 2026-08-02 | **295 Tests grün**, Ruff clean, ausschließlich offline. **Live-Check (Anzeigename im Echtbetrieb, Persistenz über Neustart, Label in Warteschlange/Toast/Scanner am echten Gerät) noch offen** (s. „Offen" unten) |
 
 ## Offen / zu testen
+
+### Offen 2026-08-02 (Drucker-Anzeigename + vereinheitlichte Anzeige: Live-Check)
+
+`PrinterConfig.label`, die „Name (Systemname)"-Anzeige in Warteschlange/
+Toast/Scanner sowie die Einstellungs-Latenz-Optimierung sind per Unit-Test
+offline abgesichert (V34). Am echten Gerät (privater Windows-Laptop, nach
+CLAUDE.md §6) noch offen:
+
+- [ ] **Name vergeben/bearbeiten:** im Einstellungs-Panel pro Drucker unter
+      „Name" einen Anzeigenamen tippen + speichern → Reiter/Panel/Warteschlange
+      und Klassen-Drucker-Checkboxen zeigen „Name (Systemname)"; leer lassen
+      → fällt auf reinen Systemnamen zurück.
+- [ ] **Standarddrucker mit Name:** zeigt „Name (Standarddrucker)" (keine
+      verschachtelten Klammern); Panel-Zeile „System:" führt den Gerätename.
+- [ ] **Persistenz:** Server neustarten → Anzeigenamen bleiben erhalten
+      (`data/printers.json` enthält `label`).
+- [ ] **Warteliste + Druck-Toast:** wartender Auftrag zeigt erlaubte Drucker
+      als „Name (Systemname)"; Druck-Toast/Scanner „Drucker Name (Systemname)".
+- [ ] **Einstellungs-Latenz:** Drucker hinzufügen/entfernen → Reiter im
+      Einstellungs-Dialog taucht im selben Moment auf wie in der Warteschlange
+      (keine spürbare Verzögerung mehr).
+- [ ] **Cache-Busting:** nach Server-Update einmal Hard-Refresh; danach werden
+      JS/CSS-Änderungen ohne erneuten Hard-Refresh übernommen.
 
 ### Offen 2026-08-01 (Schul-WLAN-Smoke nach Audit-Härtung)
 
