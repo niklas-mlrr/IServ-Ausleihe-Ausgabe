@@ -40,12 +40,17 @@ class PrinterConfig:
     """Ein Drucker im Leihschein-Drucker-Pool.
 
     `name=None` bedeutet den Standarddrucker des Geräts (OS-/.env-Default).
+    `name` ist die technische Identität (Dedup, Dispatch an `lp`/Sumatra) und
+    bleibt unverändert. `label` ist ein optionaler, frei wählbarer
+    Anzeigename (rein kosmetisch, z. B. „Drucker Raum 104") — beeinflusst
+    keinen Druck-Pfad; `None` = kein Anzeigename gesetzt (Verhalten wie heute).
     `duplex` wird pro Drucker konfiguriert, aber derzeit nur gespeichert
     (s. DuplexMode-Kommentar oben). Die Reihenfolge in `RuntimeSettings.printers`
     bestimmt die Verteilungspriorität (linkester freie Drucker zuerst)."""
 
     id: str = field(default_factory=_new_printer_id)
     name: str | None = None
+    label: str | None = None
     duplex: DuplexMode = "one_sided"
 
 

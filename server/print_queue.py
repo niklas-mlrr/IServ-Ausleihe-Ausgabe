@@ -674,6 +674,7 @@ class PrintQueue:
                 {
                     "id": p.id,
                     "name": p.name,
+                    "label": p.label,
                     "duplex": p.duplex,
                     "is_default": p.name is None,
                     "load": s.load if s else 0,

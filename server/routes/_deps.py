@@ -173,9 +173,11 @@ class SettingsToggleRequest(BaseModel):
 
 class PrinterAddRequest(BaseModel):
     """Body für `POST /api/printers/add`. `name=None` fügt den Standarddrucker
-    hinzu (falls noch nicht im Pool)."""
+    hinzu (falls noch nicht im Pool). `label` ist ein optionaler Anzeigename
+    (rein kosmetisch, s. PrinterConfig)."""
 
     name: str | None = None
+    label: str | None = None
 
 
 class PrinterRemoveRequest(BaseModel):
@@ -185,6 +187,14 @@ class PrinterRemoveRequest(BaseModel):
 class PrinterDuplexRequest(BaseModel):
     id: str = ""
     duplex: str = "one_sided"
+
+
+class PrinterLabelRequest(BaseModel):
+    """Body für `POST /api/printers/label` — setzt den kosmetischen
+    Anzeigenamen eines Druckers. `label=None` (oder leer) löscht ihn."""
+
+    id: str = ""
+    label: str | None = None
 
 
 class PrinterReorderRequest(BaseModel):

@@ -16,6 +16,7 @@ from ._deps import (
     CommitBookRequest,
     PrinterAddRequest,
     PrinterDuplexRequest,
+    PrinterLabelRequest,
     PrinterReactivateRequest,
     PrinterRemoveRequest,
     PrinterReorderRequest,
@@ -142,7 +143,8 @@ async def _after_pool_change(state, *, wake: bool = False) -> dict:
 async def add_printer(body: PrinterAddRequest) -> dict:
     """Einen Drucker zum Pool hinzufügen. `name=None` fügt den Standarddrucker
     hinzu (falls noch nicht vorhanden); benannte Drucker nur, wenn das Gerät
-    sie meldet und sie noch nicht im Pool sind. Duplex-Default `one_sided`.
+    sie meldet und sie noch nicht im Pool sind. `label` ist ein optionaler
+    Anzeigename (rein kosmetisch). Duplex-Default `one_sided`.
     """
     from ..printing import list_printers
 
@@ -165,7 +167,9 @@ async def add_printer(body: PrinterAddRequest) -> dict:
             raise HTTPException(400, f"Drucker „{name}“ am Gerät nicht gefunden")
     from ..state import PrinterConfig
 
-    state.settings.printers.append(PrinterConfig(name=name))
+    # Anzeigename: nur nicht-leerer String wird übernommen, sonst None.
+    label = body.label.strip() if isinstance(body.label, str) and body.label.strip() else None
+    state.settings.printers.append(PrinterConfig(name=name, label=label))
     return await _after_pool_change(state, wake=True)
 
 
@@ -199,6 +203,20 @@ async def set_printer_duplex(body: PrinterDuplexRequest) -> dict:
     if printer is None:
         raise HTTPException(404, "Drucker nicht gefunden")
     printer.duplex = body.duplex  # type: ignore[assignment]
+    return await _after_pool_change(state)
+
+
+@host_router.post("/api/printers/label")
+async def set_printer_label(body: PrinterLabelRequest) -> dict:
+    """Anzeigenamen eines Druckers setzen (rein kosmetisch, kein Einfluss auf
+    den Druck-Pfad). `label=None` oder leer löscht den Anzeigenamen."""
+    state = get_state()
+    pid = body.id.strip()
+    printer = next((p for p in state.settings.printers if p.id == pid), None)
+    if printer is None:
+        raise HTTPException(404, "Drucker nicht gefunden")
+    label = body.label.strip() if isinstance(body.label, str) and body.label.strip() else None
+    printer.label = label
     return await _after_pool_change(state)
 
 

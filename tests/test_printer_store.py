@@ -29,17 +29,18 @@ def test_load_first_start_default(monkeypatch, tmp_path):
 
 
 def test_save_load_roundtrip(monkeypatch, tmp_path):
-    """Speichern + Laden erhält Namen und Duplex-Modus (ids werden neu erzeugt)."""
+    """Speichern + Laden erhält Namen, Anzeigenamen und Duplex-Modus (ids werden
+    neu erzeugt)."""
     _tmp_store(monkeypatch, tmp_path)
     pool = [
-        PrinterConfig(id="x", name=None),
+        PrinterConfig(id="x", name=None, label="Raum 104"),
         PrinterConfig(id="y", name="HP-LJ", duplex="two_sided_long"),
     ]
     printer_store.save(pool)
     loaded = printer_store.load(["HP-LJ"])
-    assert [(p.name, p.duplex) for p in loaded] == [
-        (None, "one_sided"),
-        ("HP-LJ", "two_sided_long"),
+    assert [(p.name, p.label, p.duplex) for p in loaded] == [
+        (None, "Raum 104", "one_sided"),
+        ("HP-LJ", None, "two_sided_long"),
     ]
     # ids sind frisch (nicht die gespeicherten „x"/„y").
     assert all(p.id not in ("x", "y") for p in loaded)
@@ -77,3 +78,11 @@ def test_load_rejects_unknown_duplex(monkeypatch, tmp_path):
     p.write_text(json.dumps({"printers": [{"name": "HP", "duplex": "bogus"}]}), encoding="utf-8")
     loaded = printer_store.load(["HP"])
     assert loaded[0].duplex == "one_sided"
+
+
+def test_load_strips_blank_label(monkeypatch, tmp_path):
+    """Leerer/Whitespace-Anzeigename in der JSON wird zu None (kein Label)."""
+    p = _tmp_store(monkeypatch, tmp_path)
+    p.write_text(json.dumps({"printers": [{"name": "HP", "label": "  "}]}), encoding="utf-8")
+    loaded = printer_store.load(["HP"])
+    assert loaded[0].label is None

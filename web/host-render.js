@@ -837,12 +837,19 @@ window.__host = window.__host || {};
   let activePrinterTabId = null;
   let printerDeviceInfo = {printers: [], default: null, backend: null};
 
-  function printerLabel(p) {
+  function printerSystemLabel(p) {
     if (p.name === null || p.name === undefined) {
       const dev = printerDeviceInfo.default;
       return dev ? `Standarddrucker (${dev})` : 'Standarddrucker';
     }
     return p.name;
+  }
+
+  function printerLabel(p) {
+    // Anzeigename (falls gesetzt) mit Systemnamen in Klammern — der
+    // Systemname bleibt stets sichtbar zur eindeutigen Zuordnung.
+    const sys = printerSystemLabel(p);
+    return (p.label && p.label.trim()) ? `${p.label} (${sys})` : sys;
   }
 
   async function fetchPrinters() {
@@ -927,6 +934,14 @@ window.__host = window.__host || {};
     const opts = DUPLEX_OPTIONS.map(o => `<option value="${o.v}"${o.v === p.duplex ? ' selected' : ''}>${o.l}</option>`).join('');
     panel.innerHTML = `
       <div class="printer-panel-name">${escapeHtml(printerLabel(p))}</div>
+      <div class="printer-panel-sys">System: ${escapeHtml(printerSystemLabel(p))}</div>
+      <label class="settings-row settings-field" title="Frei wählbarer Anzeigename, der überall statt des Systemnamens plus Klammer angezeigt wird. Leer = nur Systemname.">
+        Anzeigename
+        <div class="printer-label-row">
+          <input type="text" data-act="label-input" value="${escapeHtml(p.label || '')}" placeholder="z. B. Drucker Raum 104" autocomplete="off">
+          <button class="secondary" data-act="label-save">Speichern</button>
+        </div>
+      </label>
       <label class="settings-row settings-field" title="Wie gedruckt wird, falls ein Auftrag länger als zwei Seiten ist. Wird nur gespeichert (nicht ans Backend weitergereicht).">
         Duplex (bei &gt; 2 Seiten)
         <select data-act="duplex">${opts}</select>
@@ -934,6 +949,11 @@ window.__host = window.__host || {};
       ${statusLine}
     `;
     panel.querySelector('[data-act="duplex"]').onchange = (e) => setPrinterDuplex(p.id, e.target.value);
+    const labelInput = panel.querySelector('[data-act="label-input"]');
+    const labelSave = panel.querySelector('[data-act="label-save"]');
+    const saveLabel = () => setPrinterLabel(p.id, labelInput.value);
+    labelSave.onclick = saveLabel;
+    labelInput.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); saveLabel(); } };
     const reactivateBtn = panel.querySelector('[data-act="reactivate"]');
     if (reactivateBtn) reactivateBtn.onclick = () => reactivatePrinter(p.id);
     return panel;
@@ -995,18 +1015,34 @@ window.__host = window.__host || {};
     await refreshPrinterPool();
   }
 
-  async function addPrinter(name) {
+  async function addPrinter(name, label) {
+    const body = {name};
+    if (label && label.trim()) body.label = label.trim();
     const r = await fetch('/api/printers/add', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({name}),
+      body: JSON.stringify(body),
     });
     if (r.ok) { showMsg('Drucker hinzugefügt'); await refreshPrinterPool(); }
     else { const t = await r.text().catch(() => ''); showMsg('Hinzufügen fehlgeschlagen' + (t ? ` (${t})` : '')); }
   }
 
+  async function setPrinterLabel(id, label) {
+    const body = {id};
+    if (label && label.trim()) body.label = label.trim();
+    const r = await fetch('/api/printers/label', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    if (r.ok) showMsg('Anzeigename gespeichert');
+    else showMsg('Anzeigename konnte nicht gespeichert werden');
+    await refreshPrinterPool();
+  }
+
   function openPrinterAddRow(pool) {
     const row = document.getElementById('printer-add-row');
     const sel = document.getElementById('printer-add-select');
+    const nameInput = document.getElementById('printer-add-name');
+    if (nameInput) nameInput.value = '';
     const inPool = new Set(pool.map(p => p.name));
     const device = (printerDeviceInfo.printers || []).filter(n => !inPool.has(n));
     const opts = [];
@@ -1487,10 +1523,14 @@ window.__host = window.__host || {};
     addConfirm.onclick = async () => {
       const v = addSel.value;
       if (v === '' && !(addSel.options.length && addSel.options[0].value === '')) return;  // „keine verfügbar"-Platzhalter
-      await addPrinter(v === '' ? null : v);
+      const labelEl = document.getElementById('printer-add-name');
+      const label = labelEl ? labelEl.value : '';
+      await addPrinter(v === '' ? null : v, label);
       addRow.style.display = 'none';
     };
     addCancel.onclick = () => { addRow.style.display = 'none'; };
+    const addNameInput = document.getElementById('printer-add-name');
+    if (addNameInput) addNameInput.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); addConfirm.click(); } };
     // Bücherlisten des Schuljahrs laden und als Reiter aufbauen (rein lesend).
     loadBooklistTabs();
     const onKey = (e) => {

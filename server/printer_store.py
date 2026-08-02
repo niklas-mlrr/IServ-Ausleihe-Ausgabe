@@ -74,7 +74,10 @@ def load(known_printers: list[str]) -> list[PrinterConfig]:
         duplex = entry.get("duplex", "one_sided")
         if duplex not in DUPLEX_MODES:
             duplex = "one_sided"
-        printer = PrinterConfig(id=_new_printer_id(), name=name, duplex=duplex)  # type: ignore[arg-type]
+        label = entry.get("label", None)
+        if not isinstance(label, str) or not label.strip():
+            label = None
+        printer = PrinterConfig(id=_new_printer_id(), name=name, label=label, duplex=duplex)  # type: ignore[arg-type]
         cleaned.append(printer)
 
     if dropped:
@@ -95,7 +98,7 @@ def save(printers: list[PrinterConfig]) -> None:
     persistiert (nur Laufzeit-zugeordnet)."""
     data = {
         "printers": [
-            {"name": p.name, "duplex": p.duplex}
+            {"name": p.name, "label": p.label, "duplex": p.duplex}
             for p in printers
         ],
     }

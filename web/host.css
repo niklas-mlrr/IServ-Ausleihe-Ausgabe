@@ -504,5 +504,9 @@
     #settings-dialog .printer-tabs-bar .ptab-add:hover { background: var(--surface-2); color: var(--text); }
     #settings-dialog #printer-add-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
     #settings-dialog #printer-add-row select { flex: 1 1 200px; }
+    #settings-dialog #printer-add-row input { flex: 1 1 180px; }
     #settings-dialog .printer-panel { display: flex; flex-direction: column; gap: 10px; padding: 14px 0 4px; }
     #settings-dialog .printer-panel-name { font-weight: 600; }
+    #settings-dialog .printer-panel-sys { font-size: .8rem; opacity: .6; margin-top: -4px; }
+    #settings-dialog .printer-label-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    #settings-dialog .printer-label-row input { flex: 1 1 180px; }
