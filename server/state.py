@@ -877,3 +877,32 @@ def bind_state(state: AppState) -> Token[AppState | None]:
 
 def reset_state(token: Token[AppState | None]) -> None:
     _bound_state.reset(token)
+
+
+# ---- Druckerauswahl für den Helfer-Druck-Dialog ----
+# `pool_light`: reduzierter Drucker-Pool (nur id/label/name/is_default) — ohne
+# die Live-Last/Status-Felder des Host-Snapshots (`pool_printers`).
+# `own_print_defaults`: explizite Vorauswahl-IDs der eigenen (letzten
+# zugehörigen) Klasse eines Helfers (`helper.context_id`): kein Kontext → [],
+# ``allowed_printer_ids is None`` (Klasse erlaubt alle) → alle Pool-IDs, sonst
+# ``allowed_printer_ids`` ∩ Pool-IDs. Der Helfer wählt genau diese Menge vor;
+# die „alle erlaubt"-Semantik wird serverseitig expandiert, sodass der Client
+# nicht zwischen „alle" und „explizit" unterscheiden muss.
+def pool_light(state: AppState) -> list[dict]:
+    return [
+        {"id": p.id, "name": p.name, "label": p.label, "is_default": p.name is None}
+        for p in state.settings.printers
+    ]
+
+
+def own_print_defaults(state: AppState, helper) -> list[str]:
+    cid = getattr(helper, "context_id", None)
+    if cid is None:
+        return []
+    ctx = state.contexts.get(cid)
+    if ctx is None:
+        return []
+    pool_ids = {p.id for p in state.settings.printers}
+    if ctx.allowed_printer_ids is None:
+        return sorted(pool_ids)
+    return sorted(ctx.allowed_printer_ids & pool_ids)

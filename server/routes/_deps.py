@@ -225,6 +225,10 @@ class NextStudentRequest(BaseModel):
 class PrintLoanSlipRequest(BaseModel):
     student_id: int | None = None
     second_page: bool = False
+    # Vom Host im Druck-Dialog gewählte Drucker-IDs. `None` = Schlüsser fehlt
+    # (alt/Tests) → Fallback auf Klassen-Allowlist; `[]` = explizit leer →
+    # Druck verweigern („mindestens einen Drucker auswählen").
+    printers: list[str] | None = None
 
 
 class CommitBookRequest(BaseModel):

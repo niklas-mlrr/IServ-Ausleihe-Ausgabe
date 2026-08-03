@@ -421,6 +421,20 @@
     .modal-warn li { margin: 2px 0; }
     .modal-check { display: flex; align-items: center; gap: 10px; font-size: .95rem; cursor: pointer; user-select: none; }
     .modal-check input { width: 18px; height: 18px; flex: none; cursor: pointer; }
+    /* Druckerauswahl-Dropdown (common.js mountPrinterPicker, überm Leihschein-Checkbox) */
+    .printer-picker { position: relative; }
+    .pp-trigger { display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 12px; background: var(--surface-2, var(--surface)); border: 1px solid var(--border); border-radius: 8px; color: var(--fg); font-size: .9rem; cursor: pointer; }
+    .pp-trigger:hover { background: var(--surface-3, var(--surface-2, var(--surface))); }
+    .pp-trigger:disabled { cursor: not-allowed; opacity: .5; }
+    .pp-label { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pp-label.pp-placeholder { color: var(--text-muted, #888); font-style: italic; }
+    .pp-caret { opacity: .6; }
+    .pp-panel { position: absolute; left: 0; right: 0; top: calc(100% + 4px); background: var(--surface-2, var(--surface)); border: 1px solid var(--border); border-radius: 8px; padding: 6px; z-index: 20; max-height: 220px; overflow-y: auto; box-shadow: 0 8px 24px var(--shadow); }
+    .pp-row { display: flex; align-items: center; gap: 8px; padding: 5px 6px; cursor: pointer; user-select: none; font-size: .9rem; }
+    .pp-row:hover { background: var(--surface-3, var(--surface-2, var(--surface))); border-radius: 4px; }
+    .pp-row input { flex: none; width: 16px; height: 16px; margin: 0; accent-color: var(--accent, #2e7d32); cursor: pointer; }
+    .pp-empty { padding: 8px; color: var(--text-muted, #888); font-size: .85rem; }
+    .modal-warn.is-error { background: rgba(192,57,43,.14); border-color: rgba(192,57,43,.55); color: #c0392b; }
     .modal-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
     .modal-actions button { padding: 12px; font-size: .95rem; width: 100%; }
     .modal-actions .primary { background: #2e7d32; color: #fff; }
@@ -533,6 +547,7 @@
     <div class="modal-box">
       <h3>Leihschein drucken</h3>
       <div class="modal-warn" id="print-warn" style="display:none"></div>
+      <div id="print-modal-picker"></div>
       <label class="modal-check">
         <input type="checkbox" id="slip-second-page">
         Schüler-Leihschein (2. Seite)

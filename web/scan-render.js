@@ -524,7 +524,25 @@ bookAlertCloseBtn.addEventListener('click', dismissBookAlert);
 bookAlertModal.addEventListener('click', (e) => { if (e.target === bookAlertModal) dismissBookAlert(); });
 
 // ---- Druck-Dialog ----
-function closePrintModal() { printModal.classList.remove('show'); updateFocusBanner(); }
+function closePrintModal() {
+  printModal.classList.remove('show');
+  printPicker = null;
+  updateFocusBanner();
+}
+
+// Fehler-Hinweis im Druck-Dialog anzeigen (Drucker-Leerauswahl). Setzt die
+// orange open-books-Warnung nicht zurück — beide können parallel stehen.
+function showPrintError(text) {
+  // Eigene Zeile unter der open-books-Warnung: print-warn umschreiben, falls
+  // es keine offene open-books-Warnung gibt, sonst zusätzlich per Klasse.
+  printWarnEl.classList.add('is-error');
+  printWarnEl.style.display = '';
+  // Bestehenden Inhalt (open-books-Liste) nicht überschreiben; stattdessen
+  // wird der Fehler als zusätzliche Zeile angehängt, falls schon Inhalt da.
+  const cur = printWarnEl.innerHTML;
+  const err = `<p style="margin:0">${escapeHtml(text)}</p>`;
+  printWarnEl.innerHTML = cur ? cur + err : err;
+}
 
 // Dialog öffnen: erst auf Abschluss laufender Scans warten, dann Warnung
 // (vorgemerkte, noch nicht gescannte Bücher) berechnen und Default setzen.
@@ -535,8 +553,11 @@ async function openPrintDialog() {
   await waitForScans();
   setReadyStatus();
   const { vorgemerkt, offen } = computeOpenBooks();
+  printWarnEl.classList.remove('is-error');
   renderOpenWarning(printWarnEl, vorgemerkt, offen);
   slipCheck.checked = slipSecondPageDefault;
+  // Druckerauswahl frisch mounten (Vorauswahl = eigene Klasse, s. settings-WS).
+  printPicker = mountPrinterPicker(printPickerEl, printerPool, printDefaultIds);
   printModal.classList.add('show');
   updateFocusBanner();
 }
@@ -561,6 +582,12 @@ function renderOpenWarning(el, vorgemerkt, offen) {
 // 'print_progress' / 'print_result' vom Worker (kein IServ-Submit).
 function sendPrint(thenNext) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  // Mindestens ein Drucker muss ausgewählt sein (sonst Hinweis, nicht senden).
+  const ids = printPicker ? printPicker.getSelectedIds() : [];
+  if (!ids.length) {
+    showPrintError('Bitte mindestens einen Drucker auswählen.');
+    return;
+  }
   printThenNext = thenNext;
   printBtn.disabled = true;
   // Druck beginn: aktive `print`-Meldung (Drucker-Status bleibt stehen, bis
@@ -569,7 +596,7 @@ function sendPrint(thenNext) {
   // als End-Meldung von dieser neuen Meldung verdrängt. trans leeren.
   setStatusText('Leihschein in Druckerwarteschlange …', null, 'print');
   clearStatus('trans');
-  ws.send(JSON.stringify({ type: 'print', second_page: slipCheck.checked }));
+  ws.send(JSON.stringify({ type: 'print', second_page: slipCheck.checked, printers: ids }));
   closePrintModal();
 }
 

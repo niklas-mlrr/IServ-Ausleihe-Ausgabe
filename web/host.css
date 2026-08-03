@@ -543,6 +543,21 @@
     #print-dialog .modal-check { color: #fff; opacity: 1; font-size: .95rem; }
     :root[data-theme="light"] #print-dialog .modal-check { color: var(--text); }
     @media (prefers-color-scheme: light) { :root:not([data-theme]) #print-dialog .modal-check { color: var(--text); } }
+    /* Druckerauswahl-Dropdown (common.js mountPrinterPicker, überm Leihschein-Checkbox) */
+    .printer-picker { position: relative; }
+    .pp-trigger { display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 12px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: .9rem; cursor: pointer; }
+    .pp-trigger:hover { background: var(--surface-3); }
+    .pp-trigger:disabled { cursor: not-allowed; opacity: .5; }
+    .pp-label { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pp-label.pp-placeholder { color: var(--text-muted); font-style: italic; }
+    .pp-caret { opacity: .6; }
+    .pp-panel { position: absolute; left: 0; right: 0; top: calc(100% + 4px); background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 6px; z-index: 20; max-height: 220px; overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+    .pp-row { display: flex; align-items: center; gap: 8px; padding: 5px 6px; cursor: pointer; user-select: none; font-size: .9rem; opacity: 1; }
+    .pp-row:hover { background: var(--surface-3); border-radius: 4px; }
+    .pp-row input { flex: none; width: 16px; height: 16px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+    .pp-empty { padding: 8px; color: var(--text-muted); font-size: .85rem; }
+    /* Druck-Dialog-Hinweis (Leer-Auswahl / Fehler) */
+    #print-dialog .modal-warn { color: #c0392b; font-size: .9rem; }
     #settings-dialog .settings-row { color: #fff; opacity: 1; font-size: .95rem; }
     :root[data-theme="light"] #settings-dialog .settings-row { color: var(--text); }
     @media (prefers-color-scheme: light) { :root:not([data-theme]) #settings-dialog .settings-row { color: var(--text); } }

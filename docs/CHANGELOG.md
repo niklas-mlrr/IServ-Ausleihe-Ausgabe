@@ -8,6 +8,36 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-03 — Druckerauswahl im Druck-Dialog (Host + Helfer)
+
+- **Neu:** im Host- und im Helfer-Druck-Dialog gibt es direkt über dem
+  „Schüler-Leihschein (2. Seite)"-Checkbox ein Dropdown zur Druckerauswahl.
+  Geschlossen zeigt es die gewählten Drucker als kommaseparierte
+  „Label (Systemname)" (Platzhalter bei Leer-Auswahl); aufgeklappt eine
+  Checkbox-Liste aller Pool-Drucker. Vor dem Drücken auf Drucken muss
+  mindestens ein Drucker ausgewählt sein, sonst wird der Druck blockiert
+  und ein Hinweis angezeigt.
+- **Vorauswahl:** erlaubte Drucker der jeweiligen Klasse — am Host die
+  Klasse des gedruckten Schülers, am Helfer die eigene (letzte zugehörige)
+  Klasse (`helper.context_id`). „Klasse erlaubt alle" (`None`) → alle
+  Pool-Drucker; keine Klasse → kein Drucker. Die Auswahl wird mit dem
+  Druckauftrag an den Server geschickt (`printers`-Feld im WS-`print` bzw.
+  im POST `/api/print-loan-slip`), der sie statt `allowed_printers_for`
+  verwendet (Fallback auf die Klassen-Allowlist, wenn das Feld fehlt —
+  alt/Tests).
+- **Datenfluss Helfer:** der Helfer bekommt Pool + Vorauswahl-IDs über die
+  `settings`-WS (neue Felder `printers`, `print_default_ids`); bei Pool-/
+  Klassenänderungen neu gepusht (`broadcast_settings` in `_after_pool_change`,
+  `/api/context-printers`, `/api/open-class`). Vorauswahl wird nur
+  übernommen, solange der Dialog *nicht* offen ist (fremde settings-Pushes wie
+  Dev-Toggles setzen eine laufende manuelle Auswahl nicht zurück).
+- **Server:** `pool_light`/`own_print_defaults` (neu in `state.py`, neben
+  `allowed_printers_for`); `PrintLoanSlipRequest.printers` neu.
+- **Komponente:** gemeinsames `mountPrinterPicker` in `web/common.js` (CSS in
+  `host.css` bzw. inline in `scan.html`).
+- **Tests:** 325 passed, ruff clean. (Kein eigener Test für die neue
+  Druckerauswahl; Fallback-Pfad für `printers=None` erhält bestehende Tests.)
+
 ## 2026-08-03 — Host-Druck: viele Aufträge gleichzeitig (Endpoint nicht-blockierend)
 
 - **Symptom:** startete der Host viele Druckaufträge, zeigte der Druck-Button

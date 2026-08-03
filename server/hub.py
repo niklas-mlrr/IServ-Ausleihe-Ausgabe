@@ -7,7 +7,7 @@ import weakref
 from contextvars import ContextVar, Token
 
 from .book_order import get_book_order_for_form
-from .state import AppState, get_state
+from .state import AppState, get_state, own_print_defaults, pool_light
 
 log = logging.getLogger(__name__)
 
@@ -144,6 +144,12 @@ class Hub:
                 "type": "settings",
                 "slip_second_page": s.settings.slip_second_page_default,
                 "book_order": book_order,
+                # Drucker-Pool + Vorauswahl für den Druck-Dialog (Helfer wählt
+                # Druckerauswahl selbst, s. _handle_print). `print_default_ids`
+                # ist die explizite Vorauswahl-Menge der eigenen Klasse
+                # (alle Pool-IDs bei „alle erlaubt", [] ohne Klasse).
+                "printers": pool_light(s),
+                "print_default_ids": own_print_defaults(s, helper),
             }
             if not await self._safe_send(helper.ws, msg):
                 helper.ws = None

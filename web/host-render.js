@@ -413,17 +413,33 @@ window.__host = window.__host || {};
     await fetch('/api/finish', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ student_id: studentId }) });
   }
 
-  // Öffnet den Druck-Dialog und gibt die gewählte „second_page"-Option zurück,
-  // oder null wenn Abbrechen gedrückt wurde.
-  function openPrintDialog() {
+  // Öffnet den Druck-Dialog und gibt die gewählte „second_page"-Option + die
+  // ausgewählten Drucker-IDs zurück, oder null wenn Abbrechen gedrückt wurde.
+  // Vorauswahl = erlaubte Drucker der Klasse des Schülers (`None` = alle
+  // Pool-Drucker); kein Klassen-Kontext → leer.
+  function openPrintDialog(studentId) {
     return new Promise(resolve => {
       const modal = document.getElementById('print-dialog');
       const box = modal.querySelector('.modal-box');
       const slipCb = document.getElementById('print-dialog-slip');
       const okBtn = document.getElementById('print-dialog-ok');
       const cancelBtn = document.getElementById('print-dialog-cancel');
+      const warnEl = document.getElementById('print-dialog-warn');
+      const pickerEl = document.getElementById('print-dialog-picker');
       const prevFocus = document.activeElement;
       slipCb.checked = !!document.getElementById('slip-second-page')?.checked;
+      warnEl.style.display = 'none';
+
+      // Pool + Vorauswahl aus dem lokalen Snapshot.
+      const pool = (state.printers || []).map(p => ({id: p.id, name: p.name, label: p.label, is_default: p.is_default}));
+      const ctxId = findCtxOfState(studentId);
+      const allowed = ctxId ? (state.contexts[ctxId] || {}).allowed_printers : undefined;
+      // ctxId vorhanden, allowed === null (Klasse erlaubt alle) → alle Pool-
+      // Drucker; allowed === [ids] → genau diese; kein ctx → leer.
+      const selected = (ctxId && allowed === null) ? pool.map(p => p.id)
+        : (ctxId && Array.isArray(allowed)) ? allowed : [];
+      const picker = mountPrinterPicker(pickerEl, pool, selected);
+
       const onKey = (e) => {
         if (e.key === 'Escape') { e.preventDefault(); finish(null); }
         else trapFocus(box, e);
@@ -435,7 +451,15 @@ window.__host = window.__host || {};
         if (prevFocus) prevFocus.focus();
         resolve(val);
       };
-      okBtn.onclick = () => finish(slipCb.checked);
+      okBtn.onclick = () => {
+        const ids = picker.getSelectedIds();
+        if (!ids.length) {
+          warnEl.textContent = 'Bitte mindestens einen Drucker auswählen.';
+          warnEl.style.display = '';
+          return;
+        }
+        finish({second_page: slipCb.checked, printers: ids});
+      };
       cancelBtn.onclick = () => finish(null);
       modal.addEventListener('keydown', onKey);
       modal.classList.add('show');
@@ -444,15 +468,15 @@ window.__host = window.__host || {};
   }
 
   async function printLoanSlip(studentId, btn) {
-    const secondPage = await openPrintDialog();
-    if (secondPage === null) return;
+    const choice = await openPrintDialog(studentId);
+    if (choice === null) return;
     await busy(btn, async () => {
       // Der Druck geht durch die server-interne Druckerwarteschlange; der
       // Endpoint blockiert bis „gedruckt"/Fehler. Live-Popup (Position /
       // „wird gedruckt" / „gedruckt") kommt via WS (showPrintProgress/
       // showPrintResult) — nur hier am startenden Host. Die HTTP-Antwort ist
       // Rückversicherung für den Fall, dass der WS gerade nicht live ist.
-      const r = await fetch('/api/print-loan-slip', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ student_id: studentId, second_page: secondPage }) });
+      const r = await fetch('/api/print-loan-slip', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ student_id: studentId, second_page: choice.second_page, printers: choice.printers }) });
       if (!r.ok) {
         const d = await r.json().catch(() => ({}));
         showMsg(d.detail || 'Druck fehlgeschlagen', 'warn');

@@ -27,7 +27,14 @@ from ..sessions import (
     send_printer_display_update,
     spectate_student,
 )
-from ..state import DisplaySession, PrinterDisplaySession, QueueStudent, get_state
+from ..state import (
+    DisplaySession,
+    PrinterDisplaySession,
+    QueueStudent,
+    get_state,
+    own_print_defaults,
+    pool_light,
+)
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -513,12 +520,27 @@ async def _handle_print(state, hub, helper, websocket, raw) -> None:
             {"type": "print_result", "ok": False, "msg": "Kein Drucker konfiguriert"},
         )
         return
-    # Drucker-Allowlist der Klasse des Schülers (Snapshot zum Enqueue-Zeitpunkt).
-    # `None` = alle Pool-Drucker; explizite Menge ohne Treffer im Pool → verweigern.
-    allowed = allowed_printers_for(state, helper.student_id)
-    if allowed is not None:
-        pool_ids = {p.id for p in state.settings.printers}
-        if not (allowed & pool_ids):
+    # Vom Helfer im Druck-Dialog gewählte Drucker. `printers` als Schlüsser
+    # vorhanden → ausschließlich diese nutzen (leer = blockieren, s. u.);
+    # Schlüsser fehlt (alt/Tests) → Fallback auf die Klassen-Allowlist.
+    pool_ids = {p.id for p in state.settings.printers}
+    selected = raw.get("printers")
+    if selected is not None:
+        selected_ids = {pid for pid in selected if pid in pool_ids}
+        if not selected_ids:
+            await hub.send_websocket(
+                websocket,
+                {"type": "print_result", "ok": False,
+                 "msg": "Bitte mindestens einen Drucker auswählen"},
+            )
+            return
+        allowed = selected_ids
+    else:
+        # Drucker-Allowlist der Klasse des Schülers (Snapshot zum Enqueue-
+        # Zeitpunkt). `None` = alle Pool-Drucker; explizite Menge ohne Treffer
+        # im Pool → verweigern.
+        allowed = allowed_printers_for(state, helper.student_id)
+        if allowed is not None and not (allowed & pool_ids):
             await hub.send_websocket(
                 websocket,
                 {
@@ -743,6 +765,9 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
             "type": "settings",
             "slip_second_page": state.settings.slip_second_page_default,
             "book_order": book_order,
+            # Drucker-Pool + Vorauswahl für den Druck-Dialog (s. hub.broadcast_settings).
+            "printers": pool_light(state),
+            "print_default_ids": own_print_defaults(state, helper),
         },
     )
 

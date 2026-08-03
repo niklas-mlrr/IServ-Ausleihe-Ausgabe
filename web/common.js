@@ -153,3 +153,104 @@ function connectWebSocket(urlOrFn, opts) {
   connect();
   return { reconnectNow: () => connect() };
 }
+
+// ---- Druckerauswahl-Dropdown (Host- + Helfer-Druck-Dialog) ----
+// Gemeinsame Komponente: geschlossener Trigger zeigt die gewählten Drucker als
+// kommaseparierte „Label (Systemname)", aufgeklappt eine Checkbox-Liste aller
+// Pool-Drucker. Aufrufer hält `pool`/`selectedIds` selbst (common.js speichert
+// keinen modulweiten State); Änderungen via setPool/setSelectedIds.
+//
+// pool: [{id, name, label, is_default}] — name/label optional (None →
+//   Standarddrucker); selectedIds: id[] (Vorauswahl).
+// Rückgabe: {getSelectedIds, setPool, setSelectedIds, setEnabled, close}.
+function mountPrinterPicker(mountEl, pool, selectedIds) {
+  const ppool = Array.isArray(pool) ? pool : [];
+  const selected = new Set(Array.isArray(selectedIds) ? selectedIds : []);
+
+  // Anzeigename „Label (Systemname)" — Label wenn gesetzt, sonst Systemname,
+  // sonst „Standarddrucker"; Systemname in Klammern nur, wenn vorhanden und
+  // vom Anzeigenamen verschieden.
+  function display(p) {
+    const disp = p.label || p.name || 'Standarddrucker';
+    return (p.name && p.name !== disp) ? `${disp} (${p.name})` : disp;
+  }
+
+  mountEl.innerHTML =
+    '<div class="printer-picker">'
+    + '<button type="button" class="pp-trigger" aria-expanded="false"><span class="pp-label"></span><span class="pp-caret">▾</span></button>'
+    + '<div class="pp-panel" hidden></div>'
+    + '</div>';
+  const root = mountEl.querySelector('.printer-picker');
+  const trigger = root.querySelector('.pp-trigger');
+  const labelEl = root.querySelector('.pp-label');
+  const panel = root.querySelector('.pp-panel');
+
+  function renderPanel() {
+    panel.innerHTML = ppool.length
+      ? ppool.map(p => {
+          const chk = selected.has(p.id) ? ' checked' : '';
+          return `<label class="pp-row"><input type="checkbox" data-pid="${escapeHtml(p.id)}"${chk}><span>${escapeHtml(display(p))}</span></label>`;
+        }).join('')
+      : '<div class="pp-empty">Kein Drucker konfiguriert</div>';
+    panel.querySelectorAll('input[data-pid]').forEach(cb => {
+      cb.addEventListener('change', () => {
+        if (cb.checked) selected.add(cb.dataset.pid);
+        else selected.delete(cb.dataset.pid);
+        renderLabel();
+      });
+    });
+  }
+
+  function renderLabel() {
+    const chosen = ppool.filter(p => selected.has(p.id));
+    labelEl.textContent = chosen.length
+      ? chosen.map(display).join(', ')
+      : 'Kein Drucker ausgewählt';
+    labelEl.classList.toggle('pp-placeholder', !chosen.length);
+  }
+
+  let open = false;
+  function setOpen(v) {
+    open = v;
+    panel.hidden = !v;
+    trigger.setAttribute('aria-expanded', v ? 'true' : 'false');
+    if (v) {
+      // Schließen bei Klick außerhalb (ein Doc-Listener pro Öffnung; wird beim
+      // Schließen wieder entfernt, sodass geschlossene Picker keine Listener
+      // akkumulieren).
+      setTimeout(() => document.addEventListener('click', onDocClick), 0);
+    } else {
+      document.removeEventListener('click', onDocClick);
+    }
+  }
+  function onDocClick(e) { if (!root.contains(e.target)) setOpen(false); }
+
+  trigger.addEventListener('click', (e) => { e.stopPropagation(); setOpen(!open); });
+
+  renderPanel();
+  renderLabel();
+
+  return {
+    getSelectedIds() { return ppool.filter(p => selected.has(p.id)).map(p => p.id); },
+    setPool(newPool) {
+      const ids = new Set((Array.isArray(newPool) ? newPool : []).map(p => p.id));
+      // Auswahl auf noch existierende Drucker kürzen.
+      for (const id of [...selected]) if (!ids.has(id)) selected.delete(id);
+      ppool.length = 0;
+      ppool.push(...(Array.isArray(newPool) ? newPool : []));
+      renderPanel();
+      renderLabel();
+    },
+    setSelectedIds(ids) {
+      selected.clear();
+      (Array.isArray(ids) ? ids : []).forEach(id => selected.add(id));
+      renderPanel();
+      renderLabel();
+    },
+    setEnabled(b) {
+      trigger.disabled = !b;
+      panel.querySelectorAll('input').forEach(cb => { cb.disabled = !b; });
+    },
+    close() { setOpen(false); },
+  };
+}

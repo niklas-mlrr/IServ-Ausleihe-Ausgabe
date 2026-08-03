@@ -137,6 +137,21 @@ function handleServerMessage(msg) {
       bookOrder = msg.book_order;
       if (studentActive) renderBooks(currentBooks);  // aktuelle Liste live umsortieren
     }
+    // Drucker-Pool + Vorauswahl für den Druck-Dialog. Pooländerungen auch am
+    // geöffneten Dialog nachführen (setPool kürzt die Auswahl auf existierende
+    // Drucker); die Vorauswahl (print_default_ids) aber nur übernehmen, solange
+    // der Dialog NICHT offen ist — sonst würde ein fremder settings-Push (z. B.
+    // Dev-Toggle am Host) die laufende manuelle Auswahl des Helfers zurücksetzen.
+    if (Array.isArray(msg.printers)) {
+      printerPool = msg.printers.map(p => ({id: p.id, name: p.name, label: p.label, is_default: p.is_default}));
+      if (printPicker) printPicker.setPool(printerPool);
+    }
+    if (Array.isArray(msg.print_default_ids)) {
+      printDefaultIds = msg.print_default_ids;
+      if (printPicker && !printModal.classList.contains('show')) {
+        printPicker.setSelectedIds(printDefaultIds);
+      }
+    }
   } else if (msg.type === 'booklist_update') {
     // Live-Nachzug der Bücherliste nach einer Ausblendungs-/Reihenfolge-Änderung
     // im Einstellungen-Dialog. Ersetzt nur die Liste + Reihenfolge, lässt den

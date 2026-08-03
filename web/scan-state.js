@@ -128,6 +128,12 @@ let scanSeq = 0;
 function resetScannedState() { scannedIsbns.clear(); scanOrder.clear(); scanSeq = 0; }
 let bookOrder = [];                 // klassenweite ISBN-Reihenfolge (vom Host konfiguriert)
 let slipSecondPageDefault = false;  // Host-Default für „Schüler-Leihschein" (2. Seite)
+// Drucker-Pool + Vorauswahl-IDs für den Druck-Dialog (via `settings`-WS). Die
+// Vorauswahl = erlaubte Drucker der eigenen (letzten zugehörigen) Klasse; der
+// Server hat das „alle erlaubt" (None) bereits zu allen Pool-IDs expandiert.
+let printerPool = [];
+let printDefaultIds = [];
+let printPicker = null;             // gemountete Druckerauswahl (mountPrinterPicker)
 let pendingScans = 0;               // noch nicht quittierte Scans (Sequenzierung)
 const scanWaiters = [];             // Resolver, die auf pendingScans===0 warten
 let printThenNext = false;          // „Drucken & nächster Schüler" angeklickt?
@@ -296,6 +302,7 @@ const bookAlertNoteEl = document.getElementById('book-alert-note');
 const bookAlertCloseBtn = document.getElementById('book-alert-close');
 const printModal = document.getElementById('print-modal');
 const printWarnEl = document.getElementById('print-warn');
+const printPickerEl = document.getElementById('print-modal-picker');
 const slipCheck = document.getElementById('slip-second-page');
 const modalPrintBtn = document.getElementById('modal-print');
 const modalPrintNextBtn = document.getElementById('modal-print-next');

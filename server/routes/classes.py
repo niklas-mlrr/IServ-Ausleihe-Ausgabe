@@ -221,6 +221,8 @@ async def open_class(body: OpenClassRequest) -> dict:
         # Bedienpunkt dafür); leer/None = alle Pool-Drucker.
         existing.allowed_printer_ids = _resolve_allowed_printers(body.printers)
         await hub.broadcast_host(state.state_snapshot())
+        # Druck-Allowlist dieser Klasse geändert → Helfer-Vorauswahl neu pushen.
+        await hub.broadcast_settings(state)
         return {"ok": True, "context_id": existing.id, "count": len(existing.queue), "reused": True}
 
     try:
@@ -246,6 +248,7 @@ async def open_class(body: OpenClassRequest) -> dict:
     except Exception:
         log.exception("Klassen-Bücherkatalog konnte beim Öffnen nicht vorgebaut werden")
     await hub.broadcast_host(state.state_snapshot())
+    await hub.broadcast_settings(state)
     return {"ok": True, "context_id": ctx.id, "count": len(ctx.queue)}
 
 
@@ -316,6 +319,8 @@ async def set_context_printers(body: ContextPrintersRequest) -> dict:
     ctx.allowed_printer_ids = _resolve_allowed_printers(body.printers)
     state.print_queue.wake()
     await hub.broadcast_host(state.state_snapshot())
+    # Druck-Allowlist dieser Klasse geändert → Helfer-Vorauswahl neu pushen.
+    await hub.broadcast_settings(state)
     return {"ok": True, "context_id": context_id, "allowed_printers": (
         None if ctx.allowed_printer_ids is None else sorted(ctx.allowed_printer_ids)
     )}

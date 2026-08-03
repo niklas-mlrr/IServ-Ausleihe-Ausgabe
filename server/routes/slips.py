@@ -60,14 +60,22 @@ async def print_loan_slip(body: PrintLoanSlipRequest, sid: str = Depends(require
     state = get_state()
     if not state.settings.printers:
         raise HTTPException(400, "Kein Drucker konfiguriert")
-    # Drucker-Allowlist der Klasse des Schülers (Snapshot zum Enqueue-Zeitpunkt).
-    # `None` = alle Pool-Drucker; eine Menge beschränkt auf diese Drucker. Ist die
-    # Menge explizit, aber kein erlaubter Drucker im Pool (z. B. alle entfernt),
-    # verweigern: sonst hinge der Auftrag endlos in der Warteschlange.
-    allowed = allowed_printers_for(state, student_id)
-    if allowed is not None:
-        pool_ids = {p.id for p in state.settings.printers}
-        if not (allowed & pool_ids):
+    # Vom Host im Druck-Dialog gewählte Drucker. `printers` als Schlüsser
+    # vorhanden → ausschließlich diese nutzen (leer = blockieren); Schlüsser
+    # fehlt (alt/Tests) → Fallback auf die Klassen-Allowlist.
+    pool_ids = {p.id for p in state.settings.printers}
+    if body.printers is not None:
+        selected_ids = {pid for pid in body.printers if pid in pool_ids}
+        if not selected_ids:
+            raise HTTPException(400, "Bitte mindestens einen Drucker auswählen")
+        allowed = selected_ids
+    else:
+        # Drucker-Allowlist der Klasse des Schülers (Snapshot zum Enqueue-
+        # Zeitpunkt). `None` = alle Pool-Drucker; eine Menge beschränkt auf
+        # diese Drucker. Ist die Menge explizit, aber kein erlaubter Drucker im
+        # Pool (z. B. alle entfernt), verweigern: sonst hinge der Auftrag endlos.
+        allowed = allowed_printers_for(state, student_id)
+        if allowed is not None and not (allowed & pool_ids):
             raise HTTPException(400, "Kein erlaubter Drucker im Pool für diese Klasse")
     # Seite 1 wird immer gedruckt; Seite 2 (Schüler-Leihschein) nur, wenn der
     # Host-Toggle gesetzt ist.
@@ -138,6 +146,8 @@ async def _after_pool_change(state, *, wake: bool = False) -> dict:
         state.print_queue.wake()
     await get_hub().broadcast_host(state.state_snapshot())
     await broadcast_printer_displays(state)
+    # Pool an Helfer neu pushen (Druck-Dialog zeigt aktualisierte Druckerauswahl).
+    await get_hub().broadcast_settings(state)
     return {"ok": True, "pool": state.print_queue.pool_printers(state.settings.printers)}
 
 
