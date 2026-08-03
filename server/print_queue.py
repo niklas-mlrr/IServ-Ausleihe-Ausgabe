@@ -84,6 +84,11 @@ _TRACK_TIMEOUT_S = 90.0
 # bevor der Absolute-Cap ihn stillfertig-wertet.
 _INACTIVITY_TIMEOUT_S = 30.0
 
+# Wie lange ein fertig gedruckter Auftrag auf dem Drucker-Display in der
+# Kategorie „Gedruckt" stehen bleibt, bevor er ausgeblendet wird (falls ihn
+# nicht vorher der nächste fertige Auftrag verdrängt).
+_PRINTED_TTL_S = 30.0
+
 
 def slip_name(lastname: str | None, firstname: str | None, form: str | None) -> str:
     """„Nachname, Vorname (Form)" für das Host-Druck-Popup — der Klassen-Präfix
@@ -156,6 +161,11 @@ class PrintQueue:
         # mit. Wird per `reactivate()` (Host-Einstellungen „Wieder aktivieren")
         # oder beim Entfernen/Verwaisten-Lauf des Druckers zurückgesetzt.
         self.faulty_printers: set[str] = set()
+        # Zuletzt fertig gedruckter Auftrag pro Drucker (Display-Anzeige
+        # „Gedruckt"): printer_id → (job.name, wall-clock fertig um). Wird beim
+        # Fertig-Werden des nächsten Auftrags an diesem Drucker überschrieben;
+        # die Anzeige blendet ihn nach 30s (TTL) bzw. beim Überschreiben aus.
+        self._last_printed: dict[str, tuple[str, float]] = {}
 
     # ---- Lebenszyklus --------------------------------------------------
 
@@ -389,6 +399,9 @@ class PrintQueue:
         async with self._lock:
             job.status = "done"
             self._remove_from_slot(printer_id, job)
+            # Als „zuletzt gedruckt" fürs Drucker-Display merken (überschreibt
+            # einen ggf. noch angezeigten Vorgänger — „bis der nächste fertig").
+            self._last_printed[printer_id] = (job.name, time.time())
             job.done.set()
             finalized = job
         await self._notify_result(finalized)
@@ -790,6 +803,24 @@ class PrintQueue:
                 return bool(set(ids) & assigned)
 
             view_waiting = [w for w in full_waiting if _relevant(w)]
+        # Pro Drucker den „zuletzt gedruckten" Auftrag für die Display-Kategorie
+        # „Gedruckt" anreichern: Name + Rest-TTL (Sekunden). Nach 30s bzw. beim
+        # Fertig-Werden des nächsten Auftrags (Überschreiben in _track) entfallen.
+        now = time.time()
+        for p in view_printers:
+            rec = self._last_printed.get(p["id"])
+            if rec is None:
+                p["printed_name"] = None
+                p["printed_expires_in"] = None
+                continue
+            name, finished_at = rec
+            elapsed = now - finished_at
+            if elapsed < _PRINTED_TTL_S:
+                p["printed_name"] = name
+                p["printed_expires_in"] = _PRINTED_TTL_S - elapsed
+            else:
+                p["printed_name"] = None
+                p["printed_expires_in"] = None
         return {
             "printers": view_printers,
             "waiting": len(view_waiting),

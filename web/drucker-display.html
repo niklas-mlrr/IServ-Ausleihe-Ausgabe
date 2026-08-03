@@ -39,14 +39,18 @@
       background: var(--card); border-radius: 14px; padding: 20px 22px;
       border: 1px solid var(--card-border); min-width: 0;
     }
-    .printer-name { font-size: 1.5rem; font-weight: 600; margin-bottom: 8px;
+    .printer-name { font-size: 2.4rem; font-weight: 700; margin-bottom: 14px;
+      overflow-wrap: anywhere; line-height: 1.1; }
+    /* Kategorien „Gedruckt" / „Wird gedruckt" / „Nächster" unter dem Namen. */
+    .dd-cat { margin-top: 14px; }
+    .dd-cat:first-of-type { margin-top: 0; }
+    .dd-cat-label { font-size: .95rem; font-weight: 600; opacity: .5;
+      text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
+    .dd-line { font-size: 1.25rem; line-height: 1.3; padding: 4px 0;
       overflow-wrap: anywhere; }
-    .printer-status { font-size: 1.2rem; opacity: .85; line-height: 1.4; }
-    .dot { width: 14px; height: 14px; border-radius: 50%; display: inline-block;
-           background: #888; margin-right: 10px; vertical-align: middle; }
-    .dot.busy { background: #5ac8fa; }
-    .dot.idle { background: #30d158; opacity: .7; }
-    .dot.fault { background: #ff6b6b; }
+    .dd-printed .dd-line { opacity: .55; }
+    .dd-next .dd-line + .dd-line { border-top: 1px solid var(--row-border); }
+    .dd-fault { font-size: 1.1rem; margin-bottom: 10px; }
     .txt-danger { color: #ff6b6b; }
 
     table { width: 100%; border-collapse: collapse; font-size: 1.05rem; }

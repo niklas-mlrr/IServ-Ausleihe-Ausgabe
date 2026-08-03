@@ -9,6 +9,8 @@ const viewQueue = document.getElementById('view-queue');
 const connDot = document.getElementById('conn-dot');
 const connText = document.getElementById('conn-text');
 const content = document.getElementById('dd-content');
+// Laufende TTL-Timer, die „Gedruckt"-Kategorien nach 30s ausblenden.
+let printedTimers = [];
 
 function show(name) {
   viewRegister.classList.toggle('show', name === 'register');
@@ -31,34 +33,66 @@ function renderQueue(msg) {
     return;
   }
 
+  // Alte TTL-Timer („Gedruckt" nach 30s ausblenden) abräumen — der neue
+  // Snapshot baut sie neu auf.
+  for (const t of printedTimers) clearTimeout(t);
+  printedTimers = [];
+
   const rows = pool.map(p => {
-    const printing = p.printing_name;
-    const spooledList = Array.isArray(p.spooled_names) && p.spooled_names.length
+    const spooledList = Array.isArray(p.spooled_names) && p.spooled_names
       ? p.spooled_names
       : (p.spooled_name ? [p.spooled_name] : []);
-    const spooledNames = spooledList.map(n => `„${escapeHtml(n)}"`).join(', ');
-    let dot, status;
-    if (p.faulty) {
-      dot = 'fault';
-      status = `<span class="txt-danger">⚠ fehlerhaft</span>` + (p.load > 0 ? ` — ${p.load} blockiert` : '');
-    } else if (printing && spooledNames) {
-      dot = 'busy'; status = `druckt „${escapeHtml(printing)}" · als nächstes ${spooledNames}`;
-    } else if (printing) {
-      dot = 'busy'; status = `druckt „${escapeHtml(printing)}"`;
-    } else if (spooledNames) {
-      dot = 'busy'; status = `gesendet, wartet auf Druck: ${spooledNames}`;
-    } else if (p.load > 0) {
-      dot = 'busy'; status = `${p.load} blockiert (wird geräumt)`;
-    } else {
-      dot = 'idle'; status = 'bereit';
-    }
-    return `<div class="printer-card">
+    const printing = p.printing_name || null;
+    const printed = p.printed_name || null;
+    // Kategorie „Gedruckt" — zuletzt fertig, nur wenn noch innerhalb der TTL.
+    const printedBlock = printed
+      ? `<div class="dd-cat dd-printed" data-printed-for="${escapeHtml(p.id)}">
+           <div class="dd-cat-label">Gedruckt</div>
+           <div class="dd-line">${escapeHtml(printed)}</div>
+         </div>`
+      : '';
+    // Kategorie „Wird gedruckt" — der aktuell druckende Auftrag.
+    const printingBlock = printing
+      ? `<div class="dd-cat dd-printing">
+           <div class="dd-cat-label">Wird gedruckt</div>
+           <div class="dd-line">${escapeHtml(printing)}</div>
+         </div>`
+      : '';
+    // Kategorie „Nächster" — bereits an den Drucker gesendet, wartet auf Druck.
+    const nextLines = spooledList.map(n => `<div class="dd-line">${escapeHtml(n)}</div>`).join('');
+    const nextBlock = nextLines
+      ? `<div class="dd-cat dd-next">
+           <div class="dd-cat-label">Nächster</div>
+           ${nextLines}
+         </div>`
+      : '';
+    // Fehler-Hinweis (bleibt sichtbar, falls der Drucker hängt).
+    const faultBlock = p.faulty
+      ? `<div class="dd-fault"><span class="txt-danger">⚠ fehlerhaft</span>${p.load > 0 ? ` — ${p.load} blockiert` : ''}</div>`
+      : '';
+    return `<div class="printer-card" data-printer="${escapeHtml(p.id)}">
       <div class="printer-name">${escapeHtml(printerLabel(p))}</div>
-      <div class="printer-status"><span class="dot ${dot}"></span>${status}</div>
+      ${faultBlock}
+      ${printedBlock}
+      ${printingBlock}
+      ${nextBlock}
     </div>`;
   }).join('');
 
   content.innerHTML = `<div class="grid" style="grid-template-columns:repeat(${pool.length},minmax(0,1fr))">${rows}</div>`;
+
+  // Pro „Gedruckt"-Block einen Timer setzen, der ihn nach der Rest-TTL
+  // ausblendet (falls kein neuer Snapshot vorher nachzieht).
+  pool.forEach(p => {
+    if (!p.printed_name || !p.printed_expires_in) return;
+    const pid = p.id;
+    const ms = Math.max(0, p.printed_expires_in) * 1000;
+    const t = setTimeout(() => {
+      const card = content.querySelector(`.printer-card[data-printer="${CSS.escape(pid)}"]`);
+      card?.querySelector('.dd-printed')?.remove();
+    }, ms);
+    printedTimers.push(t);
+  });
 }
 
 function applyTheme(theme) {
