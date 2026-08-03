@@ -8,6 +8,48 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-03 — Drucker-Display: Token-Persistenz, Namens-Freischaltung, Verboten, Styling
+
+- **Token in der URL (Persistenz):** Öffnen von `/drucker-display` leitet per
+  307 auf `/drucker-display?token=<12-hex>` weiter (eigene Route in
+  `routes/drucker_display.py`, dafür aus `_CLEAN_PAGES` in `app.py` entfernt).
+  Ein Reload liefert denselben Token → dieselbe Session wird wiederverwendet
+  (gleicher Code, gleicher Freigabe-/Drucker-Stand), kein neuer Code pro Reload.
+  Der WS-Handler (`routes/ws.py::ws_drucker_display`) validiert den Token und
+  legt sonst eine neue Session mit `assigned_printer_ids=[]` an.
+- **× am Host-Reiter = Display verbieten (endgültig):** `/api/drucker-display/
+  forget` bannt den Token (`AppState.banned_printer_display_tokens`), entfernt
+  die Session und sendet `{"type":"forbidden"}` ans Display (dann WS-close
+  4009). Reload mit dem verbotenen Token bleibt gesperrt; ein frisch geöffnetes
+  Display (neuer Token) ist erlaubt. Nicht reaktivierbar — Bestätigungsdialog
+  am Host weist darauf hin.
+- **Freischaltung per Namen statt Code:** Code-Eingabefeld am Host entfällt.
+  Reiter zeigt den Registrierungs-Code (visuelle Zuordnung vor der
+  Freischaltung); im unautorisierten Panel Name eingeben + „Einschalten" →
+  `POST /api/drucker-display/enable` (`/authorize` + `authorizePrinterDisplay`
+  entfernt). `/label`/`/assign`/`/theme` prüfen jetzt alle auf `authorized`.
+- **Neue Displays starten ohne Drucker** (`assigned_printer_ids=[]`, nicht mehr
+  `None` = alle); der Host weiht sie explizit ein.
+- **Styling Drucker-Display:**
+  - Gedruckte Aufträge **nicht mehr ausgegraut** (`.dd-order-printed` opacity
+    entfernt, Klasse entfällt).
+  - Schrift durchgehend größer: Druckername 2.4→3rem, Kategorie-Label
+    1.2→1.5rem, Fehlerhinweis 1.6→2rem, Aufträge 1.25→1.6rem (Klassen-Spalte
+    3.5em→4em).
+  - **Theme folgt zu Beginn der System-/Browser-Einstellung** des Geräts
+    (`prefers-color-scheme`), nicht mehr hardcodiert dark. `data-theme="dark"`
+    Hardcode im `<html>` entfernt; JS setzt das System-Theme initial. Host-
+    Override (`theme`-Nachricht) greift nur, wenn der Host es explizit setzt
+    (`PrinterDisplaySession.theme` Default `None` → kein `theme`-Key im
+    Update-Payload).
+- **Display: `#view-forbidden`** („Dieses Display wurde vom Betreuer
+  gesperrt.") — `forbidden`-Flag unterdrückt den automatischen Reconnect.
+- Snapshot: `printer_displays` liefert jetzt zusätzlich `registration_code`
+  (für den Reiter-Label vor der Namensgebung); `theme` kann `None` sein.
+- Tests (`test_drucker_display.py`) auf enable/forget-bannt/registration_code/
+  theme-None aktualisiert; `test_state_contract.py` unangetastet (Subset-only).
+  317 passed, ruff clean.
+
 ## 2026-08-03 — Drucker-Display-Reiter: verwalten + schließen
 
 - **Display-Reiter schließbar:** × am Reiter (mit Bestätigungsdialog) trennt

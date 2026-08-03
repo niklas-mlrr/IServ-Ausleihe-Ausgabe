@@ -854,21 +854,48 @@ async def ws_display(websocket: WebSocket) -> None:
 
 
 @router.websocket("/ws/drucker-display")
-async def ws_drucker_display(websocket: WebSocket) -> None:
+async def ws_drucker_display(websocket: WebSocket, token: str | None = None) -> None:
     """Drucker-Display (`/drucker-display`). Unauthentifiziert (öffentlich im
     LAN), zeigt aber vorab nur den Registrierungs-Code — Schülerdaten kommen
-    erst nach Host-Pairing + Drucker-Zuweisung. Push bei Druck-Übergängen
-    (``print_queue._notify_all``) und Pool-Mutationen (``_after_pool_change``)."""
+    erst nach Host-Freischaltung (Namen-Eingabe) + Drucker-Zuweisung. Push bei
+    Druck-Übergängen (``print_queue._notify_all``) und Pool-Mutationen
+    (``_after_pool_change``).
+
+    Identität = Token in der URL (``?token=<12-hex>``), den die Seite beim Öffnen
+    per Redirect zugewiesen bekommt. Ein Reload liefert denselben Token → dieselbe
+    Session (gleicher Code, gleicher Freigabe-/Drucker-Stand) wird wiederverwen-
+    det. Per × am Host verbotene Token erhalten eine ``forbidden``-Antwort und
+    keine Session."""
     state = get_state()
     hub = get_hub()
 
     await websocket.accept()
-    display = PrinterDisplaySession(
-        display_id=uuid.uuid4().hex[:12], registration_code=gen_registration_code()
-    )
-    state.printer_displays[display.display_id] = display
+
+    # Token-Validierung (12-stelliger Hex, wie display_id).
+    if not token or len(token) != 12 or any(c not in "0123456789abcdef" for c in token.lower()):
+        await websocket.close(code=1008, reason="Token fehlt/ungültig")
+        return
+    token = token.lower()
+
+    # Verbotenes Display (× am Host) → sperren, keine Session.
+    if token in state.banned_printer_display_tokens:
+        await get_hub().send_websocket(websocket, {"type": "forbidden"})
+        await websocket.close(code=4009, reason="Display verboten")
+        return
+
+    # Bestehende Session wiederverwenden (Reload) oder neu anlegen. Neue
+    # Displays starten OHNE Drucker (assigned_printer_ids=[]); der Host weiht
+    # sie explizit zu.
+    display = state.printer_displays.get(token)
+    if display is None:
+        display = PrinterDisplaySession(
+            display_id=token,
+            registration_code=gen_registration_code(),
+            assigned_printer_ids=[],
+        )
+        state.printer_displays[token] = display
     display.ws = websocket
-    await send_printer_display_update(state, display)  # zeigt den Registrierungscode
+    await send_printer_display_update(state, display)  # Code bzw. Queue-Sicht
     await hub.broadcast_host(state.state_snapshot())
 
     try:
@@ -878,7 +905,11 @@ async def ws_drucker_display(websocket: WebSocket) -> None:
     except WebSocketDisconnect:
         pass
     finally:
-        state.printer_displays.pop(display.display_id, None)
+        # Session NICHT entfernen — Reload soll sie wiederfinden. Nur die ws-
+        # Referenz lösen (falls die Session nicht schon per × entsorgt wurde).
+        d = state.printer_displays.get(token)
+        if d is not None and d.ws is websocket:
+            d.ws = None
         await safe_broadcast(hub, state)
 
 

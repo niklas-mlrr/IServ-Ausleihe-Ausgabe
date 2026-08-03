@@ -129,36 +129,37 @@ def test_qr_returns_url_and_data_url(client, ctx):
     assert d["qr"].startswith("data:image/")
 
 
-# ---- Authorize ------------------------------------------------------------
+# ---- Enable (Freischaltung per Name) --------------------------------------
 
 
-def _connected_display(state, *, code="ABCD", authorized=False):
-    d = PrinterDisplaySession(display_id="disp1", registration_code=code)
+def _connected_display(state, *, code="ABCD", authorized=False, display_id="disp1"):
+    d = PrinterDisplaySession(display_id=display_id, registration_code=code)
     d.authorized = authorized
     state.printer_displays[d.display_id] = d
     return d
 
 
-def test_authorize_unknown_code_404(client, ctx):
+def test_enable_unknown_display_404(client, ctx):
     r = client.post(
-        "/api/drucker-display/authorize",
-        json={"registration_code": "NOPE"},
+        "/api/drucker-display/enable",
+        json={"display_id": "nope", "label": "Raum 1"},
         cookies={"session_id": "sid"},
     )
     assert r.status_code == 404
 
 
-def test_authorize_known_code_authorizes_and_pushes(client, ctx):
+def test_enable_authorizes_sets_label_and_pushes(client, ctx):
     state, _, hub_inst = ctx
-    _connected_display(state, code="ABCD")  # verbunden, nicht authorisiert
+    _connected_display(state, code="ABCD")  # verbunden, nicht autorisiert
     r = client.post(
-        "/api/drucker-display/authorize",
-        json={"registration_code": "abcd"},  # Kleinbuchstaben → upper()
+        "/api/drucker-display/enable",
+        json={"display_id": "disp1", "label": "  Raum 1  "},
         cookies={"session_id": "sid"},
     )
     assert r.status_code == 200
     assert r.json()["display_id"] == "disp1"
     assert state.printer_displays["disp1"].authorized is True
+    assert state.printer_displays["disp1"].label == "Raum 1"  # gestript
     # Host bekommt aktualisierte Display-Liste gepusht (Snapshot-Broadcast).
     assert len(hub_inst.broadcasts) == 1
 
@@ -228,6 +229,8 @@ def test_forget_removes_display(client, ctx):
     )
     assert r.status_code == 200
     assert "disp1" not in state.printer_displays
+    # Token wird verboten — künftige Verbindungen mit ihm bleiben gesperrt.
+    assert "disp1" in state.banned_printer_display_tokens
     assert len(hub_inst.broadcasts) == 1
 
 
@@ -256,9 +259,11 @@ def test_snapshot_printer_displays_shape(client, ctx):
     assert pd[0]["authorized"] is True
     assert pd[0]["connected"] is False  # kein WS gesetzt
     assert pd[0]["assigned_printer_ids"] == ["p2", "p1"]  # Reihenfolge erhalten
-    # Default-Name (leer) + Default-Theme (dark).
+    # Default-Name (leer); Registration-Code im Snapshot (für Reiter-Label);
+    # Default-Theme None = folgt System-Einstellung.
     assert pd[0]["label"] == ""
-    assert pd[0]["theme"] == "dark"
+    assert pd[0]["registration_code"] == "ABCD"
+    assert pd[0]["theme"] is None
 
 
 def test_snapshot_printer_displays_none_means_all(client, ctx):
@@ -356,17 +361,18 @@ def test_send_printer_display_update_registration(monkeypatch):
     d = PrinterDisplaySession(display_id="d1", registration_code="XYZ1")
     d.ws = _FakeWS()
     asyncio.run(sessions.send_printer_display_update(state, d))
+    # theme=None (Default) → kein theme-Key; das Display folgt der System-Einstellung.
     assert d.ws.sent == [{
         "type": "registration",
         "code": "XYZ1",
         "display_id": "d1",
         "label": "",
-        "theme": "dark",
     }]
 
 
 def test_send_printer_display_update_queue(monkeypatch):
-    """Authorisiert → Queue-Payload mit gefilterter Drucker-/Wartelisten-Sicht."""
+    """Authorisiert → Queue-Payload mit gefilterter Drucker-/Wartelisten-Sicht.
+    theme nur dabei, wenn der Host es gesetzt hat."""
     from server.state import PrinterConfig
 
     state = AppState()
@@ -376,6 +382,7 @@ def test_send_printer_display_update_queue(monkeypatch):
     monkeypatch.setattr(sessions, "get_state", lambda: state)
     d = PrinterDisplaySession(display_id="d1", registration_code="XYZ1", authorized=True)
     d.assigned_printer_ids = ["p1"]
+    d.theme = "dark"  # Host hat explizit gesetzt → im Payload
     d.ws = _FakeWS()
     asyncio.run(sessions.send_printer_display_update(state, d))
     assert len(d.ws.sent) == 1

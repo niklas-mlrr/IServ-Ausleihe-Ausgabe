@@ -237,12 +237,14 @@ class DisplayAuthorizeRequest(BaseModel):
     registration_code: str = ""
 
 
-class PrinterDisplayAuthorizeRequest(BaseModel):
-    """Body für `POST /api/drucker-display/authorize` — Pairing-Code vom
-    Drucker-Display eingeben, um es zu authorisieren (s. DisplayAuthorizeRequest
-    für iPad-Displays, bewusst eigenes Model für klare Trennung)."""
+class PrinterDisplayEnableRequest(BaseModel):
+    """Body für `POST /api/drucker-display/enable` — Drucker-Display durch
+    Eingabe eines Namens freischalten (autorisierten). Der Registrierungs-Code
+    wird nur auf dem Display + im Host-Reiter gezeigt (visuelle Zuordnung),
+    nicht mehr am Host getippt."""
 
-    registration_code: str = ""
+    display_id: str = ""
+    label: str = ""
 
 
 class PrinterDisplayAssignRequest(BaseModel):

@@ -162,14 +162,13 @@
     }
     .pdd-row:first-child { border-top: none; }
     .pdd-id {
-      font-family: ui-monospace, "SF Mono", Menlo, monospace;
       font-size: .85rem; opacity: .6;
     }
-    /* Code-Eingabe + Zuordnen-Button auf gleiche Höhe bringen (Spiegel der
+    /* Namen-Eingabe + Einschalten-Button auf gleiche Höhe bringen (Spiegel der
        pdd-field-Row): gleiche font-size, Gesamthöhe 40px, keine Input-Margin. */
-    .pdd-row .pdd-code { width: 90px; margin-bottom: 0; font-size: .95rem;
-      height: 40px; padding: 0 12px; text-transform: uppercase; }
-    .pdd-row .pdd-authorize { height: 40px; padding: 0 16px; font-size: .95rem;
+    .pdd-row .pdd-enable-name { width: 220px; margin-bottom: 0; font-size: .95rem;
+      height: 40px; padding: 0 12px; }
+    .pdd-row .pdd-enable { height: 40px; padding: 0 16px; font-size: .95rem;
       display: inline-flex; align-items: center; justify-content: center; }
     .pdd-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
     .pdd-assigned { font-size: .82rem; opacity: .6; }

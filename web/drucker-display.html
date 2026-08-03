@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="de" data-theme="dark">
+<html lang="de">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
@@ -44,28 +44,27 @@
       background: var(--card); border-radius: 14px; padding: 20px 22px;
       border: 1px solid var(--card-border); min-width: 0;
     }
-    .printer-name { font-size: 2.4rem; font-weight: 700; margin-bottom: 14px;
+    .printer-name { font-size: 3rem; font-weight: 700; margin-bottom: 14px;
       overflow-wrap: anywhere; line-height: 1.1; }
     /* Kategorien „Gedruckt" / „Wird gedruckt" / „Nächster" unter dem Namen. */
     .dd-cat { margin-top: 18px; }
-    .dd-cat-label { font-size: 1.2rem; font-weight: 600; opacity: .5;
+    .dd-cat-label { font-size: 1.5rem; font-weight: 600; opacity: .5;
       text-transform: uppercase; letter-spacing: .06em; margin-bottom: 10px; }
     /* Auftrags-Kästchen: eigenes kleines Panel wie der Drucker selbst eines
        ist. Grid mit fester Klassen-Spalte → Namen stehen bündig untereinander.
        FLIP-Transition (transform) wie die Bücherliste im Helferclient. */
     .dd-order {
-      display: grid; grid-template-columns: 3.5em 1fr; gap: 10px;
+      display: grid; grid-template-columns: 4em 1fr; gap: 10px;
       align-items: baseline;
       background: var(--surface); border: 1px solid var(--card-border);
       border-radius: 10px; padding: 10px 12px; margin-top: 8px;
-      font-size: 1.25rem; line-height: 1.3; overflow-wrap: anywhere;
+      font-size: 1.6rem; line-height: 1.3; overflow-wrap: anywhere;
       position: relative;
       transition: transform .5s cubic-bezier(.22, .61, .36, 1);
     }
     .dd-order:first-child { margin-top: 0; }
     .dd-form { color: var(--muted); font-weight: 600; }
     .dd-stname { color: var(--text); }
-    .dd-order-printed { opacity: .55; }
     @media (prefers-reduced-motion: reduce) {
       .dd-order { transition: transform .01ms !important; }
     }
@@ -73,7 +72,7 @@
        Betreuer-Hinweis. Die Auftrags-Kategorien bleiben sichtbar, die Namen
        behalten ihre normale Farbe. */
     .printer-name.dd-fault-name { color: var(--danger); }
-    .dd-fault-msg { color: var(--danger); font-size: 1.6rem; line-height: 1.3;
+    .dd-fault-msg { color: var(--danger); font-size: 2rem; line-height: 1.3;
       margin-bottom: 16px; overflow-wrap: anywhere; }
     .txt-danger { color: var(--danger); }
 
@@ -98,6 +97,14 @@
     }
     .reg-sub { font-size: 1.3rem; opacity: .55; margin-top: 16px; }
 
+    /* Gesperrt (× am Host) — Display wurde vom Betreuer verboten. */
+    #view-forbidden { display: none; flex-direction: column; align-items: center;
+      justify-content: center; min-height: 90vh; text-align: center; }
+    #view-forbidden.show { display: flex; }
+    .forbidden-headline { font-size: 2rem; font-weight: 600; margin-bottom: 20px;
+      color: var(--danger-text); }
+    .forbidden-sub { font-size: 1.3rem; opacity: .55; margin-top: 16px; }
+
     #view-queue { display: none; }
     #view-queue.show { display: block; }
 
@@ -113,7 +120,13 @@
   <div id="view-register">
     <div class="reg-headline">Drucker-Display registrieren</div>
     <div class="reg-code" id="reg-code">····</div>
-    <p class="reg-sub">Diesen Code am Host eingeben und Druckerkapazitäten zuordnen.</p>
+    <p class="reg-sub">Am Host diesen Reiter wählen und einen Namen eingeben, um das Display freizuschalten.</p>
+  </div>
+
+  <!-- Gesperrt: Display wurde vom Betreuer per × verboten (endgültig). -->
+  <div id="view-forbidden">
+    <div class="forbidden-headline">Dieses Display wurde vom Betreuer gesperrt.</div>
+    <p class="forbidden-sub">Bitte wende dich an den Betreuer.</p>
   </div>
 
   <!-- Warteschlange (nach Pairing + Zuweisung) -->

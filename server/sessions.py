@@ -1444,15 +1444,18 @@ async def send_printer_display_update(state: AppState, display) -> None:
             "code": display.registration_code,
             "display_id": display.display_id,
             "label": display.label,
-            "theme": display.theme,
         }
     else:
         msg = {
             "type": "queue",
             "label": display.label,
-            "theme": display.theme,
             **state.printer_display_view(display),
         }
+    # Theme nur mitgeben, wenn der Host es explizit gesetzt hat (sonst None =
+    # Display folgt der System-Einstellung). Bei nicht autorisierten Displays
+    # ist theme ohnehin noch None.
+    if display.theme is not None:
+        msg["theme"] = display.theme
     if not await get_hub().send_websocket(display.ws, msg):
         display.ws = None
 

@@ -6,15 +6,21 @@
 
 const viewRegister = document.getElementById('view-register');
 const viewQueue = document.getElementById('view-queue');
+const viewForbidden = document.getElementById('view-forbidden');
 const connDot = document.getElementById('conn-dot');
 const connText = document.getElementById('conn-text');
 const content = document.getElementById('dd-content');
 // Laufende TTL-Timer, die „Gedruckt"-Kategorien nach 30s ausblenden.
 let printedTimers = [];
+// Wurde das Display vom Betreuer gesperrt? Dann KEIN automatischer Reconnect
+// (der Token bleibt verboten — erneute Verbindungsversuche sind sinnlos und
+// würden nur „gesperrt"-Meldungen flackern lassen).
+let forbidden = false;
 
 function show(name) {
   viewRegister.classList.toggle('show', name === 'register');
   viewQueue.classList.toggle('show', name === 'queue');
+  viewForbidden.classList.toggle('show', name === 'forbidden');
 }
 
 // Anzeige-Label eines Druckers: nur der Name (Label), nicht der Systemname.
@@ -78,7 +84,7 @@ function renderQueue(msg) {
     const printed = p.printed_name || null;
     // Die drei Kategorien stehen immer (mit Label), auch ohne Eintrag — dann
     // halt leer. So bleibt das Layout pro Drucker stabil.
-    const printedBox = printed ? orderBox(p.id, printed, 'dd-order-printed') : '';
+    const printedBox = printed ? orderBox(p.id, printed) : '';
     const printingBox = printing ? orderBox(p.id, printing) : '';
     const nextBoxes = spooledList.map(n => orderBox(p.id, n)).join('')
       + blockedList.map(n => orderBox(p.id, n, 'dd-order-blocked')).join('');
@@ -142,8 +148,15 @@ function renderQueue(msg) {
   });
 }
 
+// Initial-Theme folgt der System-/Browser-Einstellung des Geräts, auf dem das
+// Display geöffnet wird — bis der Host es explizit überschreibt (applyTheme).
+function applySystemTheme() {
+  const light = matchMedia('(prefers-color-scheme: light)').matches;
+  document.documentElement.setAttribute('data-theme', light ? 'light' : 'dark');
+}
+
 function applyTheme(theme) {
-  // Theme vom Host ('light' | 'dark'); Default dark (bisheriges Aussehen).
+  // Theme vom Host ('light' | 'dark') überschreibt die System-Einstellung.
   document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : 'dark');
 }
 
@@ -154,6 +167,15 @@ function applyLabel(label) {
 }
 
 function handleServerMessage(msg) {
+  if (msg.type === 'forbidden') {
+    // Vom Betreuer gesperrt (× am Host). Kein Reconnect — der Token bleibt
+    // verboten, auch ein Reload liefert wieder „gesperrt".
+    forbidden = true;
+    show('forbidden');
+    return;
+  }
+  // Theme nur anwenden, wenn der Host es explizit gesetzt hat (Override der
+  // System-Einstellung); ohne theme-Key folgt das Display weiterhin dem Gerät.
   if ('theme' in msg) applyTheme(msg.theme);
   if ('label' in msg) applyLabel(msg.label);
   if (msg.type === 'registration') {
@@ -165,12 +187,18 @@ function handleServerMessage(msg) {
   }
 }
 
-connectWebSocket(() => `wss://${location.host}/ws/drucker-display`, {
+// Token aus der URL (vom Server per Redirect zugewiesen). Ohne Token würde die
+// Seite gar nicht erst ausgeliefert (der Server leitet immer auf ?token=… weiter).
+const token = new URLSearchParams(location.search).get('token') || '';
+
+applySystemTheme();
+connectWebSocket(() => `wss://${location.host}/ws/drucker-display?token=${encodeURIComponent(token)}`, {
   onOpen: () => { connDot.style.background = '#30d158'; connText.textContent = 'verbunden'; },
   onClose: (e, reconnect) => {
     connDot.style.background = '#ff6b6b';
     connText.textContent = 'getrennt — neu verbinden…';
-    reconnect();
+    // Gesperrte Displays versuchen keinen Reconnect (Token bleibt verboten).
+    if (!forbidden) reconnect();
   },
   onError: () => { connDot.style.background = '#ff6b6b'; connText.textContent = 'Verbindungsfehler'; },
   onMessage: e => {

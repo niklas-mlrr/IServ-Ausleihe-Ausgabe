@@ -507,16 +507,18 @@ window.__host = window.__host || {};
     const d = await r.json();
     showQr(d.qr, d.url || '');
   }
-  // Drucker-Display über den Pairing-Code freischalten (Zuordnen-Button).
-  async function authorizePrinterDisplay(displayId, code, btn) {
-    if (!code) return;
+  // Drucker-Display durch Eingabe eines Namens freischalten (Einschalten-Button
+  // im unautorisierten Panel). Der Registrierungs-Code wird nur noch auf dem
+  // Display + im Reiter gezeigt (visuelle Zuordnung), nicht mehr am Host getippt.
+  async function enablePrinterDisplay(displayId, label, btn) {
+    if (!label || !label.trim()) return;
     if (btn) await busy(btn, async () => {
-      const r = await fetch('/api/drucker-display/authorize', {
+      const r = await fetch('/api/drucker-display/enable', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ registration_code: code.trim().toUpperCase() }),
+        body: JSON.stringify({ display_id: displayId, label: label.trim() }),
       });
-      if (r.ok) showMsg('Drucker-Display zugeordnet');
-      else { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Zuordnung fehlgeschlagen'); }
+      if (r.ok) showMsg('Drucker-Display freigeschaltet');
+      else { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Freischaltung fehlgeschlagen'); }
     });
   }
   // Aktuelle geordnete Drucker-Liste eines Displays (aus dem State): bei
@@ -574,14 +576,16 @@ window.__host = window.__host || {};
     });
     if (!r.ok) { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Theme konnte nicht gesetzt werden'); }
   }
-  // Drucker-Display abmelden (× am Reiter). Bestätigungsdialog im Caller.
+  // Drucker-Display verbieten (× am Reiter, endgültig): Token wird gebannt,
+  // das Display zeigt „gesperrt" und ein Reload bleibt gesperrt. Bestätigungs-
+  // dialog im Caller (nicht reaktivierbar).
   async function forgetPrinterDisplay(displayId) {
     const r = await fetch('/api/drucker-display/forget', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ display_id: displayId }),
     });
-    if (r.ok) { activePdTab = 'queue'; showMsg('Display getrennt'); }
-    else { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Trennen fehlgeschlagen'); }
+    if (r.ok) { activePdTab = 'queue'; showMsg('Display verboten'); }
+    else { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Verbieten fehlgeschlagen'); }
   }
   // „+"-Box der Drucker-Boxen: kleines Popover der noch nicht zugewiesenen
   // Pool-Drucker. Auswahl → addPdPrinter. Schließt bei Außenklick/Esc. Liegt
@@ -1345,13 +1349,15 @@ window.__host = window.__host || {};
       activePdTab = 'queue';
     }
     // Tab-Leiste: je Display ein Reiter — Label = Name (falls gesetzt), sonst
-    // Short-ID, plus Statuspunkt und × zum Trennen (Spiegel der Klassen-Tab-×).
+    // der Registrierungs-Code (visuelle Zuordnung vor der Freischaltung), plus
+    // Statuspunkt und × zum Verbieten (Spiegel der Klassen-Tab-×).
     tabList.innerHTML = displays.map(d => {
       const short = d.display_id.slice(0, 6);
-      const lbl = escapeHtml(d.label && d.label.trim() ? d.label : short);
+      const code = d.registration_code || short;
+      const lbl = escapeHtml(d.label && d.label.trim() ? d.label : code);
       const dotCls = d.authorized ? 'pd-dot-green' : 'pd-dot-gray';
-      const title = d.authorized ? 'autorisiert' : 'Code eingeben';
-      return `<button class="pd-tab${activePdTab === d.display_id ? ' active' : ''}" data-pd-tab="${escapeHtml(d.display_id)}" title="${title}"><span class="pd-tab-dot ${dotCls}" aria-hidden="true"></span>${lbl} <span class="pd-tab-close" data-pd-close="${escapeHtml(d.display_id)}" title="Display trennen" aria-label="Display trennen">×</span></button>`;
+      const title = d.authorized ? 'autorisiert' : `Code ${code}`;
+      return `<button class="pd-tab${activePdTab === d.display_id ? ' active' : ''}" data-pd-tab="${escapeHtml(d.display_id)}" title="${title}"><span class="pd-tab-dot ${dotCls}" aria-hidden="true"></span>${lbl} <span class="pd-tab-close" data-pd-close="${escapeHtml(d.display_id)}" title="Display verbieten" aria-label="Display verbieten">×</span></button>`;
     }).join('');
     queueTab.classList.toggle('active', activePdTab === 'queue');
     // Panels umschalten: Queue-Panel nur bei aktivem Queue-Reiter; sonst das
@@ -1370,14 +1376,16 @@ window.__host = window.__host || {};
       return;
     }
     const short = d.display_id.slice(0, 6);
+    const code = d.registration_code || short;
     if (!d.authorized) {
+      // Unautorisiert: Display zeigt den Code (visuelle Zuordnung). Freischaltung
+      // per Namens-Eingabe (+ Einschalten), nicht mehr per Code-Tippen.
       panelsHost.innerHTML = `<div class="pdd-row" data-display="${escapeHtml(d.display_id)}">
-        <span class="pdd-id">${escapeHtml(short)}</span>
-        <input class="pdd-code" type="text" inputmode="latin" autocapitalize="characters"
-               placeholder="Code" maxlength="4">
-        <button class="secondary pdd-authorize">Zuordnen</button>
+        <span class="pdd-id">Code: ${escapeHtml(code)}</span>
+        <input class="pdd-name pdd-enable-name" type="text" placeholder="Name" autocomplete="off" data-display="${escapeHtml(d.display_id)}">
+        <button class="secondary pdd-enable" data-display="${escapeHtml(d.display_id)}">Einschalten</button>
       </div>`;
-      panelsHost.querySelector('.pdd-code')?.focus();
+      panelsHost.querySelector('.pdd-enable-name')?.focus();
       return;
     }
     // Autorisiertes Panel: Name-Feld, Theme-Schieberegler, Drucker-Boxen.
@@ -2089,8 +2097,9 @@ window.__host = window.__host || {};
   document.getElementById('show-mb-qr-btn').addEventListener('click', showMbQr);
   document.getElementById('show-display-qr-btn').addEventListener('click', showDisplayQr);
   // Drucker-Display-Reiter: „+" öffnet den QR zum Verbinden eines neuen Displays;
-  // Klick auf einen Reiter wechselt den aktiven Sub-Reiter, × trennt das
-  // Display (mit Bestätigungsdialog) innerhalb der „Druckerwarteschlange"-Karte.
+  // Klick auf einen Reiter wechselt den aktiven Sub-Reiter, × verbietet das
+  // Display endgültig (mit Bestätigungsdialog) innerhalb der „Druckerwarteschlange"-
+  // Karte.
   document.getElementById('pd-tab-add').addEventListener('click', showPrinterDisplayQr);
   document.getElementById('pd-tabs-bar').addEventListener('click', async (e) => {
     const closeEl = e.target.closest('[data-pd-close]');
@@ -2099,7 +2108,10 @@ window.__host = window.__host || {};
       const id = closeEl.dataset.pdClose;
       const d = (state.printer_displays || []).find(x => x.display_id === id);
       const name = d ? (d.label && d.label.trim() ? d.label : d.display_id.slice(0, 6)) : id;
-      if (!await confirmDialog(`Drucker-Display „${name}" trennen?`, 'Trennen')) return;
+      if (!await confirmDialog(
+        `Drucker-Display „${name}" verbieten? Das Display wird gesperrt und kann nicht wieder aktiviert werden.`,
+        'Verbieten'
+      )) return;
       forgetPrinterDisplay(id);
       return;
     }
@@ -2109,15 +2121,15 @@ window.__host = window.__host || {};
     renderPrinterDisplays();
   });
   // Drucker-Displays: delegierte Handler für die per innerHTML gerenderten
-  // Elemente im aktiven Display-Panel (Code Zuordnen, Name Speichern,
+  // Elemente im aktiven Display-Panel (Namen Einschalten, Name Speichern,
   // Drucker-Box entfernen/hinzufügen, Theme-Toggle).
   const pdBox = document.getElementById('pd-panels-displays');
   pdBox.addEventListener('click', (e) => {
-    const authorizeBtn = e.target.closest('.pdd-authorize');
-    if (authorizeBtn) {
-      const row = authorizeBtn.closest('.pdd-row');
-      const code = row.querySelector('.pdd-code').value;
-      authorizePrinterDisplay(row.dataset.display, code, authorizeBtn);
+    const enableBtn = e.target.closest('.pdd-enable');
+    if (enableBtn) {
+      const row = enableBtn.closest('.pdd-row');
+      const name = row.querySelector('.pdd-enable-name').value;
+      enablePrinterDisplay(row.dataset.display, name, enableBtn);
       return;
     }
     const removeBtn = e.target.closest('.pd-box-remove');
@@ -2144,12 +2156,13 @@ window.__host = window.__host || {};
       setPdTheme(e.target.dataset.display, e.target.checked);
     }
   });
-  // Code- + Name-Eingabe per Enter abschicken.
+  // Namen-Eingabe per Enter abschicken (Freischalten im unautorisierten Panel
+  // bzw. Speichern im autorisierten Panel).
   pdBox.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter') return;
-    if (e.target.matches('.pdd-code')) {
+    if (e.target.matches('.pdd-enable-name')) {
       const row = e.target.closest('.pdd-row');
-      authorizePrinterDisplay(row.dataset.display, e.target.value, row.querySelector('.pdd-authorize'));
+      enablePrinterDisplay(row.dataset.display, e.target.value, row.querySelector('.pdd-enable'));
     } else if (e.target.matches('.pdd-name')) {
       const save = e.target.closest('.pdd-panel').querySelector('.pdd-name-save');
       if (save) save.click();

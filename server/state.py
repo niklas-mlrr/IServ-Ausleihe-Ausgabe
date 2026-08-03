@@ -325,7 +325,8 @@ class PrinterDisplaySession:
     authorized: bool = False
     assigned_printer_ids: list[str] | None = None
     label: str = ""
-    theme: str = "dark"
+    theme: str | None = None  # None = folgt System-Einstellung (prefers-color-
+                              # scheme); 'light'/'dark' = Host hat überschrieben.
     ws: object | None = None
     created_at: datetime = field(default_factory=datetime.now)
 
@@ -472,7 +473,14 @@ class AppState:
         self.displays: dict[str, DisplaySession] = {}  # display_id -> Display
         # Drucker-Displays (`/drucker-display`): eigene Rolle, Pairing + pro
         # Display zugewiesene Pool-Drucker-Teilmenge (s. PrinterDisplaySession).
+        # Key ist der Token in der URL (= display_id); Sessions bleiben über WS-
+        # Trennungen hinweg bestehen (Reload wiederverwendet sie), bis das
+        # Display am Host verboten (×) wird.
         self.printer_displays: dict[str, PrinterDisplaySession] = {}
+        # Per × verbotene Display-Token: ein Reload mit solchem Token bekommt
+        # eine „gesperrt"-Antwort statt einer Session. Ein neu geöffnetes
+        # Display (frischer Token) ist erlaubt.
+        self.banned_printer_display_tokens: set[str] = set()
 
     # -----------------------------------------------------------------
     # Kontext-Verwaltung
@@ -712,6 +720,7 @@ class AppState:
                 "authorized": d.authorized,
                 "connected": d.ws is not None,
                 "label": d.label,
+                "registration_code": d.registration_code,
                 "theme": d.theme,
                 "assigned_printer_ids": (
                     None if d.assigned_printer_ids is None else list(d.assigned_printer_ids)
