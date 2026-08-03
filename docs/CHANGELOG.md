@@ -8,6 +8,31 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-03 — Drucker-Display: Auftraggeber-Symbol in den Auftrags-Kästchen
+
+- **Auftraggeber rechts im Kästchen:** jedes Auftrags-Kästchen (Gedruckt / Wird
+  gedruckt / Nächster / Warteschlange) zeigt rechts den Auftraggeber:
+  - **Helfer** → Person-Symbol (Kopf + Schultern, dasselbe SVG wie das
+    Helferlabel in der „aktuelle Ausgabe"-Now-Serving-Karte im Host) + Helfername.
+  - **Host** → Laptop-Symbol (Display-Rechteck + Basis, aus geometrischen
+    Figuren), kein Name.
+  - Schüler/sonstige → nichts (derzeit nicht enqueueiert).
+- **Backend:** `PrintQueue._originator_info(state, job)` liefert `{type, name}`
+  (helper namentlich via Token-Lookup, Fallback „Helfer"; host; student).
+  `pool_printers(printers, state=None)` reichert pro Drucker `orders` an
+  (`{name, status, originator}`) — nur mit `state` (Display), ohne bleibt
+  `orders` leer (Host-Snapshot/Druckdialog). `display_view` reicht `state` durch
+  und liefert `printed_originator` (im `_last_printed`-Memory mitgeführt) sowie
+  `originator_info` pro `waiting_list`-Eintrag. Die flachen `printing_name`/
+  `spooled_names`/`blocked_names` für den Host bleiben erhalten.
+- Frontend: `orderBox` bekommt eine dritte Grid-Spalte (`4em 1fr auto`),
+  `.dd-origin` rechtsbündig + dezent (muted, kleiner); SVGs `ICO_HELPER`/
+  `ICO_LAPTOP`. `renderQueue` nutzt `p.orders` (strukturiert) statt der flachen
+  Namen und `w.originator_info` für die Warteschlange.
+- Tests: `test_originator_info_helper_host_student`,
+  `test_pool_printers_orders_carry_originator`,
+  `test_display_view_waiting_list_has_originator_info`. 322 passed, ruff clean.
+
 ## 2026-08-03 — Drucker-Display: allgemeine Warteschlange unter den Druckern
 
 - **Warteschlangen-Kasten unter den Druckern:** das Display zeigt unter den

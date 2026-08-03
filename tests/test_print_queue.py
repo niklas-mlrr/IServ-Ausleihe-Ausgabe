@@ -1067,3 +1067,74 @@ def test_display_view_filters_printers_and_waiting():
     # Leere Zuweisung: kein Drucker, keine Wartelisten-Einträge.
     v = pq.display_view(st, [])
     assert v["printers"] == [] and v["waiting"] == 0 and v["waiting_list"] == []
+
+
+# ---- Drucker-Display: Auftraggeber-Symbol (originator_info) ---------------
+
+
+def test_originator_info_helper_host_student():
+    """`_originator_info` liefert {type, name}: Helfer namentlich (Token-Lookup,
+    Fallback „Helfer"), Host als „Host", Schüler als „Schüler"."""
+    from server.state import HelperSession
+
+    st = AppState()
+    st.helper_sessions["tok-h"] = HelperSession(token="tok-h", name="Anna")
+    pq = st.print_queue
+    jh = _job("helper", 1, helper_token="tok-h", name="A")
+    jh_unknown = _job("helper", 2, helper_token="tok-x", name="B")  # Session weg
+    jhost = _job("host", 3, host_sid="sid1", name="C")
+    jstudent = _job("student", 4, name="D")
+    assert pq._originator_info(st, jh) == {"type": "helper", "name": "Anna"}
+    assert pq._originator_info(st, jh_unknown) == {"type": "helper", "name": "Helfer"}
+    assert pq._originator_info(st, jhost) == {"type": "host", "name": "Host"}
+    assert pq._originator_info(st, jstudent) == {"type": "student", "name": "Schüler"}
+
+
+def test_pool_printers_orders_carry_originator():
+    """Mit ``state`` liefert `pool_printers` pro Drucker ``orders`` mit Status
+    + Auftraggeber; ohne ``state`` bleibt ``orders`` leer (Host-Snapshot)."""
+    from server.state import HelperSession
+
+    st = AppState()
+    st.settings.printers = _two_printers()
+    st.helper_sessions["tok-h"] = HelperSession(token="tok-h", name="Anna")
+    pq = st.print_queue
+    printing = _job("helper", 1, helper_token="tok-h", name="A (5a)")
+    printing.status = "printing"
+    spooled = _job("host", 2, host_sid="sid1", name="B (5b)")
+    spooled.status = "spooled"
+    pq.slots["p1"] = print_queue._Slots(jobs=[printing, spooled])
+    rendered = {p["id"]: p for p in pq.pool_printers(list(st.settings.printers), st)}
+    orders = rendered["p1"]["orders"]
+    assert [o["status"] for o in orders] == ["printing", "spooled"]
+    assert orders[0]["name"] == "A (5a)"
+    assert orders[0]["originator"] == {"type": "helper", "name": "Anna"}
+    assert orders[1]["originator"] == {"type": "host", "name": "Host"}
+    # Ohne state (Host-Snapshot) bleiben orders leer — die flachen Namen-Felder
+    # sind davon unberührt.
+    flat = {p["id"]: p for p in pq.pool_printers(list(st.settings.printers))}
+    assert flat["p1"]["orders"] == []
+    assert flat["p1"]["printing_name"] == "A (5a)"
+    assert flat["p1"]["spooled_names"] == ["B (5b)"]
+
+
+def test_display_view_waiting_list_has_originator_info():
+    """`display_view`-`waiting_list`-Einträge tragen `originator_info`
+    (strukturierter Auftraggeber für das Display-Symbol)."""
+    from server.state import HelperSession
+
+    st = AppState()
+    st.settings.printers = _two_printers()
+    st.helper_sessions["tok-h"] = HelperSession(token="tok-h", name="Anna")
+    pq = st.print_queue
+    asyncio.run(pq.enqueue(_job("helper", 1, helper_token="tok-h", name="A")))
+    asyncio.run(pq.enqueue(_job("host", 2, host_sid="sid1", name="B")))
+    v = pq.display_view(st, None)
+    wl = v["waiting_list"]
+    # Rollen-Sortierung: Host (Rang 0) vor Helfer (Rang 1) → B vor A.
+    assert [w["student"] for w in wl] == ["B", "A"]
+    assert wl[0]["originator_info"] == {"type": "host", "name": "Host"}
+    assert wl[1]["originator_info"] == {"type": "helper", "name": "Anna"}
+    # String-Label für den Host bleibt erhalten (Spiegel).
+    assert wl[0]["originator"] == "Host"
+    assert wl[1]["originator"] == "Anna"

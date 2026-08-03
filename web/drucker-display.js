@@ -37,16 +37,36 @@ function parseOrder(s) {
   return m ? { name: m[1].trim(), form: m[2].trim() } : { name: s.trim(), form: '' };
 }
 
-// Ein Auftrag als Kästchen: [Klasse] [Name, Vorname] — Klasse in fester
-// Spaltenbreite, damit die Namen über alle Kästchen bündig untereinander
-// stehen. data-order-key (pro Drucker eindeutig) treibt die FLIP-Animation.
-function orderBox(pid, raw, extraClass) {
+// Helfer-Symbol (Person: Kopf + Schultern) — dasselbe SVG wie im Host
+// (host-state.js ICO_HELPER, „aktuelle Ausgabe"-Now-Serving-Helferlabel).
+const ICO_HELPER = '<svg class="dd-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
+// Host-Symbol (Laptop aus geometrischen Figuren: Display-Rechteck + Basis).
+const ICO_LAPTOP = '<svg class="dd-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="11" rx="1"/><path d="M2 20h20"/></svg>';
+
+// Auftraggeber rechts im Kästchen: Helfer → Person-Symbol + Name; Host →
+// Laptop-Symbol (ohne Name); Schüler/sonstige → nichts (derzeit nicht enqueueiert).
+function originatorHtml(o) {
+  if (!o) return '';
+  if (o.type === 'helper') {
+    return `<span class="dd-origin-kind">${ICO_HELPER}</span><span class="dd-origin-name">${escapeHtml(o.name || '')}</span>`;
+  }
+  if (o.type === 'host') {
+    return `<span class="dd-origin-kind">${ICO_LAPTOP}</span>`;
+  }
+  return '';
+}
+
+// Ein Auftrag als Kästchen: [Klasse] [Name, Vorname] [Auftraggeber] — Klasse
+// in fester Spaltenbreite (bündige Namen), Auftraggeber rechts. data-order-key
+// (pro Drucker eindeutig) treibt die FLIP-Animation.
+function orderBox(pid, raw, extraClass, originator) {
   const { name, form } = parseOrder(raw);
   const key = `${pid}::${raw}`;
   const cls = extraClass ? ` ${extraClass}` : '';
   return `<div class="dd-order${cls}" data-order-key="${escapeHtml(key)}">`
     + `<span class="dd-form">${escapeHtml(form)}</span>`
     + `<span class="dd-stname">${escapeHtml(name)}</span>`
+    + `<span class="dd-origin">${originatorHtml(originator)}</span>`
     + `</div>`;
 }
 
@@ -74,20 +94,22 @@ function renderQueue(msg) {
   });
 
   const rows = pool.map(p => {
-    const spooledList = Array.isArray(p.spooled_names) && p.spooled_names
-      ? p.spooled_names
-      : (p.spooled_name ? [p.spooled_name] : []);
+    // Strukturierte Aufträge (mit Auftraggeber) aus p.orders; Status gruppiert
+    // in die drei Kategorien. Fallback auf flache Namen-Felder, falls `orders`
+    // fehlt (sollte nicht vorkommen — display_view reicht es immer durch).
+    const orders = Array.isArray(p.orders) ? p.orders : [];
+    const printingOrd = orders.find(o => o.status === 'printing') || null;
+    const spooledOrds = orders.filter(o => o.status === 'spooled');
     // Blockierte Aufträge (stalled/peer_error/failed) nur bei Fehler relevant:
     // sie wurden gesendet, der Schüler soll seinen Namen sehen und sich melden.
-    const blockedList = p.faulty && Array.isArray(p.blocked_names) ? p.blocked_names : [];
-    const printing = p.printing_name || null;
+    const blockedOrds = p.faulty ? orders.filter(o => o.status === 'blocked') : [];
     const printed = p.printed_name || null;
     // Die drei Kategorien stehen immer (mit Label), auch ohne Eintrag — dann
     // halt leer. So bleibt das Layout pro Drucker stabil.
-    const printedBox = printed ? orderBox(p.id, printed) : '';
-    const printingBox = printing ? orderBox(p.id, printing) : '';
-    const nextBoxes = spooledList.map(n => orderBox(p.id, n)).join('')
-      + blockedList.map(n => orderBox(p.id, n, 'dd-order-blocked')).join('');
+    const printedBox = printed ? orderBox(p.id, printed, '', p.printed_originator) : '';
+    const printingBox = printingOrd ? orderBox(p.id, printingOrd.name, '', printingOrd.originator) : '';
+    const nextBoxes = spooledOrds.map(o => orderBox(p.id, o.name, '', o.originator)).join('')
+      + blockedOrds.map(o => orderBox(p.id, o.name, 'dd-order-blocked', o.originator)).join('');
     // Bei Fehler: Name + „ - Fehler" in rot, gleicher Schriftgröße wie der Name;
     // darunter der Betreuer-Hinweis. Die Kategorien (Aufträge) bleiben sichtbar.
     const faulty = !!p.faulty;
@@ -118,7 +140,7 @@ function renderQueue(msg) {
   // display_view gefiltert). Einträge als Klasse + Name-Kästchen wie die
   // Druckeraufträge (gleicher FLIP-Schlüssel-Raum, Präfix „queue::").
   const waiting = Array.isArray(msg.waiting_list) ? msg.waiting_list : [];
-  const waitingRows = waiting.map(w => orderBox('queue', w.student)).join('');
+  const waitingRows = waiting.map(w => orderBox('queue', w.student, '', w.originator_info)).join('');
   const waitingCard = `<div class="dd-waiting-card">
     <div class="dd-cat-label">Warteschlange (${waiting.length})</div>
     ${waitingRows || '<p class="hint">Keine Aufträge in der Warteschlange.</p>'}

@@ -62,7 +62,7 @@
        ist. Grid mit fester Klassen-Spalte → Namen stehen bündig untereinander.
        FLIP-Transition (transform) wie die Bücherliste im Helferclient. */
     .dd-order {
-      display: grid; grid-template-columns: 4em 1fr; gap: 10px;
+      display: grid; grid-template-columns: 4em 1fr auto; gap: 10px;
       align-items: baseline;
       background: var(--surface); border: 1px solid var(--card-border);
       border-radius: 10px; padding: 10px 12px; margin-top: 8px;
@@ -72,7 +72,17 @@
     }
     .dd-order:first-child { margin-top: 0; }
     .dd-form { color: var(--muted); font-weight: 600; }
-    .dd-stname { color: var(--text); }
+    .dd-stname { color: var(--text); min-width: 0; }
+    /* Auftraggeber rechts im Kästchen: Helfer (Person-Symbol + Name) bzw.
+       Host (Laptop-Symbol). Bündig rechts, dezent (muted, etwas kleiner). */
+    .dd-origin {
+      justify-self: end; display: inline-flex; align-items: center;
+      gap: 6px; color: var(--muted); font-size: 1rem; font-weight: 600;
+      white-space: nowrap;
+    }
+    .dd-origin-kind { display: inline-flex; align-items: center; }
+    .dd-ico { width: 1.3em; height: 1.3em; }
+    .dd-origin-name { overflow-wrap: anywhere; }
     @media (prefers-reduced-motion: reduce) {
       .dd-order { transition: transform .01ms !important; }
     }

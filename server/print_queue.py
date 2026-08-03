@@ -165,7 +165,10 @@ class PrintQueue:
         # „Gedruckt"): printer_id → (job.name, wall-clock fertig um). Wird beim
         # Fertig-Werden des nächsten Auftrags an diesem Drucker überschrieben;
         # die Anzeige blendet ihn nach 30s (TTL) bzw. beim Überschreiben aus.
-        self._last_printed: dict[str, tuple[str, float]] = {}
+        # Letzter gedruckter Auftrag pro Drucker: (Name, Auftraggeber, Zeit).
+        # Auftraggeber = strukturierter Dict ({type, name}) fürs Drucker-Display
+        # (Helfer-Symbol + Name bzw. Laptop-Symbol bei Host-Aufträgen).
+        self._last_printed: dict[str, tuple[str, dict, float]] = {}
 
     # ---- Lebenszyklus --------------------------------------------------
 
@@ -401,7 +404,13 @@ class PrintQueue:
             self._remove_from_slot(printer_id, job)
             # Als „zuletzt gedruckt" fürs Drucker-Display merken (überschreibt
             # einen ggf. noch angezeigten Vorgänger — „bis der nächste fertig").
-            self._last_printed[printer_id] = (job.name, time.time())
+            # Auftraggeber mit merken, damit das Display im „Gedruckt"-Kästchen
+            # das Helfer-/Host-Symbol zeigen kann.
+            from .state import get_state
+
+            self._last_printed[printer_id] = (
+                job.name, self._originator_info(get_state(), job), time.time(),
+            )
             job.done.set()
             finalized = job
         await self._notify_result(finalized)
@@ -654,12 +663,17 @@ class PrintQueue:
 
     # ---- Pool-Snapshot (für state_snapshot) ---------------------------
 
-    def pool_printers(self, printers: list) -> list[dict]:
+    def pool_printers(self, printers: list, state=None) -> list[dict]:
         """Pro Drucker den Live-Status für den Host-Snapshot: Last, OS-aktiv
         druckender Job (`printing_name`), ältester gesendeter Nicht-Druck-Job
         (`spooled_name`) sowie alle gesendeten Nicht-Druck-Jobs (`spooled_names`).
         Iteriert in der konfigurierten Reihenfolge (bestimmt die
         Verteilungspriorität).
+
+        Mit ``state`` werden zusätzlich strukturierte ``orders`` pro Drucker
+        angereichert (Name + Status + Auftraggeber fürs Drucker-Display, s.
+        ``_originator_info``); ohne ``state`` bleibt ``orders`` leer (Host-
+        Snapshot/Druckdialog benötigen das nicht).
 
         Lock-frei (synchrone Lesefunktion, aufgerufen vom sync `state_snapshot`
         — das async-Lock ist dort nicht verfügbar). Konsistenz ist für die
@@ -673,10 +687,14 @@ class PrintQueue:
             spooled_names: list[str] = []
             blocked_names: list[str] = []  # stalled/peer_error/failed (sichtbar
                                            # fürs Drucker-Display, s. u.)
+            orders: list[dict] = []  # strukturiert (mit Auftraggeber) fürs Display
             if s:
                 for j in s.jobs:
                     if j.status == "printing":
                         printing_name = j.name
+                        if state is not None:
+                            orders.append({"name": j.name, "status": "printing",
+                                           "originator": self._originator_info(state, j)})
                     elif j.status in ("stalled", "peer_error", "failed"):
                         # Blockierte (fehlgeschlagene) Aufträge zählen über
                         # `load` mit, werden aber nicht als aktiv druckend /
@@ -687,9 +705,15 @@ class PrintQueue:
                         # war gesendet, der Schüler muss sehen, dass er sich
                         # melden soll.
                         blocked_names.append(j.name)
+                        if state is not None:
+                            orders.append({"name": j.name, "status": "blocked",
+                                           "originator": self._originator_info(state, j)})
                         continue
                     else:
                         spooled_names.append(j.name)
+                        if state is not None:
+                            orders.append({"name": j.name, "status": "spooled",
+                                           "originator": self._originator_info(state, j)})
             out.append(
                 {
                     "id": p.id,
@@ -702,6 +726,7 @@ class PrintQueue:
                     "spooled_name": spooled_names[0] if spooled_names else None,
                     "spooled_names": spooled_names,
                     "blocked_names": blocked_names,
+                    "orders": orders,
                     "faulty": p.id in self.faulty_printers,
                 }
             )
@@ -760,6 +785,10 @@ class PrintQueue:
                     "student": student_name,
                     "form": form,
                     "originator": self._originator_label(state, j),
+                    # Strukturierter Auftraggeber (typisiert) fürs Drucker-Display
+                    # (Helfer-Symbol + Name / Laptop-Symbol). Spiegel von
+                    # `originator` (String) für den Host.
+                    "originator_info": self._originator_info(state, j),
                     "all_allowed": all_allowed,
                     "allowed_printers": allowed_names,
                     # IDs der erlaubten Drucker (parallel zu `allowed_printers`,
@@ -788,7 +817,7 @@ class PrintQueue:
         sobald das Display mindestens einen Drucker zeigt; explizite Menge →
         relevant bei nicht-leerem Schnitt."""
         printers = state.settings.printers
-        pool = self.pool_printers(printers)
+        pool = self.pool_printers(printers, state)
         if assigned_printer_ids is None:
             view_printers = pool
         else:
@@ -812,22 +841,26 @@ class PrintQueue:
 
             view_waiting = [w for w in full_waiting if _relevant(w)]
         # Pro Drucker den „zuletzt gedruckten" Auftrag für die Display-Kategorie
-        # „Gedruckt" anreichern: Name + Rest-TTL (Sekunden). Nach 30s bzw. beim
-        # Fertig-Werden des nächsten Auftrags (Überschreiben in _track) entfallen.
+        # „Gedruckt" anreichern: Name + Auftraggeber + Rest-TTL (Sekunden). Nach
+        # 30s bzw. beim Fertig-Werden des nächsten Auftrags (Überschreiben in
+        # _track) entfallen.
         now = time.time()
         for p in view_printers:
             rec = self._last_printed.get(p["id"])
             if rec is None:
                 p["printed_name"] = None
+                p["printed_originator"] = None
                 p["printed_expires_in"] = None
                 continue
-            name, finished_at = rec
+            name, originator, finished_at = rec
             elapsed = now - finished_at
             if elapsed < _PRINTED_TTL_S:
                 p["printed_name"] = name
+                p["printed_originator"] = originator
                 p["printed_expires_in"] = _PRINTED_TTL_S - elapsed
             else:
                 p["printed_name"] = None
+                p["printed_originator"] = None
                 p["printed_expires_in"] = None
         return {
             "printers": view_printers,
@@ -872,6 +905,23 @@ class PrintQueue:
         if job.role == "student":
             return "Schüler"
         return job.role or "–"
+
+    def _originator_info(self, state, job: PrintJob) -> dict:
+        """Strukturierter Auftraggeber fürs Drucker-Display: ``{type, name}``
+        mit ``type`` ∈ ``helper``/``host``/``student``. Helfer namentlich
+        (Token-Lookup, Fallback „Helfer"), Host als „Host" (das Display zeigt
+        nur das Laptop-Symbol), Schüler als „Schüler" (derzeit nicht enqueueiert).
+        Spiegel von ``_originator_label`` (string), aber typisiert für die
+        symbolgestützte Anzeige auf dem Drucker-Display."""
+        if job.helper_token:
+            h = state.helper_sessions.get(job.helper_token)
+            name = getattr(h, "name", None) if h is not None else None
+            return {"type": "helper", "name": name or "Helfer"}
+        if job.host_sid:
+            return {"type": "host", "name": "Host"}
+        if job.role == "student":
+            return {"type": "student", "name": "Schüler"}
+        return {"type": job.role or "host", "name": job.role or "–"}
 
     # ---- Notifications -------------------------------------------------
 
