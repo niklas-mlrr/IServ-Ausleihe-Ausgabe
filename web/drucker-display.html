@@ -44,6 +44,14 @@
       background: var(--card); border-radius: 14px; padding: 20px 22px;
       border: 1px solid var(--card-border); min-width: 0;
     }
+    /* Layout: Druckerkarten im Grid, darunter der Warteschlangen-Kasten
+       (vollbreit, spannt alle Spalten). */
+    .dd-layout { display: flex; flex-direction: column; gap: 16px; }
+    .dd-waiting-card {
+      background: var(--card); border-radius: 14px; padding: 20px 22px;
+      border: 1px solid var(--card-border);
+    }
+    .dd-waiting-card .hint { margin-top: 4px; }
     .printer-name { font-size: 3rem; font-weight: 700; margin-bottom: 14px;
       overflow-wrap: anywhere; line-height: 1.1; }
     /* Kategorien „Gedruckt" / „Wird gedruckt" / „Nächster" unter dem Namen. */

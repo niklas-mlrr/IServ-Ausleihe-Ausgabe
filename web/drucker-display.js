@@ -113,7 +113,21 @@ function renderQueue(msg) {
     </div>`;
   }).join('');
 
-  content.innerHTML = `<div class="grid" style="grid-template-columns:repeat(${pool.length},minmax(0,1fr))">${rows}</div>`;
+  // Allgemeine Warteschlange (zentrale Queue) unter den Druckern: nur Aufträge,
+  // die für die oben gezeigten Drucker freigegeben sind (serverseitig via
+  // display_view gefiltert). Einträge als Klasse + Name-Kästchen wie die
+  // Druckeraufträge (gleicher FLIP-Schlüssel-Raum, Präfix „queue::").
+  const waiting = Array.isArray(msg.waiting_list) ? msg.waiting_list : [];
+  const waitingRows = waiting.map(w => orderBox('queue', w.student)).join('');
+  const waitingCard = `<div class="dd-waiting-card">
+    <div class="dd-cat-label">Warteschlange (${waiting.length})</div>
+    ${waitingRows || '<p class="hint">Keine Aufträge in der Warteschlange.</p>'}
+  </div>`;
+
+  content.innerHTML = `<div class="dd-layout">
+    <div class="grid" style="grid-template-columns:repeat(${pool.length},minmax(0,1fr))">${rows}</div>
+    ${waitingCard}
+  </div>`;
 
   // FLIP-Animation: jedes Kästchen, das schon da war, startet an seiner alten
   // Position (translate) und fährt zur neuen (translate→0). Neue Kästchen

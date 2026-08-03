@@ -8,6 +8,19 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-03 — Drucker-Display: allgemeine Warteschlange unter den Druckern
+
+- **Warteschlangen-Kasten unter den Druckern:** das Display zeigt unter den
+  Drucker-Karten einen vollbreiten Kasten „Warteschlange (N)" mit den
+  zentralen Druckaufträgen, die für die oben gezeigten Drucker freigegeben
+  sind (serverseitig via `display_view` gefiltert — `waiting_list` war bereits
+  im Payload, wurde clientseitig bisher ignoriert). Einträge als Klasse +
+  Name-Kästchen wie die Druckeraufträge; FLIP-Schlüsselpräfix `queue::`, sodass
+  auch die Warteschlange die Positionsanimation übernimmt. Leere Warteschlange
+  → Hinweis „Keine Aufträge in der Warteschlange."
+- Keine Backend-Änderung (Daten waren schon da); nur `web/drucker-display.js`
+  + `.html`. 319 passed, ruff clean.
+
 ## 2026-08-03 — Drucker-Display: Drucker pre-Einschalten, Verbindungspunkt, Token-QR
 
 - **Drucker schon vor dem Einschalten zuordnen:** `/api/drucker-display/assign`
