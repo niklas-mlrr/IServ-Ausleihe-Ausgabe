@@ -324,9 +324,12 @@ function renderQueue(msg) {
   const waitingRows = waiting.map(w =>
     orderBox(w.job_id || `queue::${w.student}`, w.student || '', w.form || '', '', w.originator_info)
   ).join('');
+  // Leere Warteschlange: kein „(0)" im Label und kein Hinweistext darunter —
+  // die Karte zeigt nur das Label. Nicht leer: „Warteschlange (N)" + Namen.
+  const waitingLabel = waiting.length ? `Warteschlange (${waiting.length})` : 'Warteschlange';
   const waitingCard = `<div class="dd-waiting-card" data-flip-id="__queue__">
-    <div class="dd-cat-label" data-flip-id="__queue__::label">Warteschlange (${waiting.length})</div>
-    ${waitingRows || '<p class="hint">Keine Aufträge in der Warteschlange.</p>'}
+    <div class="dd-cat-label" data-flip-id="__queue__::label">${waitingLabel}</div>
+    ${waitingRows}
   </div>`;
 
   content.innerHTML = `<div class="dd-layout">
