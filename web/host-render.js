@@ -1404,12 +1404,9 @@ window.__host = window.__host || {};
       + (boxPrinters.length || available.length ? '' : '<p class="hint" style="margin-top:6px">Kein Drucker im Pool.</p>');
     panelsHost.innerHTML = `<div class="pdd-panel" data-display="${did}">
       <div class="pdd-field-row">
-        <label class="pdd-field">Name
-          <div class="pdd-name-row">
-            <input class="pdd-name" type="text" value="${escapeHtml(d.label || '')}" placeholder="${escapeHtml(short)}" autocomplete="off" data-display="${did}">
-            <button class="secondary pdd-name-save" data-display="${did}">Speichern</button>
-          </div>
-        </label>
+        <span class="pdd-field-label">Name</span>
+        <input class="pdd-name" type="text" value="${escapeHtml(d.label || '')}" placeholder="${escapeHtml(short)}" autocomplete="off" data-display="${did}">
+        <button class="secondary pdd-name-save" data-display="${did}">Speichern</button>
         <label class="switch pdd-theme" title="Darstellung auf dem Display: Hell oder Dunkel">
           <input type="checkbox" class="pdd-theme-toggle" data-display="${did}"${d.theme === 'dark' ? ' checked' : ''}>
           <span class="track"></span>
@@ -2135,7 +2132,7 @@ window.__host = window.__host || {};
     }
     const nameSave = e.target.closest('.pdd-name-save');
     if (nameSave) {
-      const inp = nameSave.closest('.pdd-name-row').querySelector('.pdd-name');
+      const inp = nameSave.closest('.pdd-panel').querySelector('.pdd-name');
       inp.blur();  // Fokus raus, damit der nächste Snapshot das Panel + Reiter-Label aktualisiert
       setPdLabel(nameSave.dataset.display, inp.value);
       return;
@@ -2154,7 +2151,7 @@ window.__host = window.__host || {};
       const row = e.target.closest('.pdd-row');
       authorizePrinterDisplay(row.dataset.display, e.target.value, row.querySelector('.pdd-authorize'));
     } else if (e.target.matches('.pdd-name')) {
-      const save = e.target.closest('.pdd-name-row').querySelector('.pdd-name-save');
+      const save = e.target.closest('.pdd-panel').querySelector('.pdd-name-save');
       if (save) save.click();
     }
   });

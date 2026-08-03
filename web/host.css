@@ -200,12 +200,12 @@
     .pd-tabs .pd-tab-close:hover { color: var(--danger); background: var(--surface-3); }
     /* Autorisiertes Display-Panel: Name-Feld + Theme-Schieberegler + Boxen. */
     .pdd-panel { padding-top: 6px; }
-    .pdd-field-row { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
-    .pdd-field { display: flex; flex-direction: column; gap: 6px; font-size: .8rem;
-      font-weight: 700; text-transform: uppercase; letter-spacing: .04em; opacity: .7; }
-    .pdd-name-row { display: flex; gap: 6px; }
-    .pdd-name-row input { width: 220px; }
-    .pdd-theme { opacity: 1; text-transform: none; letter-spacing: 0; font-weight: 400; }
+    .pdd-field-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .pdd-field-label { font-size: .8rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .04em; opacity: .7; }
+    .pdd-field-row .pdd-name { width: 220px; }
+    .pdd-theme { opacity: 1; text-transform: none; letter-spacing: 0; font-weight: 400;
+      margin-left: auto; }
     .pdd-section-label { font-size: .8rem; font-weight: 700; text-transform: uppercase;
       letter-spacing: .04em; opacity: .7; margin: 16px 0 8px; }
     /* Drucker-Boxen: Kästchen pro zugewiesenen Drucker, Drag umsortierbar,
