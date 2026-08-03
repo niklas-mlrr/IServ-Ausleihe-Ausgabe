@@ -8,6 +8,21 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-03 — Drucker-Displays als Reiter in der Druckerwarteschlange
+
+- **Host-UI:** die verbundene Drucker-Displays in der
+  „Druckerwarteschlange"-Karte sind keine flache Liste mehr, sondern eigene
+  **Reiter** innerhalb der Karte. Reiter 1 („Druckerwarteschlange") ist immer
+  da und zeigt Pool + zentrale Warteschlange. Pro verbundenem Drucker-Display
+  kommt ein weiterer Reiter hinzu (Short-ID + Statuspunkt: grau = unautorisiert,
+  grün = autorisiert); beim ersten Öffnen steht dort die Code-Eingabe, danach
+  die Drucker-Zuweisungs-Checkboxes. „+" am Tab-Ende öffnet den QR zum Verbinden
+  eines neuen Displays (ersetzt den bisherigen „QR für Druckerdisplay"-Button).
+- Rein client-seitig (`web/host.html`/`host-state.js`/`host-render.js`/
+  `host.css`); Endpunkte, WS und `state_snapshot()`-Format unverändert
+  (`tests/test_state_contract.py` bleibt grün). Reiter kommen/verschwinden
+  automatisch mit dem Verbindungsstand (`state.printer_displays`).
+
 ## 2026-08-03 — Drucker-Display (`/drucker-display`) mit Pairing + Zuweisung
 
 - **Neue anzeigbare Druckerwarteschlange** für einen Bildschirm neben den

@@ -84,17 +84,22 @@
           </table>
         </div>
 
-        <!-- Druckerwarteschlange — Live-Status des Drucker-Pools + zentrale Warteschlange -->
+        <!-- Druckerwarteschlange — Live-Status des Drucker-Pools + zentrale
+             Warteschlange. Drucker-Displays (Bildschirme neben den Druckern,
+             per Pairing-Code zugeordnet + pro Display zugewiesene Drucker-
+             Teilmenge) erscheinen als eigene Reiter — je einer pro verbundenes
+             Display; beim ersten Öffnen Code-Eingabe, danach Zuweisung. -->
         <div class="card">
           <h2>Druckerwarteschlange</h2>
-          <div id="print-queue-box"></div>
-          <!-- Drucker-Displays: Bildschirme neben den Druckern, per Pairing-Code
-               zugeordnet + pro Display zugewiesene Drucker-Teilmenge. -->
-          <div class="pq-section" style="margin-top:14px">Drucker-Displays</div>
-          <div class="row" style="margin-bottom:8px">
-            <button class="secondary" id="show-printer-display-qr-btn">QR für Druckerdisplay</button>
+          <div class="pd-tabs" id="pd-tabs-bar">
+            <button class="pd-tab active" id="pd-tab-queue" data-pd-tab="queue">Druckerwarteschlange</button>
+            <span id="pd-tab-list"></span>
+            <button class="pd-tab-add" id="pd-tab-add" title="Drucker-Display verbinden">+</button>
           </div>
-          <div id="printer-displays-box"></div>
+          <div class="tab-panel active" id="pd-panel-queue">
+            <div id="print-queue-box"></div>
+          </div>
+          <div class="tab-panel" id="pd-panels-displays"></div>
         </div>
       </div>
     </div>

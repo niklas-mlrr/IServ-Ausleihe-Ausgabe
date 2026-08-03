@@ -25,6 +25,11 @@ window.__host = window.__host || {};
   // leben ohnehin serverseitig im Speicher.
   let tabOrder = [];
   let activeTab = 'host';
+  // Aktiver Sub-Reiter innerhalb der „Druckerwarteschlange"-Karte: 'queue'
+  // (Pool-/Warteschlangen-Ansicht) oder <display_id> (ein Reiter pro
+  // verbundenem Drucker-Display). Rein pro Browser (wie activeTab), nicht
+  // persistiert. Fällt auf 'queue' zurück, wenn das Display verschwindet.
+  let activePdTab = 'queue';
   let classList = [];                 // Klassen-Liste aus /api/classes (für Wähler + Single-Selects)
   let ctxSingleStudents = {};         // context_id -> [students] für den Einzelne-Schüler-Select
   // SVG-Icons für die Queue-Steuer-Buttons (pro Klassen-Tab neu gerendert).

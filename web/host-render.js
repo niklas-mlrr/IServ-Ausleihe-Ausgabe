@@ -1253,47 +1253,73 @@ window.__host = window.__host || {};
       ${waitBlock}`;
   }
 
-  // Drucker-Displays (Bildschirme neben den Druckern): pro verbundenes Display
-  // Code-Eingabe (vor Pairing) bzw. Zuweisungs-Checkboxes (nach Pairing). Daten
-  // aus `state.printer_displays`; der Server pusht bei jeder Änderung einen
-  // frischen Snapshot. `assigned_printer_ids: null` = alle Pool-Drucker.
+  // Drucker-Displays (Bildschirme neben den Druckern) als Reiter innerhalb der
+  // „Druckerwarteschlange"-Karte: der erste Reiter („Druckerwarteschlange",
+  // statisch im HTML) zeigt Pool + zentrale Warteschlange. Pro verbundenes
+  // Display kommt ein weiterer Reiter hinzu (Short-ID + Statuspunkt: grau =
+  // unautorisiert, grün = autorisiert). Beim ersten Öffnen eines Display-
+  // Reiters steht dort die Code-Eingabe; nach Autorisation die Drucker-
+  // Zuweisungs-Checkboxes. Daten aus `state.printer_displays`; der Server
+  // pusht bei jeder Änderung einen frischen Snapshot. `assigned_printer_ids:
+  // null` = alle Pool-Drucker. Reiter kommen/verschwinden automatisch mit dem
+  // Verbindungsstand (connect fügt ein, disconnect/forgot poppt).
   function renderPrinterDisplays() {
-    const box = document.getElementById('printer-displays-box');
-    if (!box) return;
+    const tabList = document.getElementById('pd-tab-list');
+    const panelsHost = document.getElementById('pd-panels-displays');
+    const queueTab = document.getElementById('pd-tab-queue');
+    const queuePanel = document.getElementById('pd-panel-queue');
+    if (!tabList || !panelsHost || !queueTab || !queuePanel) return;
     const displays = state.printer_displays || [];
     const pool = state.printers || [];
-    if (!displays.length) {
-      box.innerHTML = '<p class="hint" style="margin:0">Kein Drucker-Display verbunden. „QR für Druckerdisplay" öffnen und den angezeigten Code hier eingeben.</p>';
+    // Aktiver Sub-Reiter aufräumen, falls sein Display verschwunden ist
+    // (Spiegel der Klassen-Tab-Logik in applyState).
+    if (activePdTab !== 'queue' && !displays.some(d => d.display_id === activePdTab)) {
+      activePdTab = 'queue';
+    }
+    // Tab-Leiste: je Display ein Reiter mit Short-ID + Statuspunkt.
+    tabList.innerHTML = displays.map(d => {
+      const short = d.display_id.slice(0, 6);
+      const dotCls = d.authorized ? 'pd-dot-green' : 'pd-dot-gray';
+      const title = d.authorized ? 'autorisiert' : 'Code eingeben';
+      return `<button class="pd-tab${activePdTab === d.display_id ? ' active' : ''}" data-pd-tab="${escapeHtml(d.display_id)}" title="${title}"><span class="pd-tab-dot ${dotCls}" aria-hidden="true"></span>${escapeHtml(short)}</button>`;
+    }).join('');
+    queueTab.classList.toggle('active', activePdTab === 'queue');
+    // Panels umschalten: Queue-Panel nur bei aktivem Queue-Reiter; sonst das
+    // aktive Display-Panel in den Displays-Container rendern.
+    const queueActive = activePdTab === 'queue';
+    queuePanel.classList.toggle('active', queueActive);
+    panelsHost.classList.toggle('active', !queueActive);
+    if (queueActive) { panelsHost.innerHTML = ''; return; }
+    const d = displays.find(x => x.display_id === activePdTab);
+    if (!d) { panelsHost.innerHTML = ''; return; }
+    const short = d.display_id.slice(0, 6);
+    if (!d.authorized) {
+      panelsHost.innerHTML = `<div class="pdd-row" data-display="${escapeHtml(d.display_id)}">
+        <span class="pdd-id">${escapeHtml(short)}</span>
+        <input class="pdd-code" type="text" inputmode="latin" autocapitalize="characters"
+               placeholder="Code" maxlength="4" style="width:90px;text-transform:uppercase">
+        <button class="secondary pdd-authorize">Zuordnen</button>
+      </div>`;
+      panelsHost.querySelector('.pdd-code')?.focus();
       return;
     }
-    box.innerHTML = displays.map(d => {
-      const short = d.display_id.slice(0, 6);
-      if (!d.authorized) {
-        return `<div class="pdd-row" data-display="${escapeHtml(d.display_id)}">
-          <span class="pdd-id">${escapeHtml(short)}</span>
-          <input class="pdd-code" type="text" inputmode="latin" autocapitalize="characters"
-                 placeholder="Code" maxlength="4" style="width:90px;text-transform:uppercase">
-          <button class="secondary pdd-authorize">Zuordnen</button>
-        </div>`;
-      }
-      const ids = d.assigned_printer_ids; // null = alle, sonst sortierte Liste
-      const checks = pool.map(p => {
-        const checked = ids === null || ids.includes(p.id);
-        return `<label class="pdd-check"><input type="checkbox" value="${escapeHtml(p.id)}"
-          ${checked ? 'checked' : ''} data-display="${escapeHtml(d.display_id)}">${escapeHtml(printerLabel(p))}</label>`;
-      }).join('');
-      const assignedLabel = ids === null
-        ? 'alle Drucker'
-        : (ids.length ? `${ids.length} Drucker` : 'kein Drucker');
-      return `<div class="pdd-row" data-display="${escapeHtml(d.display_id)}">
-        <div class="pdd-head">
-          <span class="pdd-id">${escapeHtml(short)}</span>
-          <span class="pdd-assigned">${escapeHtml(assignedLabel)} zugewiesen</span>
-          <button class="ghost pdd-forget">Vergessen</button>
-        </div>
-        <div class="pdd-checks">${checks || '<span class="hint">Kein Drucker im Pool.</span>'}</div>
-      </div>`;
+    const ids = d.assigned_printer_ids; // null = alle, sonst sortierte Liste
+    const checks = pool.map(p => {
+      const checked = ids === null || ids.includes(p.id);
+      return `<label class="pdd-check"><input type="checkbox" value="${escapeHtml(p.id)}"
+        ${checked ? 'checked' : ''} data-display="${escapeHtml(d.display_id)}">${escapeHtml(printerLabel(p))}</label>`;
     }).join('');
+    const assignedLabel = ids === null
+      ? 'alle Drucker'
+      : (ids.length ? `${ids.length} Drucker` : 'kein Drucker');
+    panelsHost.innerHTML = `<div class="pdd-row" data-display="${escapeHtml(d.display_id)}">
+      <div class="pdd-head">
+        <span class="pdd-id">${escapeHtml(short)}</span>
+        <span class="pdd-assigned">${escapeHtml(assignedLabel)} zugewiesen</span>
+        <button class="ghost pdd-forget">Vergessen</button>
+      </div>
+      <div class="pdd-checks">${checks || '<span class="hint">Kein Drucker im Pool.</span>'}</div>
+    </div>`;
   }
 
   function renderHelpers() {
@@ -1941,10 +1967,19 @@ window.__host = window.__host || {};
   document.getElementById('authorize-display-btn').addEventListener('click', authorizeDisplay);
   document.getElementById('show-mb-qr-btn').addEventListener('click', showMbQr);
   document.getElementById('show-display-qr-btn').addEventListener('click', showDisplayQr);
-  document.getElementById('show-printer-display-qr-btn').addEventListener('click', showPrinterDisplayQr);
+  // Drucker-Display-Reiter: „+" öffnet den QR zum Verbinden eines neuen Displays;
+  // Klick auf einen Reiter wechselt den aktiven Sub-Reiter innerhalb der
+  // „Druckerwarteschlange"-Karte.
+  document.getElementById('pd-tab-add').addEventListener('click', showPrinterDisplayQr);
+  document.getElementById('pd-tabs-bar').addEventListener('click', (e) => {
+    const tab = e.target.closest('[data-pd-tab]');
+    if (!tab) return;
+    activePdTab = tab.dataset.pdTab;
+    renderPrinterDisplays();
+  });
   // Drucker-Displays: delegierte Handler für die per innerHTML gerenderten
-  // Buttons/Checkboxes im #printer-displays-box (Zuordnen, Vergessen, Zuweisung).
-  const pdBox = document.getElementById('printer-displays-box');
+  // Buttons/Checkboxes im aktiven Display-Panel (Zuordnen, Vergessen, Zuweisung).
+  const pdBox = document.getElementById('pd-panels-displays');
   pdBox.addEventListener('click', (e) => {
     const authorizeBtn = e.target.closest('.pdd-authorize');
     if (authorizeBtn) {

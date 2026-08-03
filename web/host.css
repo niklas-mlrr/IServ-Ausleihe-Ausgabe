@@ -168,6 +168,29 @@
     .pdd-assigned { font-size: .82rem; opacity: .6; }
     .pdd-checks { display: flex; flex-wrap: wrap; gap: 6px 14px; }
     .pdd-check { display: inline-flex; align-items: center; gap: 5px; font-size: .85rem; }
+    /* Sub-Reiter innerhalb der „Druckerwarteschlange"-Karte: Reiter 1 =
+       Queue (statisch), weitere je verbundenem Drucker-Display + „+" zum
+       Verbinden. Spiegel von #tab-bar (Zeile 231), nur kompakt in der Karte. */
+    .pd-tabs {
+      display: flex; align-items: stretch; gap: 2px; flex-wrap: wrap;
+      border-bottom: 1px solid var(--border); margin-bottom: 12px;
+    }
+    /* Die dynamischen Display-Reiter liegen in einem <span>-Wrapper; display:
+       contents lässt sie direkt am Flex der .pd-tabs-Leiste teilnehmen, damit
+       Höhen + Border mit dem statischen Queue-Reiter ausrichten. */
+    #pd-tab-list { display: contents; }
+    .pd-tabs .pd-tab, .pd-tabs .pd-tab-add {
+      background: transparent; color: var(--text-muted);
+      padding: 6px 12px; font-size: .85rem; cursor: pointer;
+      border: 1px solid transparent; border-bottom: none; border-radius: 8px 8px 0 0;
+    }
+    .pd-tabs .pd-tab:hover, .pd-tabs .pd-tab-add:hover { background: var(--surface-2); color: var(--text); }
+    .pd-tabs .pd-tab.active { background: var(--surface-2); color: var(--text); border-color: var(--border); }
+    .pd-tabs .pd-tab { display: inline-flex; align-items: center; gap: 6px; }
+    .pd-tabs .pd-tab-add { font-size: 1.1rem; padding: 6px 12px; }
+    .pd-tab-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+    .pd-dot-gray { background: var(--text-muted); opacity: .5; }
+    .pd-dot-green { background: var(--ok); }
     .badge {
       display: inline-block;
       padding: 2px 8px;
