@@ -40,9 +40,14 @@
       display: grid; gap: 16px;
       grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
     }
+    /* z-index: Drucker-Karten (2) über der Warteschlangen-Karte (1), damit ein
+       Auftrag, der per FLIP von der Warteschlange in einen Drucker wandert (und
+       dabei kurz über der Warteschlangen-Karte steht), VOR deren weißem Kasten
+       malt — nicht dahinter. position:relative für z-index nötig. */
     .printer-card {
       background: var(--card); border-radius: 14px; padding: 20px 22px;
       border: 1px solid var(--card-border); min-width: 0;
+      position: relative; z-index: 2;
       transition: transform .5s cubic-bezier(.22, .61, .36, 1);
     }
     /* Layout: Druckerkarten im Grid, darunter der Warteschlangen-Kasten
@@ -51,6 +56,7 @@
     .dd-waiting-card {
       background: var(--card); border-radius: 14px; padding: 20px 22px;
       border: 1px solid var(--card-border);
+      position: relative; z-index: 1;
       transition: transform .5s cubic-bezier(.22, .61, .36, 1);
     }
     .dd-waiting-card .hint { margin-top: 4px; }
@@ -58,8 +64,12 @@
       overflow-wrap: anywhere; line-height: 1.1; }
     /* Kategorien „Gedruckt" / „Wird gedruckt" / „Nächster" unter dem Namen. */
     .dd-cat { margin-top: 18px; }
+    /* Labels gleiten per FLIP nach, wenn eine Kategorie kollabiert (z. B. das
+       „Gedruckt"-Kästchen nach TTL verschwindet → „Wird gedruckt"/„Nächster"
+       rücken nach oben) — darum dieselbe transform-Transition wie die Karten. */
     .dd-cat-label { font-size: 1.5rem; font-weight: 600; opacity: .5;
-      text-transform: uppercase; letter-spacing: .06em; margin-bottom: 10px; }
+      text-transform: uppercase; letter-spacing: .06em; margin-bottom: 10px;
+      transition: transform .5s cubic-bezier(.22, .61, .36, 1); }
     /* Auftrags-Kästchen: eigenes kleines Panel wie der Drucker selbst eines
        ist. Grid mit fester Klassen-Spalte → Namen stehen bündig untereinander.
        FLIP-Transition (transform) wie die Bücherliste im Helferclient. */
@@ -69,7 +79,7 @@
       background: var(--surface); border: 1px solid var(--card-border);
       border-radius: 10px; padding: 10px 12px; margin-top: 8px;
       font-size: 1.6rem; line-height: 1.3; overflow-wrap: anywhere;
-      position: relative;
+      position: relative; z-index: 1;
       transition: transform .5s cubic-bezier(.22, .61, .36, 1);
     }
     .dd-order:first-child { margin-top: 0; }
@@ -86,7 +96,7 @@
     .dd-ico { width: 1em; height: 1em; }
     .dd-origin-name { overflow-wrap: anywhere; }
     @media (prefers-reduced-motion: reduce) {
-      .dd-order, .printer-card, .dd-waiting-card { transition: transform .01ms !important; }
+      .dd-order, .printer-card, .dd-waiting-card, .dd-cat-label { transition: transform .01ms !important; }
     }
     /* Druckerfehler: Name + „ - Fehler" rot in Namensgröße, darunter der
        Betreuer-Hinweis. Die Auftrags-Kategorien bleiben sichtbar, die Namen

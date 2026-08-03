@@ -436,6 +436,10 @@ class PrintQueue:
                     for other in finalized_preds:
                         await self._notify_result(other)
                     await self._notify_all()
+                    # Kapazität wurde frei (Vorgänger aus dem Slot) → Scheduler
+                    # wecken, damit der nächste Warteschlangen-Auftrag nachrückt
+                    # (Pipeline voll halten, wie im normalen Finalize-Pfad).
+                    self._wake.set()
             elif time.monotonic() - last_change > _INACTIVITY_TIMEOUT_S:
                 # Hängender Drucker: kein Statuswechsel seit `_INACTIVITY_TIMEOUT_S`.
                 await self._handle_stall(printer_id, job, last_state)

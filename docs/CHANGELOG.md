@@ -8,6 +8,37 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-03 — Drucker-Display: Labels gleiten, z-index, Überlauf-Ausblendung, Vorgänger-Dispatch
+
+- **Kategorie-Labels gleiten (Q2 + neu):** „Gedruckt"/„Wird gedruckt"/„Nächster"
+  bekamen eigene FLIP-Schlüssel (`data-flip-id`). Kollabiert eine Kategorie —
+  „Gedruckt"-Kästchen verschwindet nach TTL, oder ein Auftrag verlässt „Wird
+  gedruckt"/„Nächster" — gleiten das/die Label(s) und alle Kästchen darunter
+  nach oben statt zu springen. Realisiert über den neuen `flipFromOldRects`-
+  Helfer, der Karten, Auftrags-Kästchen UND Labels FLIPt.
+- **Kein Doppel-FLIP (Karte + Inhalt):** innere Elemente (Kästchen, Labels)
+  werden RELATIV zur jeweiligen Karte gerechnet (Karten-Delta abgezogen). Bisher
+  wurde die absolute Bewegung genutzt — das hätte doppelt gegriffen, sobald eine
+  Karte selbst wandert (z. B. Warteschlangen-Karte rückt nach, weil das Grid
+  darüber wächst). Jetzt übernimmt der Karten-FLIP das Mitwandern, der innere
+  FLIP nur die Bewegung innerhalb der Karte.
+- **z-index (Teil 3):** `.printer-card` (z 2) über `.dd-waiting-card` (z 1) +
+  `.dd-order { z-index:1 }` — ein Auftrag, der per FLIP von der Warteschlange in
+  einen Drucker wandert, malt VOR den weißen Kästen (Drucker + Warteschlange),
+  nicht dahinter. `position: relative` für z-index nötig (Karten).
+- **Überlauf-Ausblendung, nur Warteschlangen-Karte (Q3):** `applyWaitingOverflow`
+  kappt bei Namens-Überlauf die Kartenhöhe (`maxHeight`, `overflow:hidden`) und
+  blendet den untersten Bereich (eine Zeile) von oben deckend nach unten
+  transparent aus (`mask-image: linear-gradient`); überlappende Namen sind
+  vollständig transparent — der Kasten endet rechtzeitig. Aufgerufen nach
+  jedem Render (vor dem FLIP) + bei Resize (debounced). Drucker-Karten bleiben
+  unberührt.
+- **Vorgänger-Dispatch (Q1):** wenn ein Vorgänger beim Start des nächsten
+  finalisiert wird (voriger Commit), wird jetzt auch der Scheduler geweckt
+  (`_wake.set()`) — der nächste Warteschlangen-Auftrag rückt sofort nach
+  (Pipeline voll halten), wie im normalen Finalize-Pfad.
+- **Tests:** 325 passed, ruff clean.
+
 ## 2026-08-03 — Druckwechsel: Vorgänger beim Start des nächsten finalisieren
 
 - **Wurzel im Backend gekappt (nicht nur Frontend-Kompensation):** ein Drucker

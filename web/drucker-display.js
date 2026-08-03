@@ -97,6 +97,121 @@ function orderBoxFromRaw(key, raw, extraClass, originator) {
   return orderBox(key, name, form, extraClass, originator);
 }
 
+// FLIP nach einer DOM-Änderung: Karten, Auftrags-Kästchen UND Kategorie-Labels
+// von ihren alten an ihre neuen Positionen gleiten lassen. Die Bewegung der
+// inneren Elemente (Kästchen, Labels) wird RELATIV zur jeweiligen Karte
+// gerechnet (Karten-Delta abgezogen), damit der Karten-FLIP nicht doppelt
+// greift: ein Kästchen, dessen Karte nach unten wandert (z. B. weil das Grid
+// darüber wächst), bekommt nur die Bewegung INNERHALB seiner Karte als eigene
+// transform — das Mitwandern mit der Karte übernimmt deren FLIP. So springt
+// nichts, und keine Bewegung bricht eine andere ab (Snapshots werden in
+// scheduleQueueRender koalesziert). Spiegel der Bücherliste (scan-render.js),
+// hier aber mit Karten als zusätzlicher Behälter-Ebene.
+function flipFromOldRects(oldCardRects, oldOrderRects, oldLabelRects) {
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // Karten-Deltas (Bewegung je Karte) — Grundlage für den relativen FLIP der
+  // inneren Elemente. Vor allen transform-Zuweisungen messen, damit die Karten
+  // noch im untransformierten Zustand sind.
+  const cardDeltas = new Map();
+  content.querySelectorAll('.printer-card, .dd-waiting-card').forEach(el => {
+    const old = oldCardRects.get(el.dataset.flipId);
+    const cur = el.getBoundingClientRect();
+    cardDeltas.set(el, old ? { dx: old.left - cur.left, dy: old.top - cur.top } : { dx: 0, dy: 0 });
+  });
+  // Auftrags-Kästchen: translate + scale, relativ zur Karte. Behälterwechsel
+  // (Warteschlange → Nächster → Wird gedruckt → Gedruckt) verbindet der stabile
+  // job_id-Schlüssel; das Kästchen wandert UND schrumpft (Drucker-Spalte ist
+  // schmaler als die vollbreite Warteschlange). transform-origin 0 0, damit
+  // scale + translate die alte Box exakt treffen. Neue Kästchen (kein alter
+  // Eintrag) erscheinen sofort — Erscheinen wird nicht animiert.
+  content.querySelectorAll('.dd-order[data-order-key]').forEach(el => {
+    const old = oldOrderRects.get(el.dataset.orderKey);
+    if (!old) return;
+    const cur = el.getBoundingClientRect();
+    const card = el.closest('.printer-card, .dd-waiting-card');
+    const cd = cardDeltas.get(card) || { dx: 0, dy: 0 };
+    const dx = (old.left - cur.left) - cd.dx;
+    const dy = (old.top - cur.top) - cd.dy;
+    const sx = cur.width ? old.width / cur.width : 1;
+    const sy = cur.height ? old.height / cur.height : 1;
+    if (!dx && !dy && Math.abs(sx - 1) < 0.01 && Math.abs(sy - 1) < 0.01) return;
+    el.style.transition = 'none';
+    el.style.transformOrigin = '0 0';
+    el.style.transform = `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`;
+    el.offsetWidth;  // Reflow erzwingen, damit die Startposition greift
+    el.style.transition = reduceMotion ? 'transform .01ms' : '';
+    el.style.transform = '';
+  });
+  // Kategorie-Labels („Gedruckt"/„Wird gedruckt"/„Nächster"/„Warteschlange"):
+  // gleiten nach, wenn eine Kategorie kollabiert — z. B. „Gedruckt"-Kästchen
+  // nach TTL verschwindet → „Wird gedruckt"/„Nächster" rücken nach oben, oder
+  // ein Auftrag verlässt „Wird gedruckt"/„Nächster" → der Rest darunter gleitet
+  // hoch. translate, relativ zur Karte; kein scale (Label behält Breite).
+  content.querySelectorAll('.dd-cat-label[data-flip-id]').forEach(el => {
+    const old = oldLabelRects.get(el.dataset.flipId);
+    if (!old) return;
+    const cur = el.getBoundingClientRect();
+    const card = el.closest('.printer-card, .dd-waiting-card');
+    const cd = cardDeltas.get(card) || { dx: 0, dy: 0 };
+    const dx = (old.left - cur.left) - cd.dx;
+    const dy = (old.top - cur.top) - cd.dy;
+    if (!dx && !dy) return;
+    el.style.transition = 'none';
+    el.style.transform = `translate(${dx}px, ${dy}px)`;
+    el.offsetWidth;
+    el.style.transition = reduceMotion ? 'transform .01ms' : '';
+    el.style.transform = '';
+  });
+  // Karten selbst: translate (kein scale — Karten behalten ihre Breite). Als
+  // Letztes, damit die inneren Elemente vorher im untransformierten Rahmen der
+  // Karte gemessen wurden.
+  content.querySelectorAll('.printer-card, .dd-waiting-card').forEach(el => {
+    const old = oldCardRects.get(el.dataset.flipId);
+    if (!old) return;
+    const cur = el.getBoundingClientRect();
+    const dx = old.left - cur.left;
+    const dy = old.top - cur.top;
+    if (!dx && !dy) return;
+    el.style.transition = 'none';
+    el.style.transform = `translate(${dx}px, ${dy}px)`;
+    el.offsetWidth;
+    el.style.transition = reduceMotion ? 'transform .01ms' : '';
+    el.style.transform = '';
+  });
+}
+
+// Überlauf der Warteschlangen-Karte: reichen die Namen nicht ins Sichtfeld,
+// endet der weiße Kasten rechtzeitig, und die überlappenden Namen werden
+// vollständig transparent — der unterste Bereich (eine Zeile hoch) blendet
+// von oben (deckend) nach unten (transparent) aus, läuft also aus. Nur die
+// Warteschlangen-Karte (nicht die Drucker-Karten). Aufgerufen nach jedem
+// Render (vor dem FLIP) und bei Fenster-Resize (debounced).
+let waitingOverflowTimer = null;
+function applyWaitingOverflow() {
+  const card = content.querySelector('.dd-waiting-card');
+  if (!card) return;
+  const top = card.getBoundingClientRect().top;
+  const avail = window.innerHeight - top - 24;  // Seitenabstand unten
+  if (avail <= 0) {
+    card.style.maxHeight = ''; card.style.overflow = '';
+    card.style.maskImage = ''; card.style.webkitMaskImage = '';
+    return;
+  }
+  // Eine Zeile hoch für den Ausblende-Bereich (Schriftgröße + Padding).
+  const row = card.querySelector('.dd-order');
+  const rowH = row ? row.getBoundingClientRect().height : 60;
+  if (card.scrollHeight > avail) {
+    card.style.maxHeight = avail + 'px';
+    card.style.overflow = 'hidden';
+    const fade = `linear-gradient(to bottom, black calc(100% - ${rowH}px), transparent 100%)`;
+    card.style.maskImage = fade;
+    card.style.webkitMaskImage = fade;
+  } else {
+    card.style.maxHeight = ''; card.style.overflow = '';
+    card.style.maskImage = ''; card.style.webkitMaskImage = '';
+  }
+}
+
 function renderQueue(msg) {
   const pool = Array.isArray(msg.printers) ? msg.printers : [];
 
@@ -125,6 +240,13 @@ function renderQueue(msg) {
   const oldCardRects = new Map();
   content.querySelectorAll('.printer-card, .dd-waiting-card').forEach(el => {
     oldCardRects.set(el.dataset.flipId, el.getBoundingClientRect());
+  });
+  // Labels („Gedruckt"/„Wird gedruckt"/„Nächster"/„Warteschlange") — eigener
+  // FLIP-Schlüssel, damit sie nachgleiten, wenn eine Kategorie kollabiert
+  // (z. B. „Gedruckt"-Kästchen verschwindet → darunter rückt alles nach oben).
+  const oldLabelRects = new Map();
+  content.querySelectorAll('.dd-cat-label[data-flip-id]').forEach(el => {
+    oldLabelRects.set(el.dataset.flipId, el.getBoundingClientRect());
   });
 
   const rows = pool.map(p => {
@@ -174,15 +296,15 @@ function renderQueue(msg) {
       <div class="printer-name${faulty ? ' dd-fault-name' : ''}">${escapeHtml(printerLabel(p))}${nameSuffix}</div>
       ${faultMsg}
       <div class="dd-cat dd-printed" data-printed-for="${escapeHtml(p.id)}">
-        <div class="dd-cat-label">Gedruckt</div>
+        <div class="dd-cat-label" data-flip-id="${escapeHtml(p.id)}::printed">Gedruckt</div>
         ${printedBox}
       </div>
       <div class="dd-cat dd-printing">
-        <div class="dd-cat-label">Wird gedruckt</div>
+        <div class="dd-cat-label" data-flip-id="${escapeHtml(p.id)}::printing">Wird gedruckt</div>
         ${printingBox}
       </div>
       <div class="dd-cat dd-next">
-        <div class="dd-cat-label">Nächster</div>
+        <div class="dd-cat-label" data-flip-id="${escapeHtml(p.id)}::next">Nächster</div>
         ${nextBoxes}
       </div>
     </div>`;
@@ -201,7 +323,7 @@ function renderQueue(msg) {
     orderBox(w.job_id || `queue::${w.student}`, w.student || '', w.form || '', '', w.originator_info)
   ).join('');
   const waitingCard = `<div class="dd-waiting-card" data-flip-id="__queue__">
-    <div class="dd-cat-label">Warteschlange (${waiting.length})</div>
+    <div class="dd-cat-label" data-flip-id="__queue__::label">Warteschlange (${waiting.length})</div>
     ${waitingRows || '<p class="hint">Keine Aufträge in der Warteschlange.</p>'}
   </div>`;
 
@@ -210,46 +332,17 @@ function renderQueue(msg) {
     ${waitingCard}
   </div>`;
 
-  // FLIP-Animation der Auftrags-Kästchen: jedes, das schon da war, startet an
-  // seiner alten Position + Größe (translate + scale) und fährt zur neuen
-  // (transform→ ''). So wandert ein Auftrag beim Behälterwechsel (z. B.
-  // Warteschlange → Nächster) von der breiten Warteschlange in die schmalere
-  // Drucker-Spalte — bewegt UND schrumpft. Neue Kästchen (kein alter Eintrag)
-  // erscheinen sofort. transform-origin 0 0, damit scale + translate zusammen
-  // die alte Box exakt treffen.
-  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  content.querySelectorAll('.dd-order[data-order-key]').forEach(el => {
-    const old = oldRects.get(el.dataset.orderKey);
-    if (!old) return;
-    const cur = el.getBoundingClientRect();
-    const dx = old.left - cur.left;
-    const dy = old.top - cur.top;
-    const sx = cur.width ? old.width / cur.width : 1;
-    const sy = cur.height ? old.height / cur.height : 1;
-    if (!dx && !dy && Math.abs(sx - 1) < 0.01 && Math.abs(sy - 1) < 0.01) return;
-    el.style.transition = 'none';
-    el.style.transformOrigin = '0 0';
-    el.style.transform = `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`;
-    el.offsetWidth;  // Reflow erzwingen, damit die Startposition greift
-    el.style.transition = reduceMotion ? 'transform .01ms' : '';
-    el.style.transform = '';
-  });
-  // FLIP der Drucker-/Warteschlangen-Karten: verschieben sich die Karten (z. B.
-  // weil eine Reihe durch einen neuen Auftrag wächst), gleiten sie an ihre neue
-  // Position statt zu springen. Kein scale (Karten behalten ihre Breite).
-  content.querySelectorAll('.printer-card, .dd-waiting-card').forEach(el => {
-    const old = oldCardRects.get(el.dataset.flipId);
-    if (!old) return;
-    const cur = el.getBoundingClientRect();
-    const dx = old.left - cur.left;
-    const dy = old.top - cur.top;
-    if (!dx && !dy) return;
-    el.style.transition = 'none';
-    el.style.transform = `translate(${dx}px, ${dy}px)`;
-    el.offsetWidth;
-    el.style.transition = reduceMotion ? 'transform .01ms' : '';
-    el.style.transform = '';
-  });
+  // Überlauf der Warteschlangen-Karte: zu viele Namen → der weiße Kasten endet
+  // rechtzeitig, überlappende Namen werden transparent ausgeblendet (nur die
+  // Warteschlangen-Karte, nicht die Drucker-Karten). Vor dem FLIP anwenden,
+  // damit die Höhenkappe während der Animation bereits steht.
+  applyWaitingOverflow();
+
+  // FLIP: Karten, Auftrags-Kästchen UND Kategorie-Labels von ihren alten an
+  // ihre neuen Positionen gleiten lassen. Innere Elemente (Kästchen, Labels)
+  // werden relativ zur jeweiligen Karte gerechnet (Karten-Delta abgezogen),
+  // damit der Karten-FLIP nicht doppelt greift (s. flipFromOldRects).
+  flipFromOldRects(oldCardRects, oldRects, oldLabelRects);
 
   // Pro „Gedruckt"-Block einen Timer setzen, der ihn nach der Rest-TTL
   // ausblendet (falls kein neuer Snapshot vorher nachzieht). Das Kästchen
@@ -307,27 +400,29 @@ function scheduleQueueRender(msg) {
 function removePrintedAndFlip(pid) {
   const card = content.querySelector(`.printer-card[data-printer="${CSS.escape(pid)}"]`);
   if (!card) return;
+  // Alte Positionen JE Element merken (Karten, Auftrags-Kästchen, Labels),
+  // BEVOR das „Gedruckt"-Kästchen entfernt wird — so gleitet danach alles
+  // (Label „Wird gedruckt"/„Nächster", weitere Kästchen, die Warteschlangen-
+  // Karte) an seine neue Position statt zu springen.
   const oldCardRects = new Map();
   content.querySelectorAll('.printer-card, .dd-waiting-card').forEach(el => {
     oldCardRects.set(el.dataset.flipId, el.getBoundingClientRect());
   });
-  // Nur das Auftrags-Kästchen entfernen — das Label „Gedruckt" bleibt stehen.
-  card.querySelector('.dd-printed .dd-order')?.remove();
-  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  content.querySelectorAll('.printer-card, .dd-waiting-card').forEach(el => {
-    const old = oldCardRects.get(el.dataset.flipId);
-    if (!old) return;
-    const cur = el.getBoundingClientRect();
-    const dx = old.left - cur.left;
-    const dy = old.top - cur.top;
-    if (!dx && !dy) return;
-    el.style.transition = 'none';
-    el.style.transform = `translate(${dx}px, ${dy}px)`;
-    el.offsetWidth;
-    el.style.transition = reduceMotion ? 'transform .01ms' : '';
-    el.style.transform = '';
+  const oldOrderRects = new Map();
+  content.querySelectorAll('.dd-order[data-order-key]').forEach(el => {
+    oldOrderRects.set(el.dataset.orderKey, el.getBoundingClientRect());
   });
+  const oldLabelRects = new Map();
+  content.querySelectorAll('.dd-cat-label[data-flip-id]').forEach(el => {
+    oldLabelRects.set(el.dataset.flipId, el.getBoundingClientRect());
+  });
+  // Nur das Auftrags-Kästchen entfernen — das Label „Gedruckt" bleibt stehen.
+  // Das Verschwinden selbst wird nicht animiert (Nutzer-Vorgabe), der Rest
+  // gleitet per flipFromOldRects nach.
+  card.querySelector('.dd-printed .dd-order')?.remove();
+  flipFromOldRects(oldCardRects, oldOrderRects, oldLabelRects);
   flipAnimating = true;
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
   setTimeout(flushPendingQueue, reduceMotion ? 80 : FLIP_MS);
 }
 
@@ -388,3 +483,10 @@ connectWebSocket(() => `wss://${location.host}/ws/drucker-display?token=${encode
 });
 
 show('register');
+
+// Bei Resize die Überlauf-Ausblendung der Warteschlangen-Karte neu berechnen
+// (debounced — nicht pro Resize-Event feuren).
+window.addEventListener('resize', () => {
+  if (waitingOverflowTimer) clearTimeout(waitingOverflowTimer);
+  waitingOverflowTimer = setTimeout(applyWaitingOverflow, 100);
+});
