@@ -37,9 +37,10 @@
     }
     .printer-card {
       background: var(--card); border-radius: 14px; padding: 20px 22px;
-      border: 1px solid var(--card-border);
+      border: 1px solid var(--card-border); min-width: 0;
     }
-    .printer-name { font-size: 1.5rem; font-weight: 600; margin-bottom: 8px; }
+    .printer-name { font-size: 1.5rem; font-weight: 600; margin-bottom: 8px;
+      overflow-wrap: anywhere; }
     .printer-status { font-size: 1.2rem; opacity: .85; line-height: 1.4; }
     .dot { width: 14px; height: 14px; border-radius: 50%; display: inline-block;
            background: #888; margin-right: 10px; vertical-align: middle; }

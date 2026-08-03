@@ -84,7 +84,7 @@ function renderQueue(msg) {
        </table>`
     : '<div class="section-label">Zentrale Warteschlange</div><p class="hint">Zentrale Warteschlange leer.</p>';
 
-  content.innerHTML = `<div class="section-label">Drucker (${pool.length})</div><div class="grid">${rows}</div>${waitBlock}`;
+  content.innerHTML = `<div class="section-label">Drucker (${pool.length})</div><div class="grid" style="grid-template-columns:repeat(${pool.length},minmax(0,1fr))">${rows}</div>${waitBlock}`;
 }
 
 function applyTheme(theme) {
