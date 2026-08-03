@@ -8,6 +8,23 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-03 — Drucker-Display: Bewegungen nicht abbrechen, Klasse robuster
+
+- **Snapshot-Koalescing (Bewegungen nicht abbrechen):** trifft während einer
+  laufenden FLIP-Animation ein neuer Snapshot ein, wird er gehalten und erst
+  nach Ablauf der Animation (FLIP_MS = 500ms) als aktuellster nachgezogen. So
+  startet keine neue Bewegung, die eine noch laufende mittendrin abbricht —
+  jede Bewegung wird vollständig sichtbar (Nutzer-Vorgabe). Eintreffende
+  Snapshots werden zum letzten gepoolt (nur der aktuellste zählt). Bei
+  `prefers-reduced-motion` nur 80ms Pooling (die FLIP-Animation ist eh instant).
+- **Klasse in der Warteschlange robuster:** `orderBox` bekommt `name` + `form`
+  jetzt direkt (vorher kombinierter String + parseOrder-Roundtrip). Die
+  Warteschlange reicht `w.student` + `w.form` getrennt — die Klasse steht
+  zuverlässig in der eigenen Spalte, auch wenn `w.form` fehlen sollte. Neue
+  Helferfunktion `orderBoxFromRaw` für kombinierte Strings (`j.name`,
+  `printed_name`).
+- Frontend-only (kein Backend-/Test-Änderung). 323 passed, ruff clean.
+
 ## 2026-08-03 — Drucker-Display: FLIP Warteschlange↔Drucker, Klasse, Schriftgrößen
 
 - **FLIP über Behälter hinweg (Warteschlange → Drucker):** Auftrags-Kästchen

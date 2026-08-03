@@ -16,6 +16,17 @@ let printedTimers = [];
 // (der Token bleibt verboten — erneute Verbindungsversuche sind sinnlos und
 // würden nur „gesperrt"-Meldungen flackern lassen).
 let forbidden = false;
+// Snapshot-Koalescing für die FLIP-Animation: trifft während einer laufenden
+// Bewegung (FLIP_MS) ein neuer Snapshot ein, wird er gehalten und erst
+// angewendet, wenn die Bewegung abgelaufen ist. So startet keine neue
+// Bewegung, die eine noch laufende abbricht (Nutzer-Vorgabe: alle Bewegungen
+// sichtbar, keine darf eine andere mittendrin abreißen). Eintreffende
+// Snapshots zwischenzeitlich werden zum letzten gepoolt (nur der aktuellste
+// zählt). Erscheinen/Verschwinden (neuer/entfernter Schlüssel) animiert nicht
+// — nur Positions-/Größenänderungen bewegen sich.
+const FLIP_MS = 500;
+let flipAnimating = false;
+let pendingQueueMsg = null;
 
 function show(name) {
   viewRegister.classList.toggle('show', name === 'register');
@@ -62,14 +73,22 @@ function originatorHtml(o) {
 // kategorie). So fährt ein Auftrag beim Wechseln des Behälters (z. B.
 // Warteschlange → Nächster → Wird gedruckt → Gedruckt) von seiner alten an
 // seine neue Position + Größe, statt zu springen.
-function orderBox(key, raw, extraClass, originator) {
-  const { name, form } = parseOrder(raw);
+// `name`/`form` kommen direkt (Warteschlange: w.student/w.form) oder werden
+// aus dem kombinierten String „Name (Form)" gesplittet (Druckeraufträge:
+// j.name, printed_name) — letzteres via parseOrder.
+function orderBox(key, name, form, extraClass, originator) {
   const cls = extraClass ? ` ${extraClass}` : '';
   return `<div class="dd-order${cls}" data-order-key="${escapeHtml(key)}">`
-    + `<span class="dd-form">${escapeHtml(form)}</span>`
+    + `<span class="dd-form">${escapeHtml(form || '')}</span>`
     + `<span class="dd-stname">${escapeHtml(name)}</span>`
     + `<span class="dd-origin">${originatorHtml(originator)}</span>`
     + `</div>`;
+}
+// Variante für kombinierte Strings „Name (Form)" (Druckeraufträge, gedruckt):
+// splittet per parseOrder und reicht die Teile an orderBox weiter.
+function orderBoxFromRaw(key, raw, extraClass, originator) {
+  const { name, form } = parseOrder(raw);
+  return orderBox(key, name, form, extraClass, originator);
 }
 
 function renderQueue(msg) {
@@ -117,12 +136,12 @@ function renderQueue(msg) {
     // halt leer. So bleibt das Layout pro Drucker stabil. FLIP-Schlüssel je
     // Box = job_id (stabil über Behälterwechsel).
     const printedBox = printed
-      ? orderBox(p.printed_job_id || `printed::${p.id}::${printed}`, printed, '', p.printed_originator)
+      ? orderBoxFromRaw(p.printed_job_id || `printed::${p.id}::${printed}`, printed, '', p.printed_originator)
       : '';
     const printingBox = printingOrd
-      ? orderBox(printingOrd.id, printingOrd.name, '', printingOrd.originator) : '';
-    const nextBoxes = spooledOrds.map(o => orderBox(o.id, o.name, '', o.originator)).join('')
-      + blockedOrds.map(o => orderBox(o.id, o.name, 'dd-order-blocked', o.originator)).join('');
+      ? orderBoxFromRaw(printingOrd.id, printingOrd.name, '', printingOrd.originator) : '';
+    const nextBoxes = spooledOrds.map(o => orderBoxFromRaw(o.id, o.name, '', o.originator)).join('')
+      + blockedOrds.map(o => orderBoxFromRaw(o.id, o.name, 'dd-order-blocked', o.originator)).join('');
     // Bei Fehler: Name + „ - Fehler" in rot, gleicher Schriftgröße wie der Name;
     // darunter der Betreuer-Hinweis. Die Kategorien (Aufträge) bleiben sichtbar.
     const faulty = !!p.faulty;
@@ -154,13 +173,12 @@ function renderQueue(msg) {
   // Druckeraufträge; FLIP-Schlüssel = job_id (gleich wie in den Druckerkarten),
   // sodass ein Auftrag beim Dispatch fließend von der Warteschlange in den
   // Drucker fährt (und dabei schrumpft, weil die Drucker-Spalte schmaler ist).
-  // `w.student` führt die Klasse nicht im String (slip_name bekommt form=None),
-  // daher anhängen, damit parseOrder() sie extrahiert.
+  // `w.student` (ohne Klasse, slip_name bekommt form=None) + `w.form` getrennt
+  // an orderBox — die Klasse steht damit zuverlässig in der eigenen Spalte.
   const waiting = Array.isArray(msg.waiting_list) ? msg.waiting_list : [];
-  const waitingRows = waiting.map(w => {
-    const raw = w.form ? `${w.student} (${w.form})` : w.student;
-    return orderBox(w.job_id || `queue::${raw}`, raw, '', w.originator_info);
-  }).join('');
+  const waitingRows = waiting.map(w =>
+    orderBox(w.job_id || `queue::${w.student}`, w.student || '', w.form || '', '', w.originator_info)
+  ).join('');
   const waitingCard = `<div class="dd-waiting-card" data-flip-id="__queue__">
     <div class="dd-cat-label">Warteschlange (${waiting.length})</div>
     ${waitingRows || '<p class="hint">Keine Aufträge in der Warteschlange.</p>'}
@@ -245,11 +263,35 @@ function applyLabel(label) {
   if (el) el.textContent = (label && label.trim()) ? label : '';
 }
 
+// Queue-Snapshot geordnet anwenden: während einer FLIP-Animation (FLIP_MS)
+// eintreffende Snapshots poolen und nach Ablauf einmalig (als aktuellster)
+// nachziehen. Siehe Block am Dateianfang (Snapshot-Koalescing).
+function scheduleQueueRender(msg) {
+  show('queue');
+  if (flipAnimating) { pendingQueueMsg = msg; return; }
+  renderQueue(msg);
+  flipAnimating = true;
+  // Bei reduzierter Bewegung ist die FLIP-Animation instant (.01ms) — dann
+  // nur kurzes Pooling gegen Flackern, kein 500ms-Lag.
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  setTimeout(flushPendingQueue, reduceMotion ? 80 : FLIP_MS);
+}
+
+function flushPendingQueue() {
+  flipAnimating = false;
+  if (pendingQueueMsg) {
+    const m = pendingQueueMsg; pendingQueueMsg = null;
+    scheduleQueueRender(m);
+  }
+}
+
 function handleServerMessage(msg) {
   if (msg.type === 'forbidden') {
     // Vom Betreuer gesperrt (× am Host). Kein Reconnect — der Token bleibt
-    // verboten, auch ein Reload liefert wieder „gesperrt".
+    // verboten, auch ein Reload liefert wieder „gesperrt". Eine eventuell
+    // wartende Queue-Animation verwerfen (das Display zeigt nicht mehr queue).
     forbidden = true;
+    pendingQueueMsg = null;
     show('forbidden');
     return;
   }
@@ -261,8 +303,7 @@ function handleServerMessage(msg) {
     document.getElementById('reg-code').textContent = msg.code || '····';
     show('register');
   } else if (msg.type === 'queue') {
-    renderQueue(msg);
-    show('queue');
+    scheduleQueueRender(msg);
   }
 }
 
