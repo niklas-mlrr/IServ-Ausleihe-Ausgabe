@@ -203,7 +203,12 @@
     .pdd-field-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
     .pdd-field-label { font-size: .8rem; font-weight: 700; text-transform: uppercase;
       letter-spacing: .04em; opacity: .7; }
-    .pdd-field-row .pdd-name { width: 220px; }
+    /* Eingabefeld + Speichern-Button auf gleiche Höhe bringen: gleicher Font-Size,
+       gleiche Gesamthöhe (border-box) und keine Margin unter dem Input. */
+    .pdd-field-row .pdd-name { width: 220px; margin-bottom: 0; font-size: .95rem;
+      height: 40px; padding: 0 12px; }
+    .pdd-field-row .pdd-name-save { height: 40px; padding: 0 16px; font-size: .95rem;
+      display: inline-flex; align-items: center; justify-content: center; }
     .pdd-theme { opacity: 1; text-transform: none; letter-spacing: 0; font-weight: 400;
       margin-left: auto; }
     .pdd-section-label { font-size: .8rem; font-weight: 700; text-transform: uppercase;
