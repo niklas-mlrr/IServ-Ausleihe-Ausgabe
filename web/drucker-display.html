@@ -14,11 +14,13 @@
     :root {
       --bg: #111; --text: #eee; --card: #1c1c1e; --card-border: #2c2c2e;
       --row-border: #1f1f21; --muted: #9a9a9e;
+      --surface: #2c2c2e;
       --danger: #ff3b30; --danger-text: #ff6b6b;
     }
     [data-theme="light"] {
       --bg: #f5f5f7; --text: #1c1c1e; --card: #ffffff; --card-border: #e5e5ea;
       --row-border: #ececee; --muted: #6e6e73;
+      --surface: #e9e9ee;
       --danger: #ff3b30; --danger-text: #d70015;
     }
     body {
@@ -45,19 +47,34 @@
     .printer-name { font-size: 2.4rem; font-weight: 700; margin-bottom: 14px;
       overflow-wrap: anywhere; line-height: 1.1; }
     /* Kategorien „Gedruckt" / „Wird gedruckt" / „Nächster" unter dem Namen. */
-    .dd-cat { margin-top: 14px; }
-    .dd-cat-label { font-size: .95rem; font-weight: 600; opacity: .5;
-      text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
-    .dd-line { font-size: 1.25rem; line-height: 1.3; padding: 4px 0;
-      overflow-wrap: anywhere; }
-    .dd-printed .dd-line { opacity: .55; }
-    .dd-next .dd-line + .dd-line { border-top: 1px solid var(--row-border); }
+    .dd-cat { margin-top: 18px; }
+    .dd-cat-label { font-size: 1.2rem; font-weight: 600; opacity: .5;
+      text-transform: uppercase; letter-spacing: .06em; margin-bottom: 10px; }
+    /* Auftrags-Kästchen: eigenes kleines Panel wie der Drucker selbst eines
+       ist. Grid mit fester Klassen-Spalte → Namen stehen bündig untereinander.
+       FLIP-Transition (transform) wie die Bücherliste im Helferclient. */
+    .dd-order {
+      display: grid; grid-template-columns: 3.5em 1fr; gap: 10px;
+      align-items: baseline;
+      background: var(--surface); border: 1px solid var(--card-border);
+      border-radius: 10px; padding: 10px 12px; margin-top: 8px;
+      font-size: 1.25rem; line-height: 1.3; overflow-wrap: anywhere;
+      position: relative;
+      transition: transform .5s cubic-bezier(.22, .61, .36, 1);
+    }
+    .dd-order:first-child { margin-top: 0; }
+    .dd-form { color: var(--muted); font-weight: 600; }
+    .dd-stname { color: var(--text); }
+    .dd-order-printed { opacity: .55; }
+    @media (prefers-reduced-motion: reduce) {
+      .dd-order { transition: transform .01ms !important; }
+    }
     /* Druckerfehler: Name + „ - Fehler" rot in Namensgröße, darunter der
-       Betreuer-Hinweis. Die Auftrags-Kategorien bleiben sichtbar. */
+       Betreuer-Hinweis. Die Auftrags-Kategorien bleiben sichtbar, die Namen
+       behalten ihre normale Farbe. */
     .printer-name.dd-fault-name { color: var(--danger); }
-    .dd-fault-msg { color: var(--danger); font-size: 1.2rem; line-height: 1.3;
-      margin-bottom: 14px; overflow-wrap: anywhere; }
-    .dd-blocked { color: var(--danger-text); }
+    .dd-fault-msg { color: var(--danger); font-size: 1.6rem; line-height: 1.3;
+      margin-bottom: 16px; overflow-wrap: anywhere; }
     .txt-danger { color: var(--danger); }
 
     table { width: 100%; border-collapse: collapse; font-size: 1.05rem; }

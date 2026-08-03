@@ -24,6 +24,26 @@ function printerLabel(p) {
   return p.is_default || !p.name ? 'Standarddrucker' : p.name;
 }
 
+// Druckauftrags-String „Nachname, Vorname (Form)" → Klasse (ohne Klammern)
+// + Name. Form fehlt → leerstring (Name rückt trotzdem bündig, s. Grid).
+function parseOrder(s) {
+  const m = s.match(/^(.*?)\s*\(([^)]*)\)\s*$/);
+  return m ? { name: m[1].trim(), form: m[2].trim() } : { name: s.trim(), form: '' };
+}
+
+// Ein Auftrag als Kästchen: [Klasse] [Name, Vorname] — Klasse in fester
+// Spaltenbreite, damit die Namen über alle Kästchen bündig untereinander
+// stehen. data-order-key (pro Drucker eindeutig) treibt die FLIP-Animation.
+function orderBox(pid, raw, extraClass) {
+  const { name, form } = parseOrder(raw);
+  const key = `${pid}::${raw}`;
+  const cls = extraClass ? ` ${extraClass}` : '';
+  return `<div class="dd-order${cls}" data-order-key="${escapeHtml(key)}">`
+    + `<span class="dd-form">${escapeHtml(form)}</span>`
+    + `<span class="dd-stname">${escapeHtml(name)}</span>`
+    + `</div>`;
+}
+
 function renderQueue(msg) {
   const pool = Array.isArray(msg.printers) ? msg.printers : [];
 
@@ -38,6 +58,15 @@ function renderQueue(msg) {
   for (const t of printedTimers) clearTimeout(t);
   printedTimers = [];
 
+  // FLIP-Vorbereitung: alte Positionen je Auftrag merken, BEVOR innerHTML
+  // ausgetauscht wird — so fahren Aufträge, die die Kategorie wechseln (z. B.
+  // Nächster → Wird gedruckt → Gedruckt), an ihre neue Position, statt zu
+  // springen. Spiegel der Bücherliste im Helferclient (scan-render.js).
+  const oldRects = new Map();
+  content.querySelectorAll('.dd-order[data-order-key]').forEach(el => {
+    oldRects.set(el.dataset.orderKey, el.getBoundingClientRect());
+  });
+
   const rows = pool.map(p => {
     const spooledList = Array.isArray(p.spooled_names) && p.spooled_names
       ? p.spooled_names
@@ -49,10 +78,10 @@ function renderQueue(msg) {
     const printed = p.printed_name || null;
     // Die drei Kategorien stehen immer (mit Label), auch ohne Eintrag — dann
     // halt leer. So bleibt das Layout pro Drucker stabil.
-    const printedLine = printed ? `<div class="dd-line">${escapeHtml(printed)}</div>` : '';
-    const printingLine = printing ? `<div class="dd-line">${escapeHtml(printing)}</div>` : '';
-    const nextLines = spooledList.map(n => `<div class="dd-line">${escapeHtml(n)}</div>`).join('')
-      + blockedList.map(n => `<div class="dd-line dd-blocked">${escapeHtml(n)}</div>`).join('');
+    const printedBox = printed ? orderBox(p.id, printed, 'dd-order-printed') : '';
+    const printingBox = printing ? orderBox(p.id, printing) : '';
+    const nextBoxes = spooledList.map(n => orderBox(p.id, n)).join('')
+      + blockedList.map(n => orderBox(p.id, n, 'dd-order-blocked')).join('');
     // Bei Fehler: Name + „ - Fehler" in rot, gleicher Schriftgröße wie der Name;
     // darunter der Betreuer-Hinweis. Die Kategorien (Aufträge) bleiben sichtbar.
     const faulty = !!p.faulty;
@@ -65,20 +94,38 @@ function renderQueue(msg) {
       ${faultMsg}
       <div class="dd-cat dd-printed" data-printed-for="${escapeHtml(p.id)}">
         <div class="dd-cat-label">Gedruckt</div>
-        ${printedLine}
+        ${printedBox}
       </div>
       <div class="dd-cat dd-printing">
         <div class="dd-cat-label">Wird gedruckt</div>
-        ${printingLine}
+        ${printingBox}
       </div>
       <div class="dd-cat dd-next">
         <div class="dd-cat-label">Nächster</div>
-        ${nextLines}
+        ${nextBoxes}
       </div>
     </div>`;
   }).join('');
 
   content.innerHTML = `<div class="grid" style="grid-template-columns:repeat(${pool.length},minmax(0,1fr))">${rows}</div>`;
+
+  // FLIP-Animation: jedes Kästchen, das schon da war, startet an seiner alten
+  // Position (translate) und fährt zur neuen (translate→0). Neue Kästchen
+  // (kein alter Eintrag) erscheinen sofort.
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  content.querySelectorAll('.dd-order[data-order-key]').forEach(el => {
+    const old = oldRects.get(el.dataset.orderKey);
+    if (!old) return;
+    const cur = el.getBoundingClientRect();
+    const dx = old.left - cur.left;
+    const dy = old.top - cur.top;
+    if (!dx && !dy) return;
+    el.style.transition = 'none';
+    el.style.transform = `translate(${dx}px, ${dy}px)`;
+    el.offsetWidth;  // Reflow erzwingen, damit die Startposition greift
+    el.style.transition = reduceMotion ? 'transform .01ms' : '';
+    el.style.transform = '';
+  });
 
   // Pro „Gedruckt"-Block einen Timer setzen, der ihn nach der Rest-TTL
   // ausblendet (falls kein neuer Snapshot vorher nachzieht).
@@ -88,8 +135,8 @@ function renderQueue(msg) {
     const ms = Math.max(0, p.printed_expires_in) * 1000;
     const t = setTimeout(() => {
       const card = content.querySelector(`.printer-card[data-printer="${CSS.escape(pid)}"]`);
-      // Nur die Schülerzeile entfernen — das Label „Gedruckt" bleibt stehen.
-      card?.querySelector('.dd-printed .dd-line')?.remove();
+      // Nur das Auftrags-Kästchen entfernen — das Label „Gedruckt" bleibt stehen.
+      card?.querySelector('.dd-printed .dd-order')?.remove();
     }, ms);
     printedTimers.push(t);
   });
