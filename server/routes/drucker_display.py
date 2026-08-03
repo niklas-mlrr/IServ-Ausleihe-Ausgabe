@@ -44,11 +44,20 @@ async def printer_display_page(request: Request) -> FileResponse | RedirectRespo
 
 
 @host_router.get("/api/drucker-display/qr")
-async def printer_display_qr(request: Request) -> dict:
+async def printer_display_qr(request: Request, display_id: str | None = None) -> dict:
     """QR, mit dem ein Gerät die Drucker-Display-Seite (`/drucker-display`)
-    öffnet. Analog `/api/display/qr` (iPad), eigener Endpoint für klare Trennung
-    und eigene URL. Liefert `{url, qr}` (PNG-Data-URL)."""
-    url = f"{_base_url(request)}/drucker-display"
+    öffnet. Ohne ``display_id`` die Basis-URL (öffnet ein neu zugewiesenes
+    Display mit frischem Token — „+"-Reiter). Mit ``display_id`` die URL inkl.
+    ``?token=`` für ein konkretes Display, sodass ein Reload dieselbe Session
+    wiederverwendet (QR-Button im autorisierten Panel). Liefert `{url, qr}`."""
+    if display_id:
+        state = get_state()
+        display = state.printer_displays.get(display_id)
+        if not display:
+            raise HTTPException(404, "Drucker-Display nicht gefunden")
+        url = f"{_base_url(request)}/drucker-display?token={display.display_id}"
+    else:
+        url = f"{_base_url(request)}/drucker-display"
     return {"url": url, "qr": make_qr_data_url(url)}
 
 
@@ -81,8 +90,8 @@ async def printer_display_assign(body: PrinterDisplayAssignRequest) -> dict:
     entfernt (erste Vorkommen gewinnt). Push an das Display + Host-Snapshot."""
     state = get_state()
     display = state.printer_displays.get(body.display_id)
-    if not display or not display.authorized:
-        raise HTTPException(404, "Drucker-Display nicht gefunden oder nicht freigeschaltet")
+    if not display:
+        raise HTTPException(404, "Drucker-Display nicht gefunden")
     if body.printer_ids is None:
         display.assigned_printer_ids = None
     else:

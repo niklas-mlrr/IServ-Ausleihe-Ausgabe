@@ -8,6 +8,26 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-03 — Drucker-Display: Drucker pre-Einschalten, Verbindungspunkt, Token-QR
+
+- **Drucker schon vor dem Einschalten zuordnen:** `/api/drucker-display/assign`
+  erfordert nicht mehr `authorized` — der Host kann die Drucker-Boxen (Boxen +
+  „+"-Popover, Drag-Reihenfolge) im unautorisierten Panel einrichten, bevor das
+  Display per Namen-Eingabe freigeschaltet wird. Das unautorisierte Panel zeigt
+  jetzt zusätzlich zu Code + Name + Einschalten die Drucker-Sektion.
+- **Punkt = Verbindungsstatus:** der Statuspunkt am Display-Reiter ist grün,
+  wenn ein Display mit diesem Token geöffnet ist (WS verbunden), sonst grau —
+  nicht mehr abhängig vom Freigabe-Status. Tab-Titel „verbunden"/„nicht
+  verbunden".
+- **QR-Button pro Display (mit Token):** im autorisierten Panel hinter Name +
+  Speichern ein „QR"-Button, der den QR-Code für die URL dieses Displays inkl.
+  `?token=` anzeigt (`GET /api/drucker-display/qr?display_id=…`). Scannt ein
+  Gerät ihn, öffnet sich dasselbe Display (Reload wiederverwendet die Session).
+  `/qr` ohne `display_id` bleibt die Basis-URL für den „+"-Reiter.
+- Tests: `test_assign_works_pre_authorization` (war 404, jetzt 200) + neue
+  `test_qr_with_display_id_includes_token` / `test_qr_with_unknown_display_id_404`.
+  319 passed, ruff clean.
+
 ## 2026-08-03 — Drucker-Display: Token-Persistenz, Namens-Freischaltung, Verboten, Styling
 
 - **Token in der URL (Persistenz):** Öffnen von `/drucker-display` leitet per

@@ -129,6 +129,29 @@ def test_qr_returns_url_and_data_url(client, ctx):
     assert d["qr"].startswith("data:image/")
 
 
+def test_qr_with_display_id_includes_token(client, ctx):
+    """QR für ein konkretes Display enthält ?token=<display_id> in der URL,
+    sodass ein Reload dieselbe Session wiederverwendet."""
+    state, _, _ = ctx
+    _connected_display(state, code="ABCD", display_id="abc123def456")
+    r = client.get(
+        "/api/drucker-display/qr?display_id=abc123def456",
+        cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 200
+    d = r.json()
+    assert d["url"].endswith("/drucker-display?token=abc123def456")
+    assert d["qr"].startswith("data:image/")
+
+
+def test_qr_with_unknown_display_id_404(client, ctx):
+    r = client.get(
+        "/api/drucker-display/qr?display_id=nope",
+        cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 404
+
+
 # ---- Enable (Freischaltung per Name) --------------------------------------
 
 
@@ -205,15 +228,22 @@ def test_assign_unknown_display_404(client, ctx):
     assert r.status_code == 404
 
 
-def test_assign_unauthorized_display_404(client, ctx):
+def test_assign_works_pre_authorization(client, ctx):
+    """Drucker lassen sich schon vor der Freischaltung zuordnen — der Host
+    kann das Display vorab einrichten (Drucker-Boxen) und erst dann einschalten."""
     state, _, _ = ctx
+    from server.state import PrinterConfig
+
+    state.settings.printers = [PrinterConfig(id="p1", name="P1")]
     _connected_display(state, code="ABCD", authorized=False)
     r = client.post(
         "/api/drucker-display/assign",
-        json={"display_id": "disp1", "printer_ids": None},
+        json={"display_id": "disp1", "printer_ids": ["p1"]},
         cookies={"session_id": "sid"},
     )
-    assert r.status_code == 404
+    assert r.status_code == 200
+    assert state.printer_displays["disp1"].assigned_printer_ids == ["p1"]
+    assert state.printer_displays["disp1"].authorized is False  # noch nicht freigeschaltet
 
 
 # ---- Forget ---------------------------------------------------------------

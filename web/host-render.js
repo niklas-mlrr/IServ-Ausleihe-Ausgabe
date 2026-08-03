@@ -500,9 +500,18 @@ window.__host = window.__host || {};
     qrWatch = { kind: 'display', baseline: ((state.modus_b && state.modus_b.displays) || []).length };
     showQr(d.qr, d.url || '');
   }
-  // QR, mit dem ein Gerät die Drucker-Display-Seite (/drucker-display) öffnet.
+  // QR, mit dem ein Gerät die Drucker-Display-Seite (/drucker-display) öffnet
+  // (Basis-URL ohne Token → frisches Display beim Scannen, „+"-Reiter).
   async function showPrinterDisplayQr() {
     const r = await fetch('/api/drucker-display/qr');
+    if (!r.ok) { showMsg('QR für Druckerdisplay konnte nicht geladen werden'); return; }
+    const d = await r.json();
+    showQr(d.qr, d.url || '');
+  }
+  // QR für ein konkretes Display (URL inkl. ?token=…) — öffnet dasselbe Display
+  // wieder, ein Reload wiederverwendet die Session (QR-Button im Panel).
+  async function showPdTokenQr(displayId) {
+    const r = await fetch(`/api/drucker-display/qr?display_id=${encodeURIComponent(displayId)}`);
     if (!r.ok) { showMsg('QR für Druckerdisplay konnte nicht geladen werden'); return; }
     const d = await r.json();
     showQr(d.qr, d.url || '');
@@ -1355,8 +1364,10 @@ window.__host = window.__host || {};
       const short = d.display_id.slice(0, 6);
       const code = d.registration_code || short;
       const lbl = escapeHtml(d.label && d.label.trim() ? d.label : code);
-      const dotCls = d.authorized ? 'pd-dot-green' : 'pd-dot-gray';
-      const title = d.authorized ? 'autorisiert' : `Code ${code}`;
+      // Punkt = Verbindungsstatus: grün, wenn ein Display mit diesem Token
+      // geöffnet ist (WS verbunden), sonst grau.
+      const dotCls = d.connected ? 'pd-dot-green' : 'pd-dot-gray';
+      const title = d.connected ? 'verbunden' : 'nicht verbunden';
       return `<button class="pd-tab${activePdTab === d.display_id ? ' active' : ''}" data-pd-tab="${escapeHtml(d.display_id)}" title="${title}"><span class="pd-tab-dot ${dotCls}" aria-hidden="true"></span>${lbl} <span class="pd-tab-close" data-pd-close="${escapeHtml(d.display_id)}" title="Display verbieten" aria-label="Display verbieten">×</span></button>`;
     }).join('');
     queueTab.classList.toggle('active', activePdTab === 'queue');
@@ -1377,18 +1388,6 @@ window.__host = window.__host || {};
     }
     const short = d.display_id.slice(0, 6);
     const code = d.registration_code || short;
-    if (!d.authorized) {
-      // Unautorisiert: Display zeigt den Code (visuelle Zuordnung). Freischaltung
-      // per Namens-Eingabe (+ Einschalten), nicht mehr per Code-Tippen.
-      panelsHost.innerHTML = `<div class="pdd-row" data-display="${escapeHtml(d.display_id)}">
-        <span class="pdd-id">Code: ${escapeHtml(code)}</span>
-        <input class="pdd-name pdd-enable-name" type="text" placeholder="Name" autocomplete="off" data-display="${escapeHtml(d.display_id)}">
-        <button class="secondary pdd-enable" data-display="${escapeHtml(d.display_id)}">Einschalten</button>
-      </div>`;
-      panelsHost.querySelector('.pdd-enable-name')?.focus();
-      return;
-    }
-    // Autorisiertes Panel: Name-Feld, Theme-Schieberegler, Drucker-Boxen.
     const did = escapeHtml(d.display_id);
     const ids = d.assigned_printer_ids; // null = alle, sonst geordnete Liste
     // Boxen-Liste: bei null alle Pool-Drucker (Pool-Reihenfolge), sonst die
@@ -1410,19 +1409,38 @@ window.__host = window.__host || {};
       : '';
     const boxGrid = `<div class="pd-box-grid">${boxes}${addBox}</div>`
       + (boxPrinters.length || available.length ? '' : '<p class="hint" style="margin-top:6px">Kein Drucker im Pool.</p>');
+    const printerSection = `<div class="pdd-section-label">Drucker (${boxPrinters.length})</div>${boxGrid}`;
+    if (!d.authorized) {
+      // Unautorisiert: Display zeigt den Code (visuelle Zuordnung). Freischaltung
+      // per Namens-Eingabe (+ Einschalten). Drucker lassen sich schon vor dem
+      // Einschalten zuordnen (Boxen + „+"-Popover unten).
+      panelsHost.innerHTML = `<div class="pdd-panel" data-display="${did}">
+        <div class="pdd-row" data-display="${did}">
+          <span class="pdd-id">Code: ${escapeHtml(code)}</span>
+          <input class="pdd-name pdd-enable-name" type="text" placeholder="Name" autocomplete="off" data-display="${did}">
+          <button class="secondary pdd-enable" data-display="${did}">Einschalten</button>
+        </div>
+        ${printerSection}
+      </div>`;
+      panelsHost.querySelector('.pdd-enable-name')?.focus();
+      wirePdBoxesDnD(panelsHost);
+      return;
+    }
+    // Autorisiertes Panel: Name-Feld, Speichern, QR-Button (Token-URL dieses
+    // Displays), Theme-Schieberegler, Drucker-Boxen.
     panelsHost.innerHTML = `<div class="pdd-panel" data-display="${did}">
       <div class="pdd-field-row">
         <span class="pdd-field-label">Name</span>
         <input class="pdd-name" type="text" value="${escapeHtml(d.label || '')}" placeholder="${escapeHtml(short)}" autocomplete="off" data-display="${did}">
         <button class="secondary pdd-name-save" data-display="${did}">Speichern</button>
+        <button class="secondary pdd-qr" data-display="${did}" title="QR-Code für dieses Display (mit Token) anzeigen">QR</button>
         <label class="switch pdd-theme" title="Darstellung auf dem Display: Hell oder Dunkel">
           <input type="checkbox" class="pdd-theme-toggle" data-display="${did}"${d.theme === 'dark' ? ' checked' : ''}>
           <span class="track"></span>
           Dunkel
         </label>
       </div>
-      <div class="pdd-section-label">Drucker (${boxPrinters.length})</div>
-      ${boxGrid}
+      ${printerSection}
     </div>`;
     wirePdBoxesDnD(panelsHost);
   }
@@ -2147,6 +2165,11 @@ window.__host = window.__host || {};
       const inp = nameSave.closest('.pdd-panel').querySelector('.pdd-name');
       inp.blur();  // Fokus raus, damit der nächste Snapshot das Panel + Reiter-Label aktualisiert
       setPdLabel(nameSave.dataset.display, inp.value);
+      return;
+    }
+    const qrBtn = e.target.closest('.pdd-qr');
+    if (qrBtn) {
+      showPdTokenQr(qrBtn.dataset.display);
       return;
     }
   });
