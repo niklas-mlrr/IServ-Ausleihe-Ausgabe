@@ -8,6 +8,29 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-03 — Druckwechsel: Vorgänger beim Start des nächsten finalisieren
+
+- **Wurzel im Backend gekappt (nicht nur Frontend-Kompensation):** ein Drucker
+  druckt nur einen gleichzeitig — wird ein Auftrag `printing`, muss jeder
+  FRÜHERE im Slot, der noch `printing` ist, tatsächlich fertig sein (das OS
+  ist zum nächsten übergegangen, sonst würde dieser nicht drucken). Bisher
+  entstand eine Status-Überlappung durch Polling-Lag: Y's Tracker sah
+  `printing`, bevor X's Tracker `absent` sah → ein Snapshot mit zwei
+  `printing`-Jobs → Sprung im Display.
+- **`_track_job`:** beim `spooled→printing`-Übergang werden alle früheren
+  `printing`-Jobs im selben Slot finalisiert (done, aus dem Slot,
+  `_last_printed` mit job_id) und ihr Tracker abgebrochen (`cancel` + join,
+  s. `_handle_stall`-Muster) — sonst würde der Vorgänger-Tracker noch selbst
+  finalisieren und `_last_printed` überschreiben. Das Druckergebnis des
+  Vorgängers sendet der übernehmende Tracker (`_notify_result`), da der
+  Vorgänger-Tracker nicht mehr dazu kommt.
+- Frontend (voriger Commit) behält das Mitführen überlappender `printing`-
+  Jobs als „Nächster" als defensives Safety-Net; `pool_printers` liefert sie
+  nach dem Backend-Fix regulär nicht mehr.
+- **Tests:** `test_printing_finalizes_predecessor_on_overlap` (Vorgänger wird
+  beim `printing`-Übergang finalisiert, Tracker abgebrochen, kein Doppel-
+  `printing` im Slot, Vorgänger-Ergebnis gesendet). 325 passed, ruff clean.
+
 ## 2026-08-03 — Drucker-Display: Sprung Nächster→Wird gedruckt beim Druckwechsel
 
 - **Symptom (intermittierend):** beim Druckwechsel sprang der Name manchmal

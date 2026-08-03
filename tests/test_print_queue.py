@@ -239,6 +239,74 @@ def test_pipeline_2_in_flight_positions(monkeypatch):
     asyncio.run(run())
 
 
+def test_printing_finalizes_predecessor_on_overlap(monkeypatch):
+    """Ein Drucker druckt nur einen gleichzeitig: wird ein Auftrag „printing",
+    während ein FRÜHERER im Slot noch „printing" ist (Überlappung durch
+    Polling-Lag — der Vorgänger ist tatsächlich fertig, das OS druckt schon
+    den nächsten), wird der Vorgänger sofort finalisiert (done, aus dem Slot,
+    _last_printed) und sein Tracker abgebrochen. So entsteht keine Status-
+    Überlappung im Snapshot → kein Sprung im Display beim Druckwechsel."""
+    st = AppState()
+    _patch(monkeypatch, st)
+    pq = st.print_queue
+    pid = st.settings.printers[0].id
+
+    helpers = {}
+    for key in ("a", "b"):
+        h = HelperSession(token=f"tok-{key}", name="T")
+        h.ws = _FakeWS()
+        st.helper_sessions[f"tok-{key}"] = h
+        helpers[key] = h
+
+    async def fake_print(state, student_id, *, pages=None, printer_name=None):
+        return {"ok": True, "backend": "sumatra", "detail": "an Drucker gesendet",
+                "job_handle": {"kind": "test", "sid": student_id}}
+
+    os_states: dict[int, str] = {}
+
+    async def fake_read_state(handle):
+        sid = handle.get("sid") if handle else None
+        return os_states.get(sid, "spooled")
+
+    monkeypatch.setattr(sessions, "print_loan_slip_for", fake_print)
+    monkeypatch.setattr(printing, "read_job_state", fake_read_state)
+
+    async def run():
+        pq.start()
+        ja = _job("helper", 1, helper_token="tok-a", name="A")
+        jb = _job("helper", 2, helper_token="tok-b", name="B")
+        await pq.enqueue(ja)
+        await pq.enqueue(jb)
+        # A druckt aktiv; B ist gesendet (Kapazität 2 → beide im Slot).
+        os_states[1] = "printing"
+        await asyncio.sleep(0.1)
+        assert ja.status == "printing"
+        assert jb.status == "spooled"
+        # Überlappung: B wird „printing", während A im OS-Poll noch „printing"
+        # ist (A ist tatsächlich fertig — ein Drucker startet den nächsten erst,
+        # wenn der vorige aus der OS-Queue geht).
+        os_states[2] = "printing"
+        await asyncio.wait_for(ja.done.wait(), timeout=5)
+        await asyncio.sleep(0.1)
+        # Vorgänger A wurde durch B's „printing"-Übergang finalisiert …
+        assert ja.status == "done"
+        assert ja not in pq.slots[pid].jobs
+        assert pq._last_printed[pid][2] == ja.id  # _last_printed = A (job_id)
+        # … und B ist jetzt der Druckende (keine Doppel-„printing" im Slot).
+        assert jb.status == "printing"
+        assert [j.status for j in pq.slots[pid].jobs] == ["printing"]
+        # A's Tracker wurde abgebrochen; sein Druckergebnis hat B's Tracker
+        # übernommen (sonst erfahre A's Urheber nie vom Abschluss).
+        a_result = [m for m in helpers["a"].ws.sent if m["type"] == "print_result"]
+        assert any(m["ok"] for m in a_result), a_result
+        # Aufräumen: B fertigstellen.
+        os_states[2] = "absent"
+        await asyncio.wait_for(jb.done.wait(), timeout=5)
+        await pq.stop()
+
+    asyncio.run(run())
+
+
 def test_failed_dispatch_keeps_result_false(monkeypatch):
     """Schlägt `print_loan_slip_for` fehl, wird der Auftrag `failed` mit ok=False."""
     st = AppState()

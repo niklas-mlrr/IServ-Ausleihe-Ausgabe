@@ -390,8 +390,51 @@ class PrintQueue:
                 last_state = state
                 last_change = time.monotonic()
                 if state == "printing" and job.status != "printing":
+                    cancelled: list[asyncio.Task] = []
+                    finalized_preds: list[PrintJob] = []
                     async with self._lock:
                         job.status = "printing"
+                        # Ein Drucker druckt nur einen gleichzeitig: ist dieser
+                        # Auftrag „printing", müssen alle FRÜHEREN im Slot, die
+                        # noch „printing" sind, tatsächlich fertig sein (das OS
+                        # ist zum nächsten übergegangen, sonst wäre dieser nicht
+                        # „printing" — nur das Polling des Vorgängers hat
+                        # „absent" noch nicht gesehen). Sie finalisieren (done,
+                        # aus dem Slot, als _last_printed merken) + ihren Tracker
+                        # canceln, damit er nicht doch noch selbst finalisiert
+                        # und _last_printed überschreibt. So gibt es keine Status-
+                        # Überlappung mehr — der Druckwechsel im Display gleitet
+                        # sauber (kein Sprung, weil kein job_id-Schlüssel
+                        # zwischenzeitlich wegfällt).
+                        s = self.slots.get(printer_id)
+                        if s:
+                            from .state import get_state
+                            for other in list(s.jobs):
+                                if other is job:
+                                    break  # nur FRÜHERE (Slot ist FIFO nach Dispatch)
+                                if other.status == "printing":
+                                    other.status = "done"
+                                    s.jobs.remove(other)
+                                    self._last_printed[printer_id] = (
+                                        other.name,
+                                        self._originator_info(get_state(), other),
+                                        other.id,
+                                        time.time(),
+                                    )
+                                    other.done.set()
+                                    finalized_preds.append(other)
+                                    t = self._job_tasks.pop(other.id, None)
+                                    if t is not None:
+                                        cancelled.append(t)
+                    # Tracker außerhalb des Locks canceln + joinen (s. _handle_stall).
+                    for t in cancelled:
+                        t.cancel()
+                    if cancelled:
+                        await asyncio.gather(*cancelled, return_exceptions=True)
+                    # Vorgänger-Druckergebnisse an ihre Urheber senden — ihr eigener
+                    # Tracker ist gecancelt, also übernimmt dieser das Notify.
+                    for other in finalized_preds:
+                        await self._notify_result(other)
                     await self._notify_all()
             elif time.monotonic() - last_change > _INACTIVITY_TIMEOUT_S:
                 # Hängender Drucker: kein Statuswechsel seit `_INACTIVITY_TIMEOUT_S`.
