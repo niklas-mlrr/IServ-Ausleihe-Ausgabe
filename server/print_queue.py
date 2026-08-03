@@ -168,7 +168,7 @@ class PrintQueue:
         # Letzter gedruckter Auftrag pro Drucker: (Name, Auftraggeber, Zeit).
         # Auftraggeber = strukturierter Dict ({type, name}) fürs Drucker-Display
         # (Helfer-Symbol + Name bzw. Laptop-Symbol bei Host-Aufträgen).
-        self._last_printed: dict[str, tuple[str, dict, float]] = {}
+        self._last_printed: dict[str, tuple[str, dict, str, float]] = {}
 
     # ---- Lebenszyklus --------------------------------------------------
 
@@ -409,7 +409,8 @@ class PrintQueue:
             from .state import get_state
 
             self._last_printed[printer_id] = (
-                job.name, self._originator_info(get_state(), job), time.time(),
+                job.name, self._originator_info(get_state(), job),
+                job.id, time.time(),
             )
             job.done.set()
             finalized = job
@@ -693,7 +694,8 @@ class PrintQueue:
                     if j.status == "printing":
                         printing_name = j.name
                         if state is not None:
-                            orders.append({"name": j.name, "status": "printing",
+                            orders.append({"id": j.id, "name": j.name,
+                                           "status": "printing",
                                            "originator": self._originator_info(state, j)})
                     elif j.status in ("stalled", "peer_error", "failed"):
                         # Blockierte (fehlgeschlagene) Aufträge zählen über
@@ -706,13 +708,15 @@ class PrintQueue:
                         # melden soll.
                         blocked_names.append(j.name)
                         if state is not None:
-                            orders.append({"name": j.name, "status": "blocked",
+                            orders.append({"id": j.id, "name": j.name,
+                                           "status": "blocked",
                                            "originator": self._originator_info(state, j)})
                         continue
                     else:
                         spooled_names.append(j.name)
                         if state is not None:
-                            orders.append({"name": j.name, "status": "spooled",
+                            orders.append({"id": j.id, "name": j.name,
+                                           "status": "spooled",
                                            "originator": self._originator_info(state, j)})
             out.append(
                 {
@@ -782,6 +786,7 @@ class PrintQueue:
             out.append(
                 {
                     "position": positions.get(j.id, 0),
+                    "job_id": j.id,
                     "student": student_name,
                     "form": form,
                     "originator": self._originator_label(state, j),
@@ -850,17 +855,20 @@ class PrintQueue:
             if rec is None:
                 p["printed_name"] = None
                 p["printed_originator"] = None
+                p["printed_job_id"] = None
                 p["printed_expires_in"] = None
                 continue
-            name, originator, finished_at = rec
+            name, originator, job_id, finished_at = rec
             elapsed = now - finished_at
             if elapsed < _PRINTED_TTL_S:
                 p["printed_name"] = name
                 p["printed_originator"] = originator
+                p["printed_job_id"] = job_id
                 p["printed_expires_in"] = _PRINTED_TTL_S - elapsed
             else:
                 p["printed_name"] = None
                 p["printed_originator"] = None
+                p["printed_job_id"] = None
                 p["printed_expires_in"] = None
         return {
             "printers": view_printers,

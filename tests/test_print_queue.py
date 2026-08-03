@@ -11,6 +11,7 @@ einzelne Tracker-Tasks — alles gegen frische `AppState`-Instanzen (Default-Poo
 from __future__ import annotations
 
 import asyncio
+import time
 
 import server.hub as hub
 import server.print_queue as print_queue
@@ -1108,6 +1109,7 @@ def test_pool_printers_orders_carry_originator():
     orders = rendered["p1"]["orders"]
     assert [o["status"] for o in orders] == ["printing", "spooled"]
     assert orders[0]["name"] == "A (5a)"
+    assert orders[0]["id"] == printing.id  # stabiler FLIP-Schlüssel (job_id)
     assert orders[0]["originator"] == {"type": "helper", "name": "Anna"}
     assert orders[1]["originator"] == {"type": "host", "name": "Host"}
     # Ohne state (Host-Snapshot) bleiben orders leer — die flachen Namen-Felder
@@ -1133,8 +1135,36 @@ def test_display_view_waiting_list_has_originator_info():
     wl = v["waiting_list"]
     # Rollen-Sortierung: Host (Rang 0) vor Helfer (Rang 1) → B vor A.
     assert [w["student"] for w in wl] == ["B", "A"]
+    assert all("job_id" in w for w in wl)  # stabiler FLIP-Schlüssel
     assert wl[0]["originator_info"] == {"type": "host", "name": "Host"}
     assert wl[1]["originator_info"] == {"type": "helper", "name": "Anna"}
     # String-Label für den Host bleibt erhalten (Spiegel).
     assert wl[0]["originator"] == "Host"
     assert wl[1]["originator"] == "Anna"
+
+
+def test_display_view_printed_carries_job_id_and_originator():
+    """`display_view` liefert für die „Gedruckt"-Kategorie `printed_name` +
+    `printed_originator` + `printed_job_id` (stabiler FLIP-Schlüssel, damit das
+    Display die Bewegung „Wird gedruckt → Gedruckt" animieren kann). Nach TTL
+    wird alles None."""
+    from server.state import HelperSession
+
+    st = AppState()
+    st.settings.printers = _two_printers()
+    st.helper_sessions["tok-h"] = HelperSession(token="tok-h", name="Anna")
+    pq = st.print_queue
+    job = _job("helper", 1, helper_token="tok-h", name="A (5a)")
+    pq._last_printed["p1"] = (job.name, pq._originator_info(st, job), job.id, time.time())
+    v = pq.display_view(st, ["p1"])
+    p1 = v["printers"][0]
+    assert p1["printed_name"] == "A (5a)"
+    assert p1["printed_job_id"] == job.id
+    assert p1["printed_originator"] == {"type": "helper", "name": "Anna"}
+    assert p1["printed_expires_in"] is not None
+    # Abgelaufen → alles None.
+    pq._last_printed["p1"] = (job.name, pq._originator_info(st, job), job.id, 0.0)
+    v2 = pq.display_view(st, ["p1"])
+    assert v2["printers"][0]["printed_name"] is None
+    assert v2["printers"][0]["printed_job_id"] is None
+    assert v2["printers"][0]["printed_originator"] is None

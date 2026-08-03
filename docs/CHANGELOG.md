@@ -8,6 +8,36 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-03 — Drucker-Display: FLIP Warteschlange↔Drucker, Klasse, Schriftgrößen
+
+- **FLIP über Behälter hinweg (Warteschlange → Drucker):** Auftrags-Kästchen
+  wandern beim Dispatch fließend von der vollbreiten Warteschlange in die
+  (schmalere) Drucker-Spalte — bewegt **und** schrumpft, weil die Drucker-Spalte
+  schmaler ist. Dafür ist der FLIP-Schlüssel je Kästchen jetzt die stabile
+  `job_id` (vorher containerspezifisch `${pid}::${raw}`, was einen Wechsel des
+  Behälters unterbrach). Ein Auftrag behält seinen Schlüssel über den gesamten
+  Lebensweg: Warteschlange → Nächster → Wird gedruckt → Gedruckt.
+- **Backend:** `pool_printers` reichert `orders` um `id` (job_id) an;
+  `waiting_list`-Einträge bekommen `job_id`; `_last_printed` führt zusätzlich
+  die `job_id` mit (TTL 30s) und `display_view` reicht sie als `printed_job_id`
+  durch. So sind alle vier Behälter über denselben Schlüssel verbunden.
+- **Karte gleitet nach (FLIP):** die Drucker- und Warteschlangen-Karten selbst
+  bekommen `transition: transform .5s` + einen `data-flip-id`-Schlüssel; beim
+  Reflow (z. B. eine Reihe wächst durch einen neuen Auftrag) gleiten die Karten
+  an ihre neue Position statt zu springen (nur translate, kein scale — die
+  Karten behalten ihre Breite).
+- **Klasse in der Warteschlange:** `waiting_list.student` führt die Klasse nicht
+  im String (`slip_name` bekommt `form=None`); das Frontend hängt `(form)` an,
+  bevor es `parseOrder()` füttert, sodass die Klasse jetzt in der Warteschlange
+  wie in den Druckerkarten angezeigt wird.
+- **Schriftgröße Auftraggeber = Name:** `.dd-origin` (1rem → 1.6rem) und
+  `.dd-ico` (1.3em → 1em) so groß wie der Name (1.6rem); vorher war der
+  Auftraggeber (Symbol + Helfername) kleiner als der Name.
+- Tests: `test_pool_printers_orders_carry_originator` (asserts `orders[0]["id"]`),
+  `test_display_view_waiting_list_has_originator_info` (asserts `job_id` je
+  Eintrag), neu `test_display_view_printed_carries_job_id_and_originator`.
+  323 passed, ruff clean.
+
 ## 2026-08-03 — Drucker-Display: Auftraggeber-Symbol in den Auftrags-Kästchen
 
 - **Auftraggeber rechts im Kästchen:** jedes Auftrags-Kästchen (Gedruckt / Wird

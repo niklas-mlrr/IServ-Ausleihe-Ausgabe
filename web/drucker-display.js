@@ -57,11 +57,13 @@ function originatorHtml(o) {
 }
 
 // Ein Auftrag als Kästchen: [Klasse] [Name, Vorname] [Auftraggeber] — Klasse
-// in fester Spaltenbreite (bündige Namen), Auftraggeber rechts. data-order-key
-// (pro Drucker eindeutig) treibt die FLIP-Animation.
-function orderBox(pid, raw, extraClass, originator) {
+// in fester Spaltenbreite (bündige Namen), Auftraggeber rechts. `key` ist der
+// FLIP-Schlüssel = job_id (stabil über alle Behälter: Warteschlange ↔ Drucker-
+// kategorie). So fährt ein Auftrag beim Wechseln des Behälters (z. B.
+// Warteschlange → Nächster → Wird gedruckt → Gedruckt) von seiner alten an
+// seine neue Position + Größe, statt zu springen.
+function orderBox(key, raw, extraClass, originator) {
   const { name, form } = parseOrder(raw);
-  const key = `${pid}::${raw}`;
   const cls = extraClass ? ` ${extraClass}` : '';
   return `<div class="dd-order${cls}" data-order-key="${escapeHtml(key)}">`
     + `<span class="dd-form">${escapeHtml(form)}</span>`
@@ -84,13 +86,20 @@ function renderQueue(msg) {
   for (const t of printedTimers) clearTimeout(t);
   printedTimers = [];
 
-  // FLIP-Vorbereitung: alte Positionen je Auftrag merken, BEVOR innerHTML
-  // ausgetauscht wird — so fahren Aufträge, die die Kategorie wechseln (z. B.
-  // Nächster → Wird gedruckt → Gedruckt), an ihre neue Position, statt zu
-  // springen. Spiegel der Bücherliste im Helferclient (scan-render.js).
+  // FLIP-Vorbereitung: alte Positionen + Größen je Auftrag UND je Karte
+  // merken, BEVOR innerHTML ausgetauscht wird. Aufträge, die den Behälter
+  // wechseln (Warteschlange → Nächster → Wird gedruckt → Gedruckt), fahren an
+  // ihre neue Position + Größe (gleicher job_id-Schlüssel verbindet die
+  // Behälter) — sie schrumpfen dabei, weil die Drucker-Spalte schmaler ist als
+  // die vollbreite Warteschlange. Die Karten selbst gleiten nach, wenn sich
+  // die Reihenhöhe verschiebt. Spiegel der Bücherliste (scan-render.js).
   const oldRects = new Map();
   content.querySelectorAll('.dd-order[data-order-key]').forEach(el => {
     oldRects.set(el.dataset.orderKey, el.getBoundingClientRect());
+  });
+  const oldCardRects = new Map();
+  content.querySelectorAll('.printer-card, .dd-waiting-card').forEach(el => {
+    oldCardRects.set(el.dataset.flipId, el.getBoundingClientRect());
   });
 
   const rows = pool.map(p => {
@@ -105,11 +114,15 @@ function renderQueue(msg) {
     const blockedOrds = p.faulty ? orders.filter(o => o.status === 'blocked') : [];
     const printed = p.printed_name || null;
     // Die drei Kategorien stehen immer (mit Label), auch ohne Eintrag — dann
-    // halt leer. So bleibt das Layout pro Drucker stabil.
-    const printedBox = printed ? orderBox(p.id, printed, '', p.printed_originator) : '';
-    const printingBox = printingOrd ? orderBox(p.id, printingOrd.name, '', printingOrd.originator) : '';
-    const nextBoxes = spooledOrds.map(o => orderBox(p.id, o.name, '', o.originator)).join('')
-      + blockedOrds.map(o => orderBox(p.id, o.name, 'dd-order-blocked', o.originator)).join('');
+    // halt leer. So bleibt das Layout pro Drucker stabil. FLIP-Schlüssel je
+    // Box = job_id (stabil über Behälterwechsel).
+    const printedBox = printed
+      ? orderBox(p.printed_job_id || `printed::${p.id}::${printed}`, printed, '', p.printed_originator)
+      : '';
+    const printingBox = printingOrd
+      ? orderBox(printingOrd.id, printingOrd.name, '', printingOrd.originator) : '';
+    const nextBoxes = spooledOrds.map(o => orderBox(o.id, o.name, '', o.originator)).join('')
+      + blockedOrds.map(o => orderBox(o.id, o.name, 'dd-order-blocked', o.originator)).join('');
     // Bei Fehler: Name + „ - Fehler" in rot, gleicher Schriftgröße wie der Name;
     // darunter der Betreuer-Hinweis. Die Kategorien (Aufträge) bleiben sichtbar.
     const faulty = !!p.faulty;
@@ -117,7 +130,7 @@ function renderQueue(msg) {
     const faultMsg = faulty
       ? `<div class="dd-fault-msg">Es scheint ein Fehler vorzuliegen. Bitte melde dich beim Betreuer.</div>`
       : '';
-    return `<div class="printer-card" data-printer="${escapeHtml(p.id)}">
+    return `<div class="printer-card" data-flip-id="${escapeHtml(p.id)}" data-printer="${escapeHtml(p.id)}">
       <div class="printer-name${faulty ? ' dd-fault-name' : ''}">${escapeHtml(printerLabel(p))}${nameSuffix}</div>
       ${faultMsg}
       <div class="dd-cat dd-printed" data-printed-for="${escapeHtml(p.id)}">
@@ -138,10 +151,17 @@ function renderQueue(msg) {
   // Allgemeine Warteschlange (zentrale Queue) unter den Druckern: nur Aufträge,
   // die für die oben gezeigten Drucker freigegeben sind (serverseitig via
   // display_view gefiltert). Einträge als Klasse + Name-Kästchen wie die
-  // Druckeraufträge (gleicher FLIP-Schlüssel-Raum, Präfix „queue::").
+  // Druckeraufträge; FLIP-Schlüssel = job_id (gleich wie in den Druckerkarten),
+  // sodass ein Auftrag beim Dispatch fließend von der Warteschlange in den
+  // Drucker fährt (und dabei schrumpft, weil die Drucker-Spalte schmaler ist).
+  // `w.student` führt die Klasse nicht im String (slip_name bekommt form=None),
+  // daher anhängen, damit parseOrder() sie extrahiert.
   const waiting = Array.isArray(msg.waiting_list) ? msg.waiting_list : [];
-  const waitingRows = waiting.map(w => orderBox('queue', w.student, '', w.originator_info)).join('');
-  const waitingCard = `<div class="dd-waiting-card">
+  const waitingRows = waiting.map(w => {
+    const raw = w.form ? `${w.student} (${w.form})` : w.student;
+    return orderBox(w.job_id || `queue::${raw}`, raw, '', w.originator_info);
+  }).join('');
+  const waitingCard = `<div class="dd-waiting-card" data-flip-id="__queue__">
     <div class="dd-cat-label">Warteschlange (${waiting.length})</div>
     ${waitingRows || '<p class="hint">Keine Aufträge in der Warteschlange.</p>'}
   </div>`;
@@ -151,9 +171,13 @@ function renderQueue(msg) {
     ${waitingCard}
   </div>`;
 
-  // FLIP-Animation: jedes Kästchen, das schon da war, startet an seiner alten
-  // Position (translate) und fährt zur neuen (translate→0). Neue Kästchen
-  // (kein alter Eintrag) erscheinen sofort.
+  // FLIP-Animation der Auftrags-Kästchen: jedes, das schon da war, startet an
+  // seiner alten Position + Größe (translate + scale) und fährt zur neuen
+  // (transform→ ''). So wandert ein Auftrag beim Behälterwechsel (z. B.
+  // Warteschlange → Nächster) von der breiten Warteschlange in die schmalere
+  // Drucker-Spalte — bewegt UND schrumpft. Neue Kästchen (kein alter Eintrag)
+  // erscheinen sofort. transform-origin 0 0, damit scale + translate zusammen
+  // die alte Box exakt treffen.
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
   content.querySelectorAll('.dd-order[data-order-key]').forEach(el => {
     const old = oldRects.get(el.dataset.orderKey);
@@ -161,10 +185,29 @@ function renderQueue(msg) {
     const cur = el.getBoundingClientRect();
     const dx = old.left - cur.left;
     const dy = old.top - cur.top;
+    const sx = cur.width ? old.width / cur.width : 1;
+    const sy = cur.height ? old.height / cur.height : 1;
+    if (!dx && !dy && Math.abs(sx - 1) < 0.01 && Math.abs(sy - 1) < 0.01) return;
+    el.style.transition = 'none';
+    el.style.transformOrigin = '0 0';
+    el.style.transform = `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`;
+    el.offsetWidth;  // Reflow erzwingen, damit die Startposition greift
+    el.style.transition = reduceMotion ? 'transform .01ms' : '';
+    el.style.transform = '';
+  });
+  // FLIP der Drucker-/Warteschlangen-Karten: verschieben sich die Karten (z. B.
+  // weil eine Reihe durch einen neuen Auftrag wächst), gleiten sie an ihre neue
+  // Position statt zu springen. Kein scale (Karten behalten ihre Breite).
+  content.querySelectorAll('.printer-card, .dd-waiting-card').forEach(el => {
+    const old = oldCardRects.get(el.dataset.flipId);
+    if (!old) return;
+    const cur = el.getBoundingClientRect();
+    const dx = old.left - cur.left;
+    const dy = old.top - cur.top;
     if (!dx && !dy) return;
     el.style.transition = 'none';
     el.style.transform = `translate(${dx}px, ${dy}px)`;
-    el.offsetWidth;  // Reflow erzwingen, damit die Startposition greift
+    el.offsetWidth;
     el.style.transition = reduceMotion ? 'transform .01ms' : '';
     el.style.transform = '';
   });

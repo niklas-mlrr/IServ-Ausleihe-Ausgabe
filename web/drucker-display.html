@@ -43,6 +43,7 @@
     .printer-card {
       background: var(--card); border-radius: 14px; padding: 20px 22px;
       border: 1px solid var(--card-border); min-width: 0;
+      transition: transform .5s cubic-bezier(.22, .61, .36, 1);
     }
     /* Layout: Druckerkarten im Grid, darunter der Warteschlangen-Kasten
        (vollbreit, spannt alle Spalten). */
@@ -50,6 +51,7 @@
     .dd-waiting-card {
       background: var(--card); border-radius: 14px; padding: 20px 22px;
       border: 1px solid var(--card-border);
+      transition: transform .5s cubic-bezier(.22, .61, .36, 1);
     }
     .dd-waiting-card .hint { margin-top: 4px; }
     .printer-name { font-size: 3rem; font-weight: 700; margin-bottom: 14px;
@@ -77,14 +79,14 @@
        Host (Laptop-Symbol). Bündig rechts, dezent (muted, etwas kleiner). */
     .dd-origin {
       justify-self: end; display: inline-flex; align-items: center;
-      gap: 6px; color: var(--muted); font-size: 1rem; font-weight: 600;
+      gap: 6px; color: var(--muted); font-size: 1.6rem; font-weight: 600;
       white-space: nowrap;
     }
     .dd-origin-kind { display: inline-flex; align-items: center; }
-    .dd-ico { width: 1.3em; height: 1.3em; }
+    .dd-ico { width: 1em; height: 1em; }
     .dd-origin-name { overflow-wrap: anywhere; }
     @media (prefers-reduced-motion: reduce) {
-      .dd-order { transition: transform .01ms !important; }
+      .dd-order, .printer-card, .dd-waiting-card { transition: transform .01ms !important; }
     }
     /* Druckerfehler: Name + „ - Fehler" rot in Namensgröße, darunter der
        Betreuer-Hinweis. Die Auftrags-Kategorien bleiben sichtbar, die Namen
