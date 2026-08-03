@@ -8,6 +8,27 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-03 — Host-Druck: viele Aufträge gleichzeitig (Endpoint nicht-blockierend)
+
+- **Symptom:** startete der Host viele Druckaufträge, zeigte der Druck-Button
+  ab einer bestimmten Anzahl „…" und der Auftrag tauchte nicht in der Host-
+  Druckerwarteschlange auf.
+- **Ursache:** `/api/print-loan-slip` enqueued zwar sofort, blockierte danach
+  aber bis zum fertigen Druck (`job.done.wait()`) und hielt die HTTP-Verbindung
+  die gesamte Druckdauer offen. Browser erlauben nur ~6 gleichzeitige
+  Verbindungen pro Origin → ab dem 7. Auftrag blieben die Fetches beim Browser
+  hängen (Button „…"), der Request wurde gar nicht erst gesendet, der Auftrag
+  kam nie in die Warteschlange.
+- **Fix:** der Endpoint enqueued und kehrt **sofort** zurück
+  (`{"ok": true, "queued": true, "job_id": …}`). Status, Position und Ergebnis
+  liefert weiterhin die WS (`print_progress`/`print_result`, zielgerichtet an
+  den startenden Host — `showPrintProgress`/`showPrintResult` bereits
+  vorhanden). Validierung (kein Drucker / kein erlaubter Drucker) bleibt
+  vorab als sofortige 400. Entspricht dem Helfer-WS-Pfad (`_handle_print`),
+  der schon immer nur enqueued.
+- **Tests:** 325 passed, ruff clean (kein HTTP-Level-Test für den Endpoint
+  vorhanden; Tests nutzen `print_loan_slip_for` + `job.done.wait()` direkt).
+
 ## 2026-08-03 — Drucker-Display: Warteschlange zeigt alle Namen, Überlauf transparent, Resize-adaptiv
 
 - **Alle Namen stets gerendert (kein Cap, kein Clip):** die Warteschlangen-Karte

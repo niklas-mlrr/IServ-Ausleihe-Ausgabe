@@ -41,11 +41,16 @@ async def print_loan_slip(body: PrintLoanSlipRequest, sid: str = Depends(require
     Kein Schreibzugriff auf IServ — `get_loan_slip_pdf` ist ein reiner GET, das
     Drucken passiert am Laptop/Macbook (siehe server/printing.py).
 
-    Der Endpoint enqueued den Auftrag und **blockiert** bis der Worker ihn
-    abgearbeitet hat (gedruckt/fehlgeschlagen) — die HTTP-Antwort ist Rückversicherung
-    für den Fall, dass der Host-WS gerade nicht live ist. Das Live-Popup
-    (Position / „wird gedruckt" / „gedruckt") läuft parallel via WS und erscheint
-    nur an diesem Host (`sid`), nicht an allen eingeloggt-Verbundenen.
+    Der Endpoint enqueued den Auftrag und kehrt **sofort** zurück (nicht-
+    blockierend) — Status, Position und Ergebnis kommen live via WS
+    (`print_progress`/`print_result`), nur an diesen Host (`sid`), nicht an
+    allen eingeloggt-Verbundenen. Vorher blockierte der Endpoint bis zum
+    fertigen Druck und hielt die HTTP-Verbindung die ganze Druckdauer offen;
+    da Browser nur ~6 gleichzeitige Verbindungen pro Origin erlauben, blieben
+    ab dem 7. Auftrag die Fetches beim Browser hängen (Button zeigte „…", der
+    Auftrag wurde gar nicht erst zum Server gesendet → tauchte nicht in der
+    Warteschlange auf). Nicht-blockierend entspricht der Helfer-WS
+    (`_handle_print`), die dort auch nur enqueued und den WS benachrichtigen lässt.
     """
     if body.student_id is None:
         raise HTTPException(400, "student_id fehlt")
@@ -83,16 +88,10 @@ async def print_loan_slip(body: PrintLoanSlipRequest, sid: str = Depends(require
         allowed_printers=allowed,
     )
     await state.print_queue.enqueue(job)
-    # Bis der Worker den Auftrag finalisiert hat (physisch gedruckt / fehl-
-    # geschlagen). `done` wird im Worker gesetzt, sobald der Kopf abgearbeitet ist.
-    await job.done.wait()
-    res = dict(job.result or {})
-    res.pop("job_handle", None)  # internes OS-Handle nicht nach außen reichen
-    if not res.get("ok"):
-        # 502 wie vor der Queue-Umstellung (Contract erhalten); das Live-Popup
-        # läuft parallel via WS (`print_result` mit ok:false → toast-warn).
-        raise HTTPException(502, res.get("msg") or res.get("detail") or "Druck fehlgeschlagen")
-    return res
+    # Nicht-blockierend: der Worker druckt im Hintergrund, Status + Ergebnis
+    # liefert die WS (`print_progress`/`print_result` an diesen `sid`). Die
+    # HTTP-Antwort bestätigt nur den Enqueue (Validierung vorab als 400).
+    return {"ok": True, "queued": True, "job_id": job.id}
 
 
 @host_router.get("/api/printers")
