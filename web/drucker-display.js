@@ -44,28 +44,11 @@ function renderQueue(msg) {
       : (p.spooled_name ? [p.spooled_name] : []);
     const printing = p.printing_name || null;
     const printed = p.printed_name || null;
-    // Kategorie „Gedruckt" — zuletzt fertig, nur wenn noch innerhalb der TTL.
-    const printedBlock = printed
-      ? `<div class="dd-cat dd-printed" data-printed-for="${escapeHtml(p.id)}">
-           <div class="dd-cat-label">Gedruckt</div>
-           <div class="dd-line">${escapeHtml(printed)}</div>
-         </div>`
-      : '';
-    // Kategorie „Wird gedruckt" — der aktuell druckende Auftrag.
-    const printingBlock = printing
-      ? `<div class="dd-cat dd-printing">
-           <div class="dd-cat-label">Wird gedruckt</div>
-           <div class="dd-line">${escapeHtml(printing)}</div>
-         </div>`
-      : '';
-    // Kategorie „Nächster" — bereits an den Drucker gesendet, wartet auf Druck.
+    // Die drei Kategorien stehen immer (mit Label), auch ohne Eintrag — dann
+    // halt leer. So bleibt das Layout pro Drucker stabil.
+    const printedLine = printed ? `<div class="dd-line">${escapeHtml(printed)}</div>` : '';
+    const printingLine = printing ? `<div class="dd-line">${escapeHtml(printing)}</div>` : '';
     const nextLines = spooledList.map(n => `<div class="dd-line">${escapeHtml(n)}</div>`).join('');
-    const nextBlock = nextLines
-      ? `<div class="dd-cat dd-next">
-           <div class="dd-cat-label">Nächster</div>
-           ${nextLines}
-         </div>`
-      : '';
     // Fehler-Hinweis (bleibt sichtbar, falls der Drucker hängt).
     const faultBlock = p.faulty
       ? `<div class="dd-fault"><span class="txt-danger">⚠ fehlerhaft</span>${p.load > 0 ? ` — ${p.load} blockiert` : ''}</div>`
@@ -73,8 +56,18 @@ function renderQueue(msg) {
     return `<div class="printer-card" data-printer="${escapeHtml(p.id)}">
       <div class="printer-name">${escapeHtml(printerLabel(p))}</div>
       ${faultBlock}
-      ${printedBlock}
-      ${printingBlock}
+      <div class="dd-cat dd-printed" data-printed-for="${escapeHtml(p.id)}">
+        <div class="dd-cat-label">Gedruckt</div>
+        ${printedLine}
+      </div>
+      <div class="dd-cat dd-printing">
+        <div class="dd-cat-label">Wird gedruckt</div>
+        ${printingLine}
+      </div>
+      <div class="dd-cat dd-next">
+        <div class="dd-cat-label">Nächster</div>
+        ${nextLines}
+      </div>
       ${nextBlock}
     </div>`;
   }).join('');
@@ -89,7 +82,8 @@ function renderQueue(msg) {
     const ms = Math.max(0, p.printed_expires_in) * 1000;
     const t = setTimeout(() => {
       const card = content.querySelector(`.printer-card[data-printer="${CSS.escape(pid)}"]`);
-      card?.querySelector('.dd-printed')?.remove();
+      // Nur die Schülerzeile entfernen — das Label „Gedruckt" bleibt stehen.
+      card?.querySelector('.dd-printed .dd-line')?.remove();
     }, ms);
     printedTimers.push(t);
   });
