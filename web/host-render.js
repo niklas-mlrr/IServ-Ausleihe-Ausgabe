@@ -432,7 +432,7 @@ window.__host = window.__host || {};
 
       // Pool + Vorauswahl aus dem lokalen Snapshot.
       const pool = (state.printers || []).map(p => ({id: p.id, name: p.name, label: p.label, is_default: p.is_default}));
-      const ctxId = findCtxOfState(studentId);
+      const ctxId = findCtxOfStudent(studentId);
       const allowed = ctxId ? (state.contexts[ctxId] || {}).allowed_printers : undefined;
       // ctxId vorhanden, allowed === null (Klasse erlaubt alle) → alle Pool-
       // Drucker; allowed === [ids] → genau diese; kein ctx → leer.
