@@ -15,6 +15,7 @@ function renderWaitingStatus() {
     ? `Warteschlange: ${n}`
     : waitingMsg, null, 'wait');
   clearStatus('trans');
+  clearStatus('print');
 }
 
 // Peek-Statuszeile: Warteschlange angezeigt, aber der zugewiesene Schüler ist
@@ -342,11 +343,11 @@ function startNextCountdown(baseText) {
   cancelNextCountdown();
   const gen = ++nextCountdownGen;
   let secs = NEXT_STUDENT_COUNTDOWN_S;
-  // Countdown ist ein Warten-Zustand (Warten auf den nächsten Schüler) →
-  // persistente `wait`-Zeile; ersetzt das „Leihschein gedruckt." aus dem
-  // print_result (gleicher Slot). trans leeren, da der Druck-Abschluss den
-  // letzten Scan-Ergebnis verdrängt.
-  setStatusText(`${baseText} Nächster Schüler in ${secs}s.`, null, 'wait');
+  // Countdown hängt am Druck-Ergebnis („Leihschein gedruckt. Nächster Schüler
+  // in Xs.") → `print`-Zeile, terminal: überschreibt die vorige Druckmeldung
+  // („gedruckt."), ist aber danach von jeder neuen Meldung überschreibbar.
+  // trans leeren (Druck-Abschluss verdrängt Scan-Hinweis).
+  setStatusText(`${baseText} Nächster Schüler in ${secs}s.`, null, 'print', true);
   clearStatus('trans');
   nextCountdownTimer = setInterval(() => {
     secs -= 1;
@@ -358,7 +359,7 @@ function startNextCountdown(baseText) {
       return;
     }
     if (gen !== nextCountdownGen) return;  // superseded → keine weiteren Updates
-    setStatusText(`${baseText} Nächster Schüler in ${secs}s.`, null, 'wait');
+    setStatusText(`${baseText} Nächster Schüler in ${secs}s.`, null, 'print', true);
   }, 1000);
 }
 
@@ -384,6 +385,7 @@ function advanceToNext() {
   loadingStudent = true;  // nächste Schülerzugewiesen, wird gerade geladen → Queue verbergen
   setStatusText('Warten…', null, 'wait');
   clearStatus('trans');
+  clearStatus('print');
   // Eigene Klasse leer, aber ein Reiter weiter hinten hat noch Wartende
   // (s. suggestedQueueContext): direkt dorthin springen, statt aus der
   // leeren eigenen Queue zu ziehen. Der Server bindet den Helfer dabei an
@@ -561,10 +563,11 @@ function sendPrint(thenNext) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   printThenNext = thenNext;
   printBtn.disabled = true;
-  // Druck beginn: persistente `wait`-Zeile (Drucker-Status bleibt stehen, bis
-  // das Ergebnis/ein neuer Druck ihn ersetzt). trans leeren, da der
-  // Druck-Abschluss den „Scanner bereit"-/Scan-Hinweis verdrängt.
-  setStatusText('Leihschein in Druckerwarteschlange …', null, 'wait');
+  // Druck beginn: aktive `print`-Meldung (Drucker-Status bleibt stehen, bis
+  // das Ergebnis/ein neuer Druck ihn ersetzt). Ein aktives wait („Warten …")
+  // bleibt parallel sichtbar; ein terminales wait („Scanner bereit") wird
+  // als End-Meldung von dieser neuen Meldung verdrängt. trans leeren.
+  setStatusText('Leihschein in Druckerwarteschlange …', null, 'print');
   clearStatus('trans');
   ws.send(JSON.stringify({ type: 'print', second_page: slipCheck.checked }));
   closePrintModal();

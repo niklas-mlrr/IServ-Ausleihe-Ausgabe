@@ -94,6 +94,7 @@ function handleServerMessage(msg) {
     closeLendModal();
     setStatusText('Warten…', null, 'wait');
     clearStatus('trans');
+    clearStatus('print');
     if (menuWasOpen) animateMenu(false, true);
   } else if (msg.type === 'scan_result') {
     if (msg.spectator) {
@@ -165,7 +166,7 @@ function handleServerMessage(msg) {
     // Zentrale-Warteschlangen-Jobs ohne zugewiesenen Drucker → kein Zusatz.
     // Für peer_error übernimmt der Server den Text — kein Zusatz.
     if (msg.peer_error) {
-      setStatusText(msg.msg || 'Es dauert ungewöhnlich lange, vielleicht liegt ein Fehler vor.', null, 'wait');
+      setStatusText(msg.msg || 'Es dauert ungewöhnlich lange, vielleicht liegt ein Fehler vor.', null, 'print');
     } else {
       const pname = msg.printer_label;
       let text;
@@ -182,34 +183,37 @@ function handleServerMessage(msg) {
       } else {
         text = 'Leihschein in Druckerwarteschlange…';
       }
-      // Drucker-Fortschritt aktualisiert nur die persistente `wait`-Zeile und
-      // lässt `trans` (z.B. ein laufendes Scan-Ergebnis) unangetastet — der
-      // Helfer sieht beides gleichzeitig.
-      setStatusText(text, null, 'wait');
+      // Drucker-Fortschritt = aktive Meldung: aktualisiert nur die `print`-
+      // Zeile. Aktive Meldungen in `trans`/`wait` (z.B. „Warten …") bleiben
+      // sichtbar; terminale (z.B. „Scanner bereit") werden als End-Meldungen
+      // von dieser neuen Meldung verdrängt.
+      setStatusText(text, null, 'print');
     }
   } else if (msg.type === 'print_result') {
     printBtn.disabled = false;
     const wasPrintThenNext = printThenNext;
     printThenNext = false;
     if (msg.stalled) {
-      setStatusText(msg.msg || 'Druck dauert ungewöhnlich lange', null, 'wait');
+      // Noch andauerndes Problem (Drucker hängt) → aktiv, persistiert.
+      setStatusText(msg.msg || 'Druck dauert ungewöhnlich lange', null, 'print');
     } else if (msg.peer_error) {
-      setStatusText(msg.msg || 'Es dauert ungewöhnlich lange, vielleicht liegt ein Fehler vor.', null, 'wait');
+      setStatusText(msg.msg || 'Es dauert ungewöhnlich lange, vielleicht liegt ein Fehler vor.', null, 'print');
     } else if (msg.ok) {
       const pname = msg.printer_label;
       const base = pname ? `Leihschein von ${pname} gedruckt.` : 'Leihschein gedruckt.';
-      // Drucker-Ergebnis bleibt persistent in der `wait`-Zeile stehen (s.
-      // Nutzer-Wunsch: Drucker-Meldungen bleiben sichtbar), bis der nächste
-      // Druck / nächste Schüler / „Scanner bereit" es ersetzt. trans nicht
-      // angetastet — ein während des Drucks gescanntes Ergebnis bleibt sichtbar.
-      setStatusText(base, null, 'wait');
+      // „gedruckt." = terminal: überschreibt die vorige Druckmeldung im selben
+      // Slot, ist aber danach von jeder neuen Meldung überschreibbar. Aktive
+      // Meldungen anderer Slots (z.B. „Warten …") bleiben sichtbar; terminale
+      // (z.B. „Scanner bereit") werden verdrängt.
+      setStatusText(base, null, 'print', true);
       // „Drucken & nächster Schüler": bei erfolgreichem Druck nicht sofort
       // weiterschalten, sondern per Countdown (4 s, entspricht der Host-
       // Toast-Dauer). stalled/peer_error/Fehler → ok=false → kein Auto-
       // Advance (Schüler bleibt stehen, s. Plan Fehler-Verhalten).
       if (wasPrintThenNext) startNextCountdown(base);
     } else {
-      setStatusText(`Druck fehlgeschlagen: ${msg.msg || ''}`, null, 'wait');
+      // Druck endgültig gescheitert → terminal (End-Meldung).
+      setStatusText(`Druck fehlgeschlagen: ${msg.msg || ''}`, null, 'print', true);
     }
   } else if (msg.type === 'waiting') {
     studentActive = false;

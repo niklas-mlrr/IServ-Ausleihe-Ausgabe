@@ -8,6 +8,66 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-03 — Helfer-Statuszeile: aktiv vs. terminal + Reihenfolge
+
+- **Neue Unterscheidung (aktiv vs. terminal):** Meldungen in den drei Zeilen
+  (`wait`/`trans`/`print`) sind jetzt entweder **aktiv** (andauernder Vorgang,
+  z.B. „Warten …", „wird gedruckt …", „wartet auf Druck …") oder **terminal**
+  (End-/Bereit-Meldung: „Leihschein gedruckt.", „Druck fehlgeschlagen …",
+  „Scanner bereit — Buch scannen", Countdown „Nächster Schüler in Xs").
+  - Aktiv: persistiert, wird nur durch eine neue Meldung im **selben** Slot
+    ersetzt — Meldungen anderer Slots verdrängen sie nicht.
+  - Terminal: überschreibt die vorige Meldung im selben Slot, ist aber von
+    **jeder neuen Meldung** (egal welcher Slot) überschreibbar.
+- **Umsetzung:** `setStatusText(text, alertClass, slot, terminal=false)` mit
+  einem `terminal`-Flag pro Slot (`statusTerminal`). Jede neue nicht-leere
+  Meldung verdrängt terminale Meldungen in den ANDEREN Slots, aktive dort
+  bleiben stehen. `clearStatus(slot)` leert gezielt eine Zeile (ohne Kaskade)
+  für explizite Resets (neuer Schüler/idle).
+- **Reihenfolge neu (oben → unten):** `#status-wait` (Worker-Status, jetzt
+  oben) → `#status-trans` (Scan-Ergebnisse) → `#status-print` (Drucker).
+  Zuvor war `wait` unten; die unterste Zeile ist nun nach oben gewandert.
+- **Löst das Problem-Szenario:** Druck startet während der Worker lädt →
+  `wait`=„Warten …" (aktiv) + `print`=Druckstatus (aktiv) gleichzeitig
+  sichtbar; das späte `worker_ready` setzt `wait`=„Scanner bereit" (terminal)
+  und verdrängt nur das terminale Ende, **nicht** den aktiven Druckstatus.
+  Danach ist „Scanner bereit" selbst von jedem neuen Scan-Ergebnis
+  überschreibbar; „Leihschein gedruckt." überschreibt die vorige Druckmeldung
+  und ist ebenfalls von jeder neuen Meldung überschreibbar.
+- Betrifft nur den Helfer-Client (Modus A); Schüler-Client (`student.*`)
+  unverändert.
+
+## 2026-08-03 — Helfer-Statuszeile: dritte Zeile für Drucker (Refinement)
+
+- **Problem des Zwei-Zeilen-Modells:** Wurde ein Leihschein gedruckt während
+  der Worker noch lud (sofort nach Aufrufen des Schülers), lief die Kette
+  `Warten…` → (Druck startet) `Leihschein in Druckerwarteschlange …` →
+  (`worker_ready`) `Scanner bereit — Buch scannen`, und das späte
+  `worker_ready` hat den Druckstatus aus der `wait`-Zeile gelöscht. Der
+  Nutzer-Wunsch „Druckstatus bleibt stehen" war so nicht erfüllt.
+- **Lösung: dritte, eigene Zeile `#status-print`** (zwischen `#status-trans`
+  und `#status-wait`). Jetzt drei gestapelte Zeilen (oben → unten):
+  - **`#status-trans`** — flüchtig: Scan-Ergebnisse, „Gesendet", „Prüfe Scans
+    …", „Schüler wird aufgerufen …", Peek-Status, Kamera-/Verbindungs-Hinweise.
+    Wird bei jeder neuen Meldung überschrieben.
+  - **`#status-print`** — persistent: alle Drucker-Meldungen (`print_progress`,
+    `print_result`, „Leihschein in Druckerwarteschlange …") + Countdown
+    „Nächster Schüler in Xs". Wird NUR durch eine neue Druckermeldung ersetzt.
+  - **`#status-wait`** — persistent: Worker-/Helfer-Zustand („Warten …",
+    „Warten bis Schüler frei …", „Scanner bereit — Buch scannen", idle-
+    Warteschlangengröße). Wird nur durch eine neue `wait`-Meldung ersetzt.
+- **Slot-Übergänge (neu):** `setStatusText(text, alertClass, slot)` mit
+  `slot='trans'|'print'|'wait'`. Aufräumen nur der Zeilen, deren Inhalt
+  hinfällig wird — **`worker_ready` („Scanner bereit") tastet `print` nicht
+  mehr an** (Fix), ebenso little `sendPrint`/`print_progress`/`print_result`
+  die `wait`-Zeile nicht. Ein neuer Schüler (`loading`/`student_info`) bzw.
+  idle löscht `trans` + `print` (Druckstatus des vorigen Schülers); Druckbeginn
+  löscht `trans`. So bleiben im Problem-Szenario „Warten …" und Druckstatus
+  gleichzeitig sichtbar, und „Scanner bereit" verdrängt nur „Warten …".
+- Leere Zeilen kollabieren (`.empty`); bei einer aktiven Zeile sieht es aus
+  wie eine einzige. Alert-Farben gelten über `.status-line.status-alert-*`
+  für alle drei Zeilen.
+
 ## 2026-08-03 — Helfer-Statuszeile: Warten-/Drucker-Meldungen bleiben stehen
 
 - **Helfer-Client (`scan.html`, `scan-state.js`, `scan-ws.js`,

@@ -7,22 +7,39 @@
 
 window.__scan = window.__scan || {};
 
-const statusTransEl = document.getElementById('status-trans');
 const statusWaitEl = document.getElementById('status-wait');
-// Zentraler Setter für die zwei Statuszeilen in #status:
-//   • `trans` (Default) — die OBere, flüchtige Zeile: Scan-Ergebnisse,
-//     „Gesendet", „Prüfe Scans", Kamera-/Verbindungs-Hinweise, „Scanner
-//     bereit". Wird von jeder neuen `trans`-Meldung überschrieben.
-//   • `wait` — die UNTERE, persistente Zeile: „Warten…", „Warten bis Schüler
-//     frei…", Warteschlangengröße (idle) und alles Drucker-Bezogene
-//     (print_progress / print_result / „Leihschein in Druckerwarteschlange …"
-//     / Countdown „Nächster Schüler in Xs"). Wird NUR durch eine neue
-//     `wait`-Meldung ersetzt — Scan-Ergebnisse (trans) lassen sie stehen,
-//     damit der Helfer sieht, worauf gerade gewartet wird.
-// `clearStatus(slot)` leert eine Zeile (kollabiert per .empty). Zustandswechsel
-// räumen jeweils die ANDERE Zeile auf: „Scanner bereit" löscht wait (nicht
-// mehr Warten), neuer Schüler/Warten/idle löscht trans (alter Scan-Ergebnis
-// hinfällig), Druckbeginn löscht trans.
+const statusTransEl = document.getElementById('status-trans');
+const statusPrintEl = document.getElementById('status-print');
+const STATUS_SLOTS = ['wait', 'trans', 'print'];
+function statusSlotEl(slot) {
+  if (slot === 'wait') return statusWaitEl;
+  if (slot === 'print') return statusPrintEl;
+  return statusTransEl;
+}
+// Zentraler Setter für die drei Statuszeilen in #status (oben → unten):
+//   • `wait`   (oben)  — Worker-/Helfer-Zustand: „Warten …", „Warten bis
+//     Schüler frei …", „Scanner bereit — Buch scannen", idle-Warteschlange.
+//   • `trans`  (Mitte) — flüchtige Zeile: Scan-Ergebnisse, „Gesendet",
+//     „Prüfe Scans", Kamera-/Verbindungs-Hinweise.
+//   • `print`  (unten) — Drucker-Zeile: alle Druckermeldungen + Countdown.
+// Zwei Arten von Meldungen:
+//   • **aktiv** (`terminal=false`, Default) — ein andauernder Vorgang
+//     („Warten …", „wird gedruckt …", „wartet auf Druck …"). Persistiert:
+//     wird NUR durch eine neue Meldung im SELBEN Slot ersetzt, nicht durch
+//     Meldungen anderer Slots.
+//   • **terminal** (`terminal=true`) — eine End-/Bereit-Meldung („Leihschein
+//     gedruckt.", „Druck fehlgeschlagen …", „Scanner bereit", Countdown).
+//     Überschreibt die vorige Meldung im selben Slot, ist aber von JEDER
+//     neuen Meldung (egal welcher Slot) überschreibbar: jede neue nicht-leere
+//     `setStatusText`-Meldung verdrängt terminale Meldungen in den ANDEREN
+//     Slots, aktive dort bleiben stehen.
+// So bleibt z.B. während ein Druck läuft (print=aktiv) und der Worker noch
+// lädt (wait=aktiv „Warten …") beides sichtbar; das spätere „Scanner bereit"
+// (wait=terminal) verdrängt nur das terminale „Warten …"-Ende, nicht den
+// aktiven Druck — und ist danach selbst von jedem neuen Scan-Ergebnis
+// überschreibbar.
+// `clearStatus(slot)` leert gezielt eine Zeile (ohne Kaskade) — für explizite
+// Zustands-Resets (neuer Schüler/idle räumt alte Druck-/Scan-Status weg).
 // Hält die Alert-Farbe strikt an den Alert-Text gebunden — jeder andere
 // Statustext setzt automatisch wieder normale Schrift. `alertClass` ist eine
 // der drei Farb-CSS-Klassen (`status-alert-red`/`status-alert-orange`/
@@ -32,17 +49,31 @@ const statusWaitEl = document.getElementById('status-wait');
 // mehr auseinanderlaufen). Nimmt PLAIN TEXT entgegen (kein HTML) — schreibt
 // auf textContent, das Entities nicht interpretiert; escapeHtml()-te Strings
 // hier wären falsch.
+const statusTerminal = { wait: false, trans: false, print: false };
 function applyStatusText(el, text, alertClass) {
   el.textContent = text;
   el.classList.remove('status-alert-red', 'status-alert-orange', 'status-book-issued');
   if (alertClass) el.classList.add(alertClass);
   el.classList.toggle('empty', !text);
 }
-function setStatusText(text, alertClass = null, slot = 'trans') {
-  if (slot === 'wait') applyStatusText(statusWaitEl, text, alertClass);
-  else applyStatusText(statusTransEl, text, alertClass);
+function setStatusText(text, alertClass = null, slot = 'trans', terminal = false) {
+  applyStatusText(statusSlotEl(slot), text, alertClass);
+  statusTerminal[slot] = terminal && !!text;
+  if (text) {
+    // Neue nicht-leere Meldung verdrängt terminale End-Meldungen in den
+    // ANDEREN Slots; aktive (andauernde) Meldungen bleiben dort stehen.
+    for (const other of STATUS_SLOTS) {
+      if (other !== slot && statusTerminal[other]) {
+        applyStatusText(statusSlotEl(other), '', null);
+        statusTerminal[other] = false;
+      }
+    }
+  }
 }
-function clearStatus(slot) { setStatusText('', null, slot); }
+function clearStatus(slot) {
+  applyStatusText(statusSlotEl(slot), '', null);
+  statusTerminal[slot] = false;
+}
 const dotEl = document.getElementById('dot');
 const sNameEl = document.getElementById('s-name');
 const sFormEl = document.getElementById('s-form');
@@ -205,9 +236,16 @@ function syncQueueView() {
 // her (statt ihn mit „Warten…" zu überschreiben).
 function setReadyStatus() {
   if (studentActive) {
-    if (spectating) { setStatusText('Warten bis Schüler frei…', null, 'wait'); clearStatus('trans'); }
-    else if (workerPending) { setStatusText('Warten…', null, 'wait'); clearStatus('trans'); }
-    else { clearStatus('wait'); setStatusText('Scanner bereit — Buch scannen'); }
+    if (spectating) { setStatusText('Warten bis Schüler frei…', null, 'wait'); clearStatus('trans'); clearStatus('print'); }
+    else if (workerPending) { setStatusText('Warten…', null, 'wait'); clearStatus('trans'); clearStatus('print'); }
+    else {
+      // Worker bereit → „Scanner bereit" (terminal): überschreibt die vorige
+      // Worker-Meldung („Warten …") im selben Slot, ist aber danach von jeder
+      // neuen Meldung überschreibbar. Aktive Druck-Meldungen (print) werden
+      // NICHT verdrängt — ein laufender Druck bleibt sichtbar.
+      setStatusText('Scanner bereit — Buch scannen', null, 'wait', true);
+      clearStatus('trans');
+    }
   } else renderWaitingStatus();
 }
 
