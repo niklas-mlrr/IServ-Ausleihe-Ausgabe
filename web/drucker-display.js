@@ -68,7 +68,6 @@ function renderQueue(msg) {
         <div class="dd-cat-label">Nächster</div>
         ${nextLines}
       </div>
-      ${nextBlock}
     </div>`;
   }).join('');
 
