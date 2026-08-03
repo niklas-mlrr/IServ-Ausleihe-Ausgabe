@@ -8,6 +8,27 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-03 — Drucker-Display: Warteschlange zeigt alle Namen, Überlauf transparent, Resize-adaptiv
+
+- **Alle Namen stets gerendert (kein Cap, kein Clip):** die Warteschlangen-Karte
+  behält ihre natürliche Höhe — jeder Auftrag bleibt im DOM und sichtbar
+  gerendert, auch die untersten (vollständig transparent). Zuvor kappte
+  `maxHeight`+`overflow:hidden` den Kasten und schnitt Namen hart ab.
+- **Maske statt Clipping:** `applyWaitingOverflow` setzt nur noch eine
+  `mask-image`-Gradient (deckend bis vorletzte Zeile, eine Zeile Ausblenden
+  von deckend nach vollständig transparent, darunter vollständig transparent).
+  Der weiße Kasten endet weich (auslaufend), überlappende Namen sind
+  transparent, nicht abgeschnitten.
+- **Seite fix im Viewport:** `html/body { overflow:hidden }` (Drucker-Display
+  ist ein festes Bildschirmgerät, nicht zum Scrollen) — die transparente
+  Überlappung wird unten unsichtbar abgeschnitten, kein Scrollbalken.
+- **Resize-adaptiv:** Maske wird nach jedem Render (vor dem FLIP), nach Ablauf
+  einer FLIP-Animation (`flushPendingQueue`) und bei Fenster-Resize (debounced)
+  neu berechnet — Fenstergrößenänderung verschiebt die Ausblende-Grenze mit.
+- Backend nimmt ohnehin alle Aufträge in die Warteschlange auf (`enqueue` ohne
+  Cap) und sendet alle (`display_view` filtert nur nach Display-Zuweisung);
+  keine Backend-Änderung nötig.
+
 ## 2026-08-03 — Drucker-Display: Labels gleiten, z-index, Überlauf-Ausblendung, Vorgänger-Dispatch
 
 - **Kategorie-Labels gleiten (Q2 + neu):** „Gedruckt"/„Wird gedruckt"/„Nächster"

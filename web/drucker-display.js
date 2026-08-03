@@ -180,20 +180,24 @@ function flipFromOldRects(oldCardRects, oldOrderRects, oldLabelRects) {
   });
 }
 
-// Überlauf der Warteschlangen-Karte: reichen die Namen nicht ins Sichtfeld,
-// endet der weiße Kasten rechtzeitig, und die überlappenden Namen werden
-// vollständig transparent — der unterste Bereich (eine Zeile hoch) blendet
-// von oben (deckend) nach unten (transparent) aus, läuft also aus. Nur die
-// Warteschlangen-Karte (nicht die Drucker-Karten). Aufgerufen nach jedem
-// Render (vor dem FLIP) und bei Fenster-Resize (debounced).
+// Überlauf der Warteschlangen-Karte: ALLE Namen bleiben stets gerendert (kein
+// Cap, kein Clip) — die Karte behält ihre natürliche Höhe. Eine Mask-Gradient
+// blendet ab der vorletzten sichtbaren Zeile nach unten aus: der unterste
+// Bereich (eine Zeile hoch) geht von deckend (oben) zu vollständig transparent
+// (unten) über, alles darunter ist vollständig transparent — weiterhin
+// gerendert, nur unsichtbar. Beim Resize neu berechnet. Nur die Warteschlangen-
+// Karte (Drucker-Karten unberührt). Die Seite selbst klebt fix im Viewport
+// (body overflow:hidden) — die transparente Überlappung wird unten abgeschnitten,
+// was unsichtbar bleibt, da sie ohnehin transparent ist. Aufgerufen nach jedem
+// Render (vor dem FLIP, dann stimmt die Maske für die neue Layoutposition),
+// nach Ablauf einer FLIP-Animation (flushPendingQueue) und bei Resize.
 let waitingOverflowTimer = null;
 function applyWaitingOverflow() {
   const card = content.querySelector('.dd-waiting-card');
   if (!card) return;
   const top = card.getBoundingClientRect().top;
-  const avail = window.innerHeight - top - 24;  // Seitenabstand unten
+  const avail = window.innerHeight - top - 24;  // body padding unten
   if (avail <= 0) {
-    card.style.maxHeight = ''; card.style.overflow = '';
     card.style.maskImage = ''; card.style.webkitMaskImage = '';
     return;
   }
@@ -201,13 +205,11 @@ function applyWaitingOverflow() {
   const row = card.querySelector('.dd-order');
   const rowH = row ? row.getBoundingClientRect().height : 60;
   if (card.scrollHeight > avail) {
-    card.style.maxHeight = avail + 'px';
-    card.style.overflow = 'hidden';
-    const fade = `linear-gradient(to bottom, black calc(100% - ${rowH}px), transparent 100%)`;
+    const opaque = Math.max(0, avail - rowH);
+    const fade = `linear-gradient(to bottom, black 0px, black ${opaque}px, transparent ${avail}px)`;
     card.style.maskImage = fade;
     card.style.webkitMaskImage = fade;
   } else {
-    card.style.maxHeight = ''; card.style.overflow = '';
     card.style.maskImage = ''; card.style.webkitMaskImage = '';
   }
 }
@@ -428,6 +430,10 @@ function removePrintedAndFlip(pid) {
 
 function flushPendingQueue() {
   flipAnimating = false;
+  // Nach Ablauf der FLIP-Animation liegt die Warteschlangen-Karte an ihrer
+  // neuen Layoutposition (transform wieder 0) — Maske neu berechnen, falls
+  // sich z. B. das Grid darüber verkleinert/größert hat (s. removePrintedAndFlip).
+  applyWaitingOverflow();
   if (pendingQueueMsg) {
     // Ein frischer Snapshot bringt aktuellen Stand — eine aufgeschobene TTL-
     // Entfernung ist damit hinfällig (das Kästchen ist im Snapshot eh weg).

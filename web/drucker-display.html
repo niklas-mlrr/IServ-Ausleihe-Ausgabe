@@ -8,7 +8,11 @@
   <script src="/common.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body { height: 100%; }
+    /* Seite fix im Viewport (Drucker-Display ist ein festes Bildschirmgerät,
+       nicht zum Scrollen) — so bleibt die Warteschlangen-Karte mit allen Namen
+       stets im sichtbaren Bereich; Überlauf wird ausgeblendet (s. Maske in
+       drucker-display.js), nicht gescrollt. */
+    html, body { height: 100%; overflow: hidden; }
     /* Theme-Variablen: dark = Default (bisheriges Aussehen), light = hell.
        --danger/--danger-text wie die Helfer-Statuszeile (host.css). */
     :root {
