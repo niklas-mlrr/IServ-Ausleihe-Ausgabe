@@ -25,8 +25,6 @@ function printerLabel(p) {
 
 function renderQueue(msg) {
   const pool = Array.isArray(msg.printers) ? msg.printers : [];
-  const waitingList = Array.isArray(msg.waiting_list) ? msg.waiting_list : [];
-  const waiting = msg.waiting || 0;
 
   if (!pool.length) {
     content.innerHTML =
@@ -61,30 +59,7 @@ function renderQueue(msg) {
     </div>`;
   }).join('');
 
-  const waitRows = waitingList.map(w => {
-    const printers = w.all_allowed
-      ? 'alle'
-      : (w.allowed_printers && w.allowed_printers.length
-          ? w.allowed_printers.map(escapeHtml).join(', ')
-          : '<span class="txt-danger">kein Drucker im Pool</span>');
-    return `<tr>
-      <td class="pq-pos">${w.position}</td>
-      <td>${escapeHtml(w.student || '–')}</td>
-      <td>${w.form ? escapeHtml(w.form) : '–'}</td>
-      <td>${escapeHtml(w.originator || '–')}</td>
-      <td>${printers}</td>
-    </tr>`;
-  }).join('');
-
-  const waitBlock = waitingList.length
-    ? `<div class="section-label">Zentrale Warteschlange (${waiting})</div>
-       <table>
-         <thead><tr><th>#</th><th>Schüler</th><th>Klasse</th><th>Auftraggeber</th><th>Drucker</th></tr></thead>
-         <tbody>${waitRows}</tbody>
-       </table>`
-    : '<div class="section-label">Zentrale Warteschlange</div><p class="hint">Zentrale Warteschlange leer.</p>';
-
-  content.innerHTML = `<div class="section-label">Drucker (${pool.length})</div><div class="grid" style="grid-template-columns:repeat(${pool.length},minmax(0,1fr))">${rows}</div>${waitBlock}`;
+  content.innerHTML = `<div class="grid" style="grid-template-columns:repeat(${pool.length},minmax(0,1fr))">${rows}</div>`;
 }
 
 function applyTheme(theme) {
@@ -92,15 +67,8 @@ function applyTheme(theme) {
   document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : 'dark');
 }
 
-function applyLabel(label) {
-  // Display-Name als Queue-Überschrift (leer = Default „Druckerwarteschlange").
-  const h1 = document.querySelector('#view-queue h1');
-  if (h1) h1.textContent = (label && label.trim()) ? label : 'Druckerwarteschlange';
-}
-
 function handleServerMessage(msg) {
   if ('theme' in msg) applyTheme(msg.theme);
-  if ('label' in msg) applyLabel(msg.label);
   if (msg.type === 'registration') {
     document.getElementById('reg-code').textContent = msg.code || '····';
     show('register');
