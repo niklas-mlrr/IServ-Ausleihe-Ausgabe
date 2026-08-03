@@ -217,18 +217,33 @@
       display: flex; align-items: center; justify-content: center;
       white-space: normal; overflow-wrap: normal; word-break: normal; text-align: center;
     }
+    /* Zwei gestapelte Statuszeilen: oben die flüchtige Meldung (Scan-Ergebnis,
+       „Gesendet", Kamera-/Verbindungs-Hinweis — bei jeder neuen Meldung
+       überschrieben), unten die persistente Warten-/Drucker-Meldung (bleibt
+       stehen, bis eine neue Warten-/Drucker-Meldung sie ersetzt). Leere Zeilen
+       kollabieren (.empty) → bei nur einer aktiven Zeile sieht es aus wie eine
+       einzige. */
+    .status-lines {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 2px; min-width: 0;
+    }
+    .status-line {
+      text-align: center; white-space: normal; overflow-wrap: normal; word-break: normal;
+      line-height: 1.2;
+    }
+    .status-line.empty { display: none; }
     .dot { display: none; }
     .dot.ok { background: #4caf50; }
     .dot.err { background: #f44336; }
     /* Rote Alert-Status (ausgemustert, anderweitig verliehen, unbekannt,
        Prüf-Fehler) — dieselbe Farbe wie die jeweilige Modal-Überschrift
        (s. ALERT_META in scan-state.js / statusAlertClass()). */
-    #status-text.status-alert-red { color: #f44336; font-weight: 700; }
+    .status-line.status-alert-red { color: #f44336; font-weight: 700; }
     /* Buch erfolgreich ausgegeben (booked) — grün, nur für diese Meldung. */
-    #status-text.status-book-issued { color: #2e7d32; font-weight: 700; }
+    .status-line.status-book-issued { color: #2e7d32; font-weight: 700; }
     /* Orange Alert-Status (bereits an dich verliehen, nicht bestellt,
        Buchliste noch nicht geladen) — dieselbe Farbe wie die Modal-Überschrift. */
-    #status-text.status-alert-orange { color: #e69500; font-weight: 700; }
+    .status-line.status-alert-orange { color: #e69500; font-weight: 700; }
 
     /* ---- Name (groß, ohne Box) + Klasse/Bezahlstatus rechtsbündig ---- */
     .name-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 12px 2px 8px; }
@@ -456,7 +471,7 @@
 
     <div class="status-bar">
       <button id="print-btn" title="Leihschein drucken"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg></button>
-      <div id="status"><span class="dot" id="dot"></span><span id="status-text">Verbinde…</span></div>
+      <div id="status"><span class="dot" id="dot"></span><div class="status-lines"><span id="status-trans" class="status-line">Verbinde…</span><span id="status-wait" class="status-line empty"></span></div></div>
       <button id="next-btn" title="Nächster Schüler"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg></button>
     </div>
 

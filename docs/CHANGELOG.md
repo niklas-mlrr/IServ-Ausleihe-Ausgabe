@@ -8,6 +8,39 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-03 — Helfer-Statuszeile: Warten-/Drucker-Meldungen bleiben stehen
+
+- **Helfer-Client (`scan.html`, `scan-state.js`, `scan-ws.js`,
+  `scan-render.js`):** Die Statuszeile besteht jetzt aus zwei gestapelten
+  Zeilen statt einer:
+  - **`#status-trans` (oben, flüchtig):** Scan-Ergebnisse, „Gesendet",
+    „Prüfe Scans …", „Schüler wird aufgerufen …", Peek-Status, Kamera-/
+    Verbindungs-Hinweise, „Scanner bereit — Buch scannen". Wird von jeder
+    neuen flüchtigen Meldung überschrieben.
+  - **`#status-wait` (unten, persistent):** „Warten…", „Warten bis Schüler
+    frei…", Warteschlangengröße (idle) und alles Drucker-Bezogene
+    (`print_progress`, `print_result`, „Leihschein in
+    Druckerwarteschlange …", Countdown „Nächster Schüler in Xs"). Wird
+    NUR durch eine neue `wait`-Meldung ersetzt — flüchtige Scan-Ergebnisse
+    lassen sie stehen, damit der Helfer während eines laufenden Drucks
+    sieht, worauf er wartet.
+  - Leere Zeilen kollabieren (`.empty` → `display:none`); bei nur einer
+    aktiven Zeile bleibt die Optik wie zuvor (eine Zeile, zentriert).
+- **Slot-Übergänge:** `setStatusText(text, alertClass, slot)` mit
+  `slot='trans'|'wait'` (Default `trans`); `clearStatus(slot)` leert eine
+  Zeile. Zustandswechsel räumen die jeweils andere Zeile auf: „Scanner
+    bereit" löscht `wait` (nicht mehr Warten), neuer Schüler/Warten/idle
+  löscht `trans` (alter Scan-Ergebnis hinfällig), Druckbeginn
+  (`sendPrint`) löscht `trans`. Drucker-Fortschritt (`print_progress`)
+  berührt `trans` nicht → Scan-Ergebnis und Drucker-Status gleichzeitig
+  sichtbar.
+- **Alert-Farben:** `.status-line.status-alert-red/-orange/-book-issued`
+  (statt `#status-text.…`) gelten für beide Zeilen.
+- Betrifft nur den Helfer-Client (Modus A); Schüler-Client (`student.*`)
+  unverändert.
+> `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
+> werden hier nur verlinkt, nicht dupliziert.
+
 ## 2026-08-02 — Druck-Status-Texte vereinheitlicht (Helfer + Host) + Countdown „Nächster Schüler"
 
 - **Helfer-Client (`scan-ws.js`):** Druck-Status-Texte überarbeitet. Drucker

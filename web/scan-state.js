@@ -7,21 +7,42 @@
 
 window.__scan = window.__scan || {};
 
-const statusEl = document.getElementById('status-text');
-// Zentraler Setter: hält die Alert-Farbe strikt an den Alert-Text gebunden —
-// jeder andere Statustext (z.B. "<Code> gesendet") setzt automatisch wieder
-// die normale Schrift. `alertClass` ist eine der drei Farb-CSS-Klassen
-// (`status-alert-red`/`status-alert-orange`/`status-book-issued`) oder
-// `null` für normale Schrift — s. `statusAlertClass()` weiter unten, das sie
-// aus DEMSELBEN `ALERT_META` ableitet, das auch die Fenster-Überschrift
-// einfärbt (Statuszeile und Fenster können dadurch nicht mehr auseinanderlaufen).
-// Nimmt PLAIN TEXT entgegen (kein HTML) — schreibt auf textContent, das
-// Entities nicht interpretiert; escapeHtml()-te Strings hier wären falsch.
-function setStatusText(text, alertClass = null) {
-  statusEl.textContent = text;
-  statusEl.classList.remove('status-alert-red', 'status-alert-orange', 'status-book-issued');
-  if (alertClass) statusEl.classList.add(alertClass);
+const statusTransEl = document.getElementById('status-trans');
+const statusWaitEl = document.getElementById('status-wait');
+// Zentraler Setter für die zwei Statuszeilen in #status:
+//   • `trans` (Default) — die OBere, flüchtige Zeile: Scan-Ergebnisse,
+//     „Gesendet", „Prüfe Scans", Kamera-/Verbindungs-Hinweise, „Scanner
+//     bereit". Wird von jeder neuen `trans`-Meldung überschrieben.
+//   • `wait` — die UNTERE, persistente Zeile: „Warten…", „Warten bis Schüler
+//     frei…", Warteschlangengröße (idle) und alles Drucker-Bezogene
+//     (print_progress / print_result / „Leihschein in Druckerwarteschlange …"
+//     / Countdown „Nächster Schüler in Xs"). Wird NUR durch eine neue
+//     `wait`-Meldung ersetzt — Scan-Ergebnisse (trans) lassen sie stehen,
+//     damit der Helfer sieht, worauf gerade gewartet wird.
+// `clearStatus(slot)` leert eine Zeile (kollabiert per .empty). Zustandswechsel
+// räumen jeweils die ANDERE Zeile auf: „Scanner bereit" löscht wait (nicht
+// mehr Warten), neuer Schüler/Warten/idle löscht trans (alter Scan-Ergebnis
+// hinfällig), Druckbeginn löscht trans.
+// Hält die Alert-Farbe strikt an den Alert-Text gebunden — jeder andere
+// Statustext setzt automatisch wieder normale Schrift. `alertClass` ist eine
+// der drei Farb-CSS-Klassen (`status-alert-red`/`status-alert-orange`/
+// `status-book-issued`) oder `null` für normale Schrift — s. `statusAlertClass()`
+// weiter unten, das sie aus DEMSELBEN `ALERT_META` ableitet, das auch die
+// Fenster-Überschrift einfärbt (Statuszeile und Fenster können dadurch nicht
+// mehr auseinanderlaufen). Nimmt PLAIN TEXT entgegen (kein HTML) — schreibt
+// auf textContent, das Entities nicht interpretiert; escapeHtml()-te Strings
+// hier wären falsch.
+function applyStatusText(el, text, alertClass) {
+  el.textContent = text;
+  el.classList.remove('status-alert-red', 'status-alert-orange', 'status-book-issued');
+  if (alertClass) el.classList.add(alertClass);
+  el.classList.toggle('empty', !text);
 }
+function setStatusText(text, alertClass = null, slot = 'trans') {
+  if (slot === 'wait') applyStatusText(statusWaitEl, text, alertClass);
+  else applyStatusText(statusTransEl, text, alertClass);
+}
+function clearStatus(slot) { setStatusText('', null, slot); }
 const dotEl = document.getElementById('dot');
 const sNameEl = document.getElementById('s-name');
 const sFormEl = document.getElementById('s-form');
@@ -184,8 +205,9 @@ function syncQueueView() {
 // her (statt ihn mit „Warten…" zu überschreiben).
 function setReadyStatus() {
   if (studentActive) {
-    if (spectating) setStatusText('Warten bis Schüler frei…');
-    else setStatusText(workerPending ? 'Warten…' : 'Scanner bereit — Buch scannen');
+    if (spectating) { setStatusText('Warten bis Schüler frei…', null, 'wait'); clearStatus('trans'); }
+    else if (workerPending) { setStatusText('Warten…', null, 'wait'); clearStatus('trans'); }
+    else { clearStatus('wait'); setStatusText('Scanner bereit — Buch scannen'); }
   } else renderWaitingStatus();
 }
 
@@ -305,6 +327,7 @@ const LAYOUT_PROPS = ['display','flexDirection','flexWrap','alignItems','justify
 // bare Bezeichner aus der gemeinsamen Skript-Scope, keine funktionale
 // Abhängigkeit von window.__scan).
 window.__scan.setStatusText = setStatusText;
+window.__scan.clearStatus = clearStatus;
 window.__scan.statusAlertClass = statusAlertClass;
 window.__scan.resetScannedState = resetScannedState;
 window.__scan.drainScanWaiters = drainScanWaiters;
