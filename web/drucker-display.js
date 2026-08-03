@@ -49,13 +49,16 @@ function renderQueue(msg) {
     const printedLine = printed ? `<div class="dd-line">${escapeHtml(printed)}</div>` : '';
     const printingLine = printing ? `<div class="dd-line">${escapeHtml(printing)}</div>` : '';
     const nextLines = spooledList.map(n => `<div class="dd-line">${escapeHtml(n)}</div>`).join('');
-    // Fehler-Hinweis (bleibt sichtbar, falls der Drucker hängt).
-    const faultBlock = p.faulty
-      ? `<div class="dd-fault"><span class="txt-danger">⚠ fehlerhaft</span>${p.load > 0 ? ` — ${p.load} blockiert` : ''}</div>`
+    // Bei Fehler: Name + „ - Fehler" in rot, gleicher Schriftgröße wie der Name;
+    // darunter der Betreuer-Hinweis. Die Kategorien (Aufträge) bleiben sichtbar.
+    const faulty = !!p.faulty;
+    const nameSuffix = faulty ? ' - Fehler' : '';
+    const faultMsg = faulty
+      ? `<div class="dd-fault-msg">Es scheint ein Fehler vorzuliegen. Bitte melde dich beim Betreuer.</div>`
       : '';
     return `<div class="printer-card" data-printer="${escapeHtml(p.id)}">
-      <div class="printer-name">${escapeHtml(printerLabel(p))}</div>
-      ${faultBlock}
+      <div class="printer-name${faulty ? ' dd-fault-name' : ''}">${escapeHtml(printerLabel(p))}${nameSuffix}</div>
+      ${faultMsg}
       <div class="dd-cat dd-printed" data-printed-for="${escapeHtml(p.id)}">
         <div class="dd-cat-label">Gedruckt</div>
         ${printedLine}

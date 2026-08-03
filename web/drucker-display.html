@@ -49,7 +49,11 @@
       overflow-wrap: anywhere; }
     .dd-printed .dd-line { opacity: .55; }
     .dd-next .dd-line + .dd-line { border-top: 1px solid var(--row-border); }
-    .dd-fault { font-size: 1.1rem; margin-bottom: 10px; }
+    /* Druckerfehler: Name + „ - Fehler" rot in Namensgröße, darunter der
+       Betreuer-Hinweis. Die Auftrags-Kategorien bleiben sichtbar. */
+    .printer-name.dd-fault-name { color: #ff6b6b; }
+    .dd-fault-msg { color: #ff6b6b; font-size: 1.2rem; line-height: 1.3;
+      margin-bottom: 14px; overflow-wrap: anywhere; }
     .txt-danger { color: #ff6b6b; }
 
     table { width: 100%; border-collapse: collapse; font-size: 1.05rem; }
