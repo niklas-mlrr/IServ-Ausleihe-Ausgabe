@@ -1374,7 +1374,7 @@ window.__host = window.__host || {};
       panelsHost.innerHTML = `<div class="pdd-row" data-display="${escapeHtml(d.display_id)}">
         <span class="pdd-id">${escapeHtml(short)}</span>
         <input class="pdd-code" type="text" inputmode="latin" autocapitalize="characters"
-               placeholder="Code" maxlength="4" style="width:90px;text-transform:uppercase">
+               placeholder="Code" maxlength="4">
         <button class="secondary pdd-authorize">Zuordnen</button>
       </div>`;
       panelsHost.querySelector('.pdd-code')?.focus();
