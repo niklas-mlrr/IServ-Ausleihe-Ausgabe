@@ -303,6 +303,26 @@ class DisplaySession:
 
 
 @dataclass
+class PrinterDisplaySession:
+    """Drucker-Display (`/drucker-display`) — Warteschlangen-Anzeige für einen
+    Bildschirm neben den Druckern. Pairing-Flow wie `DisplaySession` (zeigt
+    zunächst nur den Registrierungs-Code), plus Host-Zuweisung, *welche*
+    Pool-Drucker dieses Display sehen soll.
+
+    ``assigned_printer_ids``: ``None`` = alle Pool-Drucker (Default direkt nach
+    Authorize); eine explizite Menge (auch leer) beschränkt auf genau diese IDs.
+    Schüler-Namen werden — anders als beim iPad-Display — gezeigt, aber erst nach
+    Pairing, sodass die offene Seite vorab keine Daten preisgibt."""
+
+    display_id: str
+    registration_code: str
+    authorized: bool = False
+    assigned_printer_ids: set[str] | None = None
+    ws: object | None = None
+    created_at: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
 class RuntimeSettings:
     """Die vier Host-/Entwickler-Bool-Toggles + der Drucker-Pool — im
     Einstellungen-Dialog gesetzt, gemeinsam in `routes/settings.py::_BOOL_SETTINGS`
@@ -442,6 +462,9 @@ class AppState:
         self.modus_b_join_qr: str | None = None  # PNG-Data-URL für iPad/Host
         self.student_sessions: dict[str, StudentSessionB] = {}  # session_token -> Session
         self.displays: dict[str, DisplaySession] = {}  # display_id -> Display
+        # Drucker-Displays (`/drucker-display`): eigene Rolle, Pairing + pro
+        # Display zugewiesene Pool-Drucker-Teilmenge (s. PrinterDisplaySession).
+        self.printer_displays: dict[str, PrinterDisplaySession] = {}
 
     # -----------------------------------------------------------------
     # Kontext-Verwaltung
@@ -639,6 +662,7 @@ class AppState:
                 **self.print_queue.pool_summary(),
                 "waiting_list": self.print_queue.waiting_list(self),
             },
+            "printer_displays": self.printer_displays_snapshot(),
             "book_order": list(ctx.book_order) if ctx else [],
         }
 
@@ -663,6 +687,33 @@ class AppState:
             "pending_count": len(pending),
             "displays": displays,
         }
+
+    # --- Drucker-Displays -------------------------------------------------
+
+    def printer_displays_snapshot(self) -> list[dict]:
+        """Drucker-Displays für den Host-Snapshot: je Display Kennung,
+        Pairing-Status, Verbindungsstatus und die zugewiesene Drucker-Teilmenge
+        (sortierte ID-Liste oder ``None`` = alle Pool-Drucker). Der Host-Client
+        rendert daraus die Code-Eingabe + Zuweisungs-Checkboxes."""
+        return [
+            {
+                "display_id": d.display_id,
+                "authorized": d.authorized,
+                "connected": d.ws is not None,
+                "assigned_printer_ids": (
+                    None if d.assigned_printer_ids is None else sorted(d.assigned_printer_ids)
+                ),
+            }
+            for d in self.printer_displays.values()
+        ]
+
+    def printer_display_view(self, display: PrinterDisplaySession) -> dict:
+        """Gefilterte Queue-Sicht für ein Drucker-Display: die zugewiesenen
+        Pool-Drucker (Live-Status) + die zentrale Warteschlange, gefiltert auf
+        Einträge, deren Allowlist die Display-Zuweisung schneidet. Logik liegt
+        im ``print_queue``-Modul (dort ist die Job-Allowlist beheimatet), s.
+        ``PrintQueue.display_view``."""
+        return self.print_queue.display_view(self, display.assigned_printer_ids)
 
     # --- Modus-B-Lookups ---
 

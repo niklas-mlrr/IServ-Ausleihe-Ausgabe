@@ -237,6 +237,30 @@ class DisplayAuthorizeRequest(BaseModel):
     registration_code: str = ""
 
 
+class PrinterDisplayAuthorizeRequest(BaseModel):
+    """Body für `POST /api/drucker-display/authorize` — Pairing-Code vom
+    Drucker-Display eingeben, um es zu authorisieren (s. DisplayAuthorizeRequest
+    für iPad-Displays, bewusst eigenes Model für klare Trennung)."""
+
+    registration_code: str = ""
+
+
+class PrinterDisplayAssignRequest(BaseModel):
+    """Body für `POST /api/drucker-display/assign` — zugewiesene Pool-Drucker
+    für ein Drucker-Display setzen. ``printer_ids`` = Drucker-IDs; ``None`` =
+    alle Pool-Drucker (Default), explizite (auch leere) Liste = Teilmenge."""
+
+    display_id: str = ""
+    printer_ids: list[str] | None = None
+
+
+class PrinterDisplayForgetRequest(BaseModel):
+    """Body für `POST /api/drucker-display/forget` — ein Drucker-Display
+    abmelden (Session entfernen, WS wird geschlossen)."""
+
+    display_id: str = ""
+
+
 class StudentJoinRequest(BaseModel):
     join_secret: str = ""
 

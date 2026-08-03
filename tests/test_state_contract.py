@@ -40,6 +40,7 @@ EXPECTED_SNAPSHOT_KEYS = {
     "slip_second_page_default",
     "printers",
     "print_queue_summary",
+    "printer_displays",
     "book_order",
 }
 
@@ -90,3 +91,5 @@ def test_toggle_defaults_are_off():
     assert printers[0]["load"] == 0
     assert printers[0]["faulty"] is False
     assert snap["print_queue_summary"] == {"waiting": 0, "waiting_list": []}
+    # Kein Drucker-Display verbunden → leere Liste.
+    assert snap["printer_displays"] == []

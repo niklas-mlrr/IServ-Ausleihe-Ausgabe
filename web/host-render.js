@@ -500,6 +500,53 @@ window.__host = window.__host || {};
     qrWatch = { kind: 'display', baseline: ((state.modus_b && state.modus_b.displays) || []).length };
     showQr(d.qr, d.url || '');
   }
+  // QR, mit dem ein Gerät die Drucker-Display-Seite (/drucker-display) öffnet.
+  async function showPrinterDisplayQr() {
+    const r = await fetch('/api/drucker-display/qr');
+    if (!r.ok) { showMsg('QR für Druckerdisplay konnte nicht geladen werden'); return; }
+    const d = await r.json();
+    showQr(d.qr, d.url || '');
+  }
+  // Drucker-Display über den Pairing-Code freischalten (Zuordnen-Button).
+  async function authorizePrinterDisplay(displayId, code, btn) {
+    if (!code) return;
+    if (btn) await busy(btn, async () => {
+      const r = await fetch('/api/drucker-display/authorize', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ registration_code: code.trim().toUpperCase() }),
+      });
+      if (r.ok) showMsg('Drucker-Display zugeordnet');
+      else { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Zuordnung fehlgeschlagen'); }
+    });
+  }
+  // Zugewiesene Drucker eines Drucker-Displays setzen (Checkboxes).
+  async function assignPrinterDisplay(displayId, btn) {
+    const box = btn.closest('.pdd-row');
+    const checked = Array.from(box.querySelectorAll('.pdd-check input[type=checkbox]:checked'))
+      .map(c => c.value);
+    // Alle Häkchen = alle Pool-Drucker → als `null` (= alle) schicken, damit neu
+    // hinzugefügte Pool-Drucker automatisch erscheinen. Kein Häkchen = leere Menge.
+    const poolIds = (state.printers || []).map(p => p.id);
+    const all = checked.length === poolIds.length;
+    const body = { display_id: displayId, printer_ids: all ? null : checked };
+    if (btn) await busy(btn, async () => {
+      const r = await fetch('/api/drucker-display/assign', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Zuweisung fehlgeschlagen'); }
+    });
+  }
+  // Drucker-Display abmelden (Vergessen-Button).
+  async function forgetPrinterDisplay(displayId, btn) {
+    if (btn) await busy(btn, async () => {
+      const r = await fetch('/api/drucker-display/forget', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ display_id: displayId }),
+      });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Abmelden fehlgeschlagen'); }
+    });
+  }
   // Gemeinsame Pairing-Funktion: ordnet einen wartenden Code einem Schüler zu.
   async function doPair(studentId, code, btn) {
     if (!studentId || !code) return;
@@ -620,7 +667,7 @@ window.__host = window.__host || {};
 
   // Host-Tab (Helfer + Modus-B-Kontrolle) und Klassen-Tab (Now-Serving + Queue
   // + Pairing) getrennt rendern.
-  function renderHostTab() { renderHelpers(); renderModusBControl(); renderPrintQueue(); }
+  function renderHostTab() { renderHelpers(); renderModusBControl(); renderPrintQueue(); renderPrinterDisplays(); }
   function renderClassTab(id) {
     if (!(state.contexts || {})[id]) return;
     if (!document.getElementById('panel-ctx-' + id)) return;
@@ -1204,6 +1251,49 @@ window.__host = window.__host || {};
       </table>
       <div class="pq-section">Zentrale Warteschlange (${waiting})</div>
       ${waitBlock}`;
+  }
+
+  // Drucker-Displays (Bildschirme neben den Druckern): pro verbundenes Display
+  // Code-Eingabe (vor Pairing) bzw. Zuweisungs-Checkboxes (nach Pairing). Daten
+  // aus `state.printer_displays`; der Server pusht bei jeder Änderung einen
+  // frischen Snapshot. `assigned_printer_ids: null` = alle Pool-Drucker.
+  function renderPrinterDisplays() {
+    const box = document.getElementById('printer-displays-box');
+    if (!box) return;
+    const displays = state.printer_displays || [];
+    const pool = state.printers || [];
+    if (!displays.length) {
+      box.innerHTML = '<p class="hint" style="margin:0">Kein Drucker-Display verbunden. „QR für Druckerdisplay" öffnen und den angezeigten Code hier eingeben.</p>';
+      return;
+    }
+    box.innerHTML = displays.map(d => {
+      const short = d.display_id.slice(0, 6);
+      if (!d.authorized) {
+        return `<div class="pdd-row" data-display="${escapeHtml(d.display_id)}">
+          <span class="pdd-id">${escapeHtml(short)}</span>
+          <input class="pdd-code" type="text" inputmode="latin" autocapitalize="characters"
+                 placeholder="Code" maxlength="4" style="width:90px;text-transform:uppercase">
+          <button class="secondary pdd-authorize">Zuordnen</button>
+        </div>`;
+      }
+      const ids = d.assigned_printer_ids; // null = alle, sonst sortierte Liste
+      const checks = pool.map(p => {
+        const checked = ids === null || ids.includes(p.id);
+        return `<label class="pdd-check"><input type="checkbox" value="${escapeHtml(p.id)}"
+          ${checked ? 'checked' : ''} data-display="${escapeHtml(d.display_id)}">${escapeHtml(printerLabel(p))}</label>`;
+      }).join('');
+      const assignedLabel = ids === null
+        ? 'alle Drucker'
+        : (ids.length ? `${ids.length} Drucker` : 'kein Drucker');
+      return `<div class="pdd-row" data-display="${escapeHtml(d.display_id)}">
+        <div class="pdd-head">
+          <span class="pdd-id">${escapeHtml(short)}</span>
+          <span class="pdd-assigned">${escapeHtml(assignedLabel)} zugewiesen</span>
+          <button class="ghost pdd-forget">Vergessen</button>
+        </div>
+        <div class="pdd-checks">${checks || '<span class="hint">Kein Drucker im Pool.</span>'}</div>
+      </div>`;
+    }).join('');
   }
 
   function renderHelpers() {
@@ -1851,6 +1941,37 @@ window.__host = window.__host || {};
   document.getElementById('authorize-display-btn').addEventListener('click', authorizeDisplay);
   document.getElementById('show-mb-qr-btn').addEventListener('click', showMbQr);
   document.getElementById('show-display-qr-btn').addEventListener('click', showDisplayQr);
+  document.getElementById('show-printer-display-qr-btn').addEventListener('click', showPrinterDisplayQr);
+  // Drucker-Displays: delegierte Handler für die per innerHTML gerenderten
+  // Buttons/Checkboxes im #printer-displays-box (Zuordnen, Vergessen, Zuweisung).
+  const pdBox = document.getElementById('printer-displays-box');
+  pdBox.addEventListener('click', (e) => {
+    const authorizeBtn = e.target.closest('.pdd-authorize');
+    if (authorizeBtn) {
+      const row = authorizeBtn.closest('.pdd-row');
+      const code = row.querySelector('.pdd-code').value;
+      authorizePrinterDisplay(row.dataset.display, code, authorizeBtn);
+      return;
+    }
+    const forgetBtn = e.target.closest('.pdd-forget');
+    if (forgetBtn) {
+      forgetPrinterDisplay(forgetBtn.closest('.pdd-row').dataset.display, forgetBtn);
+      return;
+    }
+  });
+  // Checkbox-Wechsel → sofort zuweisen (ohne extra Speichern-Button).
+  pdBox.addEventListener('change', (e) => {
+    if (e.target.matches('.pdd-check input[type=checkbox]')) {
+      assignPrinterDisplay(e.target.dataset.display, e.target);
+    }
+  });
+  // Code-Eingabe per Enter abschicken.
+  pdBox.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && e.target.matches('.pdd-code')) {
+      const row = e.target.closest('.pdd-row');
+      authorizePrinterDisplay(row.dataset.display, e.target.value, row.querySelector('.pdd-authorize'));
+    }
+  });
   document.getElementById('add-helper-btn').addEventListener('click', addHelper);
   document.getElementById('qr-modal').addEventListener('click', closeQr);
   document.getElementById('qr-box').addEventListener('click', (e) => e.stopPropagation());

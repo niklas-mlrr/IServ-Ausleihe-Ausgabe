@@ -1426,6 +1426,39 @@ async def broadcast_displays(state: AppState) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Drucker-Display (`/drucker-display`)
+# ---------------------------------------------------------------------------
+
+
+async def send_printer_display_update(state: AppState, display) -> None:
+    """Aktuellen Zustand an ein Drucker-Display schicken. Nicht authorisiert →
+    Registrierungs-Code (große Nummer), damit der Host das Display zuordnen
+    kann. Authorisiert → gefilterte Queue-Sicht (zugewiesene Drucker + relevante
+    Warteschlange, s. ``AppState.printer_display_view``). ``send_websocket``
+    liefert False statt zu werfen — Cleanup dediziert am Rückgabewert."""
+    if display.ws is None:
+        return
+    if not display.authorized:
+        msg = {
+            "type": "registration",
+            "code": display.registration_code,
+            "display_id": display.display_id,
+        }
+    else:
+        msg = {"type": "queue", **state.printer_display_view(display)}
+    if not await get_hub().send_websocket(display.ws, msg):
+        display.ws = None
+
+
+async def broadcast_printer_displays(state: AppState) -> None:
+    """Jedem verbundenen Drucker-Display seine aktuelle Queue-Sicht pushen
+    (s. ``send_printer_display_update``). Aufgerufen bei Druck-Übergängen
+    (``print_queue._notify_all``) und Pool-Mutationen (``_after_pool_change``)."""
+    for display in list(state.printer_displays.values()):
+        await send_printer_display_update(state, display)
+
+
+# ---------------------------------------------------------------------------
 # Timeout-Sweeper (harter Zugriffsentzug bei Inaktivität)
 # ---------------------------------------------------------------------------
 

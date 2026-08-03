@@ -24,9 +24,10 @@ from ..sessions import (
     process_scan,
     rebind_helper_to_context,
     send_display_update,
+    send_printer_display_update,
     spectate_student,
 )
-from ..state import DisplaySession, QueueStudent, get_state
+from ..state import DisplaySession, PrinterDisplaySession, QueueStudent, get_state
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -844,6 +845,40 @@ async def ws_display(websocket: WebSocket) -> None:
         pass
     finally:
         state.displays.pop(display.display_id, None)
+        await safe_broadcast(hub, state)
+
+
+# ---------------------------------------------------------------------------
+# Drucker-Display (Warteschlangen-Anzeige neben den Druckern)
+# ---------------------------------------------------------------------------
+
+
+@router.websocket("/ws/drucker-display")
+async def ws_drucker_display(websocket: WebSocket) -> None:
+    """Drucker-Display (`/drucker-display`). Unauthentifiziert (öffentlich im
+    LAN), zeigt aber vorab nur den Registrierungs-Code — Schülerdaten kommen
+    erst nach Host-Pairing + Drucker-Zuweisung. Push bei Druck-Übergängen
+    (``print_queue._notify_all``) und Pool-Mutationen (``_after_pool_change``)."""
+    state = get_state()
+    hub = get_hub()
+
+    await websocket.accept()
+    display = PrinterDisplaySession(
+        display_id=uuid.uuid4().hex[:12], registration_code=gen_registration_code()
+    )
+    state.printer_displays[display.display_id] = display
+    display.ws = websocket
+    await send_printer_display_update(state, display)  # zeigt den Registrierungscode
+    await hub.broadcast_host(state.state_snapshot())
+
+    try:
+        while True:
+            # Display sendet nichts Inhaltliches; receive dient der Trennungserkennung.
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        state.printer_displays.pop(display.display_id, None)
         await safe_broadcast(hub, state)
 
 

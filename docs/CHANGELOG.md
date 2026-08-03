@@ -8,6 +8,39 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-03 — Drucker-Display (`/drucker-display`) mit Pairing + Zuweisung
+
+- **Neue anzeigbare Druckerwarteschlange** für einen Bildschirm neben den
+  Druckern, aufrufbar über `https://<ip>:<port>/drucker-display` (Clean URL,
+  kein Login). Vor dem Pairing zeigt das Display **nur eine 4-stellige
+  Registrierungs-Nummer** — keine Schülerdaten. Erst nach Zuordnung durch den
+  Host + Drucker-Zuweisung erscheint die Warteschlange (mit Schülernamen, wie
+  im Host).
+- **Pairing-Flow** (Muster vom iPad-Display `/ws/display` übernommen): neue
+  Rolle `PrinterDisplaySession` (`server/state.py`) + WS `/ws/drucker-display`
+  (`server/routes/ws.py`). Push bei Druck-Übergängen
+  (`print_queue._notify_all` → `broadcast_printer_displays`) und Pool-
+  Mutationen (`_after_pool_change`), kein Polling.
+- **Host-Zuweisung:** pro Display legt der Host fest, *welche* Pool-Drucker
+  dieses Display sieht (`assigned_printer_ids`: `None` = alle, explizite Menge =
+  Teilmenge). Mehrere Displays mit je verschiedenen Druckern möglich, mehrere
+  Drucker auf einem Display. Warteliste serverseitig gefiltert
+  (`print_queue.display_view`): ein Eintrag ist relevant, wenn seine Allowlist
+  die Display-Zuweisung schneidet. Endpunkte: `/api/drucker-display/{qr,
+  authorize, assign, forget}` (Host-authentifiziert, `server/routes/
+  drucker_display.py`).
+- **Host-UI:** in der bestehenden „Druckerwarteschlange"-Karte neuer Button
+  „QR für Druckerdisplay" + eine Drucker-Displays-Liste (Code-Eingabe vor
+  Pairing, Zuweisungs-Checkboxes danach). `web/host-render.js::renderPrinterDisplays`.
+- **Schnittstelle:** `state_snapshot()` hat den neuen Top-Level-Key
+  `printer_displays` (Display-Liste für den Host); `print_queue.waiting_list`
+  liefert zusätzlich `allowed_printer_ids` (IDs zur serverseitigen Filterung).
+  Characterisierungs-Test `tests/test_state_contract.py` um den Key erweitert.
+- **Tests:** `tests/test_drucker_display.py` (QR/Auth-Guard, Authorize/Assign/
+  Forget, Snapshot-Shape, `send_printer_display_update`-Payloads),
+  `tests/test_print_queue.py` ergänzt um `display_view`-Filterung + `allowed_
+  printer_ids`. Suite grün (316 Tests), Ruff sauber.
+
 ## 2026-08-03 — Helfer-Statuszeile: aktiv vs. terminal + Reihenfolge
 
 - **Neue Unterscheidung (aktiv vs. terminal):** Meldungen in den drei Zeilen

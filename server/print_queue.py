@@ -741,9 +741,56 @@ class PrintQueue:
                     "originator": self._originator_label(state, j),
                     "all_allowed": all_allowed,
                     "allowed_printers": allowed_names,
+                    # IDs der erlaubten Drucker (parallel zu `allowed_printers`,
+                    # das Anzeige-Labels führt) — zur serverseitigen Filterung
+                    # für Drucker-Displays (s. `display_view`). `None` = alle.
+                    "allowed_printer_ids": (
+                        None if j.allowed_printers is None else sorted(j.allowed_printers)
+                    ),
                 }
             )
         return out
+
+    def display_view(self, state, assigned_printer_ids: set[str] | None) -> dict:
+        """Gefilterte Queue-Sicht für ein Drucker-Display (`/drucker-display`):
+        die zugewiesenen Pool-Drucker (Live-Status) + die zentrale Warteschlange,
+        gefiltert auf Einträge, deren Allowlist die Display-Zuweisung schneidet.
+
+        ``assigned_printer_ids``: ``None`` = alle Pool-Drucker (Default nach
+        Authorize); eine explizite Menge beschränkt Drucker + Warteliste auf
+        Relevanz. Eine leere Menge zeigt weder Drucker noch Wartelisten-Einträge
+        (Display zeigt clientseitig einen Hinweis).
+
+        Ein Wartelisten-Eintrag ist relevant, wenn seine Allowlist die Display-
+        Zuweisung schneidet: ``allowed=None`` (alle Pool-Drucker) → relevant,
+        sobald das Display mindestens einen Drucker zeigt; explizite Menge →
+        relevant bei nicht-leerem Schnitt."""
+        printers = state.settings.printers
+        pool = self.pool_printers(printers)
+        if assigned_printer_ids is None:
+            view_printers = pool
+        else:
+            view_printers = [p for p in pool if p["id"] in assigned_printer_ids]
+        full_waiting = self.waiting_list(state)
+        if assigned_printer_ids is None:
+            view_waiting = full_waiting
+        else:
+            assigned = set(assigned_printer_ids)
+
+            def _relevant(entry: dict) -> bool:
+                ids = entry.get("allowed_printer_ids")
+                if ids is None:
+                    # Eintrag erlaubt alle Pool-Drucker → relevant, sobald das
+                    # Display mindestens einen Drucker zeigt.
+                    return len(assigned) > 0
+                return bool(set(ids) & assigned)
+
+            view_waiting = [w for w in full_waiting if _relevant(w)]
+        return {
+            "printers": view_printers,
+            "waiting": len(view_waiting),
+            "waiting_list": view_waiting,
+        }
 
     @staticmethod
     def _printer_display(p) -> str:
@@ -838,6 +885,14 @@ class PrintQueue:
         # entfällt der Snapshot-Aufwand komplett.
         if state.host_ws_connections:
             await hub.send_all_hosts(state.state_snapshot())
+        # Drucker-Displays (`/drucker-display`) erhalten bei jedem Druck-
+        # Übergang ihre gefilterte Queue-Sicht — analog dem Host-Broadcast,
+        # aber pro Display (s. sessions.broadcast_printer_displays). Ohne
+        # verbundene Displays entfällt der Aufwand komplett.
+        if state.printer_displays:
+            from .sessions import broadcast_printer_displays
+
+            await broadcast_printer_displays(state)
 
     def _is_peer_error(self, job: PrintJob, printers: list, *, in_slot: bool) -> bool:
         """Zentraler Wartender ohne Ersatzdrucker (alle erlaubten Drucker sind

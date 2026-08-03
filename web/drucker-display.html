@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="de" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Ausleihe — Druckerwarteschlange</title>
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <script src="/common.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #111;
+      color: #eee;
+      min-height: 100vh;
+      padding: 24px;
+    }
+    h1 {
+      font-size: 1.6rem; font-weight: 600; opacity: .85;
+      margin-bottom: 16px; letter-spacing: .02em;
+    }
+    .section-label {
+      font-size: 1.1rem; font-weight: 600; opacity: .55;
+      margin: 18px 0 10px; text-transform: uppercase; letter-spacing: .08em;
+    }
+    .grid {
+      display: grid; gap: 16px;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    }
+    .printer-card {
+      background: #1c1c1e; border-radius: 14px; padding: 20px 22px;
+      border: 1px solid #2c2c2e;
+    }
+    .printer-name { font-size: 1.5rem; font-weight: 600; margin-bottom: 8px; }
+    .printer-status { font-size: 1.2rem; opacity: .85; line-height: 1.4; }
+    .dot { width: 14px; height: 14px; border-radius: 50%; display: inline-block;
+           background: #888; margin-right: 10px; vertical-align: middle; }
+    .dot.busy { background: #5ac8fa; }
+    .dot.idle { background: #30d158; opacity: .7; }
+    .dot.fault { background: #ff6b6b; }
+    .txt-danger { color: #ff6b6b; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 1.05rem; }
+    th { text-align: left; opacity: .5; font-weight: 600; padding: 8px 10px;
+         border-bottom: 1px solid #2c2c2e; }
+    td { padding: 10px; border-bottom: 1px solid #1f1f21; vertical-align: top; }
+    .pq-pos { color: #9a9a9e; width: 40px; text-align: right; font-variant-numeric: tabular-nums; }
+
+    .hint { opacity: .5; font-size: 1.1rem; margin: 8px 0; }
+
+    /* Registrierung (vor Pairing) — nur die Nummer, keine Schülerdaten. */
+    #view-register { display: none; flex-direction: column; align-items: center;
+      justify-content: center; min-height: 90vh; text-align: center; }
+    #view-register.show { display: flex; }
+    .reg-headline { font-size: 2rem; font-weight: 600; margin-bottom: 20px; }
+    .reg-code {
+      font-size: 6rem; font-weight: 700; letter-spacing: .3em;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      background: #1c1c1e; border: 1px solid #2c2c2e; border-radius: 20px;
+      padding: 24px 48px; margin: 12px 0;
+    }
+    .reg-sub { font-size: 1.3rem; opacity: .55; margin-top: 16px; }
+
+    #view-queue { display: none; }
+    #view-queue.show { display: block; }
+
+    #conn { position: fixed; top: 14px; right: 18px; font-size: .85rem; opacity: .55; }
+  </style>
+</head>
+<body>
+  <div id="conn"><span class="dot" id="conn-dot" style="background:#888"></span><span id="conn-text">verbinde…</span></div>
+
+  <!-- Registrierung (vor Pairing am Host) — zeigt NUR die Nummer. -->
+  <div id="view-register">
+    <div class="reg-headline">Drucker-Display registrieren</div>
+    <div class="reg-code" id="reg-code">····</div>
+    <p class="reg-sub">Diesen Code am Host eingeben und Druckerkapazitäten zuordnen.</p>
+  </div>
+
+  <!-- Warteschlange (nach Pairing + Zuweisung) -->
+  <div id="view-queue">
+    <h1>Druckerwarteschlange</h1>
+    <div id="dd-content"></div>
+  </div>
+
+  <script src="/drucker-display.js"></script>
+</body>
+</html>

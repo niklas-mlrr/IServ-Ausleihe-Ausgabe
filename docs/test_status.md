@@ -5,7 +5,7 @@
 > Risiko hier unter „Offen / zu testen" eintragen; nach erfolgreichem Test in
 > „Verifiziert" verschieben (mit Datum + Skript/Befund). Bezug: `docs/PLAN.md`.
 >
-> Stand: 2026-08-02 (Druck-Status-Texte vereinheitlicht + Countdown „Nächster Schüler", 295 Tests grün).
+> Stand: 2026-08-03 (Drucker-Display `/drucker-display` mit Pairing + Drucker-Zuweisung, 316 Tests grün).
 > Alle bisherigen Tests sind **read-only** gegen IServ
 > (kein Submit, keine Buchung — PLAN §6).
 >
@@ -52,8 +52,26 @@
 | V33 | **Audit-Härtung:** `/api/commit-book` nutzt die vollständige Vorabprüfung + per-Schüler-Lock; Queue-/Schuljahr-Reset gibt Worker vollständig frei; Modus-B-Reopen widerruft Pending-Sessions; ersetzte WS verlieren Befehlsrecht; Host-WS schließen bei TTL/Logout; Tokens bleiben aus Logs; App-State/Hub sind je FastAPI-App isoliert; Config/Pfade validiert und CWD-unabhängig. | Neue/erweiterte Tests in `test_booking_precheck.py`, `test_queue_flow.py`, `test_hub.py`, `test_ws_scanner.py`, `test_app_runtime.py`, `test_config.py`, `test_main.py`; `uv run python -W error -m pytest -q`; `uvx ruff check server tests conftest.py` | 2026-08-01 | **294 Tests grün**, 68 % Coverage, Ruff clean, keine Warnungen; ausschließlich offline, kein IServ-Write/Playwright-Enter. |
 | V34 | **Drucker-Anzeigename + vereinheitlichte „Name (Systemname)"-Anzeige** — `PrinterConfig.label` (rein kosmetisch, `name` bleibt Identität); Persistenz in `data/printers.json` (Roundtrip + Blank→`None`); `POST /api/printers/add` nimmt `label`, neu `POST /api/printers/label` setzt/löscht ihn. `pool_printers` liefert `label`; Host `printerLabel(p)` zeigt überall `<Label> (<Systemname>)` (Reiter/Panel/Warteschlange/Checkboxen; Standarddrucker ohne verschachtelte Klammern). Warteschlangen-Warteliste (`_printer_display`) + Druck-Toast/Scanner nutzen das Format via neuem WS-Feld `printer_label` in `print_progress`/`print_result` (`printer`-Systemname unverändert). Einstellungs-Latenz: Mutationen rendern aus Endpoint-Antwort statt `lpstat`-Re-Fetch; Pool wird aus WS-Snapshot live nachgeführt (Fokus-Schutz). Static-File-Cache-Busting via `Cache-Control: no-cache, must-revalidate`. | `tests/test_printer_store.py` (+1: `test_load_strips_blank_label`; Roundtrip-Test um `label` erweitert); `tests/test_state_contract.py` unverändert | 2026-08-02 | **295 Tests grün**, Ruff clean, ausschließlich offline. **Live-Check (Anzeigename im Echtbetrieb, Persistenz über Neustart, Label in Warteschlange/Toast/Scanner am echten Gerät) noch offen** (s. „Offen" unten) |
 | V35 | **Druck-Status-Texte vereinheitlicht + Countdown „Nächster Schüler"** — Helfer-Client (`scan-ws.js`): Drucker inline als `<Druckername> (<Systemname>)` (`msg.printer_label`), kein „ von Drucker …"-Anhang mehr. `printing`→„… wird von <pname> gedruckt…", Pos.0→„… wartet an <pname> auf Druck…", Pos.1+Drucker→„… an 1. Druckerwarteschlangenposition von <pname>", Pos.1 ohne Drucker (zentraler Wartender)→Kurzform, Pos.≥2→„… an X. Druckerwarteschlangenposition" (kurz), `gedruckt`→„… von <pname> gedruckt." (mit Punkt). Bei „Drucken & nächster Schüler" nach erfolgreichem Druck 4-Sekunden-Countdown „… Nächster Schüler in Xs." (tickt 4→3→2→1, 0 nie sichtbar, dann `advanceToNext`) statt sofortigem Weiterrücken; Dauer entspricht der Host-Toast-Dauer (4000 ms). Generationenzähler schützt vor Doppel-Advance (`cancelNextCountdown` am Anfang von `advanceToNext`). Host-Client (`host-render.js`, `printToastText`): gleiche Texte, aber Präfix „Leihschein von <Name>, <Vorname> (<Klasse>)" (`msg.name`), kein „ — Drucker …"-Suffix, Abschlusspunkt bei „gedruckt."; kein Countdown (Host ohne Auto-Advance). peer_error/stalled/Fehler unverändert. **Keine Server-Änderung** — `printer_label`/`name`/`position`/`status` waren bereits im WS-Payload; `test_state_contract.py` unberührt. | `node --check web/scan-ws.js web/scan-render.js web/host-render.js`; `uvx ruff check`; `uv run pytest -q` | 2026-08-02 | **295 Tests grün**, Ruff clean, `node --check` OK. **Live-Check (alle Status-Phasen + Countdown + Doppel-Advance-Schutz am echten Gerät) noch offen** (s. „Offen" unten) |
+| V36 | **Drucker-Display (`/drucker-display`) — Pairing + Drucker-Zuweisung** — Neue anzeigbare Warteschlange für einen Bildschirm neben den Druckern, aufrufbar via `https://<ip>:<port>/drucker-display` (Clean URL, kein Login). Vor Pairing zeigt das Display **nur eine 4-stellige Registrierungs-Nummer** (keine Schülerdaten); erst nach Host-Zuordnung + Drucker-Zuweisung erscheint die Queue (mit Schülernamen, wie im Host). Pairing-Flow wie iPad-Display (`/ws/display`): neue Rolle `PrinterDisplaySession` (`server/state.py`) + unauthentifiziertes WS `/ws/drucker-display` (`server/routes/ws.py`). Push bei Druck-Übergängen (`print_queue._notify_all`→`broadcast_printer_displays`) und Pool-Mutationen (`_after_pool_change`), kein Polling. Pro Display legt der Host fest, welche Pool-Drucker dieses Display sieht (`assigned_printer_ids`: `None`=alle, explizite Menge=Teilmenge); mehrere Displays mit je verschiedenen Druckern + mehrere Drucker auf einem Display. Warteliste serverseitig gefiltert (`print_queue.display_view`): ein Eintrag ist relevant, wenn seine Allowlist die Display-Zuweisung schneidet. Endpunkte `/api/drucker-display/{qr,authorize,assign,forget}` (Host-auth, `server/routes/drucker_display.py`). Host-UI: Button „QR für Druckerdisplay" + Displays-Liste (Code-Eingabe + Zuweisungs-Checkboxes) in der bestehenden Druckerwarteschlange-Karte. `state_snapshot()`-Key `printer_displays`; `print_queue.waiting_list` liefert zusätzlich `allowed_printer_ids`. | `tests/test_drucker_display.py` (QR/Auth-Guard, Authorize/Assign/Forget, Snapshot-Shape, `send_printer_display_update`-Payloads); `tests/test_print_queue.py` (+`display_view`-Filterung + `allowed_printer_ids`); `tests/test_state_contract.py` (Schema um `printer_displays`); WS-Smoke via `TestClient.websocket_connect` (Registration→Queue) | 2026-08-03 | **316 Tests grün**, Ruff clean. **Live-Check (Pairing am echten Display-Bildschirm + Drucker-Zuweisung + Live-Status-Übergänge im WLAN) noch offen** (s. „Offen" unten) |
 
 ## Offen / zu testen
+
+### Offen 2026-08-03 (Drucker-Display: Live-Check im Schul-WLAN)
+
+Pairing-Flow, Zuweisung, Snapshot-Schnittstelle und WS-Push sind offline per
+Unit-Suite + `websocket_connect`-Smoke abgesichert (V36); berühren keine
+IServ-/Buchungs-Logik (rein Anzeige). Am echten Display-Bildschirm neben den
+Druckern noch offen:
+
+- `/drucker-display` im Schul-WLAN öffnen → zeigt 4-stelligen Pairing-Code.
+- Host: „QR für Druckerdisplay" zeigt QR auf die Seite; Code eingeben → Display
+  erscheint in der Liste; Druckerkapazitäten per Checkbox zuordnen.
+- Display zeigt zugewiesene Drucker (groß, Status-Dot) + zentrale Warteschlange
+  (mit Schülernamen); folgt Druck-Übergängen live (druckt→wartet→fertig).
+- Mehrere Displays mit je verschiedenen Druckern + ein Display mit mehreren
+  Druckern; Drucker umbenennen/entfernen → Display passt sich an.
+- Keine Schülerdaten vor dem Pairing (nur Nummer) —Privacy-Check am öffentlichen
+  Bildschirm.
 
 ### Offen 2026-08-02 (Druck-Status-Texte + Countdown „Nächster Schüler": Live-Check)
 

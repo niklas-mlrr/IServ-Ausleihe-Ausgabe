@@ -121,7 +121,7 @@ async def lifespan(app: FastAPI):
 
 
 # Seiten, die auch ohne ".html" erreichbar sein sollen (Clean URLs).
-_CLEAN_PAGES = ("host", "scan", "student", "qr-display")
+_CLEAN_PAGES = ("host", "scan", "student", "qr-display", "drucker-display")
 
 
 def _page_handler(path: Path):

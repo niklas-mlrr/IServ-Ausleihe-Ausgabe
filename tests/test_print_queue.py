@@ -999,3 +999,65 @@ def test_stall_peer_at_position_zero_shows_pos_zero_label(monkeypatch):
     assert "2." not in b_msg
     # Beide bleiben im Slot (mitzählen).
     assert pq.slots["p1"].jobs == [a, b]
+
+
+# ---- Drucker-Display: display_view (Filterung zugewiesener Drucker) ----
+
+
+def test_waiting_list_exposes_allowed_printer_ids():
+    """`waiting_list` liefert zusätzlich `allowed_printer_ids` (IDs statt der
+    Anzeige-Labels) — Grundlage für die serverseitige Display-Filterung. None
+    = alle Pool-Drucker, sonst sortierte ID-Liste (auch leer bei verwaisten IDs)."""
+    st = AppState()
+    st.settings.printers = _two_printers()
+    pq = st.print_queue
+    asyncio.run(pq.enqueue(_job("helper", 1, name="A")))                      # None → alle
+    asyncio.run(pq.enqueue(_job("helper", 2, name="B", allowed={"p1"})))
+    asyncio.run(pq.enqueue(_job("helper", 3, name="C", allowed={"orphan"})))  # verwaist
+    wl = pq.waiting_list(st)
+    assert wl[0]["allowed_printer_ids"] is None
+    assert wl[1]["allowed_printer_ids"] == ["p1"]
+    # Roh-Durchreichung der Job-Allowlist (auch verwaiste IDs) — die Display-
+    # Filterung greift über die Schnittmenge mit den zugewiesenen Pool-Druckern,
+    # sodass verwaiste IDs nie matchen (s. test_display_view_filters_*).
+    assert wl[2]["allowed_printer_ids"] == ["orphan"]
+
+
+def test_display_view_filters_printers_and_waiting():
+    """`display_view` filtert Drucker + Wartelisten-Einträge gegen die Display-
+    Zuweisung. None = alle; explizite Menge = nur diese Drucker + Einträge, deren
+    Allowlist die Zuweisung schneidet; leere Menge = nichts. `allowed=None` ist
+    relevant, sobald mindestens ein Drucker zugewiesen ist."""
+    st = AppState()
+    st.settings.printers = _two_printers()
+    pq = st.print_queue
+    # A: alle erlaubt (None); B: nur p1; C: nur p2; D: verwaist (orphan).
+    asyncio.run(pq.enqueue(_job("helper", 1, name="A")))
+    asyncio.run(pq.enqueue(_job("helper", 2, name="B", allowed={"p1"})))
+    asyncio.run(pq.enqueue(_job("helper", 3, name="C", allowed={"p2"})))
+    asyncio.run(pq.enqueue(_job("helper", 4, name="D", allowed={"orphan"})))
+
+    # None = alle Drucker + alle Wartelisten-Einträge.
+    v = pq.display_view(st, None)
+    assert [p["id"] for p in v["printers"]] == ["p1", "p2"]
+    assert v["waiting"] == 4
+    assert [w["student"] for w in v["waiting_list"]] == ["A", "B", "C", "D"]
+
+    # Nur p1 zugewiesen: Drucker p1; relevant sind A (alle) + B (p1); nicht C/D.
+    v = pq.display_view(st, {"p1"})
+    assert [p["id"] for p in v["printers"]] == ["p1"]
+    assert [w["student"] for w in v["waiting_list"]] == ["A", "B"]
+
+    # Nur p2 zugewiesen: A + C.
+    v = pq.display_view(st, {"p2"})
+    assert [p["id"] for p in v["printers"]] == ["p2"]
+    assert [w["student"] for w in v["waiting_list"]] == ["A", "C"]
+
+    # Beide zugewiesen: alle Drucker; A/B/C relevant, D (nur orphan) nicht.
+    v = pq.display_view(st, {"p1", "p2"})
+    assert [p["id"] for p in v["printers"]] == ["p1", "p2"]
+    assert [w["student"] for w in v["waiting_list"]] == ["A", "B", "C"]
+
+    # Leere Zuweisung: kein Drucker, keine Wartelisten-Einträge.
+    v = pq.display_view(st, set())
+    assert v["printers"] == [] and v["waiting"] == 0 and v["waiting_list"] == []

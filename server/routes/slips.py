@@ -10,7 +10,7 @@ from fastapi import Depends, HTTPException
 from ..config import get_config
 from ..hub import get_hub
 from ..print_queue import PrintJob, slip_name
-from ..sessions import allowed_printers_for, commit_book_safely
+from ..sessions import allowed_printers_for, broadcast_printer_displays, commit_book_safely
 from ..state import get_state
 from ._deps import (
     CommitBookRequest,
@@ -131,11 +131,14 @@ def _persist_printers(state) -> None:
 
 async def _after_pool_change(state, *, wake: bool = False) -> dict:
     """Nach einer Pool-Mutation: persistieren, ggf. Scheduler wecken (wartende
-    Aufträge verteilen), alle Hosts über den neuen Snapshot informieren."""
+    Aufträge verteilen), alle Hosts über den neuen Snapshot informieren und die
+    Drucker-Displays aktualisieren (umbenannter/entfernter Drucker → Anzeige
+    folgt)."""
     _persist_printers(state)
     if wake:
         state.print_queue.wake()
     await get_hub().broadcast_host(state.state_snapshot())
+    await broadcast_printer_displays(state)
     return {"ok": True, "pool": state.print_queue.pool_printers(state.settings.printers)}
 
 
