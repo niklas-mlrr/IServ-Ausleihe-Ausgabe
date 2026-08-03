@@ -15,12 +15,11 @@ function show(name) {
   viewQueue.classList.toggle('show', name === 'queue');
 }
 
-// Anzeige-Label eines Druckers: „<Label> (<Systemname>)" bzw. Systemname oder
-// „Standarddrucker" — konsistent mit dem Host (host-render.js printerLabel /
-// print_queue._printer_display).
+// Anzeige-Label eines Druckers: nur der Name (Label), nicht der Systemname.
+// Fallback auf Systemname bzw. „Standarddrucker", wenn kein Label gesetzt.
 function printerLabel(p) {
-  const sys = p.is_default || !p.name ? 'Standarddrucker' : p.name;
-  return p.label && p.label.trim() ? `${p.label} (${sys})` : sys;
+  if (p.label && p.label.trim()) return p.label.trim();
+  return p.is_default || !p.name ? 'Standarddrucker' : p.name;
 }
 
 function renderQueue(msg) {
