@@ -67,8 +67,15 @@ function applyTheme(theme) {
   document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : 'dark');
 }
 
+function applyLabel(label) {
+  // Display-Name unten links (leer = nichts anzeigen).
+  const el = document.getElementById('dd-name');
+  if (el) el.textContent = (label && label.trim()) ? label : '';
+}
+
 function handleServerMessage(msg) {
   if ('theme' in msg) applyTheme(msg.theme);
+  if ('label' in msg) applyLabel(msg.label);
   if (msg.type === 'registration') {
     document.getElementById('reg-code').textContent = msg.code || '····';
     show('register');
