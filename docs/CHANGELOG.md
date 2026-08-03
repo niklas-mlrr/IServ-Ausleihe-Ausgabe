@@ -8,6 +8,30 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-03 — Drucker-Display: Sprung Nächster→Wird gedruckt beim Druckwechsel
+
+- **Symptom (intermittierend):** beim Druckwechsel sprang der Name manchmal
+  von „Nächster" nach „Wird gedruckt" (hinter den noch stehenden Namen), statt
+  zu gleiten — und der vorige Name verschob sich danach.
+- **Ursache:** beim Druckwechsel überlappt sich der Status kurz. Der vorige
+  Job ist im OS-Poll noch `printing` (erst beim nächsten Poll `absent`/
+  finalisiert), während der nächste schon physisch druckt und ebenfalls
+  `printing` wird. `pool_printers` gibt dann ZWEI `printing`-Orders aus. Das
+  Display nahm per `orders.find(status==='printing')` aber nur den ERSTEN
+  (den vorigen) als „Wird gedruckt"; der zweite `printing`-Job fiel durchs
+  Raster (weder `printing` noch `spooled`) → aus dem DOM verschwunden. Sein
+  FLIP-Schlüssel (job_id) war eine Runde lang weg → beim Finalisieren des
+  Vorgängers kein alter Rect → Sprung statt FLIP.
+- **Fix (Frontend):** nur der erste `printing`-Job wird als „Wird gedruckt"
+  gezeigt; weitere gleichzeitig `printing`-Jobs bleiben als „Nächster"
+  sichtbar (`nextOrds` = spooled + überlappende printing, in Slot-Reihenfolge).
+  So bleibt der job_id-Schlüssel erhalten und der Auftrag gleitet bei der
+  Finalisierung des Vorgängers fließend von „Nächster" nach „Wird gedruckt".
+- **Test:** `test_pool_printers_overlap_two_printing_jobs` friert ein, dass
+  `pool_printers` bei zwei `printing`-Jobs im Slot zwei `printing`-Orders
+  mit stabilen job_ids liefert (Grundlage fürs Frontend-Handling).
+- 324 passed, ruff clean.
+
 ## 2026-08-03 — Drucker-Display: beim Verschwinden gleitet der Rest nach
 
 - **Verschwinden → Rest gleitet, statt springt:** das „Gedruckt"-Kästchen

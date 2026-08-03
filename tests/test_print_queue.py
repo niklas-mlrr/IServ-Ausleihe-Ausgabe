@@ -1120,6 +1120,30 @@ def test_pool_printers_orders_carry_originator():
     assert flat["p1"]["spooled_names"] == ["B (5b)"]
 
 
+def test_pool_printers_overlap_two_printing_jobs():
+    """Beim Druckwechsel überlappt sich der Status kurz: der vorige Job ist im
+    OS-Poll noch ``printing`` (erst beim nächsten Poll ``absent``/finalisiert),
+    während der nächste schon physisch druckt und ebenfalls ``printing`` wird.
+    `pool_printers` gibt dann ZWEI ``printing``-Orders aus (in Slot-Reihenfolge).
+    Das Display zeigt nur den ersten als „Wird gedruckt"; der zweite bleibt als
+    „Nächster" sichtbar, damit sein FLIP-Schlüssel (job_id) erhalten bleibt und
+    er bei der Finalisierung des Vorgängers fließend nachfolgt statt springt."""
+    st = AppState()
+    st.settings.printers = _two_printers()
+    pq = st.print_queue
+    old = _job("host", 1, host_sid="s1", name="Alt (5a)")
+    old.status = "printing"
+    new = _job("host", 2, host_sid="s1", name="Neu (5b)")
+    new.status = "printing"  # Überlappung: druckt schon, Vorgänger noch nicht finalisiert
+    pq.slots["p1"] = print_queue._Slots(jobs=[old, new])
+    rendered = {p["id"]: p for p in pq.pool_printers(list(st.settings.printers), st)}
+    orders = rendered["p1"]["orders"]
+    assert [o["status"] for o in orders] == ["printing", "printing"]
+    assert [o["id"] for o in orders] == [old.id, new.id]
+    # beide job_ids stabil — das Display hält den zweiten über „Nächster" am Leben
+    assert all("id" in o for o in orders)
+
+
 def test_display_view_waiting_list_has_originator_info():
     """`display_view`-`waiting_list`-Einträge tragen `originator_info`
     (strukturierter Auftraggeber für das Display-Symbol)."""

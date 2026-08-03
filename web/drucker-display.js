@@ -132,8 +132,23 @@ function renderQueue(msg) {
     // in die drei Kategorien. Fallback auf flache Namen-Felder, falls `orders`
     // fehlt (sollte nicht vorkommen — display_view reicht es immer durch).
     const orders = Array.isArray(p.orders) ? p.orders : [];
-    const printingOrd = orders.find(o => o.status === 'printing') || null;
-    const spooledOrds = orders.filter(o => o.status === 'spooled');
+    // Beim Druckwechsel überlappt sich der Status kurz: der vorige Job ist im
+    // OS-Poll noch „printing" (erst beim nächsten Poll „absent"/finalisiert),
+    // während der nächste schon physisch druckt und ebenfalls „printing" wird.
+    // Nur den ERSTEN „printing"-Job als „Wird gedruckt" zeigen; weitere
+    // gleichzeitig „printing"-Jobs bleiben als „Nächster" sichtbar (s. nextOrds),
+    // sodass ihr FLIP-Schlüssel (job_id) erhalten bleibt und sie bei der
+    // Finalisierung des Vorgängers fließend von „Nächster" nach „Wird gedruckt"
+    // gleiten — statt zu springen, weil sie zwischendrin aus dem DOM verschwunden
+    // wären (kein alter Rect → kein FLIP → Sprung).
+    const printingOrds = orders.filter(o => o.status === 'printing');
+    const printingOrd = printingOrds[0] || null;
+    // „Nächster": spooled + überlappende weitere printing-Jobs, in Slot-Reihen-
+    // folge (orders ist FIFO nach Dispatch-Reihenfolge), damit die Positionen
+    // und FLIP-Schlüssel stabil bleiben.
+    const nextOrds = orders.filter(
+      o => o.status === 'spooled' || (o.status === 'printing' && o !== printingOrd)
+    );
     // Blockierte Aufträge (stalled/peer_error/failed) nur bei Fehler relevant:
     // sie wurden gesendet, der Schüler soll seinen Namen sehen und sich melden.
     const blockedOrds = p.faulty ? orders.filter(o => o.status === 'blocked') : [];
@@ -146,7 +161,7 @@ function renderQueue(msg) {
       : '';
     const printingBox = printingOrd
       ? orderBoxFromRaw(printingOrd.id, printingOrd.name, '', printingOrd.originator) : '';
-    const nextBoxes = spooledOrds.map(o => orderBoxFromRaw(o.id, o.name, '', o.originator)).join('')
+    const nextBoxes = nextOrds.map(o => orderBoxFromRaw(o.id, o.name, '', o.originator)).join('')
       + blockedOrds.map(o => orderBoxFromRaw(o.id, o.name, 'dd-order-blocked', o.originator)).join('');
     // Bei Fehler: Name + „ - Fehler" in rot, gleicher Schriftgröße wie der Name;
     // darunter der Betreuer-Hinweis. Die Kategorien (Aufträge) bleiben sichtbar.
