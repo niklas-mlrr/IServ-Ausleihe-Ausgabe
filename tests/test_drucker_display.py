@@ -179,8 +179,8 @@ def test_assign_filters_orphan_ids(client, ctx):
         cookies={"session_id": "sid"},
     )
     assert r.status_code == 200
-    # Verwaiste ID (nicht im Pool) wird herausgefiltert.
-    assert state.printer_displays["disp1"].assigned_printer_ids == {"p1"}
+    # Verwaiste ID (nicht im Pool) wird herausgefiltert; geordnete Liste.
+    assert state.printer_displays["disp1"].assigned_printer_ids == ["p1"]
 
 
 def test_assign_none_means_all_printers(client, ctx):
@@ -246,7 +246,8 @@ def test_forget_unknown_display_404(client, ctx):
 def test_snapshot_printer_displays_shape(client, ctx):
     state, _, _ = ctx
     _connected_display(state, code="ABCD", authorized=True)
-    state.printer_displays["disp1"].assigned_printer_ids = {"p2", "p1"}
+    # Geordnete Liste — Reihenfolge bleibt erhalten (keine Sortierung mehr).
+    state.printer_displays["disp1"].assigned_printer_ids = ["p2", "p1"]
     r = client.get("/api/state", cookies={"session_id": "sid"})
     assert r.status_code == 200
     pd = r.json()["printer_displays"]
@@ -254,8 +255,10 @@ def test_snapshot_printer_displays_shape(client, ctx):
     assert pd[0]["display_id"] == "disp1"
     assert pd[0]["authorized"] is True
     assert pd[0]["connected"] is False  # kein WS gesetzt
-    # Sortierte ID-Liste der Zuweisung.
-    assert pd[0]["assigned_printer_ids"] == ["p1", "p2"]
+    assert pd[0]["assigned_printer_ids"] == ["p2", "p1"]  # Reihenfolge erhalten
+    # Default-Name (leer) + Default-Theme (dark).
+    assert pd[0]["label"] == ""
+    assert pd[0]["theme"] == "dark"
 
 
 def test_snapshot_printer_displays_none_means_all(client, ctx):
@@ -264,6 +267,82 @@ def test_snapshot_printer_displays_none_means_all(client, ctx):
     r = client.get("/api/state", cookies={"session_id": "sid"})
     pd = r.json()["printer_displays"]
     assert pd[0]["assigned_printer_ids"] is None  # Default = alle Pool-Drucker
+
+
+def test_assign_preserves_order_and_dedupes(client, ctx):
+    """Reihenfolge der Request-Liste bleibt erhalten; Duplikate + verwaiste IDs
+    werden entfernt (erstes Vorkommen gewinnt)."""
+    state, _, _ = ctx
+    from server.state import PrinterConfig
+
+    state.settings.printers = [PrinterConfig(id="p1", name="P1"),
+                               PrinterConfig(id="p2", name="P2")]
+    _connected_display(state, code="ABCD", authorized=True)
+    r = client.post(
+        "/api/drucker-display/assign",
+        json={"display_id": "disp1", "printer_ids": ["p2", "p1", "p2", "orphan"]},
+        cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 200
+    assert state.printer_displays["disp1"].assigned_printer_ids == ["p2", "p1"]
+    # Snapshot spiegelt die Reihenfolge.
+    snap = client.get("/api/state", cookies={"session_id": "sid"}).json()
+    assert snap["printer_displays"][0]["assigned_printer_ids"] == ["p2", "p1"]
+
+
+# ---- Label + Theme --------------------------------------------------------
+
+
+def test_label_endpoint_sets_name_and_pushes(client, ctx):
+    state, _, hub_inst = ctx
+    _connected_display(state, code="ABCD", authorized=True)
+    r = client.post(
+        "/api/drucker-display/label",
+        json={"display_id": "disp1", "label": "  Raum 104  "},
+        cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 200
+    assert r.json()["label"] == "Raum 104"  # ge-trimmed
+    assert state.printer_displays["disp1"].label == "Raum 104"
+    # Host-Snapshot aktualisiert.
+    assert len(hub_inst.broadcasts) == 1
+    assert hub_inst.broadcasts[0]["printer_displays"][0]["label"] == "Raum 104"
+
+
+def test_label_unauthorized_display_404(client, ctx):
+    state, _, _ = ctx
+    _connected_display(state, code="ABCD", authorized=False)
+    r = client.post(
+        "/api/drucker-display/label",
+        json={"display_id": "disp1", "label": "x"},
+        cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 404
+
+
+def test_theme_endpoint_sets_theme_and_pushes(client, ctx):
+    state, _, hub_inst = ctx
+    _connected_display(state, code="ABCD", authorized=True)
+    r = client.post(
+        "/api/drucker-display/theme",
+        json={"display_id": "disp1", "theme": "light"},
+        cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 200
+    assert r.json()["theme"] == "light"
+    assert state.printer_displays["disp1"].theme == "light"
+    assert hub_inst.broadcasts[0]["printer_displays"][0]["theme"] == "light"
+
+
+def test_theme_invalid_value_400(client, ctx):
+    state, _, _ = ctx
+    _connected_display(state, code="ABCD", authorized=True)
+    r = client.post(
+        "/api/drucker-display/theme",
+        json={"display_id": "disp1", "theme": "rainbow"},
+        cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 400
 
 
 # ---- send_printer_display_update: Payload je Zustand ----------------------
@@ -277,7 +356,13 @@ def test_send_printer_display_update_registration(monkeypatch):
     d = PrinterDisplaySession(display_id="d1", registration_code="XYZ1")
     d.ws = _FakeWS()
     asyncio.run(sessions.send_printer_display_update(state, d))
-    assert d.ws.sent == [{"type": "registration", "code": "XYZ1", "display_id": "d1"}]
+    assert d.ws.sent == [{
+        "type": "registration",
+        "code": "XYZ1",
+        "display_id": "d1",
+        "label": "",
+        "theme": "dark",
+    }]
 
 
 def test_send_printer_display_update_queue(monkeypatch):
@@ -290,12 +375,14 @@ def test_send_printer_display_update_queue(monkeypatch):
     monkeypatch.setattr(sessions, "get_hub", lambda: hub_inst)
     monkeypatch.setattr(sessions, "get_state", lambda: state)
     d = PrinterDisplaySession(display_id="d1", registration_code="XYZ1", authorized=True)
-    d.assigned_printer_ids = {"p1"}
+    d.assigned_printer_ids = ["p1"]
     d.ws = _FakeWS()
     asyncio.run(sessions.send_printer_display_update(state, d))
     assert len(d.ws.sent) == 1
     msg = d.ws.sent[0]
     assert msg["type"] == "queue"
+    assert msg["label"] == ""
+    assert msg["theme"] == "dark"
     assert [p["id"] for p in msg["printers"]] == ["p1"]
     assert msg["waiting"] == 0
 

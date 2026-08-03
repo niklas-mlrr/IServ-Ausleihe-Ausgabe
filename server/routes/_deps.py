@@ -247,8 +247,10 @@ class PrinterDisplayAuthorizeRequest(BaseModel):
 
 class PrinterDisplayAssignRequest(BaseModel):
     """Body für `POST /api/drucker-display/assign` — zugewiesene Pool-Drucker
-    für ein Drucker-Display setzen. ``printer_ids`` = Drucker-IDs; ``None`` =
-    alle Pool-Drucker (Default), explizite (auch leere) Liste = Teilmenge."""
+    für ein Drucker-Display setzen. ``printer_ids`` = geordnete Drucker-ID-
+    Liste (Reihenfolge = Display-Reihenfolge, Duplikate werden entfernt);
+    ``None`` = alle Pool-Drucker (Default), explizite (auch leere) Liste =
+    Teilmenge."""
 
     display_id: str = ""
     printer_ids: list[str] | None = None
@@ -259,6 +261,22 @@ class PrinterDisplayForgetRequest(BaseModel):
     abmelden (Session entfernen, WS wird geschlossen)."""
 
     display_id: str = ""
+
+
+class PrinterDisplayLabelRequest(BaseModel):
+    """Body für `POST /api/drucker-display/label` — Display-Name setzen. Leer
+    = kein Name (Reiter/Überschrift zeigen Short-ID/Default)."""
+
+    display_id: str = ""
+    label: str = ""
+
+
+class PrinterDisplayThemeRequest(BaseModel):
+    """Body für `POST /api/drucker-display/theme` — Darstellung auf dem Display
+    setzen. ``theme`` = ``'light'`` oder ``'dark'``."""
+
+    display_id: str = ""
+    theme: str = "dark"
 
 
 class StudentJoinRequest(BaseModel):

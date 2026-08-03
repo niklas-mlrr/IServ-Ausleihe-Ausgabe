@@ -1443,9 +1443,16 @@ async def send_printer_display_update(state: AppState, display) -> None:
             "type": "registration",
             "code": display.registration_code,
             "display_id": display.display_id,
+            "label": display.label,
+            "theme": display.theme,
         }
     else:
-        msg = {"type": "queue", **state.printer_display_view(display)}
+        msg = {
+            "type": "queue",
+            "label": display.label,
+            "theme": display.theme,
+            **state.printer_display_view(display),
+        }
     if not await get_hub().send_websocket(display.ws, msg):
         display.ws = None
 

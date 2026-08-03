@@ -8,6 +8,30 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-03 — Drucker-Display-Reiter: verwalten + schließen
+
+- **Display-Reiter schließbar:** × am Reiter (mit Bestätigungsdialog) trennt
+  das Display (`/api/drucker-display/forget`). Reiter-Label = Display-Name,
+  sobald gesetzt, sonst Short-ID (Statuspunkt bleibt).
+- **Verwaltung pro Display (im Reiter nach Pairing):**
+  - **Name-Feld** — frei wählbarer Display-Name, erscheint als Überschrift auf
+    dem Display (`/api/drucker-display/label`).
+  - **Light/Dark-Schieberegler** — Darstellung auf dem Display
+    (`/api/drucker-display/theme`); Display wendet `data-theme` an
+    (`web/drucker-display.html` jetzt CSS-Variablen + `[data-theme="light"]`).
+  - **Drucker-Boxen** statt Checkboxes: je zugewiesenen Drucker ein Kästchen
+    (per Drag umsortierbar, × entfernt), ganz rechts eine „+"-Box zum Hinzufügen
+    noch nicht zugewiesener Pool-Drucker (Popover).
+- **Zuweisung geordnet:** `assigned_printer_ids` von Menge (`set`) auf
+  geordnete Liste umgestellt — die Display-Reihenfolge bleibt erhalten
+  (`server/print_queue.py::display_view` ordnet danach). Einmal explizit,
+  immer explizit; nur der Default nach Pairing ist `None` = alle.
+- Server: `PrinterDisplaySession` +`label`/`theme`;
+  `printer_displays_snapshot` liefert geordnete Liste + Name + Theme.
+  Tests (`test_drucker_display.py`, `test_print_queue.py`) angepasst + neue
+  für Label/Theme/Reihenfolge. `test_state_contract.py` unangetastet
+  (friert nur Top-Level-Keys + leere Display-Liste).
+
 ## 2026-08-03 — Drucker-Displays als Reiter in der Druckerwarteschlange
 
 - **Host-UI:** die verbundene Drucker-Displays in der

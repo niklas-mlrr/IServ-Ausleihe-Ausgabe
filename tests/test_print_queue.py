@@ -1025,9 +1025,10 @@ def test_waiting_list_exposes_allowed_printer_ids():
 
 def test_display_view_filters_printers_and_waiting():
     """`display_view` filtert Drucker + Wartelisten-Einträge gegen die Display-
-    Zuweisung. None = alle; explizite Menge = nur diese Drucker + Einträge, deren
-    Allowlist die Zuweisung schneidet; leere Menge = nichts. `allowed=None` ist
-    relevant, sobald mindestens ein Drucker zugewiesen ist."""
+    Zuweisung. None = alle (Pool-Reihenfolge); explizite geordnete Liste = nur
+    diese Drucker in der gegebenen Reihenfolge + Einträge, deren Allowlist die
+    Zuweisung schneidet; leere Liste = nichts. `allowed=None` ist relevant, sobald
+    mindestens ein Drucker zugewiesen ist."""
     st = AppState()
     st.settings.printers = _two_printers()
     pq = st.print_queue
@@ -1037,27 +1038,32 @@ def test_display_view_filters_printers_and_waiting():
     asyncio.run(pq.enqueue(_job("helper", 3, name="C", allowed={"p2"})))
     asyncio.run(pq.enqueue(_job("helper", 4, name="D", allowed={"orphan"})))
 
-    # None = alle Drucker + alle Wartelisten-Einträge.
+    # None = alle Drucker (Pool-Reihenfolge) + alle Wartelisten-Einträge.
     v = pq.display_view(st, None)
     assert [p["id"] for p in v["printers"]] == ["p1", "p2"]
     assert v["waiting"] == 4
     assert [w["student"] for w in v["waiting_list"]] == ["A", "B", "C", "D"]
 
     # Nur p1 zugewiesen: Drucker p1; relevant sind A (alle) + B (p1); nicht C/D.
-    v = pq.display_view(st, {"p1"})
+    v = pq.display_view(st, ["p1"])
     assert [p["id"] for p in v["printers"]] == ["p1"]
     assert [w["student"] for w in v["waiting_list"]] == ["A", "B"]
 
     # Nur p2 zugewiesen: A + C.
-    v = pq.display_view(st, {"p2"})
+    v = pq.display_view(st, ["p2"])
     assert [p["id"] for p in v["printers"]] == ["p2"]
     assert [w["student"] for w in v["waiting_list"]] == ["A", "C"]
 
-    # Beide zugewiesen: alle Drucker; A/B/C relevant, D (nur orphan) nicht.
-    v = pq.display_view(st, {"p1", "p2"})
+    # Beide zugewiesen (p1 vor p2): alle Drucker in dieser Reihenfolge;
+    # A/B/C relevant, D (nur orphan) nicht.
+    v = pq.display_view(st, ["p1", "p2"])
     assert [p["id"] for p in v["printers"]] == ["p1", "p2"]
     assert [w["student"] for w in v["waiting_list"]] == ["A", "B", "C"]
 
+    # Reihenfolge wird erhalten: p2 vor p1.
+    v = pq.display_view(st, ["p2", "p1"])
+    assert [p["id"] for p in v["printers"]] == ["p2", "p1"]
+
     # Leere Zuweisung: kein Drucker, keine Wartelisten-Einträge.
-    v = pq.display_view(st, set())
+    v = pq.display_view(st, [])
     assert v["printers"] == [] and v["waiting"] == 0 and v["waiting_list"] == []

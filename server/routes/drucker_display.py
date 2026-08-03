@@ -16,6 +16,8 @@ from ._deps import (
     PrinterDisplayAssignRequest,
     PrinterDisplayAuthorizeRequest,
     PrinterDisplayForgetRequest,
+    PrinterDisplayLabelRequest,
+    PrinterDisplayThemeRequest,
     _base_url,
     host_router,
 )
@@ -63,9 +65,10 @@ async def printer_display_authorize(body: PrinterDisplayAuthorizeRequest) -> dic
 @host_router.post("/api/drucker-display/assign")
 async def printer_display_assign(body: PrinterDisplayAssignRequest) -> dict:
     """Zugewiesene Pool-Drucker für ein Drucker-Display setzen. `printer_ids=None`
-    = alle Pool-Drucker (Default); explizite (auch leere) Liste = Teilmenge.
-    Verwaiste IDs (Drucker nachträglich aus dem Pool entfernt) werden heraus-
-    gefiltert. Push an das Display + Host-Snapshot (Liste der Displays folgt)."""
+    = alle Pool-Drucker (Default); explizite (auch leere) Liste = geordnete
+    Teilmenge (Reihenfolge = Display-Reihenfolge). Verwaiste IDs (Drucker
+    nachträglich aus dem Pool entfernt) werden herausgefiltert, Duplikate
+    entfernt (erste Vorkommen gewinnt). Push an das Display + Host-Snapshot."""
     state = get_state()
     display = state.printer_displays.get(body.display_id)
     if not display or not display.authorized:
@@ -74,12 +77,55 @@ async def printer_display_assign(body: PrinterDisplayAssignRequest) -> dict:
         display.assigned_printer_ids = None
     else:
         pool_ids = {p.id for p in state.settings.printers}
-        display.assigned_printer_ids = {pid for pid in body.printer_ids if pid in pool_ids}
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for pid in body.printer_ids:
+            if pid in pool_ids and pid not in seen:
+                seen.add(pid)
+                ordered.append(pid)
+        display.assigned_printer_ids = ordered
     await send_printer_display_update(state, display)
     from ..hub import get_hub
 
     await get_hub().broadcast_host(state.state_snapshot())
     return {"ok": True, "assigned_printer_ids": display.assigned_printer_ids}
+
+
+@host_router.post("/api/drucker-display/label")
+async def printer_display_label(body: PrinterDisplayLabelRequest) -> dict:
+    """Display-Name setzen (leer = kein Name). Der Name erscheint im Reiter
+    (sobald gesetzt) und als Überschrift auf dem Display. Push an das Display
+    (überschreibt die Default-Überschrift) + Host-Snapshot."""
+    state = get_state()
+    display = state.printer_displays.get(body.display_id)
+    if not display or not display.authorized:
+        raise HTTPException(404, "Drucker-Display nicht gefunden oder nicht freigeschaltet")
+    display.label = (body.label or "").strip()
+    await send_printer_display_update(state, display)
+    from ..hub import get_hub
+
+    await get_hub().broadcast_host(state.state_snapshot())
+    return {"ok": True, "label": display.label}
+
+
+@host_router.post("/api/drucker-display/theme")
+async def printer_display_theme(body: PrinterDisplayThemeRequest) -> dict:
+    """Darstellung auf dem Display setzen (``'light'`` oder ``'dark'``). Das
+    Display wendet das Theme via ``data-theme`` am Wurzelelement an. Push an
+    das Display + Host-Snapshot (Schieberegler-Stand folgt)."""
+    state = get_state()
+    display = state.printer_displays.get(body.display_id)
+    if not display or not display.authorized:
+        raise HTTPException(404, "Drucker-Display nicht gefunden oder nicht freigeschaltet")
+    theme = (body.theme or "").strip().lower()
+    if theme not in ("light", "dark"):
+        raise HTTPException(400, "theme muss 'light' oder 'dark' sein")
+    display.theme = theme
+    await send_printer_display_update(state, display)
+    from ..hub import get_hub
+
+    await get_hub().broadcast_host(state.state_snapshot())
+    return {"ok": True, "theme": display.theme}
 
 
 @host_router.post("/api/drucker-display/forget")

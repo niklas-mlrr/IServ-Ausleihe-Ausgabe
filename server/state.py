@@ -310,14 +310,22 @@ class PrinterDisplaySession:
     Pool-Drucker dieses Display sehen soll.
 
     ``assigned_printer_ids``: ``None`` = alle Pool-Drucker (Default direkt nach
-    Authorize); eine explizite Menge (auch leer) beschränkt auf genau diese IDs.
-    Schüler-Namen werden — anders als beim iPad-Display — gezeigt, aber erst nach
-    Pairing, sodass die offene Seite vorab keine Daten preisgibt."""
+    Authorize); eine explizite geordnete Liste (auch leer) beschränkt auf genau
+    diese IDs in der vom Host gewählten Reihenfolge (Display zeigt die Drucker
+    in dieser Reihenfolge). Einmal explizit, immer explizit — nur der Default
+    ist ``None``.
+    ``label``: frei wählbarer Display-Name (vom Host setzbar), der im Reiter
+    und als Überschrift auf dem Display erscheint. Leer = Short-ID/Default.
+    ``theme``: ``'dark'`` (Default) oder ``'light'`` — Darstellung auf dem
+    Display. Schüler-Namen werden — anders als beim iPad-Display — gezeigt,
+    aber erst nach Pairing, sodass die offene Seite vorab keine Daten preisgibt."""
 
     display_id: str
     registration_code: str
     authorized: bool = False
-    assigned_printer_ids: set[str] | None = None
+    assigned_printer_ids: list[str] | None = None
+    label: str = ""
+    theme: str = "dark"
     ws: object | None = None
     created_at: datetime = field(default_factory=datetime.now)
 
@@ -692,16 +700,21 @@ class AppState:
 
     def printer_displays_snapshot(self) -> list[dict]:
         """Drucker-Displays für den Host-Snapshot: je Display Kennung,
-        Pairing-Status, Verbindungsstatus und die zugewiesene Drucker-Teilmenge
-        (sortierte ID-Liste oder ``None`` = alle Pool-Drucker). Der Host-Client
-        rendert daraus die Code-Eingabe + Zuweisungs-Checkboxes."""
+        Pairing-Status, Verbindungsstatus, Display-Name (``label``), Theme
+        (``'light'``/``'dark'``) und die zugewiesene Drucker-Teilmenge als
+        geordnete ID-Liste (oder ``None`` = alle Pool-Drucker). Die Reihenfolge
+        der Liste ist die vom Host gewählte Display-Reihenfolge (keine
+        Sortierung mehr). Der Host-Client rendert daraus Code-Eingabe, Name-
+        Feld, Theme-Schieberegler und die Drucker-Boxen."""
         return [
             {
                 "display_id": d.display_id,
                 "authorized": d.authorized,
                 "connected": d.ws is not None,
+                "label": d.label,
+                "theme": d.theme,
                 "assigned_printer_ids": (
-                    None if d.assigned_printer_ids is None else sorted(d.assigned_printer_ids)
+                    None if d.assigned_printer_ids is None else list(d.assigned_printer_ids)
                 ),
             }
             for d in self.printer_displays.values()

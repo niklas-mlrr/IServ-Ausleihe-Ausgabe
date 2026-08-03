@@ -751,15 +751,16 @@ class PrintQueue:
             )
         return out
 
-    def display_view(self, state, assigned_printer_ids: set[str] | None) -> dict:
+    def display_view(self, state, assigned_printer_ids: list[str] | None) -> dict:
         """Gefilterte Queue-Sicht für ein Drucker-Display (`/drucker-display`):
         die zugewiesenen Pool-Drucker (Live-Status) + die zentrale Warteschlange,
         gefiltert auf Einträge, deren Allowlist die Display-Zuweisung schneidet.
 
         ``assigned_printer_ids``: ``None`` = alle Pool-Drucker (Default nach
-        Authorize); eine explizite Menge beschränkt Drucker + Warteliste auf
-        Relevanz. Eine leere Menge zeigt weder Drucker noch Wartelisten-Einträge
-        (Display zeigt clientseitig einen Hinweis).
+        Authorize, Pool-Reihenfolge); eine explizite geordnete Liste beschränkt
+        Drucker + Warteliste auf Relevanz und gibt die Drucker in der vom Host
+        gewählten Reihenfolge. Eine leere Liste zeigt weder Drucker noch
+        Wartelisten-Einträge (Display zeigt clientseitig einen Hinweis).
 
         Ein Wartelisten-Eintrag ist relevant, wenn seine Allowlist die Display-
         Zuweisung schneidet: ``allowed=None`` (alle Pool-Drucker) → relevant,
@@ -770,7 +771,10 @@ class PrintQueue:
         if assigned_printer_ids is None:
             view_printers = pool
         else:
-            view_printers = [p for p in pool if p["id"] in assigned_printer_ids]
+            by_id = {p["id"]: p for p in pool}
+            # Reihenfolge der Display-Zuweisung (geordnete Liste) erhalten;
+            # verwaiste IDs (nicht mehr im Pool) überspringen.
+            view_printers = [by_id[pid] for pid in assigned_printer_ids if pid in by_id]
         full_waiting = self.waiting_list(state)
         if assigned_printer_ids is None:
             view_waiting = full_waiting

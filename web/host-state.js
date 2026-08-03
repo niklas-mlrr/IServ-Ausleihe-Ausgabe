@@ -30,6 +30,9 @@ window.__host = window.__host || {};
   // verbundenem Drucker-Display). Rein pro Browser (wie activeTab), nicht
   // persistiert. Fällt auf 'queue' zurück, wenn das Display verschwindet.
   let activePdTab = 'queue';
+  // Drag-Zustand für die Drucker-Boxen eines Display-Reiters (HTML5 DnD),
+  // analog blDragIndex für die Bücherlisten. PID des gezogenen Druckers.
+  let pdDragPid = null;
   let classList = [];                 // Klassen-Liste aus /api/classes (für Wähler + Single-Selects)
   let ctxSingleStudents = {};         // context_id -> [students] für den Einzelne-Schüler-Select
   // SVG-Icons für die Queue-Steuer-Buttons (pro Klassen-Tab neu gerendert).

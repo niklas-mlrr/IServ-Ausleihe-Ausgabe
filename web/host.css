@@ -191,6 +191,60 @@
     .pd-tab-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
     .pd-dot-gray { background: var(--text-muted); opacity: .5; }
     .pd-dot-green { background: var(--ok); }
+    /* × am Display-Reiter (Spiegel #tab-bar .tab-close). */
+    .pd-tabs .pd-tab-close {
+      background: transparent; border: none; color: var(--text-muted);
+      cursor: pointer; font-size: 1rem; line-height: 1; padding: 0 2px;
+      border-radius: 4px; margin-left: 2px;
+    }
+    .pd-tabs .pd-tab-close:hover { color: var(--danger); background: var(--surface-3); }
+    /* Autorisiertes Display-Panel: Name-Feld + Theme-Schieberegler + Boxen. */
+    .pdd-panel { padding-top: 6px; }
+    .pdd-field-row { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
+    .pdd-field { display: flex; flex-direction: column; gap: 6px; font-size: .8rem;
+      font-weight: 700; text-transform: uppercase; letter-spacing: .04em; opacity: .7; }
+    .pdd-name-row { display: flex; gap: 6px; }
+    .pdd-name-row input { width: 220px; }
+    .pdd-theme { opacity: 1; text-transform: none; letter-spacing: 0; font-weight: 400; }
+    .pdd-section-label { font-size: .8rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .04em; opacity: .7; margin: 16px 0 8px; }
+    /* Drucker-Boxen: Kästchen pro zugewiesenen Drucker, Drag umsortierbar,
+       × entfernt; ganz rechts eine gestrichelte „+"-Box zum Hinzufügen. */
+    .pd-box-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+    .pd-box {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: 8px; padding: 8px 10px; cursor: grab; font-size: .85rem;
+    }
+    .pd-box:hover { border-color: var(--text-muted); }
+    .pd-box.dragging { opacity: .4; cursor: grabbing; }
+    .pd-box-name { white-space: nowrap; }
+    .pd-box-remove {
+      background: transparent; border: none; color: var(--text-muted);
+      cursor: pointer; font-size: 1rem; line-height: 1; padding: 0 2px;
+      border-radius: 4px;
+    }
+    .pd-box-remove:hover { color: var(--danger); background: var(--surface-3); }
+    .pd-box-add {
+      display: inline-flex; align-items: center; justify-content: center;
+      background: transparent; border: 1px dashed var(--border);
+      border-radius: 8px; padding: 8px 14px; cursor: pointer;
+      font-size: 1.1rem; color: var(--text-muted); user-select: none;
+    }
+    .pd-box-add:hover { border-color: var(--text-muted); color: var(--text); }
+    /* Popover der noch nicht zugewiesenen Pool-Drucker (öffnet via „+"). */
+    .pd-add-popover {
+      position: fixed; z-index: 80; min-width: 200px; max-width: 320px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 4px; box-shadow: 0 6px 18px rgba(0,0,0,.25);
+      display: flex; flex-direction: column; gap: 2px;
+    }
+    .pd-add-item {
+      background: transparent; border: none; cursor: pointer;
+      text-align: left; padding: 8px 10px; border-radius: 6px;
+      font-size: .85rem; color: var(--text);
+    }
+    .pd-add-item:hover { background: var(--surface-2); }
     .badge {
       display: inline-block;
       padding: 2px 8px;

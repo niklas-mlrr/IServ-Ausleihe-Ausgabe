@@ -519,33 +519,99 @@ window.__host = window.__host || {};
       else { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Zuordnung fehlgeschlagen'); }
     });
   }
-  // Zugewiesene Drucker eines Drucker-Displays setzen (Checkboxes).
-  async function assignPrinterDisplay(displayId, btn) {
-    const box = btn.closest('.pdd-row');
-    const checked = Array.from(box.querySelectorAll('.pdd-check input[type=checkbox]:checked'))
-      .map(c => c.value);
-    // Alle Häkchen = alle Pool-Drucker → als `null` (= alle) schicken, damit neu
-    // hinzugefügte Pool-Drucker automatisch erscheinen. Kein Häkchen = leere Menge.
-    const poolIds = (state.printers || []).map(p => p.id);
-    const all = checked.length === poolIds.length;
-    const body = { display_id: displayId, printer_ids: all ? null : checked };
-    if (btn) await busy(btn, async () => {
-      const r = await fetch('/api/drucker-display/assign', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (!r.ok) { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Zuweisung fehlgeschlagen'); }
-    });
+  // Aktuelle geordnete Drucker-Liste eines Displays (aus dem State): bei
+  // `assigned_printer_ids === null` (Default = alle) die Pool-Drucker in
+  // Pool-Reihenfolge, sonst die gespeicherte Liste (verwaiste IDs heraus).
+  function _pdCurrentIds(displayId) {
+    const d = (state.printer_displays || []).find(x => x.display_id === displayId);
+    if (!d) return [];
+    const pool = state.printers || [];
+    if (d.assigned_printer_ids === null) return pool.map(p => p.id);
+    const byId = {};
+    pool.forEach(p => { byId[p.id] = true; });
+    return d.assigned_printer_ids.filter(pid => byId[pid]);
   }
-  // Drucker-Display abmelden (Vergessen-Button).
-  async function forgetPrinterDisplay(displayId, btn) {
-    if (btn) await busy(btn, async () => {
-      const r = await fetch('/api/drucker-display/forget', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ display_id: displayId }),
-      });
-      if (!r.ok) { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Abmelden fehlgeschlagen'); }
+  // Geordnete Drucker-Liste eines Displays setzen. Die volle Liste geht an
+  // /assign; der Server übernimmt Reihenfolge + Dedup + Pool-Filter.
+  async function assignPdPrinters(displayId, printerIds) {
+    const r = await fetch('/api/drucker-display/assign', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ display_id: displayId, printer_ids: printerIds }),
     });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Zuweisung fehlgeschlagen'); }
+  }
+  // Drucker-Box hinzufügen: PID ans Ende der aktuellen Liste anhängen.
+  async function addPdPrinter(displayId, pid) {
+    const ids = _pdCurrentIds(displayId);
+    if (ids.includes(pid)) return;  // Duplikat verhindern
+    await assignPdPrinters(displayId, [...ids, pid]);
+  }
+  // Drucker-Box entfernen: PID aus der Liste streichen.
+  async function removePdPrinter(displayId, pid) {
+    await assignPdPrinters(displayId, _pdCurrentIds(displayId).filter(x => x !== pid));
+  }
+  // Drucker-Box per Drag umsortieren: dragPid vor/unter targetPid einsortieren.
+  function reorderPdBoxPrinters(displayId, dragPid, targetPid) {
+    const ids = _pdCurrentIds(displayId).filter(x => x !== dragPid);
+    const to = ids.indexOf(targetPid);
+    ids.splice(to + 1, 0, dragPid);
+    assignPdPrinters(displayId, ids);
+  }
+  // Display-Name setzen (Name-Feld + Speichern / Enter).
+  async function setPdLabel(displayId, label) {
+    const r = await fetch('/api/drucker-display/label', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ display_id: displayId, label: label || '' }),
+    });
+    if (r.ok) showMsg('Display-Name gespeichert');
+    else { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Name konnte nicht gespeichert werden'); }
+  }
+  // Theme-Schieberegler: Hell/Dunkel auf dem Display.
+  async function setPdTheme(displayId, dark) {
+    const r = await fetch('/api/drucker-display/theme', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ display_id: displayId, theme: dark ? 'dark' : 'light' }),
+    });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Theme konnte nicht gesetzt werden'); }
+  }
+  // Drucker-Display abmelden (× am Reiter). Bestätigungsdialog im Caller.
+  async function forgetPrinterDisplay(displayId) {
+    const r = await fetch('/api/drucker-display/forget', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ display_id: displayId }),
+    });
+    if (r.ok) { activePdTab = 'queue'; showMsg('Display getrennt'); }
+    else { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Trennen fehlgeschlagen'); }
+  }
+  // „+"-Box der Drucker-Boxen: kleines Popover der noch nicht zugewiesenen
+  // Pool-Drucker. Auswahl → addPdPrinter. Schließt bei Außenklick/Esc. Liegt
+  // auf document.body (überlebt Re-Renders des Panels) und räumt sich selbst.
+  function openPdAddMenu(displayId, plusBox) {
+    // Alte Popovers entfernen (nur eines gleichzeitig).
+    document.querySelectorAll('.pd-add-popover').forEach(el => el.remove());
+    const pool = state.printers || [];
+    const assigned = new Set(_pdCurrentIds(displayId));
+    const available = pool.filter(p => !assigned.has(p.id));
+    if (!available.length) { showMsg('Alle Pool-Drucker bereits zugewiesen'); return; }
+    const pop = document.createElement('div');
+    pop.className = 'pd-add-popover';
+    pop.innerHTML = available.map(p =>
+      `<button class="pd-add-item" data-pid="${escapeHtml(p.id)}">${escapeHtml(printerLabel(p))}</button>`).join('');
+    pop.addEventListener('click', (e) => {
+      const item = e.target.closest('.pd-add-item');
+      if (!item) return;
+      addPdPrinter(displayId, item.dataset.pid);
+      pop.remove();
+    });
+    document.body.appendChild(pop);
+    const rect = plusBox.getBoundingClientRect();
+    pop.style.top = `${rect.bottom + 4}px`;
+    pop.style.left = `${rect.left}px`;
+    const close = () => pop.remove();
+    setTimeout(() => {  // nächster Tick, damit der öffnende Klick nicht schließt
+      document.addEventListener('click', close, { once: true });
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); }, { once: true });
+    }, 0);
   }
   // Gemeinsame Pairing-Funktion: ordnet einen wartenden Code einem Schüler zu.
   async function doPair(studentId, code, btn) {
@@ -1256,13 +1322,15 @@ window.__host = window.__host || {};
   // Drucker-Displays (Bildschirme neben den Druckern) als Reiter innerhalb der
   // „Druckerwarteschlange"-Karte: der erste Reiter („Druckerwarteschlange",
   // statisch im HTML) zeigt Pool + zentrale Warteschlange. Pro verbundenes
-  // Display kommt ein weiterer Reiter hinzu (Short-ID + Statuspunkt: grau =
-  // unautorisiert, grün = autorisiert). Beim ersten Öffnen eines Display-
-  // Reiters steht dort die Code-Eingabe; nach Autorisation die Drucker-
-  // Zuweisungs-Checkboxes. Daten aus `state.printer_displays`; der Server
+  // Display kommt ein weiterer Reiter hinzu (Label = Display-Name, sonst
+  // Short-ID, plus Statuspunkt grau=unautorisiert / grün=autorisiert und ein
+  // × zum Trennen). Beim ersten Öffnen eines Display-Reiters steht dort die
+  // Code-Eingabe; nach Autorisation: Name-Feld, Light/Dark-Schieberegler und
+  // eine Box-Ansicht der zugewiesenen Drucker (Drag umsortieren, × entfernen,
+  // „+"-Box zum Hinzufügen). Daten aus `state.printer_displays`; der Server
   // pusht bei jeder Änderung einen frischen Snapshot. `assigned_printer_ids:
-  // null` = alle Pool-Drucker. Reiter kommen/verschwinden automatisch mit dem
-  // Verbindungsstand (connect fügt ein, disconnect/forgot poppt).
+  // null` = alle Pool-Drucker (Default), geordnete Liste = Teilmenge in dieser
+  // Reihenfolge. Reiter kommen/verschwinden automatisch mit dem Verbindungsstand.
   function renderPrinterDisplays() {
     const tabList = document.getElementById('pd-tab-list');
     const panelsHost = document.getElementById('pd-panels-displays');
@@ -1276,12 +1344,14 @@ window.__host = window.__host || {};
     if (activePdTab !== 'queue' && !displays.some(d => d.display_id === activePdTab)) {
       activePdTab = 'queue';
     }
-    // Tab-Leiste: je Display ein Reiter mit Short-ID + Statuspunkt.
+    // Tab-Leiste: je Display ein Reiter — Label = Name (falls gesetzt), sonst
+    // Short-ID, plus Statuspunkt und × zum Trennen (Spiegel der Klassen-Tab-×).
     tabList.innerHTML = displays.map(d => {
       const short = d.display_id.slice(0, 6);
+      const lbl = escapeHtml(d.label && d.label.trim() ? d.label : short);
       const dotCls = d.authorized ? 'pd-dot-green' : 'pd-dot-gray';
       const title = d.authorized ? 'autorisiert' : 'Code eingeben';
-      return `<button class="pd-tab${activePdTab === d.display_id ? ' active' : ''}" data-pd-tab="${escapeHtml(d.display_id)}" title="${title}"><span class="pd-tab-dot ${dotCls}" aria-hidden="true"></span>${escapeHtml(short)}</button>`;
+      return `<button class="pd-tab${activePdTab === d.display_id ? ' active' : ''}" data-pd-tab="${escapeHtml(d.display_id)}" title="${title}"><span class="pd-tab-dot ${dotCls}" aria-hidden="true"></span>${lbl} <span class="pd-tab-close" data-pd-close="${escapeHtml(d.display_id)}" title="Display trennen" aria-label="Display trennen">×</span></button>`;
     }).join('');
     queueTab.classList.toggle('active', activePdTab === 'queue');
     // Panels umschalten: Queue-Panel nur bei aktivem Queue-Reiter; sonst das
@@ -1292,6 +1362,13 @@ window.__host = window.__host || {};
     if (queueActive) { panelsHost.innerHTML = ''; return; }
     const d = displays.find(x => x.display_id === activePdTab);
     if (!d) { panelsHost.innerHTML = ''; return; }
+    // Fokus-Schutz: wird gerade im Name-Feld getippt, das Panel nicht neu
+    // aufbauen (sonst fliegt Fokus + Wert bei jedem eintreffenden Snapshot).
+    // Tabs werden dennoch aktualisiert. Die nächste Änderung ohne Fokus holt nach.
+    const ae = document.activeElement;
+    if (ae && ae.classList && ae.classList.contains('pdd-name') && panelsHost.contains(ae)) {
+      return;
+    }
     const short = d.display_id.slice(0, 6);
     if (!d.authorized) {
       panelsHost.innerHTML = `<div class="pdd-row" data-display="${escapeHtml(d.display_id)}">
@@ -1303,23 +1380,70 @@ window.__host = window.__host || {};
       panelsHost.querySelector('.pdd-code')?.focus();
       return;
     }
-    const ids = d.assigned_printer_ids; // null = alle, sonst sortierte Liste
-    const checks = pool.map(p => {
-      const checked = ids === null || ids.includes(p.id);
-      return `<label class="pdd-check"><input type="checkbox" value="${escapeHtml(p.id)}"
-        ${checked ? 'checked' : ''} data-display="${escapeHtml(d.display_id)}">${escapeHtml(printerLabel(p))}</label>`;
+    // Autorisiertes Panel: Name-Feld, Theme-Schieberegler, Drucker-Boxen.
+    const did = escapeHtml(d.display_id);
+    const ids = d.assigned_printer_ids; // null = alle, sonst geordnete Liste
+    // Boxen-Liste: bei null alle Pool-Drucker (Pool-Reihenfolge), sonst die
+    // zugewiesenen in der Display-Reihenfolge. by_id für Lookups.
+    const byId = {};
+    pool.forEach(p => { byId[p.id] = p; });
+    const boxPrinters = ids === null ? pool : ids.map(pid => byId[pid]).filter(Boolean);
+    const assignedIds = ids === null ? pool.map(p => p.id) : ids;
+    const available = pool.filter(p => !assignedIds.includes(p.id));  // für „+"
+    const boxes = boxPrinters.map(p => {
+      const pid = escapeHtml(p.id);
+      return `<div class="pd-box" draggable="true" data-pid="${pid}" data-display="${did}">
+        <span class="pd-box-name">${escapeHtml(printerLabel(p))}</span>
+        <button class="pd-box-remove" data-pd-remove="${pid}" data-display="${did}" title="Entfernen" aria-label="Drucker entfernen">×</button>
+      </div>`;
     }).join('');
-    const assignedLabel = ids === null
-      ? 'alle Drucker'
-      : (ids.length ? `${ids.length} Drucker` : 'kein Drucker');
-    panelsHost.innerHTML = `<div class="pdd-row" data-display="${escapeHtml(d.display_id)}">
-      <div class="pdd-head">
-        <span class="pdd-id">${escapeHtml(short)}</span>
-        <span class="pdd-assigned">${escapeHtml(assignedLabel)} zugewiesen</span>
-        <button class="ghost pdd-forget">Vergessen</button>
+    const addBox = available.length
+      ? `<div class="pd-box pd-box-add" data-display="${did}" title="Drucker hinzufügen">+</div>`
+      : '';
+    const boxGrid = `<div class="pd-box-grid">${boxes}${addBox}</div>`
+      + (boxPrinters.length || available.length ? '' : '<p class="hint" style="margin-top:6px">Kein Drucker im Pool.</p>');
+    panelsHost.innerHTML = `<div class="pdd-panel" data-display="${did}">
+      <div class="pdd-field-row">
+        <label class="pdd-field">Name
+          <div class="pdd-name-row">
+            <input class="pdd-name" type="text" value="${escapeHtml(d.label || '')}" placeholder="${escapeHtml(short)}" autocomplete="off" data-display="${did}">
+            <button class="secondary pdd-name-save" data-display="${did}">Speichern</button>
+          </div>
+        </label>
+        <label class="switch pdd-theme" title="Darstellung auf dem Display: Hell oder Dunkel">
+          <input type="checkbox" class="pdd-theme-toggle" data-display="${did}"${d.theme === 'dark' ? ' checked' : ''}>
+          <span class="track"></span>
+          Dunkel
+        </label>
       </div>
-      <div class="pdd-checks">${checks || '<span class="hint">Kein Drucker im Pool.</span>'}</div>
+      <div class="pdd-section-label">Drucker (${boxPrinters.length})</div>
+      ${boxGrid}
     </div>`;
+    wirePdBoxesDnD(panelsHost);
+  }
+
+  // HTML5-Drag der Drucker-Boxen (Spiegel von wirePrinterTabDrag /
+  // onBlDrag*): eine Box auf eine andere ziehen → Reihenfolge im State
+  // neu festlegen und an /assign schicken.
+  function wirePdBoxesDnD(host) {
+    host.querySelectorAll('.pd-box[draggable="true"]').forEach(box => {
+      box.addEventListener('dragstart', (e) => {
+        pdDragPid = box.dataset.pid;
+        box.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+      });
+      box.addEventListener('dragend', () => {
+        box.classList.remove('dragging');
+        pdDragPid = null;
+      });
+      box.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; });
+      box.addEventListener('drop', (e) => {
+        e.preventDefault();
+        const targetPid = box.dataset.pid;
+        if (!pdDragPid || pdDragPid === targetPid) return;
+        reorderPdBoxPrinters(box.dataset.display, pdDragPid, targetPid);
+      });
+    });
   }
 
   function renderHelpers() {
@@ -1968,17 +2092,28 @@ window.__host = window.__host || {};
   document.getElementById('show-mb-qr-btn').addEventListener('click', showMbQr);
   document.getElementById('show-display-qr-btn').addEventListener('click', showDisplayQr);
   // Drucker-Display-Reiter: „+" öffnet den QR zum Verbinden eines neuen Displays;
-  // Klick auf einen Reiter wechselt den aktiven Sub-Reiter innerhalb der
-  // „Druckerwarteschlange"-Karte.
+  // Klick auf einen Reiter wechselt den aktiven Sub-Reiter, × trennt das
+  // Display (mit Bestätigungsdialog) innerhalb der „Druckerwarteschlange"-Karte.
   document.getElementById('pd-tab-add').addEventListener('click', showPrinterDisplayQr);
-  document.getElementById('pd-tabs-bar').addEventListener('click', (e) => {
+  document.getElementById('pd-tabs-bar').addEventListener('click', async (e) => {
+    const closeEl = e.target.closest('[data-pd-close]');
+    if (closeEl) {
+      e.stopPropagation();
+      const id = closeEl.dataset.pdClose;
+      const d = (state.printer_displays || []).find(x => x.display_id === id);
+      const name = d ? (d.label && d.label.trim() ? d.label : d.display_id.slice(0, 6)) : id;
+      if (!await confirmDialog(`Drucker-Display „${name}" trennen?`, 'Trennen')) return;
+      forgetPrinterDisplay(id);
+      return;
+    }
     const tab = e.target.closest('[data-pd-tab]');
     if (!tab) return;
     activePdTab = tab.dataset.pdTab;
     renderPrinterDisplays();
   });
   // Drucker-Displays: delegierte Handler für die per innerHTML gerenderten
-  // Buttons/Checkboxes im aktiven Display-Panel (Zuordnen, Vergessen, Zuweisung).
+  // Elemente im aktiven Display-Panel (Code Zuordnen, Name Speichern,
+  // Drucker-Box entfernen/hinzufügen, Theme-Toggle).
   const pdBox = document.getElementById('pd-panels-displays');
   pdBox.addEventListener('click', (e) => {
     const authorizeBtn = e.target.closest('.pdd-authorize');
@@ -1988,23 +2123,39 @@ window.__host = window.__host || {};
       authorizePrinterDisplay(row.dataset.display, code, authorizeBtn);
       return;
     }
-    const forgetBtn = e.target.closest('.pdd-forget');
-    if (forgetBtn) {
-      forgetPrinterDisplay(forgetBtn.closest('.pdd-row').dataset.display, forgetBtn);
+    const removeBtn = e.target.closest('.pd-box-remove');
+    if (removeBtn) {
+      removePdPrinter(removeBtn.dataset.display, removeBtn.dataset.pdRemove);
+      return;
+    }
+    const addBox = e.target.closest('.pd-box-add');
+    if (addBox) {
+      openPdAddMenu(addBox.dataset.display, addBox);
+      return;
+    }
+    const nameSave = e.target.closest('.pdd-name-save');
+    if (nameSave) {
+      const inp = nameSave.closest('.pdd-name-row').querySelector('.pdd-name');
+      inp.blur();  // Fokus raus, damit der nächste Snapshot das Panel + Reiter-Label aktualisiert
+      setPdLabel(nameSave.dataset.display, inp.value);
       return;
     }
   });
-  // Checkbox-Wechsel → sofort zuweisen (ohne extra Speichern-Button).
+  // Theme-Schieberegler → sofort setzen.
   pdBox.addEventListener('change', (e) => {
-    if (e.target.matches('.pdd-check input[type=checkbox]')) {
-      assignPrinterDisplay(e.target.dataset.display, e.target);
+    if (e.target.matches('.pdd-theme-toggle')) {
+      setPdTheme(e.target.dataset.display, e.target.checked);
     }
   });
-  // Code-Eingabe per Enter abschicken.
+  // Code- + Name-Eingabe per Enter abschicken.
   pdBox.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && e.target.matches('.pdd-code')) {
+    if (e.key !== 'Enter') return;
+    if (e.target.matches('.pdd-code')) {
       const row = e.target.closest('.pdd-row');
       authorizePrinterDisplay(row.dataset.display, e.target.value, row.querySelector('.pdd-authorize'));
+    } else if (e.target.matches('.pdd-name')) {
+      const save = e.target.closest('.pdd-name-row').querySelector('.pdd-name-save');
+      if (save) save.click();
     }
   });
   document.getElementById('add-helper-btn').addEventListener('click', addHelper);

@@ -87,7 +87,20 @@ function renderQueue(msg) {
   content.innerHTML = `<div class="section-label">Drucker (${pool.length})</div><div class="grid">${rows}</div>${waitBlock}`;
 }
 
+function applyTheme(theme) {
+  // Theme vom Host ('light' | 'dark'); Default dark (bisheriges Aussehen).
+  document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : 'dark');
+}
+
+function applyLabel(label) {
+  // Display-Name als Queue-Überschrift (leer = Default „Druckerwarteschlange").
+  const h1 = document.querySelector('#view-queue h1');
+  if (h1) h1.textContent = (label && label.trim()) ? label : 'Druckerwarteschlange';
+}
+
 function handleServerMessage(msg) {
+  if ('theme' in msg) applyTheme(msg.theme);
+  if ('label' in msg) applyLabel(msg.label);
   if (msg.type === 'registration') {
     document.getElementById('reg-code').textContent = msg.code || '····';
     show('register');
