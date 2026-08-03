@@ -303,6 +303,7 @@ const bookAlertCloseBtn = document.getElementById('book-alert-close');
 const printModal = document.getElementById('print-modal');
 const printWarnEl = document.getElementById('print-warn');
 const printPickerEl = document.getElementById('print-modal-picker');
+const printPickerErrEl = document.getElementById('print-picker-error');
 const slipCheck = document.getElementById('slip-second-page');
 const modalPrintBtn = document.getElementById('modal-print');
 const modalPrintNextBtn = document.getElementById('modal-print-next');

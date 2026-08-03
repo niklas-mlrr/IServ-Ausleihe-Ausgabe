@@ -530,18 +530,12 @@ function closePrintModal() {
   updateFocusBanner();
 }
 
-// Fehler-Hinweis im Druck-Dialog anzeigen (Drucker-Leerauswahl). Setzt die
-// orange open-books-Warnung nicht zurück — beide können parallel stehen.
+// Fehler-Hinweis im Druck-Dialog anzeigen (Drucker-Leerauswahl). Eigene Zeile
+// direkt unter dem Dropdown — getrennt von der orange open-books-Warnung, die
+// davon unberührt bleibt (Inhalt + Farbe). Farbe = Statuszeilen-Rot (#f44336).
 function showPrintError(text) {
-  // Eigene Zeile unter der open-books-Warnung: print-warn umschreiben, falls
-  // es keine offene open-books-Warnung gibt, sonst zusätzlich per Klasse.
-  printWarnEl.classList.add('is-error');
-  printWarnEl.style.display = '';
-  // Bestehenden Inhalt (open-books-Liste) nicht überschreiben; stattdessen
-  // wird der Fehler als zusätzliche Zeile angehängt, falls schon Inhalt da.
-  const cur = printWarnEl.innerHTML;
-  const err = `<p style="margin:0">${escapeHtml(text)}</p>`;
-  printWarnEl.innerHTML = cur ? cur + err : err;
+  printPickerErrEl.textContent = text;
+  printPickerErrEl.style.display = '';
 }
 
 // Dialog öffnen: erst auf Abschluss laufender Scans warten, dann Warnung
@@ -555,6 +549,8 @@ async function openPrintDialog() {
   const { vorgemerkt, offen } = computeOpenBooks();
   printWarnEl.classList.remove('is-error');
   renderOpenWarning(printWarnEl, vorgemerkt, offen);
+  printPickerErrEl.textContent = '';
+  printPickerErrEl.style.display = 'none';
   slipCheck.checked = slipSecondPageDefault;
   // Druckerauswahl frisch mounten (Vorauswahl = eigene Klasse, s. settings-WS).
   printPicker = mountPrinterPicker(printPickerEl, printerPool, printDefaultIds);

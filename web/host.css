@@ -556,8 +556,9 @@
     .pp-row:hover { background: var(--surface-3); border-radius: 4px; }
     .pp-row input { flex: none; width: 16px; height: 16px; margin: 0; accent-color: var(--accent); cursor: pointer; }
     .pp-empty { padding: 8px; color: var(--text-muted); font-size: .85rem; }
-    /* Druck-Dialog-Hinweis (Leer-Auswahl / Fehler) */
-    #print-dialog .modal-warn { color: #c0392b; font-size: .9rem; }
+    /* Druck-Dialog-Hinweis (Leer-Auswahl): eigene Zeile direkt unter dem Dropdown,
+       rot wie die Statuszeile (.txt-danger = --danger-text). */
+    #print-dialog-picker-error { color: var(--danger-text); font-weight: 700; font-size: .9rem; }
     #settings-dialog .settings-row { color: #fff; opacity: 1; font-size: .95rem; }
     :root[data-theme="light"] #settings-dialog .settings-row { color: var(--text); }
     @media (prefers-color-scheme: light) { :root:not([data-theme]) #settings-dialog .settings-row { color: var(--text); } }

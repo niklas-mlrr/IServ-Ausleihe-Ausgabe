@@ -457,11 +457,12 @@ window.__host = window.__host || {};
       const slipCb = document.getElementById('print-dialog-slip');
       const okBtn = document.getElementById('print-dialog-ok');
       const cancelBtn = document.getElementById('print-dialog-cancel');
-      const warnEl = document.getElementById('print-dialog-warn');
+      const pickerErrEl = document.getElementById('print-dialog-picker-error');
       const pickerEl = document.getElementById('print-dialog-picker');
       const prevFocus = document.activeElement;
       slipCb.checked = !!document.getElementById('slip-second-page')?.checked;
-      warnEl.style.display = 'none';
+      pickerErrEl.textContent = '';
+      pickerErrEl.style.display = 'none';
 
       // Pool + Vorauswahl aus dem lokalen Snapshot.
       const pool = (state.printers || []).map(p => ({id: p.id, name: p.name, label: p.label, is_default: p.is_default}));
@@ -487,8 +488,8 @@ window.__host = window.__host || {};
       okBtn.onclick = () => {
         const ids = picker.getSelectedIds();
         if (!ids.length) {
-          warnEl.textContent = 'Bitte mindestens einen Drucker auswählen.';
-          warnEl.style.display = '';
+          pickerErrEl.textContent = 'Bitte mindestens einen Drucker auswählen.';
+          pickerErrEl.style.display = '';
           return;
         }
         finish({second_page: slipCb.checked, printers: ids});
