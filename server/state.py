@@ -415,6 +415,13 @@ class ClassContext:
     # der Klasse wirkt erst auf künftige Drucke. Rein In-Memory (Kontexte leben
     # nicht persistiert), kein DB-/IServ-Zugriff.
     allowed_printer_ids: set[str] | None = None
+    # Während `open_class` Schüler/Flags/Katalog lädt, steht der Kontext schon in
+    # `self.contexts` (für interne Lookups wie `_ensure_class_catalog`), soll aber
+    # NOCH nicht an Clients gehen — sonst snapshottet ein nebenläufiger Broadcast
+    # (Helfer hinzufügen, Modus B …) die leere Queue und der Klassen-Tab erscheint
+    # am Host vorzeitig. `loading=True` hält den Kontext aus `state_snapshot` und
+    # `real_contexts_summary` heraus, bis `open_class` ihn freigibt + broadcastet.
+    loading: bool = False
 
 
 class AppState:
@@ -627,6 +634,7 @@ class AppState:
                 "queue_all": [s.as_dict() for s in c.queue],
             }
             for c in self.contexts.values()
+            if not c.loading
         ]
 
     def helpers_as_dict(self) -> dict:
@@ -655,12 +663,13 @@ class AppState:
                 ),
             }
             for c in self.contexts.values()
+            if not c.loading
         }
         return {
             "type": "state",
             # Flat-Felder (aus dem aktiven Kontext) — der Host-Client liest sie
             # direkt vom Snapshot (kein State-seitiges Kompat-Feld mehr nötig).
-            "active_form": ctx.form if ctx and ctx.form else None,
+            "active_form": ctx.form if ctx and ctx.form and not ctx.loading else None,
             "active_context_id": self.active_context_id,
             "contexts": contexts,
             "selected_schoolyear": self.selected_schoolyear,

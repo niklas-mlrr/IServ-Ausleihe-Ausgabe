@@ -216,6 +216,12 @@ async def open_class(body: OpenClassRequest) -> dict:
 
     existing = next((c for c in state.contexts.values() if c.form == form), None)
     if existing is not None:
+        # Noch ladender Kontext → nicht als „geladen" zurückmelden (would-be
+        # count 0). Client-seitige Per-Klassen-Sperre verhindert das beim
+        # selben Host; dieser Guard ist die Absicherung gegen Races/andere
+        # Hosts. Der „Öffnen"-Button bleibt für andere Klassen frei.
+        if existing.loading:
+            raise HTTPException(409, {"reason": "loading", "msg": "Klasse wird noch geladen"})
         state.set_active_context(existing.id)
         # Erneutes Öffnen aktualisiert die Druck-Allowlist („Öffnen" ist der
         # Bedienpunkt dafür); leer/None = alle Pool-Drucker.
@@ -232,10 +238,17 @@ async def open_class(body: OpenClassRequest) -> dict:
         raise HTTPException(502, f"IServ-Fehler: {e}") from e
 
     ctx = state.open_context(form)
+    # Kontext erst veröffentlichen, wenn er vollständig geladen ist: während
+    # die langsamen IServ-Awaits (Flags/Katalog) laufen, darf kein anderer
+    # Broadcast (Helfer hinzufügen, Modus B …) die leere Queue snapshotten —
+    # sonst erscheint der Klassen-Tab am Host vorzeitig. `loading=True` hält
+    # den Kontext aus `state_snapshot`/`real_contexts_summary` heraus.
+    ctx.loading = True
     ctx.allowed_printer_ids = _resolve_allowed_printers(body.printers)
     ctx.queue = [QueueStudent.from_iserv(s, form=form) for s in students]
     # Immer (nicht nur bei gewählten Auto-Fertig-Filtern): der Abruf füllt auch
-    # die Info-Flags für die Queue-Anzeige. Fehler sind pro Schüler gekapselt.
+    # die Info-Flags für die Queue-Anzeige. Fehler sind pro Schüler gekapselt
+    # und nicht fatal — die Klasse bleibt geladen.
     try:
         await _load_student_flags(state, ctx, body.auto_done or [])
     except Exception:
@@ -247,6 +260,8 @@ async def open_class(body: OpenClassRequest) -> dict:
         await _ensure_class_catalog(state, context_id=ctx.id)
     except Exception:
         log.exception("Klassen-Bücherkatalog konnte beim Öffnen nicht vorgebaut werden")
+    # Vollständig geladen → veröffentlichen und an alle Clients broadcasten.
+    ctx.loading = False
     await hub.broadcast_host(state.state_snapshot())
     await hub.broadcast_settings(state)
     return {"ok": True, "context_id": ctx.id, "count": len(ctx.queue)}

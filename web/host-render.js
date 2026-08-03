@@ -201,28 +201,61 @@ window.__host = window.__host || {};
     });
   }
 
+  // Per-Klassen-Sperre während des Ladens: ein erneutes „Öffnen" für DIESELBE
+  // Klasse wird ignoriert, bis ihr Request abgeschlossen ist — die Klasse soll
+  // sich nicht vorzeitig (z. B. mit 0 Schülern) als „geladen" zeigen. Andere
+  // Klassen lassen sich daneben weiter öffnen (kein globaler Button-Lock,
+  // „Öffnen" bleibt für andere Klassen drückbar).
+  const openingForms = new Set();
+
   async function openClass(force = false) {
     const form = document.getElementById('new-class-select').value;
     if (!form) return;
+    if (openingForms.has(form)) return;  // diese Klasse lädt bereits
+    openingForms.add(form);
+    const release = () => openingForms.delete(form);
     const auto_done = getAutoDoneSelection();
     localStorage.setItem(AUTO_DONE_STORAGE_KEY, JSON.stringify(auto_done));
     const printers = getSelectedClassPrinters();
     saveClassPrintersSelection(printers);
-    showMsg('Lade Schüler…');
-    const r = await fetch('/api/open-class', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ form, force, auto_done, printers }) });
-    const d = await r.json();
+    // Ein einziger persistenter Toast: steht während des gesamten Ladens
+    // („Lade Klasse …") und wird in-place zum Abschluss-Hinweis, sobald die
+    // Klasse geladen ist. So gibt es nie zwei gleichzeitig sichtbare Toasts.
+    const loadToast = showMsgPersistent(`Lade ${form}…`);
+    let r, d;
+    try {
+      r = await fetch('/api/open-class', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ form, force, auto_done, printers }) });
+      d = await r.json();
+    } catch (err) {
+      finalizeToast(loadToast, 'Fehler beim Laden der Klasse');
+      release();
+      return;
+    }
     if (r.status === 409 && d.detail && d.detail.reason === 'active_sessions') {
+      // Vor dem Bestätigungsdialog Sperre + Lade-Toast aufheben, damit der
+      // rekursive Aufruf („Trotzdem öffnen") sauber neu starten kann.
+      dismissToast(loadToast);
+      release();
       if (await confirmDialog(`${d.detail.msg}\n\nTrotzdem öffnen?`, 'Öffnen')) return openClass(true);
       showMsg('Öffnen abgebrochen');
       return;
     }
-    if (!r.ok) { showMsg(d.detail?.msg || d.detail || 'Fehler'); return; }
+    if (!r.ok) {
+      // 409 reason 'loading' (Klasse noch am Laden) oder anderer Fehler: keine
+      // „geladen"-Meldung, nur den Fehlertext zeigen.
+      finalizeToast(loadToast, d.detail?.msg || d.detail || 'Fehler');
+      release();
+      return;
+    }
     const id = d.context_id;
     // Optimistisch lokal anzeigen, bevor der WS-Broadcast eintrifft (snappy
     // UX). applyState leitet tabOrder anschließend aus state.contexts ab und
     // rekonziliert diese Vorausnahme — global bleibt der Server der Truth.
     if (!tabOrder.includes(id)) tabOrder.push(id);
-    showMsg(`${d.count} Schüler geladen — ${form}`);
+    // Gleicher Toast-Element, neuer Text — kein zweiter „Klasse …"-Toast
+    // daneben. Auto-dismissed nach 4 s wie ein normaler Hinweis.
+    finalizeToast(loadToast, `${form} geladen — ${d.count} Schüler`);
+    release();
     switchTab(id);
   }
 
@@ -1671,6 +1704,41 @@ window.__host = window.__host || {};
       const drop = () => t.remove();
       t.addEventListener('transitionend', drop, { once: true });
       setTimeout(drop, 400);  // Fallback, falls keine Transition feuert (reduced-motion)
+    }, 4000);
+  }
+
+  // Wie showMsg, aber ohne Auto-Dismiss: der Toast bleibt stehen, bis der
+  // Aufrufer ihn via dismissToast(el) wieder entfernt. Für Hinweise, die einen
+  // Statusübergang begleiten (z. B. „Lade Klasse …" bis zum fertigen Laden).
+  function showMsgPersistent(text, variant) {
+    const stack = document.getElementById('toast-stack');
+    const t = document.createElement('div');
+    t.className = 'toast' + (variant ? ` toast-${variant}` : '');
+    t.textContent = text;
+    stack.appendChild(t);
+    requestAnimationFrame(() => t.classList.add('show'));
+    return t;
+  }
+
+  function dismissToast(el) {
+    if (!el) return;
+    el.classList.remove('show');
+    const drop = () => el.remove();
+    el.addEventListener('transitionend', drop, { once: true });
+    setTimeout(drop, 400);  // Fallback (reduced-motion)
+  }
+
+  // Macht einen per showMsgPersistent erzeugten Toast zum finalen Hinweis: Text
+  // wird in-place ausgetauscht (kein zweiter Toast, der kurzzeitig neben dem
+  // ersten sichtbar wäre) und danach wie showMsg nach 4 s auto-dismissed.
+  function finalizeToast(el, text) {
+    if (!el) { showMsg(text); return; }
+    el.textContent = text;
+    setTimeout(() => {
+      el.classList.remove('show');
+      const drop = () => el.remove();
+      el.addEventListener('transitionend', drop, { once: true });
+      setTimeout(drop, 400);  // Fallback (reduced-motion)
     }, 4000);
   }
 

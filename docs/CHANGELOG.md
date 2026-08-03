@@ -8,6 +8,54 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-03 — Klassen-Lade-Hinweis + Snapshot-Race beim nebenläufigen Broadcast
+
+- **Host-Hinweis beim Klassen-Öffnen:** der bisherige „Lade Schüler…"-Toast
+  verschwand nach 4 s (Auto-Dismiss) — bei langsamen IServ-Laden war er weg,
+  bevor die Klasse da war. Neu: ein **persistenter Toast** (`showMsgPersistent`
+  + `finalizeToast` in `web/host-render.js`, ohne Auto-Dismiss bzw. Text-in-
+  place-Austausch) zeigt „Lade {form}…" und bleibt stehen, bis die Klasse
+  wirklich geladen ist; danach wird **derselbe Toast-Element** in-place zu
+  „{form} geladen — {count} Schüler" (kein zweiter Toast, der sich mit dem
+  ersten in der Fade-Transition überlappt). `form` aus IServ ist bereits
+  „Klasse 8a" o. ä. → kein zusätzliches „Klasse"-Präfix davor (sonst
+  „Klasse Klasse 8a"); Wortwahl: „Lade Klasse 8a…" / „Klasse 8a geladen —
+  28 Schüler".
+- **Per-Klassen-Sperre statt globalem Button-Lock:** `openingForms: Set` in
+  `host-render.js` blockiert ein erneutes „Öffnen" für **dieselbe** Klasse,
+  solange sie lädt — der „Öffnen"-Button bleibt für **andere** Klassen
+  drückbar (kein `disabled`, kein globales `classLoading`-Lock mehr). 409-
+  „Trotzdem öffnen"-Pfad gibt die Sperre vor dem `confirmDialog` frei, damit
+  der rekursive Aufruf sauber neu startet.
+- **Root-Cause „Klasse öffnet sich zu früh":** `open_class` registrierte den
+  Kontext sofort per `state.open_context(form)` in `state.contexts` (leere
+  Queue), dann folgten langsame IServ-Awaits (`get_students_for_form`,
+  `_load_student_flags`, `_ensure_class_catalog`). Während dieser Pause
+  feuerte jeder nebenläufige Endpoint, der `broadcast_host(state_snapshot())`
+  aufruft — Helfer hinzufügen (`/api/add-helper`), Modus B aktivieren/
+  deaktivieren (`/api/modus-b/open|close`) — und snapshottete den halb
+  geladenen Kontext mit leerer Queue. Der Host sah den neuen Kontext in
+  `state.contexts` → Klassen-Tab erschien **vorzeitig** (0 Schüler), lange
+  bevor `open_class` fertig war.
+- **Fix — Kontext erst veröffentlichen, wenn vollständig geladen**
+  (`server/state.py`, `server/routes/classes.py`): neues
+  `ClassContext.loading: bool`; `state_snapshot()` und
+  `real_contexts_summary()` schließen `loading`-Kontexte aus (`if not
+  c.loading`), `active_form` wird für ladende Kontexte unterdrückt. Der
+  Kontext bleibt intern in `self.contexts` (für Lookups wie
+  `_ensure_class_catalog` via `ctx_or_active`), wird aber nicht an Clients
+  gesendet. `open_class`: `ctx.loading = True` direkt nach `open_context`,
+  Flags + Katalog bleiben einzeln nicht-fatal (`try`/`except` wie bisher),
+  `ctx.loading = False` erst kurz vor dem finalen `broadcast_host`. Re-Open-
+  Pfad: `existing.loading` → `409 {reason: "loading"}` (Absicherung gegen
+  Races/andere Hosts), statt vorzeitig `count: 0` als „geladen" zu melden.
+- **Draht-Format unverändert** — `test_state_contract.py` bleibt grün
+  (`loading`-Kontexte sind im Test nicht beteiligt; nur ein Filter mehr, kein
+  neues Feld). Volle Suite grün, `node --check` OK, Ruff clean. Live-Check am
+  echten Gerät offen. Details: `_logs/2026-08-03_sba_klasse_laden_hinweis.md`;
+  Lessons Learned: neuer Gotcha „Snapshot-Race bei nebenläufigem Broadcast
+  während asyncem Kontext-Aufbau".
+
 ## 2026-08-03 — Druckerauswahl im Druck-Dialog (Host + Helfer)
 
 - **Neu:** im Host- und im Helfer-Druck-Dialog gibt es direkt über dem
