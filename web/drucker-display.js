@@ -27,6 +27,12 @@ let forbidden = false;
 const FLIP_MS = 500;
 let flipAnimating = false;
 let pendingQueueMsg = null;
+// Aufgeschobene „Gedruckt"-TTL-Entfernung: trifft der TTL-Timer während einer
+// laufenden FLIP-Animation, wird die Entfernung zurückgestellt und nach
+// Ablauf von flushPendingQueue nachgezogen (s. Nutzer-Vorgabe: beim
+// Verschwinden soll der Rest gleiten, nicht springen — und keine Bewegung
+// darf eine andere abbrechen).
+let pendingTtlPid = null;
 
 function show(name) {
   viewRegister.classList.toggle('show', name === 'register');
@@ -231,15 +237,17 @@ function renderQueue(msg) {
   });
 
   // Pro „Gedruckt"-Block einen Timer setzen, der ihn nach der Rest-TTL
-  // ausblendet (falls kein neuer Snapshot vorher nachzieht).
+  // ausblendet (falls kein neuer Snapshot vorher nachzieht). Das Kästchen
+  // verschwindet ohne Animation, der Rest gleitet per FLIP nach — läuft der
+  // Timer während einer Animation, wird die Entfernung aufgeschoben
+  // (s. removePrintedAndFlip / flushPendingQueue).
   pool.forEach(p => {
     if (!p.printed_name || !p.printed_expires_in) return;
     const pid = p.id;
     const ms = Math.max(0, p.printed_expires_in) * 1000;
     const t = setTimeout(() => {
-      const card = content.querySelector(`.printer-card[data-printer="${CSS.escape(pid)}"]`);
-      // Nur das Auftrags-Kästchen entfernen — das Label „Gedruckt" bleibt stehen.
-      card?.querySelector('.dd-printed .dd-order')?.remove();
+      if (flipAnimating) { pendingTtlPid = pid; return; }
+      removePrintedAndFlip(pid);
     }, ms);
     printedTimers.push(t);
   });
@@ -277,11 +285,48 @@ function scheduleQueueRender(msg) {
   setTimeout(flushPendingQueue, reduceMotion ? 80 : FLIP_MS);
 }
 
+// „Gedruckt"-Kästchen nach TTL verschwinden lassen: das Kästchen selbst ohne
+// Animation entfernen, aber den Rest (z. B. den Warteschlangen-Kasten
+// darunter) per FLIP gleiten lassen — nicht springen. Gezielt (ohne vollen
+// Re-Render), damit andere Drucker-TTL-Timer nicht zurückgesetzt werden.
+function removePrintedAndFlip(pid) {
+  const card = content.querySelector(`.printer-card[data-printer="${CSS.escape(pid)}"]`);
+  if (!card) return;
+  const oldCardRects = new Map();
+  content.querySelectorAll('.printer-card, .dd-waiting-card').forEach(el => {
+    oldCardRects.set(el.dataset.flipId, el.getBoundingClientRect());
+  });
+  // Nur das Auftrags-Kästchen entfernen — das Label „Gedruckt" bleibt stehen.
+  card.querySelector('.dd-printed .dd-order')?.remove();
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  content.querySelectorAll('.printer-card, .dd-waiting-card').forEach(el => {
+    const old = oldCardRects.get(el.dataset.flipId);
+    if (!old) return;
+    const cur = el.getBoundingClientRect();
+    const dx = old.left - cur.left;
+    const dy = old.top - cur.top;
+    if (!dx && !dy) return;
+    el.style.transition = 'none';
+    el.style.transform = `translate(${dx}px, ${dy}px)`;
+    el.offsetWidth;
+    el.style.transition = reduceMotion ? 'transform .01ms' : '';
+    el.style.transform = '';
+  });
+  flipAnimating = true;
+  setTimeout(flushPendingQueue, reduceMotion ? 80 : FLIP_MS);
+}
+
 function flushPendingQueue() {
   flipAnimating = false;
   if (pendingQueueMsg) {
+    // Ein frischer Snapshot bringt aktuellen Stand — eine aufgeschobene TTL-
+    // Entfernung ist damit hinfällig (das Kästchen ist im Snapshot eh weg).
+    pendingTtlPid = null;
     const m = pendingQueueMsg; pendingQueueMsg = null;
     scheduleQueueRender(m);
+  } else if (pendingTtlPid) {
+    const pid = pendingTtlPid; pendingTtlPid = null;
+    removePrintedAndFlip(pid);
   }
 }
 

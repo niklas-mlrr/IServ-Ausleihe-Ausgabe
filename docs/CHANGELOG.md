@@ -8,6 +8,26 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-03 — Drucker-Display: beim Verschwinden gleitet der Rest nach
+
+- **Verschwinden → Rest gleitet, statt springt:** das „Gedruckt"-Kästchen
+  wurde nach seiner TTL (30s) bisher direkt per `remove()` aus dem DOM
+  gerissen — dabei sprang der Rest (z. B. der Warteschlangen-Kasten darunter)
+  sofort hoch. Jetzt: `removePrintedAndFlip` merkt die Karten-Positionen,
+  entfernt das Kästchen (ohne Animation — nur das Verschwinden selbst ist
+  nicht dynamisch, s. Nutzer-Vorgabe) und lässt die betroffenen Karten per
+  FLIP an ihre neue Position gleiten. Gezielt (kein vollständiger Re-Render),
+  damit andere Drucker-TTL-Timer nicht zurückgesetzt werden.
+- **TTL-Entfernung im Coalescing-Schutz:** trifft der TTL-Timer während
+  einer laufenden FLIP-Animation, wird die Entfernung aufgeschoben
+  (`pendingTtlPid`) und nach Ablauf nachgezogen — keine Bewegung bricht eine
+  andere ab. Ein frischer Snapshot macht die aufgeschobene Entfernung
+  hinfällig (Kästchen ist im Snapshot eh weg).
+- Die Snapshot-basierten Verschwinden-Fälle (Auftrag verlässt die
+  Warteschlange → Rest gleitet hoch; Auftrag wandert per FLIP zum Drucker)
+  funktionieren bereits über den FLIP+Coalescing-Mechanismus.
+- Frontend-only. 323 passed, ruff clean.
+
 ## 2026-08-03 — Drucker-Display: Bewegungen nicht abbrechen, Klasse robuster
 
 - **Snapshot-Koalescing (Bewegungen nicht abbrechen):** trifft während einer
