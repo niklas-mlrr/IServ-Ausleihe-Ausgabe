@@ -671,6 +671,8 @@ class PrintQueue:
             s = self.slots.get(p.id)
             printing_name: str | None = None
             spooled_names: list[str] = []
+            blocked_names: list[str] = []  # stalled/peer_error/failed (sichtbar
+                                           # fürs Drucker-Display, s. u.)
             if s:
                 for j in s.jobs:
                     if j.status == "printing":
@@ -679,7 +681,12 @@ class PrintQueue:
                         # Blockierte (fehlgeschlagene) Aufträge zählen über
                         # `load` mit, werden aber nicht als aktiv druckend /
                         # wartend gelistet — der Drucker ist `faulty`, die
-                        # Blockade zeigt das Host-UI separat an.
+                        # Blockade zeigt das Host-UI separat an. Die Namen
+                        # sammeln wir dennoch (`blocked_names`), damit das
+                        # Drucker-Display sie trotz Fehler anzeigt: der Auftrag
+                        # war gesendet, der Schüler muss sehen, dass er sich
+                        # melden soll.
+                        blocked_names.append(j.name)
                         continue
                     else:
                         spooled_names.append(j.name)
@@ -694,6 +701,7 @@ class PrintQueue:
                     "printing_name": printing_name,
                     "spooled_name": spooled_names[0] if spooled_names else None,
                     "spooled_names": spooled_names,
+                    "blocked_names": blocked_names,
                     "faulty": p.id in self.faulty_printers,
                 }
             )

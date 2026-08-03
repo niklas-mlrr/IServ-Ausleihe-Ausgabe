@@ -42,13 +42,17 @@ function renderQueue(msg) {
     const spooledList = Array.isArray(p.spooled_names) && p.spooled_names
       ? p.spooled_names
       : (p.spooled_name ? [p.spooled_name] : []);
+    // Blockierte Aufträge (stalled/peer_error/failed) nur bei Fehler relevant:
+    // sie wurden gesendet, der Schüler soll seinen Namen sehen und sich melden.
+    const blockedList = p.faulty && Array.isArray(p.blocked_names) ? p.blocked_names : [];
     const printing = p.printing_name || null;
     const printed = p.printed_name || null;
     // Die drei Kategorien stehen immer (mit Label), auch ohne Eintrag — dann
     // halt leer. So bleibt das Layout pro Drucker stabil.
     const printedLine = printed ? `<div class="dd-line">${escapeHtml(printed)}</div>` : '';
     const printingLine = printing ? `<div class="dd-line">${escapeHtml(printing)}</div>` : '';
-    const nextLines = spooledList.map(n => `<div class="dd-line">${escapeHtml(n)}</div>`).join('');
+    const nextLines = spooledList.map(n => `<div class="dd-line">${escapeHtml(n)}</div>`).join('')
+      + blockedList.map(n => `<div class="dd-line dd-blocked">${escapeHtml(n)}</div>`).join('');
     // Bei Fehler: Name + „ - Fehler" in rot, gleicher Schriftgröße wie der Name;
     // darunter der Betreuer-Hinweis. Die Kategorien (Aufträge) bleiben sichtbar.
     const faulty = !!p.faulty;
