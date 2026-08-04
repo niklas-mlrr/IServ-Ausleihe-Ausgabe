@@ -615,6 +615,100 @@ def test_context_printers_last_not_removable_while_live_on(client, ctx):
     assert c.allowed_printer_ids is None
 
 
+def test_open_class_seeds_done_options(client, ctx):
+    """`done_signed`/`done_collected` aus dem `/api/open-class`-Body landen auf
+    dem Kontext (Default `False`, kompatibel mit Öffnen ohne Angabe) — sowohl
+    beim erstmaligen Öffnen als auch beim erneuten Öffnen (Reuse-Pfad)."""
+    state, _, _ = ctx
+    state.iserv = _FakeIServForClasses()
+
+    r1 = client.post("/api/open-class", json={"form": "10a"}, cookies={"session_id": "sid"})
+    assert r1.status_code == 200
+    cid = r1.json()["context_id"]
+    assert state.contexts[cid].done_signed is False
+    assert state.contexts[cid].done_collected is False
+
+    r2 = client.post(
+        "/api/open-class",
+        json={"form": "10a", "done_signed": True, "done_collected": True},
+        cookies={"session_id": "sid"},
+    )
+    assert r2.status_code == 200
+    assert r2.json()["reused"] is True
+    assert state.contexts[cid].done_signed is True
+    assert state.contexts[cid].done_collected is True
+
+
+def test_context_done_options_collected_requires_signed(client, ctx):
+    """`/api/context-done-options` normalisiert `done_collected` auf `False`,
+    wenn `done_signed=False` mitgeschickt wird — kein inkonsistenter
+    „eingesammelt ohne unterschrieben"-Zustand serverseitig."""
+    state, _, _ = ctx
+    c = state.open_context("10a")
+
+    r = client.post(
+        "/api/context-done-options",
+        json={"context_id": c.id, "done_signed": False, "done_collected": True},
+        cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 200
+    assert r.json() == {
+        "ok": True, "context_id": c.id, "done_signed": False, "done_collected": False,
+    }
+    assert c.done_signed is False
+    assert c.done_collected is False
+
+    r = client.post(
+        "/api/context-done-options",
+        json={"context_id": c.id, "done_signed": True, "done_collected": True},
+        cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 200
+    assert c.done_signed is True
+    assert c.done_collected is True
+
+    r = client.post(
+        "/api/context-done-options",
+        json={"context_id": "unbekannt", "done_signed": True, "done_collected": True},
+        cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 404
+
+
+def test_display_authorize_by_id_not_code(client, ctx):
+    """`/api/display/authorize` autorisiert per `display_id` (Klick auf einen
+    Host-Listeneintrag, wie beim Drucker-Display) — kein getippter
+    Registrierungscode mehr. Unbekannte/bereits autorisierte ID → 404."""
+    from server.state import DisplaySession
+
+    state, _, _ = ctx
+    d = DisplaySession(display_id="disp1", registration_code="ABCD")
+    state.displays[d.display_id] = d
+
+    r = client.post(
+        "/api/display/authorize", json={"display_id": "disp1"}, cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "display_id": "disp1"}
+    assert d.authorized is True
+
+    # Erneutes Freischalten derselben (schon autorisierten) ID -> 404.
+    r = client.post(
+        "/api/display/authorize", json={"display_id": "disp1"}, cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 404
+
+    # Unbekannte ID -> 404.
+    r = client.post(
+        "/api/display/authorize", json={"display_id": "unbekannt"}, cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 404
+
+    # Fehlende ID -> 400.
+    r = client.post("/api/display/authorize", json={}, cookies={"session_id": "sid"})
+    assert r.status_code == 400
+
+
 def test_close_class_ends_students_and_releases_helper_bindings(client, ctx):
     from server.state import HelperSession, QueueStudent
 

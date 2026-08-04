@@ -113,6 +113,11 @@ class OpenClassRequest(BaseModel):
     # Bücher gescannt sind (Druckmodus). Default "auto" (kompatibel mit Öffnungen
     # ohne Angabe). S. ClassContext.slip_trigger.
     slip_trigger: Literal["auto", "student", "helper", "barcode"] = "auto"
+    # „Fertig"-Voraussetzungen (Klasseneinstellungen „Leihschein unterschreiben"/
+    # „…wird vom Lehrer eingesammelt"). Default `False` (kompatibel mit
+    # Öffnungen ohne Angabe). S. ClassContext.done_signed/done_collected.
+    done_signed: bool = False
+    done_collected: bool = False
 
 
 class CloseClassRequest(BaseModel):
@@ -154,6 +159,19 @@ class ContextSlipTriggerRequest(BaseModel):
 
     context_id: str = ""
     slip_trigger: Literal["auto", "student", "helper", "barcode"] = "auto"
+
+
+class ContextDoneOptionsRequest(BaseModel):
+    """Body für `POST /api/context-done-options`: „Fertig"-Voraussetzungen
+    einer bereits geöffneten Klasse nachträglich setzen (Checkboxen „Leihschein
+    unterschreiben"/„…wird vom Lehrer eingesammelt" in den Klasseneinstellungen).
+    `done_collected` ohne `done_signed` ist bedeutungslos — der Endpoint
+    erzwingt `done_collected=False`, wenn `done_signed=False` (s.
+    ClassContext.done_signed/done_collected)."""
+
+    context_id: str = ""
+    done_signed: bool = False
+    done_collected: bool = False
 
 
 # Modul-Level-Singleton als Body-Default (statt `= ContextIdBody()` direkt im
@@ -268,7 +286,12 @@ class CommitBookRequest(BaseModel):
 
 
 class DisplayAuthorizeRequest(BaseModel):
-    registration_code: str = ""
+    """Body für `POST /api/display/authorize` — iPad-Display durch Klick auf
+    einen konkreten, am Host gelisteten Eintrag freischalten (`display_id`,
+    wie beim Drucker-Display). Der Registrierungscode wird nur noch auf dem
+    iPad + in der Host-Liste gezeigt (visueller Abgleich), nicht mehr getippt."""
+
+    display_id: str = ""
 
 
 class PrinterDisplayEnableRequest(BaseModel):

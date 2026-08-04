@@ -5,7 +5,7 @@
 > Risiko hier unter „Offen / zu testen" eintragen; nach erfolgreichem Test in
 > „Verifiziert" verschieben (mit Datum + Skript/Befund). Bezug: `docs/PLAN.md`.
 >
-> Stand: 2026-08-04 (Klassen-Lehreransicht `/teacher`: Wisch-Geste + Leihschein-Eingang, 378 Tests grün).
+> Stand: 2026-08-04 (Klasseneinstellungen: Drucker-Default-Fix, Fertig-Optionen persistiert, iPad-Freischalt ohne Tippen, 381 Tests grün).
 > Alle bisherigen Tests sind **read-only** gegen IServ
 > (kein Submit, keine Buchung — PLAN §6).
 >
@@ -58,6 +58,7 @@
 
 | V39 | **Klassen-Lehreransicht `/teacher`** — QR-Minten/-Ersetzen einer noch unautorisierten Session pro Klassen-Tab, Blockieren bei bereits autorisierter (409, Host muss erst trennen), Host-Autorisieren per Registrierungscode, explizites Trennen; token-authentifizierte `pending <-> skipped`-Statuswechsel strikt auf die eigene Klasse beschränkt (Schüler einer anderen Klasse → 404); `AppState.teacher_snapshot` liefert nachweislich nur Klassenname/Summen/Name/Status/Buch-Fortschritt/Druckstatus (kein `paid`/`amount_open`/`assigned_helper`, keine andere Klasse); Host-Snapshot-Kachel je Klassen-Tab leakt nie den Token; `/ws/teacher` zeigt vor Autorisierung nur den Code, danach `teacher_state`, unbekannter/entwerteter Token → sofortiges `forbidden`+Close (kein Reconnect möglich), gültige autorisierte Session reconnectet weiter; `Hub.broadcast_host` pusht Lehrer-Updates bei jeder Zustandsänderung mit; `close_class`/`select_schoolyear` entwerten gebundene Sessions hart. | `tests/test_teacher.py` (38 Tests: HTTP-Endpunkte + `AppState.teacher_snapshot` + `websocket_connect`-WS-Flow + 2 direkte `Hub`/`sessions`-Einheitstests) | 2026-08-04 | **373 Tests grün**, Ruff clean, `node --check web/teacher.js web/host-render.js` OK. **Live-Check (QR-Scan + Pairing + Live-Updates am echten Lehrkraft-Handy im Schul-WLAN) noch offen** (s. „Offen" unten) |
 | V40 | **Lehreransicht-Nachbesserung: Wisch-Geste + Leihschein-Eingang** — „Als abwesend" läuft jetzt über eine Wisch-Geste nach rechts (Pointer Events, Touch + Maus) statt eines Buttons, Ziehschwelle dient als Bestätigung (kein Modal mehr für diese Aktion). Neues Flag `QueueStudent.slip_collected` (analog `slip_printed`, in `reset_progress()` zurückgesetzt); neuer token-authentifizierter Endpunkt `POST /api/teacher/slip-collected` verlangt `slip_printed=True` (409 sonst) und ist klassenscharf isoliert (andere Klasse → 404); `AppState.teacher_snapshot` liefert das Flag je Schüler + `slip_collected_count` als Summe. Host sieht die Statistik read-only (eigener Endpunkt setzt sie nicht) über `state_snapshot()`'s bereits vorhandenes `as_dict()`. **Folgekorrektur (selbe Session):** `teacher_qr` broadcastete den Snapshot nach dem Minten bisher nicht (Code-Anzeige im Klassen-Tab blieb bis zu einer zufälligen anderen Aktion veraltet) — behoben; „Abbrechen"-Button jetzt `secondary` statt `ghost warn` (gleiche Größe wie „Bestätigen"); Wisch-Schwelle relativ zur Zeilenbreite (55 %/90 % statt fixer 90px, Label vollständig lesbar) plus Chevron-Hinweis + Hinweistext gegen Zufallsauffindbarkeit. | `tests/test_teacher.py` (+5 neue: Auth-Gate, „kein Leihschein gedruckt"-Gate, Setzen/Zurücknehmen, Klassen-Isolation, `teacher_snapshot`-Zähler; +1 Regression-Assertion für den QR-Broadcast) + `tests/test_queue_progress.py` (`slip_collected` in `reset_progress()`-Assertion) | 2026-08-04 | **378 Tests grün**, Ruff clean, `node --check web/teacher.js web/host-render.js` OK. **Live-Check (Wisch-Geste auf echtem Touchscreen, Checkbox-Sync Lehrkraft↔Host) noch offen** (s. „Offen" unten) |
+| V41 | **Klasseneinstellungen: drei Nachbesserungen** — (1) Drucker-Default im panel-new überlebt jetzt einen Server-Neustart: Persistenz über den stabilen `printer.name` (`printerStableKey()`) statt der laufzeit-instabilen `id` (`printer_store.py` vergibt `id`s bei jedem Start neu — dokumentiertes Verhalten, brach aber die `localStorage`-Auswahl). (2) `ClassContext.done_signed`/`done_collected` (In-Memory, Muster wie `live_ausgabe`/`slip_trigger`) — Klasseneinstellungen-Checkboxen „Leihschein unterschreiben"/„…wird vom Lehrer eingesammelt" waren bisher reine UI ohne Serverkontakt; jetzt in `state_snapshot()`, gesetzt via `/api/open-class` (beide Zweige) und neuem `POST /api/context-done-options`; `done_collected` wird serverseitig auf `False` normalisiert, wenn `done_signed=False`. Weiterhin ohne Auswirkung auf den Fertig-Übergang selbst (folgt später). (3) iPad-Freischalten vereinheitlicht mit Drucker-Display/Lehrkraft/Modus-B-Schüler: `POST /api/display/authorize` nimmt jetzt `display_id` (Klick auf einen Host-Listeneintrag) statt getipptem `registration_code`; `modus_b_snapshot()` liefert den Code je Display nur noch zum visuellen Abgleich. | `tests/test_api_guards.py` (+4: `test_open_class_seeds_done_options`, `test_context_done_options_collected_requires_signed`, `test_display_authorize_by_id_not_code`) | 2026-08-04 | **381 Tests grün**, Ruff clean, `node --check` auf allen `web/*.js` OK. **Live-Check (Drucker-Persistenz über echten Neustart, iPad-Freischalt-Klick am echten Gerät) noch offen** (s. „Offen" unten) |
 
 ## Offen / zu testen
 
@@ -120,6 +121,23 @@ UI). Am echten Gerät (privater Laptop, nach CLAUDE.md §6) noch offen:
 - [ ] **Beide Stellen:** Klassen-Tab (Klasseneinstellungen-Detail) **und**
   panel-new („Neue Klasse") verhalten sich gleich; Auswahl in panel-new
   über `applyState`-Re-Render hinweg erhalten.
+
+### Offen 2026-08-04 (Klasseneinstellungen-Nachbesserungen: Live-Check)
+
+Persistenz-/Endpunkt-Logik ist per Unit-Suite abgesichert (V41); rein
+In-Memory-State bzw. `localStorage`. Am echten Gerät noch offen:
+
+- [ ] **Drucker-Default nach Neustart:** panel-new-Auswahl treffen (alle
+  Drucker angehakt lassen), Server neu starten (neue Laufzeit-`id`s), panel-new
+  erneut öffnen → weiterhin alle Drucker angehakt (vorher: keiner).
+- [ ] **Fertig-Optionen:** „Leihschein unterschreiben"/„…wird vom Lehrer
+  eingesammelt" im Klassen-Tab ankreuzen, Seite neu laden (bzw. anderer
+  Host-Rechner) → Haken bleibt erhalten (Snapshot-getrieben); „eingesammelt"
+  fällt automatisch zurück, sobald „unterschreiben" abgewählt wird.
+- [ ] **iPad-Freischalten ohne Tippen:** iPad scannt den Modus-B-QR → Host
+  sieht im Kasten „Live-Ausgabe (Modus B)" einen Listeneintrag mit Code +
+  „Freischalten"-Button (kein Textfeld mehr); Klick schaltet das iPad frei,
+  Eintrag verschwindet aus der Liste.
 
 ### Offen 2026-08-03 (Drucker-Display: Live-Check im Schul-WLAN)
 

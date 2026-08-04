@@ -60,14 +60,31 @@ window.__host = window.__host || {};
   const AUTO_DONE_STORAGE_KEY = 'autoDoneFilters';
 
   // Druck-Allowlist für neu zu öffnende Klassen (panel-new): Menge der
-  // angehakten Drucker-IDs, die mit `/api/open-class` als `printers` geschickt
-  // wird. `null` (nichts gespeichert) = alle angehakt (Default). Eine explizit
-  // leere Auswahl = `[]` = bewusst kein Drucker für die Klasse (keine
-  // Vorauswahl; Druck bleibt per manueller Auswahl im Druckdialog möglich).
-  // Wird für das nächste Öffnen gemerkt.
+  // angehakten Drucker, die mit `/api/open-class` als `printers` (IDs)
+  // geschickt wird. `null` (nichts gespeichert) = alle angehakt (Default).
+  // Eine explizit leere Auswahl = `[]` = bewusst kein Drucker für die Klasse
+  // (keine Vorauswahl; Druck bleibt per manueller Auswahl im Druckdialog
+  // möglich). Wird für das nächste Öffnen gemerkt.
+  //
+  // Persistiert wird NICHT die `id` (die ist laut `printer_store.py` bewusst
+  // nur zur Laufzeit stabil und wird bei jedem Server-Neustart neu vergeben —
+  // gespeicherte IDs wären nach einem Neustart verwaist, nichts würde mehr
+  // matchen und keine Checkbox bliebe angehakt), sondern der stabile
+  // `name` (technische Identität, `null` bleibt `null` = Standarddrucker).
   const CLASS_PRINTERS_STORAGE_KEY = 'classPrinters';
 
-  // Angehakte Drucker-IDs aus dem panel-new (`#new-class-printers`) lesen.
+  // `p.name` selbst ist der stabile Schlüssel; für den Standarddrucker
+  // (`name === null`) wird `''` verwendet — dieselbe Normalisierung, die ein
+  // `data-pname=""`-Attribut beim Auslesen über `el.dataset.pname` ohnehin
+  // liefert (kein `null` im DOM darstellbar), damit Speichern/Lesen konsistent
+  // denselben Wert vergleichen.
+  function printerStableKey(p) {
+    return p.name || '';
+  }
+
+  // Angehakte Drucker-IDs aus dem panel-new (`#new-class-printers`) lesen —
+  // für den `/api/open-class`-Request (der Server erwartet IDs des aktuellen
+  // Pools).
   function getSelectedClassPrinters() {
     const out = [];
     document.querySelectorAll('#new-class-printers input[data-pid]').forEach(el => {
@@ -76,11 +93,20 @@ window.__host = window.__host || {};
     return out;
   }
 
-  // Gespeicherte Auswahl laden (Set der IDs; null = „alle", Default bei
-  // nichts Gespeichertem). Eine leere Menge = bewusst kein Drucker. Legt keine
-  // Annahme über aktuell konfigurierte Drucker — beim Render werden nur IDs
-  // gecheckt, die im Pool UND im gespeicherten Set stehen (oder alle, wenn
-  // gespeichert null ist).
+  // Angehakte Drucker als stabile Namen (für die localStorage-Persistenz,
+  // s. `printerStableKey`).
+  function getSelectedClassPrinterNames() {
+    const out = [];
+    document.querySelectorAll('#new-class-printers input[data-pid]').forEach(el => {
+      if (el.checked) out.push(el.dataset.pname);
+    });
+    return out;
+  }
+
+  // Gespeicherte Auswahl laden (Set stabiler Namen; null = „alle", Default
+  // bei nichts Gespeichertem). Eine leere Menge = bewusst kein Drucker. Beim
+  // Render werden nur Pool-Drucker gecheckt, deren `printerStableKey` im
+  // gespeicherten Set steht (oder alle, wenn gespeichert null ist).
   function loadClassPrintersSelection() {
     try {
       const raw = JSON.parse(localStorage.getItem(CLASS_PRINTERS_STORAGE_KEY) || 'null');
@@ -125,6 +151,28 @@ window.__host = window.__host || {};
     if (SLIP_TRIGGER_VALUES.includes(value)) {
       localStorage.setItem(CLASS_SLIP_TRIGGER_STORAGE_KEY, value);
     }
+  }
+
+  // „Fertig"-Voraussetzungen (Klasseneinstellungen „Leihschein unterschreiben"/
+  // „…wird vom Lehrer eingesammelt") für neu zu öffnende Klassen (panel-new):
+  // Checkboxen `#new-class-done-signed`/`#new-class-done-collected`, die mit
+  // `/api/open-class` als `done_signed`/`done_collected` geschickt werden.
+  // Default `false` (kompatibel mit bestehendem Verhalten). Wird für das
+  // nächste Öffnen gemerkt. S. ClassContext.done_signed/done_collected.
+  const CLASS_DONE_SIGNED_STORAGE_KEY = 'classDoneSigned';
+  const CLASS_DONE_COLLECTED_STORAGE_KEY = 'classDoneCollected';
+
+  function loadClassDoneSigned() {
+    return localStorage.getItem(CLASS_DONE_SIGNED_STORAGE_KEY) === 'true';
+  }
+  function saveClassDoneSigned(on) {
+    localStorage.setItem(CLASS_DONE_SIGNED_STORAGE_KEY, on ? 'true' : 'false');
+  }
+  function loadClassDoneCollected() {
+    return localStorage.getItem(CLASS_DONE_COLLECTED_STORAGE_KEY) === 'true';
+  }
+  function saveClassDoneCollected(on) {
+    localStorage.setItem(CLASS_DONE_COLLECTED_STORAGE_KEY, on ? 'true' : 'false');
   }
   // ---- Bücherlisten ordnen (Einstellungen-Dialog, Reiter je Jahrgang) ----
   // Analog zur Klassen-Bücher-Reihenfolge, aber jahrgangsweit und vorab: pro

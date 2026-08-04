@@ -476,6 +476,17 @@ class ClassContext:
     # Nach erfolgreichem Druck geht der Schüler automatisch auf „abgeschlossen".
     # Nur Modus B; Modus A unberührt. Rein In-Memory, wie `live_ausgabe`.
     slip_trigger: str = "auto"
+    # „Fertig"-Voraussetzungen für den Leihschein dieser Klasse
+    # (Klasseneinstellungen-Checkboxen „Leihschein unterschreiben" / „…wird
+    # vom Lehrer eingesammelt"): `done_signed` — Schüler soll erst nach
+    # unterschriebenem (nicht nur gedrucktem) Leihschein als fertig gelten;
+    # `done_collected` — der unterschriebene Schein wird zusätzlich vom Lehrer
+    # eingesammelt (nur sinnvoll, wenn `done_signed` gesetzt ist — Endpunkt
+    # erzwingt das). Aktuell reine Einstellung ohne Auswirkung auf den
+    # Fertig-Übergang selbst (folgt später) — nur Persistenz + Anzeige, wie
+    # `live_ausgabe`/`slip_trigger`.
+    done_signed: bool = False
+    done_collected: bool = False
     # Während `open_class` Schüler/Flags/Katalog lädt, steht der Kontext schon in
     # `self.contexts` (für interne Lookups wie `_ensure_class_catalog`), soll aber
     # NOCH nicht an Clients gehen — sonst snapshottet ein nebenläufiger Broadcast
@@ -750,6 +761,10 @@ class AppState:
                 # Wann der Leihschein am Schülerclient gedruckt wird (Druckmodus).
                 # S. ClassContext.slip_trigger.
                 "slip_trigger": c.slip_trigger,
+                # „Fertig"-Voraussetzungen (Leihschein unterschreiben/einsammeln).
+                # S. ClassContext.done_signed/done_collected.
+                "done_signed": c.done_signed,
+                "done_collected": c.done_collected,
                 # Lehrkraft-Statusansicht dieser Klasse (`/teacher`) — nur der
                 # Verbindungs-/Freigabestand für den Host-Reiter, NIE der Token
                 # (der bleibt Server-intern + in der einmalig ausgelieferten
@@ -797,6 +812,10 @@ class AppState:
                 "display_id": d.display_id,
                 "authorized": d.authorized,
                 "connected": d.ws is not None,
+                # Für die Freischalt-Liste am Host (Klick statt Tippen, wie beim
+                # Drucker-Display): Anzeige nur zum visuellen Abgleich mit dem
+                # iPad-Bildschirm, kein Credential mehr (s. display_authorize).
+                "registration_code": d.registration_code,
             }
             for d in self.displays.values()
         ]

@@ -249,18 +249,22 @@ window.__host = window.__host || {};
     const auto_done = getAutoDoneSelection();
     localStorage.setItem(AUTO_DONE_STORAGE_KEY, JSON.stringify(auto_done));
     const printers = getSelectedClassPrinters();
-    saveClassPrintersSelection(printers);
+    saveClassPrintersSelection(getSelectedClassPrinterNames());
     const liveAusgabe = !!document.getElementById('new-class-live-ausgabe')?.checked;
     saveClassLiveAusgabe(liveAusgabe);
     const slipTrigger = document.getElementById('new-class-slip-trigger')?.value || 'auto';
     saveClassSlipTrigger(slipTrigger);
+    const doneSigned = !!document.getElementById('new-class-done-signed')?.checked;
+    saveClassDoneSigned(doneSigned);
+    const doneCollected = !!document.getElementById('new-class-done-collected')?.checked;
+    saveClassDoneCollected(doneCollected);
     // Ein einziger persistenter Toast: steht während des gesamten Ladens
     // („Lade Klasse …") und wird in-place zum Abschluss-Hinweis, sobald die
     // Klasse geladen ist. So gibt es nie zwei gleichzeitig sichtbare Toasts.
     const loadToast = showMsgPersistent(`Lade ${form}…`);
     let r, d;
     try {
-      r = await fetch('/api/open-class', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ form, force, auto_done, printers, live_ausgabe: liveAusgabe, slip_trigger: slipTrigger }) });
+      r = await fetch('/api/open-class', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ form, force, auto_done, printers, live_ausgabe: liveAusgabe, slip_trigger: slipTrigger, done_signed: doneSigned, done_collected: doneCollected }) });
       d = await r.json();
     } catch (err) {
       finalizeToast(loadToast, 'Fehler beim Laden der Klasse');
@@ -575,15 +579,19 @@ window.__host = window.__host || {};
       showQr(mbQrDataUrl, state.modus_b.join_url || '');
     }
   }
-  // iPad-Display per Registrierungscode (vom iPad-Bildschirm) freischalten.
-  async function authorizeDisplay() {
-    const el = document.getElementById('mb-display-code');
-    const code = (el.value || '').trim();
-    if (!code) return;
-    const r = await fetch('/api/display/authorize', { method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ registration_code: code }) });
-    if (r.ok) { el.value = ''; showMsg('iPad freigeschaltet'); }
-    else { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Freischalten fehlgeschlagen'); }
+  // iPad-Display per Klick auf einen Eintrag der Host-Freischalt-Liste
+  // freischalten (kein Tippen des Registrierungscodes mehr — wie beim
+  // Drucker-Display, s. enablePrinterDisplay). Der Code dient dort nur noch
+  // dem visuellen Abgleich mit dem iPad-Bildschirm.
+  async function authorizeDisplay(displayId, btn) {
+    if (!displayId) return;
+    const call = async () => {
+      const r = await fetch('/api/display/authorize', { method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ display_id: displayId }) });
+      if (r.ok) showMsg('iPad freigeschaltet');
+      else { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Freischalten fehlgeschlagen'); }
+    };
+    if (btn) await busy(btn, call); else await call();
   }
   // QR, mit dem ein iPad die Display-Seite (/qr-display) öffnet.
   async function showDisplayQr() {
@@ -779,9 +787,20 @@ window.__host = window.__host || {};
     document.getElementById('mb-close-btn').style.display = mb.open ? '' : 'none';
     document.getElementById('mb-status').textContent = mb.open ? 'geöffnet' : 'geschlossen';
     document.getElementById('mb-info').style.display = mb.open ? '' : 'none';
-    // Freischalt-Feld nur zeigen, wenn ein iPad verbunden, aber noch nicht autorisiert ist.
-    const needsAuth = (mb.displays || []).some(d => d.connected && !d.authorized);
-    document.getElementById('mb-display-auth').style.display = needsAuth ? '' : 'none';
+    // Freischalt-Liste: alle verbundenen, aber noch nicht autorisierten iPads —
+    // Klick statt Tippen (wie beim Drucker-Display); der Code dient nur dem
+    // visuellen Abgleich mit dem iPad-Bildschirm.
+    const pendingHost = document.getElementById('mb-display-pending');
+    const pendingDisplays = (mb.displays || []).filter(d => d.connected && !d.authorized);
+    pendingHost.style.display = pendingDisplays.length ? 'flex' : 'none';
+    pendingHost.innerHTML = pendingDisplays.map(d => {
+      const did = escapeHtml(d.display_id);
+      const code = escapeHtml(d.registration_code || d.display_id.slice(0, 6));
+      return `<div class="row" style="align-items:center;gap:8px">
+        <span style="opacity:.7">iPad verbunden — Code <b>${code}</b>:</span>
+        <button class="success" data-action="authorize-display" data-display-id="${did}">Freischalten</button>
+      </div>`;
+    }).join('');
   }
 
   // Pairing-Card eines Klassen-Tabs: Arm-Banner + wartende Codes, zugeordnet
@@ -949,10 +968,11 @@ window.__host = window.__host || {};
 
   function _printerCheckboxHTML(p, checked, dataCtxId) {
     const pid = escapeHtml(p.id);
+    const pname = escapeHtml(printerStableKey(p));
     const lbl = escapeHtml(printerLabel(p));
     const ctxAttr = dataCtxId ? ` data-ctx-id="${escapeHtml(dataCtxId)}"` : '';
     return `<label class="check-line" title="Leihschein dieser Klasse auf „${lbl}" drucken${checked ? '' : ' (abgewählt)'}">
-      <input type="checkbox" class="printer-check" data-pid="${pid}"${ctxAttr}${checked ? ' checked' : ''}>
+      <input type="checkbox" class="printer-check" data-pid="${pid}" data-pname="${pname}"${ctxAttr}${checked ? ' checked' : ''}>
       <span>${lbl}</span>
     </label>`;
   }
@@ -969,7 +989,7 @@ window.__host = window.__host || {};
       return;
     }
     const saved = loadClassPrintersSelection();  // Set | null (null = alle)
-    const checkboxes = pool.map(p => _printerCheckboxHTML(p, saved === null || saved.has(p.id), null)).join('');
+    const checkboxes = pool.map(p => _printerCheckboxHTML(p, saved === null || saved.has(printerStableKey(p)), null)).join('');
     // Bewusst leere Auswahl (gespeichertes leeres Set) ehrlich anzeigen: kein
     // Drucker für die nächste zu öffnende Klasse — Druck nur per manueller
     // Auswahl. Default (nichts gespeichert) = alle angehakt.
@@ -985,6 +1005,12 @@ window.__host = window.__host || {};
     // vorbelegen (Default "auto").
     const slipSel = document.getElementById('new-class-slip-trigger');
     if (slipSel) slipSel.value = loadClassSlipTrigger();
+    // Fertig-Optionen für die nächste zu öffnende Klasse aus localStorage
+    // vorbelegen (Default aus, s. ClassContext.done_signed/done_collected).
+    const signedCb = document.getElementById('new-class-done-signed');
+    if (signedCb) signedCb.checked = loadClassDoneSigned();
+    const collectedCb = document.getElementById('new-class-done-collected');
+    if (collectedCb) collectedCb.checked = loadClassDoneCollected();
     // Kopplung Drucker ↔ Live-Ausgabe aus dem gerenderten Zustand synchronisieren
     // (Schalter deaktiviert + roter Hinweis, wenn kein Drucker gewählt).
     updateNewClassLiveGate();
@@ -1044,6 +1070,12 @@ window.__host = window.__host || {};
       slipSel.value = ctx.slip_trigger || 'auto';
       slipSel.dataset.prevValue = slipSel.value;
     }
+    // Fertig-Optionen dieser Klasse aus dem Snapshot setzen (Default `false`,
+    // kompatibel mit Kontexten, die die Felder noch nicht liefern).
+    const signedCb = document.querySelector(`input[data-ctx-done-signed="${id}"]`);
+    if (signedCb) signedCb.checked = !!ctx.done_signed;
+    const collectedCb = document.querySelector(`input[data-ctx-done-collected="${id}"]`);
+    if (collectedCb) collectedCb.checked = !!ctx.done_collected;
     const mbCard = document.querySelector(`[data-ctx-mb="${id}"]`);
     if (mbCard) mbCard.style.display = liveOn ? '' : 'none';
     // Kopplung Drucker ↔ Live-Ausgabe: der „mindestens ein Drucker"-Hinweis
@@ -1060,8 +1092,8 @@ window.__host = window.__host || {};
   // Klassen-Tab: Fertig-Optionen unter der Live-Ausgabe. „Leihschein
   // eingesammelt" ist ausgegraut, wenn „Leihschein unterschrieben" nicht
   // angehakt ist (= fertig bereits bei gedruckt); beide ausgegraut, wenn
-  // Live-Ausgabe aus. Reine UI — die eigentliche Funktion folgt später
-  // (noch kein Serverkontakt, keine Persistenz).
+  // Live-Ausgabe aus. Persistiert serverseitig via `setContextDoneOptions`
+  // (s. u.) — die eigentliche Fertig-Übergang-Funktion folgt später.
   function updateCtxDoneOpts(id) {
     const live = document.querySelector(`input[data-ctx-live="${id}"]`);
     const signed = document.querySelector(`input[data-ctx-done-signed="${id}"]`);
@@ -1170,6 +1202,32 @@ window.__host = window.__host || {};
       if (el && prev) el.value = prev;  // revert
     } else if (el) {
       el.dataset.prevValue = value;
+    }
+  }
+
+  // Klassen-Tab: „Fertig"-Voraussetzungen (Leihschein unterschreiben/
+  // einsammeln) dieser Klasse nachträglich speichern. Liest beide Checkboxen
+  // aktuell aus dem DOM (statt nur der geänderten), damit z. B. „eingesammelt"
+  // korrekt mitgeschickt wird, wenn „unterschreiben" gerade abgewählt wurde.
+  // Persistiert serverseitig via /api/context-done-options; bei Fehler revert
+  // (beide Checkboxen zurück auf den Server-Snapshot) + Toast.
+  async function setContextDoneOptions(id) {
+    const signed = document.querySelector(`input[data-ctx-done-signed="${id}"]`);
+    const collected = document.querySelector(`input[data-ctx-done-collected="${id}"]`);
+    if (!signed || !collected) return;
+    const r = await fetch('/api/context-done-options', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ context_id: id, done_signed: !!signed.checked, done_collected: !!collected.checked }),
+    });
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      showMsg(d.detail?.msg || d.detail || 'Fertig-Optionen konnten nicht gespeichert werden');
+      const ctx = (state.contexts || {})[id];
+      if (ctx) {
+        signed.checked = !!ctx.done_signed;
+        collected.checked = !!ctx.done_collected;
+      }
+      updateCtxDoneOpts(id);
     }
   }
 
@@ -2490,9 +2548,9 @@ window.__host = window.__host || {};
   }
 
   // ---- Tastatur-Shortcuts für den Operator (nur wenn eingeloggt) ----
-  // Esc schließt das oberste Overlay; "c" fokussiert das iPad-Freischalt-Feld;
-  // "n" gibt dem einzigen unbesetzten Helfer den nächsten Schüler. Nichts
-  // Destruktives liegt auf einer Taste. Tipp-Eingaben werden nicht abgefangen.
+  // Esc schließt das oberste Overlay; "n" gibt dem einzigen unbesetzten Helfer
+  // den nächsten Schüler. Nichts Destruktives liegt auf einer Taste.
+  // Tipp-Eingaben werden nicht abgefangen.
   document.addEventListener('keydown', (e) => {
     const qr = document.getElementById('qr-modal');
     const confirmOpen = document.getElementById('confirm-modal').classList.contains('show');
@@ -2505,10 +2563,7 @@ window.__host = window.__host || {};
     if (document.getElementById('main-view').style.display === 'none') return;
     const typing = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName || '');
     if (typing) return;
-    if (e.key === 'c') {
-      const code = document.getElementById('mb-display-code');
-      if (code && code.offsetParent !== null) { e.preventDefault(); code.focus(); }
-    } else if (e.key === 'n') {
+    if (e.key === 'n') {
       const free = Object.values(state.helpers || {}).filter(h => h.student_id === null);
       if (free.length === 1) {
         const h = free[0];
@@ -2562,7 +2617,7 @@ window.__host = window.__host || {};
       if (warn) { warn.textContent = 'Zuerst Live-Ausgabe schließen'; warn.style.display = ''; }
       return;
     }
-    saveClassPrintersSelection(getSelectedClassPrinters());
+    saveClassPrintersSelection(getSelectedClassPrinterNames());
     updateNewClassLiveGate();
   });
   document.getElementById('new-class-live-ausgabe').addEventListener('change', (e) => {
@@ -2583,8 +2638,10 @@ window.__host = window.__host || {};
   });
   // panel-new: Fertig-Optionen unter der Live-Ausgabe. „Leihschein
   // eingesammelt" ausgegraut, wenn „Leihschein unterschrieben" nicht angehakt
-  // ist; beide ausgegraut, wenn Live-Ausgabe aus. Reine UI — die eigentliche
-  // Funktion folgt später (noch kein Serverkontakt, keine Persistenz).
+  // ist; beide ausgegraut, wenn Live-Ausgabe aus. Persistiert für das nächste
+  // Öffnen in localStorage (s. loadClassDoneSigned/-Collected); tatsächlich
+  // an den Server geschickt wird die Auswahl erst mit `/api/open-class`
+  // (s. `openClass`) — die eigentliche Fertig-Übergang-Funktion folgt später.
   function updateNewClassDoneOpts() {
     const live = document.getElementById('new-class-live-ausgabe');
     const signed = document.getElementById('new-class-done-signed');
@@ -2596,11 +2653,22 @@ window.__host = window.__host || {};
     collected.disabled = !liveOn || !signed.checked;
     if (slipTrigger) slipTrigger.disabled = !liveOn;
   }
-  document.getElementById('new-class-done-signed').addEventListener('change', updateNewClassDoneOpts);
+  document.getElementById('new-class-done-signed').addEventListener('change', (e) => {
+    saveClassDoneSigned(e.target.checked);
+    updateNewClassDoneOpts();
+  });
+  document.getElementById('new-class-done-collected').addEventListener('change', (e) => {
+    saveClassDoneCollected(e.target.checked);
+  });
   document.getElementById('mb-open-btn').addEventListener('click', openModusB);
   document.getElementById('mb-close-btn').addEventListener('click', closeModusB);
-  document.getElementById('mb-display-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') authorizeDisplay(); });
-  document.getElementById('authorize-display-btn').addEventListener('click', authorizeDisplay);
+  // Delegiert (innerHTML wird bei jedem Snapshot neu aufgebaut, s.
+  // renderModusBControl): Klick auf „Freischalten" eines gelisteten,
+  // verbundenen-aber-unautorisierten iPads.
+  document.getElementById('mb-display-pending').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-action="authorize-display"]');
+    if (btn) authorizeDisplay(btn.dataset.displayId, btn);
+  });
   document.getElementById('show-mb-qr-btn').addEventListener('click', showMbQr);
   document.getElementById('show-display-qr-btn').addEventListener('click', showDisplayQr);
   // Drucker-Display-Reiter: „+" öffnet den QR zum Verbinden eines neuen Displays;
@@ -2720,7 +2788,8 @@ window.__host = window.__host || {};
     if (el.classList.contains('ctx-single-class')) ctxLoadStudents(el.dataset.ctxId);
     else if (el.classList.contains('ctx-single-student')) ctxOnStudentChange(el.dataset.ctxId);
     else if (el.classList.contains('printer-check')) setContextPrinters(el.dataset.ctxId, el);
-    else if (el.hasAttribute('data-ctx-done-signed')) updateCtxDoneOpts(el.dataset.ctxDoneSigned);
+    else if (el.hasAttribute('data-ctx-done-signed')) { updateCtxDoneOpts(el.dataset.ctxDoneSigned); setContextDoneOptions(el.dataset.ctxDoneSigned); }
+    else if (el.hasAttribute('data-ctx-done-collected')) setContextDoneOptions(el.dataset.ctxDoneCollected);
     else if (el.hasAttribute('data-ctx-live')) setContextLiveAusgabe(el.dataset.ctxLive, el.checked, el);
     else if (el.hasAttribute('data-ctx-slip-trigger')) setContextSlipTrigger(el.dataset.ctxSlipTrigger, el.value, el);
   });

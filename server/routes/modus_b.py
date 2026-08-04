@@ -105,17 +105,17 @@ async def display_qr(request: Request) -> dict:
 
 @host_router.post("/api/display/authorize")
 async def display_authorize(body: DisplayAuthorizeRequest) -> dict:
-    """iPad-Display per Registrierungscode autorisieren (Registrierung am Host)."""
-    code = body.registration_code.strip().upper()
-    if not code:
-        raise HTTPException(400, "registration_code fehlt")
+    """iPad-Display durch Klick auf einen Eintrag der Host-Freischalt-Liste
+    autorisieren (`display_id`, wie `printer_display_enable`) — kein Tippen
+    des Registrierungscodes mehr nötig, der Host wählt aus den aktuell
+    verbundenen, noch unautorisierten Displays."""
+    display_id = body.display_id.strip()
+    if not display_id:
+        raise HTTPException(400, "display_id fehlt")
     state = get_state()
-    display = next(
-        (d for d in state.displays.values() if d.registration_code == code and not d.authorized),
-        None,
-    )
-    if not display:
-        raise HTTPException(404, "Kein Display mit diesem Code (oder bereits autorisiert)")
+    display = state.displays.get(display_id)
+    if not display or display.authorized:
+        raise HTTPException(404, "Kein Display mit dieser ID (oder bereits autorisiert)")
     display.authorized = True
     await send_display_update(state, display)
     await get_hub().broadcast_host(state.state_snapshot())

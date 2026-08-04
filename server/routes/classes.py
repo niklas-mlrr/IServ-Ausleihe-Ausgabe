@@ -23,6 +23,7 @@ from ..state import AppState, ClassContext, QueueStudent, get_state
 from ._deps import (
     AddStudentRequest,
     CloseClassRequest,
+    ContextDoneOptionsRequest,
     ContextIdBody,
     ContextLiveAusgabeRequest,
     ContextPrintersRequest,
@@ -63,6 +64,14 @@ def _require_printer_for_live(allowed: set[str] | None) -> None:
     Meldung wie der clientseitige rote Hinweis)."""
     if allowed is not None and not allowed:
         raise HTTPException(400, "Es ist mindestens ein Drucker auszuwählen")
+
+
+def _resolve_done_collected(signed: bool, collected: bool) -> bool:
+    """„Leihschein eingesammelt" ist ohne „unterschreiben" bedeutungslos —
+    still auf `False` normalisieren statt einen inkonsistenten Zustand zuzulassen
+    (Client greyt die Checkbox zwar aus, ein deaktiviertes Element behält aber
+    seinen zuletzt gesetzten `checked`-Wert)."""
+    return collected and signed
 
 
 async def _load_student_flags(state: AppState, ctx: ClassContext, auto_done: list[str]) -> None:
@@ -252,6 +261,8 @@ async def open_class(body: OpenClassRequest) -> dict:
         existing.allowed_printer_ids = resolved
         existing.live_ausgabe = body.live_ausgabe
         existing.slip_trigger = body.slip_trigger
+        existing.done_signed = body.done_signed
+        existing.done_collected = _resolve_done_collected(body.done_signed, body.done_collected)
         await hub.broadcast_host(state.state_snapshot())
         # Druck-Allowlist dieser Klasse geändert → Helfer-Vorauswahl neu pushen.
         await hub.broadcast_settings(state)
@@ -275,6 +286,8 @@ async def open_class(body: OpenClassRequest) -> dict:
     ctx.allowed_printer_ids = resolved
     ctx.live_ausgabe = body.live_ausgabe
     ctx.slip_trigger = body.slip_trigger
+    ctx.done_signed = body.done_signed
+    ctx.done_collected = _resolve_done_collected(body.done_signed, body.done_collected)
     ctx.queue = [QueueStudent.from_iserv(s, form=form) for s in students]
     # Immer (nicht nur bei gewählten Auto-Fertig-Filtern): der Abruf füllt auch
     # die Info-Flags für die Queue-Anzeige. Fehler sind pro Schüler gekapselt
@@ -429,6 +442,31 @@ async def set_context_slip_trigger(body: ContextSlipTriggerRequest) -> dict:
     ctx.slip_trigger = body.slip_trigger
     await hub.broadcast_host(state.state_snapshot())
     return {"ok": True, "context_id": context_id, "slip_trigger": ctx.slip_trigger}
+
+
+@host_router.post("/api/context-done-options")
+async def set_context_done_options(body: ContextDoneOptionsRequest) -> dict:
+    """„Fertig"-Voraussetzungen einer bereits geöffneten Klasse nachträglich
+    setzen (Checkboxen „Leihschein unterschreiben"/„…wird vom Lehrer
+    eingesammelt" in den Klasseneinstellungen). Rein In-Memory, kein
+    DB-/IServ-Zugriff — aktuell ohne Auswirkung auf den Fertig-Übergang selbst
+    (folgt später), nur Persistenz + Anzeige (s. ClassContext.done_signed/
+    done_collected). `done_collected` wird auf `False` normalisiert, wenn
+    `done_signed=False` gesetzt wird."""
+
+    state = get_state()
+    hub = get_hub()
+    context_id = body.context_id.strip()
+    ctx = state.contexts.get(context_id)
+    if ctx is None:
+        raise HTTPException(404, "Kontext unbekannt")
+    ctx.done_signed = body.done_signed
+    ctx.done_collected = _resolve_done_collected(body.done_signed, body.done_collected)
+    await hub.broadcast_host(state.state_snapshot())
+    return {
+        "ok": True, "context_id": context_id,
+        "done_signed": ctx.done_signed, "done_collected": ctx.done_collected,
+    }
 
 
 @host_router.get("/api/students-for-class")

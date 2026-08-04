@@ -8,6 +8,53 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-04 — Klasseneinstellungen: Drucker-Default-Fix, Fertig-Optionen persistiert, iPad-Freischalt ohne Tippen
+
+Drei Nachbesserungen aus der frisch gebauten Klassen-Feature-Session:
+
+- **Bugfix (Drucker-Default nach Neustart):** `printer_store.py` vergibt
+  Drucker-`id`s bewusst nur laufzeitstabil neu (dokumentiert, kein Fehler),
+  aber die `classPrinters`-Auswahl im panel-new war client-seitig per `id` in
+  `localStorage` gespeichert — nach jedem Server-Neustart liefen die
+  gespeicherten IDs ins Leere, `saved.has(p.id)` matchte nichts mehr, keine
+  Checkbox blieb angehakt. Fix: Persistenz jetzt über den stabilen
+  `printer.name` (`printerStableKey()`, neu in `host-state.js`) statt der
+  `id`; `_printerCheckboxHTML` trägt zusätzlich `data-pname`. IDs bleiben
+  weiterhin das, was `/api/open-class` bekommt. Verifiziert per Node/vm-
+  Testharness (Restart mit neuen IDs, gleichen Namen → weiterhin alle
+  angehakt).
+- **„Leihschein unterschreiben"/„…wird vom Lehrer eingesammelt" persistiert:**
+  bisher reine UI ohne Serverkontakt. Neue `ClassContext.done_signed`/
+  `done_collected` (In-Memory, Muster wie `live_ausgabe`/`slip_trigger`), in
+  `state_snapshot()`, gesetzt über `/api/open-class` (`done_signed`/
+  `done_collected`, beide Zweige: Neu-Öffnen + Reuse) sowie neuer Endpunkt
+  `POST /api/context-done-options` fürs nachträgliche Setzen im Klassen-Tab.
+  `done_collected` wird serverseitig auf `False` normalisiert, sobald
+  `done_signed=False` gesetzt wird (`_resolve_done_collected`) — kein
+  inkonsistenter „eingesammelt ohne unterschrieben"-Zustand. panel-new
+  bekommt eigene localStorage-Persistenz (`loadClassDoneSigned/-Collected`),
+  vorbelegt bei jedem Render, gespeichert bei Änderung. Weiterhin reine
+  Einstellung ohne Auswirkung auf den Fertig-Übergang selbst (folgt später).
+- **iPad-Freischalten ohne Tippen:** Recherche zeigte, dass drei von vier
+  Pairing-Flows (Drucker-Display, Lehrkraft, Modus-B-Schüler) bereits
+  klickbasiert sind — nur das iPad-Display (`/qr-display`) verlangte noch
+  den vom iPad abgelesenen Code manuell im Host-Textfeld. Historisch, weil
+  dieser Flow (Phase 4, 2026-06-15) nie das UX-Upgrade bekam, das
+  Drucker-Display später erhielt. Jetzt angeglichen: `modus_b_snapshot()`
+  liefert `registration_code` je Display, der Host zeigt eine Liste aller
+  verbundenen-aber-unautorisierten iPads mit Klick-Button „Freischalten"
+  (`#mb-display-pending`, ersetzt `#mb-display-code`-Textfeld); `POST
+  /api/display/authorize` nimmt jetzt `display_id` statt
+  `registration_code` (wie `printer_display_enable`). Der Code dient nur
+  noch dem visuellen Abgleich mit dem iPad-Bildschirm, ist kein Credential
+  mehr. Tastatur-Shortcut „c" (fokussierte das alte Textfeld) entfernt.
+- Tests: `tests/test_api_guards.py` (+4: `test_open_class_seeds_done_options`,
+  `test_context_done_options_collected_requires_signed`,
+  `test_display_authorize_by_id_not_code` deckt auch den 400-/404-Pfad ab) —
+  **381 Tests grün**, Ruff clean, `node --check` auf allen `web/*.js` OK.
+  **Live-Check (Drucker-Persistenz über echten Neustart, iPad-Freischalt-Klick
+  am echten Gerät) noch offen.**
+
 ## 2026-08-04 — Lehreransicht: QR-Bugfix, Button-Größe, Wisch-Schwelle + Hinweis
 
 Drei weitere Nachbesserungen im direkten Anschluss:
