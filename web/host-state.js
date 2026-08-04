@@ -61,8 +61,10 @@ window.__host = window.__host || {};
 
   // Druck-Allowlist für neu zu öffnende Klassen (panel-new): Menge der
   // angehakten Drucker-IDs, die mit `/api/open-class` als `printers` geschickt
-  // wird. Leere Auswahl = alle Pool-Drucker (Server interpretiert None/[] als
-  // „alle"). Default: alle angehakt. Wird für das nächste Öffnen gemerkt.
+  // wird. `null` (nichts gespeichert) = alle angehakt (Default). Eine explizit
+  // leere Auswahl = `[]` = bewusst kein Drucker für die Klasse (keine
+  // Vorauswahl; Druck bleibt per manueller Auswahl im Druckdialog möglich).
+  // Wird für das nächste Öffnen gemerkt.
   const CLASS_PRINTERS_STORAGE_KEY = 'classPrinters';
 
   // Angehakte Drucker-IDs aus dem panel-new (`#new-class-printers`) lesen.
@@ -74,10 +76,11 @@ window.__host = window.__host || {};
     return out;
   }
 
-  // Gespeicherte Auswahl laden (Set der IDs; null = „alle", Default). Legt
-  // keine Annahme über aktuell konfigurierte Drucker — beim Render werden nur
-  // IDs gecheckt, die im Pool UND im gespeicherten Set stehen (oder alle, wenn
-  // gespeichert null/leer ist).
+  // Gespeicherte Auswahl laden (Set der IDs; null = „alle", Default bei
+  // nichts Gespeichertem). Eine leere Menge = bewusst kein Drucker. Legt keine
+  // Annahme über aktuell konfigurierte Drucker — beim Render werden nur IDs
+  // gecheckt, die im Pool UND im gespeicherten Set stehen (oder alle, wenn
+  // gespeichert null ist).
   function loadClassPrintersSelection() {
     try {
       const raw = JSON.parse(localStorage.getItem(CLASS_PRINTERS_STORAGE_KEY) || 'null');
@@ -88,6 +91,21 @@ window.__host = window.__host || {};
 
   function saveClassPrintersSelection(ids) {
     localStorage.setItem(CLASS_PRINTERS_STORAGE_KEY, JSON.stringify(ids || []));
+  }
+
+  // Live-Ausgabe (Modus B) für neu zu öffnende Klassen (panel-new): Schalter
+  // `#new-class-live-ausgabe`, der mit `/api/open-class` als `live_ausgabe`
+  // geschickt wird. Default `true` (Modus B sichtbar, kompatibel mit
+  // bestehendem Verhalten). Wird für das nächste Öffnen gemerkt.
+  const CLASS_LIVE_AUSGABE_STORAGE_KEY = 'classLiveAusgabe';
+
+  function loadClassLiveAusgabe() {
+    const raw = localStorage.getItem(CLASS_LIVE_AUSGABE_STORAGE_KEY);
+    return raw === null ? true : raw === 'true';
+  }
+
+  function saveClassLiveAusgabe(on) {
+    localStorage.setItem(CLASS_LIVE_AUSGABE_STORAGE_KEY, on ? 'true' : 'false');
   }
   // ---- Bücherlisten ordnen (Einstellungen-Dialog, Reiter je Jahrgang) ----
   // Analog zur Klassen-Bücher-Reihenfolge, aber jahrgangsweit und vorab: pro

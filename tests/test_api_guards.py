@@ -501,6 +501,120 @@ def test_open_class_reused_no_second_queue(client, ctx):
     assert state.active_context_id == ctx_id
 
 
+def test_open_class_empty_printers_means_none_not_all(client, ctx):
+    """Leere Drucker-Auswahl (`printers: []`) bedeutet bewusst „kein Drucker"
+    — keine Vorauswahl im Helfer-Druckdialog. Sie darf NICHT still zu „alle
+    Pool-Drucker" (`None`) werden. Feld fehlt → `None` (alle, Default).
+
+    Kopplung: `printers: []` + `live_ausgabe: true` (Default) wird abgewiesen
+    (Live-Ausgabe braucht mind. einen Drucker); mit `live_ausgabe: false` ist
+    die leere Menge erlaubt."""
+    state, _, _ = ctx
+    state.iserv = _FakeIServForClasses()
+
+    # Feld fehlt → Default „alle" (None), live_ausgabe Default true → OK (alle).
+    r1 = client.post("/api/open-class", json={"form": "10a"}, cookies={"session_id": "sid"})
+    assert r1.status_code == 200
+    cid = r1.json()["context_id"]
+    assert state.contexts[cid].allowed_printer_ids is None
+
+    # Gleiche Klasse erneut öffnen mit explizit leerer Liste + Live-Ausgabe aus
+    # → leere Menge (kein Drucker), erlaubt.
+    r2 = client.post(
+        "/api/open-class", json={"form": "10a", "printers": [], "live_ausgabe": False},
+        cookies={"session_id": "sid"},
+    )
+    assert r2.status_code == 200
+    assert r2.json()["reused"] is True
+    assert state.contexts[cid].allowed_printer_ids == set()
+    assert state.contexts[cid].live_ausgabe is False
+
+    # Leere Liste + Live-Ausgabe an (Default) → 400 (mind. ein Drucker).
+    r3 = client.post(
+        "/api/open-class", json={"form": "10a", "printers": [], "live_ausgabe": True},
+        cookies={"session_id": "sid"},
+    )
+    assert r3.status_code == 400
+    assert "mindestens ein Drucker" in r3.json()["detail"]
+
+
+def test_context_live_ausgabe_requires_printer(client, ctx):
+    """Live-Ausgabe aktivieren setzt mind. einen Drucker voraus; `None` (alle)
+    gilt als gewählt. Ausschalten immer erlaubt."""
+    state, _, _ = ctx
+    c = state.open_context("10a")
+
+    # Kein Drucker (explizit leer) + Live an → 400.
+    c.allowed_printer_ids = set()
+    r = client.post(
+        "/api/context-live-ausgabe",
+        json={"context_id": c.id, "live_ausgabe": True},
+        cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 400
+    assert "mindestens ein Drucker" in r.json()["detail"]
+    assert c.live_ausgabe is True  # unverändert (Default)
+
+    # `None` (alle) gilt als gewählt → Live an erlaubt.
+    c.allowed_printer_ids = None
+    r = client.post(
+        "/api/context-live-ausgabe",
+        json={"context_id": c.id, "live_ausgabe": True},
+        cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 200
+    assert c.live_ausgabe is True
+
+    # Ausschalten immer erlaubt (auch bei keinem Drucker).
+    c.allowed_printer_ids = set()
+    r = client.post(
+        "/api/context-live-ausgabe",
+        json={"context_id": c.id, "live_ausgabe": False},
+        cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 200
+    assert c.live_ausgabe is False
+
+
+def test_context_printers_last_not_removable_while_live_on(client, ctx):
+    """Bei aktiver Live-Ausgabe darf der letzte Drucker nicht abgewählt werden
+    (erst Live-Ausgabe schließen). `None` (alle) ist immer erlaubt."""
+    state, _, _ = ctx
+    c = state.open_context("10a")
+    c.allowed_printer_ids = {"p1"}
+    c.live_ausgabe = True
+
+    # Letzten Drucker abwählen + Live an → 400.
+    r = client.post(
+        "/api/context-printers",
+        json={"context_id": c.id, "printers": []},
+        cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 400
+    assert "Zuerst Live-Ausgabe schließen" in r.json()["detail"]
+    assert c.allowed_printer_ids == {"p1"}  # unverändert
+
+    # Live aus → leer jetzt erlaubt.
+    c.live_ausgabe = False
+    r = client.post(
+        "/api/context-printers",
+        json={"context_id": c.id, "printers": []},
+        cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 200
+    assert c.allowed_printer_ids == set()
+
+    # `None` (alle) auch bei Live an erlaubt.
+    c.live_ausgabe = True
+    r = client.post(
+        "/api/context-printers",
+        json={"context_id": c.id, "printers": None},
+        cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 200
+    assert c.allowed_printer_ids is None
+
+
 def test_close_class_ends_students_and_releases_helper_bindings(client, ctx):
     from server.state import HelperSession, QueueStudent
 

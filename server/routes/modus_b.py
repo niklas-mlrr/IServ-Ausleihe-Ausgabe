@@ -176,6 +176,13 @@ async def student_pair(body: StudentPairRequest) -> dict:
     student = state.find_student(student_id)
     if not student:
         raise HTTPException(404, "Schüler nicht in der Queue")
+    # Live-Ausgabe für die Klasse des Schülers muss eingeschaltet sein — sonst
+    # ist der Modus-B-Kasten in deren Klassenansicht ausgeblendet und eine
+    # Zuordnung darf nicht möglich sein (defensive Absicherung des
+    # client-seitigen Gates, s. host-render.js Queue-Pairing-Button).
+    owning = state.find_student_with_ctx(student_id)
+    if owning is not None and not owning[0].live_ausgabe:
+        raise HTTPException(403, "Live-Ausgabe für diese Klasse deaktiviert")
     if student.status not in ("pending",):
         raise HTTPException(409, f"Schüler nicht verfügbar (Status: {student.status})")
     if state.find_session_by_student(student_id):

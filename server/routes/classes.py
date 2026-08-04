@@ -22,6 +22,7 @@ from ._deps import (
     AddStudentRequest,
     CloseClassRequest,
     ContextIdBody,
+    ContextLiveAusgabeRequest,
     ContextPrintersRequest,
     OpenClassRequest,
     SelectSchoolyearRequest,
@@ -38,13 +39,27 @@ _AUTO_DONE_FILTERS = {
 
 
 def _resolve_allowed_printers(printers: list[str] | None) -> set[str] | None:
-    """Client-Druckerauswahl → Allowlist. `None` oder leere Liste = kein Filter
-    (alle Pool-Drucker, Default, kompatibel mit Test-Config / Öffnen ohne
-    Auswahl). Sonst Menge der übergebenen Drucker-IDs (Dubletten/Leerstring
-    herausgefiltert)."""
-    if not printers:
+    """Client-Druckerauswahl → Allowlist. `None` (Feld fehlt) = kein Filter
+    (alle Pool-Drucker, Default, kompatibel mit Öffnen ohne Angabe / Tests).
+    Eine explizite Liste — auch eine leere — wird als Menge der übergebenen
+    Drucker-IDs interpretiert (Dubletten/Leerstring herausgefiltert). Eine
+    leere Liste bedeutet also bewusst „kein Drucker ausgewählt": keine
+    Vorauswahl für den Helfer/Host-Druckdialog; der Druck bleibt über die
+    manuelle Auswahl im Druckdialog weiterhin möglich (s. slips.py / ws.py
+    `_handle_print`, wo eine explizite `printers`-Auswahl die Allowlist
+    übersteuert)."""
+    if printers is None:
         return None
     return {pid.strip() for pid in printers if pid and pid.strip()}
+
+
+def _require_printer_for_live(allowed: set[str] | None) -> None:
+    """Kopplung Drucker ↔ Live-Ausgabe pro Klasse: Live-Ausgabe benötigt
+    mindestens einen Drucker. `None` = alle Pool-Drucker (gilt als „gewählt");
+    eine **explizit leere Menge** bei aktiver Live-Ausgabe → 400 (gleiche
+    Meldung wie der clientseitige rote Hinweis)."""
+    if allowed is not None and not allowed:
+        raise HTTPException(400, "Es ist mindestens ein Drucker auszuwählen")
 
 
 async def _load_student_flags(state: AppState, ctx: ClassContext, auto_done: list[str]) -> None:
@@ -225,7 +240,10 @@ async def open_class(body: OpenClassRequest) -> dict:
         state.set_active_context(existing.id)
         # Erneutes Öffnen aktualisiert die Druck-Allowlist („Öffnen" ist der
         # Bedienpunkt dafür); leer/None = alle Pool-Drucker.
-        existing.allowed_printer_ids = _resolve_allowed_printers(body.printers)
+        resolved = _resolve_allowed_printers(body.printers)
+        _require_printer_for_live(resolved if body.live_ausgabe else None)
+        existing.allowed_printer_ids = resolved
+        existing.live_ausgabe = body.live_ausgabe
         await hub.broadcast_host(state.state_snapshot())
         # Druck-Allowlist dieser Klasse geändert → Helfer-Vorauswahl neu pushen.
         await hub.broadcast_settings(state)
@@ -244,7 +262,10 @@ async def open_class(body: OpenClassRequest) -> dict:
     # sonst erscheint der Klassen-Tab am Host vorzeitig. `loading=True` hält
     # den Kontext aus `state_snapshot`/`real_contexts_summary` heraus.
     ctx.loading = True
-    ctx.allowed_printer_ids = _resolve_allowed_printers(body.printers)
+    resolved = _resolve_allowed_printers(body.printers)
+    _require_printer_for_live(resolved if body.live_ausgabe else None)
+    ctx.allowed_printer_ids = resolved
+    ctx.live_ausgabe = body.live_ausgabe
     ctx.queue = [QueueStudent.from_iserv(s, form=form) for s in students]
     # Immer (nicht nur bei gewählten Auto-Fertig-Filtern): der Abruf füllt auch
     # die Info-Flags für die Queue-Anzeige. Fehler sind pro Schüler gekapselt
@@ -323,6 +344,11 @@ async def set_context_printers(body: ContextPrintersRequest) -> dict:
     Filter (alle Pool-Drucker). Wirkt ab dem nächsten Druckauftrag (bereits
     wartende behalten ihre Allowlist — s. print_queue `PrintJob.allowed_printers`).
 
+    Kopplung Live-Ausgabe: eine **explizit leere** Allowlist (`[]`, nicht `None`)
+    wird verweigert, solange Live-Ausgabe für diese Klasse aktiv ist — erst
+    Live-Ausgabe ausschalten, dann den letzten Drucker abwählen (400
+    „Zuerst Live-Ausgabe schließen").
+
     Reiner In-Memory-State, kein DB-/IServ-Zugriff. Weckt den Scheduler, damit
     künftige Aufträge sofort verteilt werden können."""
     state = get_state()
@@ -331,7 +357,12 @@ async def set_context_printers(body: ContextPrintersRequest) -> dict:
     ctx = state.contexts.get(context_id)
     if ctx is None:
         raise HTTPException(404, "Kontext unbekannt")
-    ctx.allowed_printer_ids = _resolve_allowed_printers(body.printers)
+    new_allowed = _resolve_allowed_printers(body.printers)
+    # Letzten Drucker bei aktiver Live-Ausgabe nicht wegnehmen — erst Live-Ausgabe
+    # ausschalten. `None` (alle) gilt als „Drucker gewählt" und ist immer erlaubt.
+    if new_allowed is not None and not new_allowed and ctx.live_ausgabe:
+        raise HTTPException(400, "Zuerst Live-Ausgabe schließen")
+    ctx.allowed_printer_ids = new_allowed
     state.print_queue.wake()
     await hub.broadcast_host(state.state_snapshot())
     # Druck-Allowlist dieser Klasse geändert → Helfer-Vorauswahl neu pushen.
@@ -339,6 +370,33 @@ async def set_context_printers(body: ContextPrintersRequest) -> dict:
     return {"ok": True, "context_id": context_id, "allowed_printers": (
         None if ctx.allowed_printer_ids is None else sorted(ctx.allowed_printer_ids)
     )}
+
+
+@host_router.post("/api/context-live-ausgabe")
+async def set_context_live_ausgabe(body: ContextLiveAusgabeRequest) -> dict:
+    """Live-Ausgabe (Modus B) für eine bereits geöffnete Klasse nachträglich
+    ein-/ausschalten (Schalter im Klassen-Tab unter der Drucker-Auswahl). Rein
+    In-Memory, kein DB-/IServ-Zugriff. `True` → Modus-B-Kasten sichtbar +
+    Pairing zulässig; `False` → beides ausgeblendet/abgewiesen. Das globale
+    Modus-B-Backend (Join-Secret/QR, iPad-Freischalt) bleibt unberührt.
+
+    Kopplung Drucker: Aktivieren setzt mindestens einen Drucker für die Klasse
+    voraus (`None` = alle gilt als gewählt); sonst 400 „Es ist mindestens ein
+    Drucker auszuwählen". Ausschalten ist immer erlaubt."""
+
+    state = get_state()
+    hub = get_hub()
+    context_id = body.context_id.strip()
+    ctx = state.contexts.get(context_id)
+    if ctx is None:
+        raise HTTPException(404, "Kontext unbekannt")
+    # Live-Ausgabe aktivieren setzt mindestens einen Drucker voraus (gleiche
+    # Meldung wie der clientseitige rote Hinweis). Ausschalten immer erlaubt.
+    if body.live_ausgabe:
+        _require_printer_for_live(ctx.allowed_printer_ids)
+    ctx.live_ausgabe = bool(body.live_ausgabe)
+    await hub.broadcast_host(state.state_snapshot())
+    return {"ok": True, "context_id": context_id, "live_ausgabe": ctx.live_ausgabe}
 
 
 @host_router.get("/api/students-for-class")

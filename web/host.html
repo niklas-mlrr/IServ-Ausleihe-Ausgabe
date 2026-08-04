@@ -145,7 +145,26 @@
       <p class="hint">Betrifft nur neu geladene Klassen (nicht bereits geöffnete Reiter). Die Auswahl wird für das nächste Öffnen gemerkt.</p>
       <div style="font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;opacity:.7;border-top:1px solid var(--border);padding-top:12px;margin-top:4px">Drucker für diese Klasse</div>
       <div id="new-class-printers" style="display:flex;flex-direction:column;gap:10px;margin-top:10px"></div>
-      <p class="hint">Auf welche Drucker der Leihschein dieser Klasse gedruckt wird. Kein Haken = alle Pool-Drucker. Im Klassen-Reiter nachträglich änderbar. Wird für das nächste Öffnen gemerkt.</p>
+      <p class="hint">Auf welche Drucker der Leihschein dieser Klasse gedruckt wird. Kein Haken = kein Drucker (Leihschein-Druck nur per manueller Auswahl im Druckdialog). Im Klassen-Reiter nachträglich änderbar. Wird für das nächste Öffnen gemerkt.</p>
+      <p class="ctx-coupling-warn" id="new-class-printer-warn" style="display:none"></p>
+      <div style="font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;opacity:.7;border-top:1px solid var(--border);padding-top:12px;margin-top:4px">Live-Ausgabe für diese Klasse</div>
+      <label class="switch" style="margin-top:10px" title="Modus B (Live-Ausgabe) für diese Klasse: Schüler können sich per iPad selbst scannen. Aus = kein Modus-B-Kasten in der Klassenansicht, keine Pairing-Zuordnung. Im Klassen-Reiter nachträglich änderbar. Wird für das nächste Öffnen gemerkt.">
+        <input type="checkbox" id="new-class-live-ausgabe" checked>
+        <span class="track"></span>
+        Live-Ausgabe (Modus B) aktivieren
+      </label>
+      <p class="ctx-coupling-warn" id="new-class-live-warn" style="display:none"></p>
+      <p class="hint">Schüler können sich per iPad selbst zum Scannen einreihen. Ausgeschaltet bleibt der Modus-B-Kasten in dieser Klassenansicht ausgeblendet.</p>
+      <div id="new-class-done-opts" style="margin-top:14px;display:flex;flex-direction:column;gap:10px">
+        <label class="check-line" title="Schüler erst als fertig markieren, wenn der Leihschein unterschrieben ist — sonst bereits nach dem Drucken. Nur bei aktiver Live-Ausgabe.">
+          <input type="checkbox" id="new-class-done-signed">
+          <span>Leihschein unterschreiben</span>
+        </label>
+        <label class="check-line" title="Der unterschriebene Leihschein wird vom Lehrer eingesammelt. Nur relevant, wenn „Leihschein unterschreiben" angehakt ist.">
+          <input type="checkbox" id="new-class-done-collected">
+          <span>Leihschein wird vom Lehrer eingesammelt</span>
+        </label>
+      </div>
     </div>
     <div class="card">
       <h2>Test Config öffnen</h2>

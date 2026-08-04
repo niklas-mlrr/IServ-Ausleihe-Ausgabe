@@ -8,6 +8,146 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-04 — Fertig-Optionen unter der Live-Ausgabe (UI-Scaffold)
+
+- **Host, Klassen-Tab + panel-new:** unter dem Live-Ausgabe-Schalter zwei
+  **Checkboxen** (`.check-line`) ergänzt — rein UI, die eigentliche Funktion
+  folgt später (kein Serverkontakt, keine Persistenz):
+  1. **„Leihschein unterschreiben"** — angehakt = Schüler erst fertig, wenn der
+     Leihschein unterschrieben ist; nicht angehakt = fertig bereits bei
+     gedruckt (Default).
+  2. **„Leihschein wird vom Lehrer eingesammelt"** — darunter.
+- **Ausgrau-Regel:** beide Checkboxen ausgegraut, wenn die Live-Ausgabe
+  **aus** ist; „eingesammelt" zusätzlich ausgegraut, wenn „Leihschein
+  unterschreiben" **nicht** angehakt ist (= fertig bei gedruckt).
+  - Klassen-Tab: `updateCtxDoneOpts(id)` (gerufen aus `renderCtxPrinters`,
+    `setContextLiveAusgabe` und beim Wechsel der signed-Checkbox via
+    delegiertem `change`-Handler).
+  - panel-new: `updateNewClassDoneOpts()` (gerufen aus
+    `renderNewClassPrinters`, dem Live-Schalter-Listener und dem
+    signed-Checkbox-Listener).
+- **CSS:** `.check-line input:disabled` / `.check-line:has(input:disabled)`
+  (eingegraut, `cursor: not-allowed`) ergänzt.
+
+## 2026-08-04 — Kopplung Drucker ↔ Live-Ausgabe pro Klasse
+
+- **Regel:** Live-Ausgabe (Modus B) für eine Klasse setzt **mindestens einen
+  Drucker** voraus; umgekehrt darf bei **aktiver** Live-Ausgabe der **letzte
+  Drucker nicht abgewählt** werden — erst Live-Ausgabe schließen, dann den
+  Drucker entfernen. `None` (alle Pool-Drucker) gilt als „Drucker gewählt".
+- **Client (rot wie Helfer-Statuszeile, `var(--danger-text)`):**
+  - **Klassen-Tab** (`buildClassPanel`/`renderCtxPrinters`): der Hinweis
+    „Es ist mindestens ein Drucker auszuwählen" erscheint **erst beim Versuch**,
+    den Live-Ausgabe-Schalter ohne gewählten Drucker zu aktivieren (Schalter
+    wird revertiert, Hinweis unter dem Schalter, `data-ctx-live-warn`). Wird bei
+    aktiver Live-Ausgabe der letzte Drucker abgewählt, wird die Checkbox
+    **revertiert** + roter Hinweis „Zuerst Live-Ausgabe schließen" (unter den
+    Druckern, `data-ctx-printer-warn`). Beide Hinweise verschwinden, sobald
+    wieder ein Drucker gewählt ist.
+  - **panel-new** („Neue Klasse"): analog — Hinweis „Es ist mindestens ein
+    Drucker auszuwählen" erst beim Aktivierungsversuch ohne Drucker
+    (`#new-class-live-warn`), Revert + Hinweis beim Versuch, den letzten
+    Drucker bei aktiver Live-Ausgabe abzuwählen (`#new-class-printer-warn`).
+    Auswahl wird jetzt bei jeder Änderung nach `localStorage` persistiert
+    (vorher nur beim Öffnen), damit ein `applyState`→`renderNewClassPrinters`-
+    Re-Render die Wahl nicht verwirft.
+- **Server (defensive Absicherung):**
+  - `open_class`: `printers: []` + `live_ausgabe: true` → 400
+    „Es ist mindestens ein Drucker auszuwählen" (beide Pfade: neu + reused).
+  - `set_context_printers`: leere Menge + `live_ausgabe` aktiv → 400
+    „Zuerst Live-Ausgabe schließen".
+  - `set_context_live_ausgabe`: Aktivieren ohne Drucker → 400
+    „Es ist mindestens ein Drucker auszuwählen"; Ausschalten immer erlaubt.
+  - Gemeinsamer Helfer `_require_printer_for_live`.
+- **Touch:** `server/routes/classes.py` (Helfer + 3 Endpunkte + Docstrings),
+  `web/host.html` + `web/host-render.js` (Klassen-Tab + panel-new: Gate,
+  Hinweise, Listener, `updateCtxCouplingHints`/`updateNewClassLiveGate`),
+  `web/host.css` (deaktivierter Switch `.switch:has(input:disabled)`,
+  `.ctx-coupling-warn`), `tests/test_api_guards.py` (3 neue Tests + vorhandener
+  um `live_ausgabe` ergänzt). Keine IServ-Writes, rein In-Memory. Suite grün.
+
+## 2026-08-04 — Leere Drucker-Auswahl pro Klasse = kein Drucker (nicht „alle")
+
+- **Bisher** wurde eine leere Drucker-Auswahl beim Öffnen/Umkonfigurieren einer
+  Klasse still zu „alle Pool-Drucker": `_resolve_allowed_printers` mappte
+  `None` **und** `[]` auf `None` (Allowlist = alle). Wer alle Checkboxen
+  abwählte, bekam trotzdem still alle Drucker als Vorauswahl.
+- **Neu** unterscheidet die Funktion: `None` (Feld fehlt, Default/Tests) →
+  `None` (alle), aber eine **explizit leere Liste** `[]` → **leere Menge** =
+  bewusst „kein Drucker ausgewählt". Wirkung (mit Nutzer geklärt: nur
+  Vorauswahl, **nicht** Druck blockieren):
+  - Helfer-/Host-Druckdialog bekommt für diese Klasse **keine Vorauswahl**
+    (`own_print_defaults` → `[]`); der Druck bleibt per **manueller Auswahl**
+    im Druckdialog möglich (die `printers`-Auswahl übersteuert die Allowlist,
+    s. `slips.py` / `ws.py` `_handle_print`).
+  - Klassen-Tab und panel-new zeigen die leere Auswahl **ehrlich** an (keine
+    Checkbox angehakt) plus Hinweis „Kein Drucker ausgewählt — Leihschein-Druck
+    nur per manueller Auswahl im Druckdialog."
+  - Der Fallback-Pfad (Druckdialog sendet keinen `printers`-Key, nur alt/Tests)
+    verweigert bei leerer Menge weiterhin mit „Kein erlaubter Drucker im Pool
+    für diese Klasse" — das betrifft die echte UI nicht (sie sendet immer eine
+    `printers`-Auswahl).
+- **Draht-Format:** `state_snapshot().contexts[id].allowed_printers` ist nun
+  `[]` statt `null`, wenn die Auswahl leer war. `null` bleibt „alle". Der
+  Charakterisierungs-Test `test_state_contract.py` friert nur Top-Level-Schlüssel
+  ein → keine Anpassung nötig. Neuer Test `test_open_class_empty_printers_means_none_not_all`
+  pinnt die Semantik (`[]` → `set()`, Feld fehlt → `None`). Suite grün.
+- Touch: `server/routes/classes.py` (`_resolve_allowed_printers`),
+  `web/host-render.js` (`renderCtxPrinters`, `renderNewClassPrinters`,
+  `setContextPrinters`-Kommentar), `web/host-state.js` (Speicher-Kommentare),
+  `tests/test_api_guards.py`. Keine IServ-Writes, rein In-Memory.
+
+## 2026-08-04 — Live-Ausgabe (Modus B) pro Klasse ein/aus
+
+- **Bisher** war Modus B (Live-Ausgabe) rein **global** (ein `modus_b_open`-
+  Schalter, ein Join-Secret/QR, ein Pairing-Code-Pool) — in jeder Klassenansicht
+  erschien der „Pairing (Modus B)"-Kasten immer, unabhängig davon, ob die Klasse
+  Live-Ausgabe nutzen will.
+- **Neu** gibt es einen **pro-Klasse**-Schalter `live_ausgabe` (Default `true`):
+  - **panel-new** („Neue Klasse" öffnen): unter der Druckerauswahl, mit Strich
+    getrennt, ein Switch „Live-Ausgabe (Modus B) aktivieren". Wahl wird fürs
+    nächste Öffnen in `localStorage` gemerkt (analog der Drucker-Allowlist).
+  - **Klasseneinstellungen-Detail** im Klassen-Tab: derselbe Switch unter der
+    Drucker-Karte, nachträglich live änderbar (`POST /api/context-live-ausgabe`).
+  - **Aus = kein Modus-B-Kasten** in der Klassenansicht (`display:none` auf der
+    Pairing-Karte) **und kein Pairing-Button** in der Queue-Zeile **und kein
+    Pairing-Hinweis** in der „Aktuell in Ausgabe"-Box (Now-Serving-Empty-Text
+    nennt dann nur noch „Nächster" statt „Pairing oder Nächster").
+- **Reichweite bewusst nur UI/Sichtbarkeit** (mit Nutzer geklärt): das globale
+  Modus-B-Backend (Join-Secret/QR, iPad-Freischalt, offene pending-Sessions)
+  bleibt. Pairing-Codes lassen sich nur für Klassen mit `live_ausgabe=true`
+  zuordnen — client-seitig (Button fehlt) **und** defensiv serverseitig
+  (`/api/student/pair` → 403, wenn der Kontext des Schülers `live_ausgabe=false`).
+- **Draht-Format:** `state_snapshot().contexts[id]` erhält zusätzlich
+  `live_ausgabe: bool`. Der Charakterisierungs-Test `test_state_contract.py`
+  friert nur Top-Level-/`modus_b`-Schlüssel ein → kein Test-Anpassung nötig,
+  Suite bleibt grün (331 passed).
+- Touch: `server/state.py` (`ClassContext.live_ausgabe`, Snapshot),
+  `server/routes/_deps.py` (`OpenClassRequest.live_ausgabe`,
+  `ContextLiveAusgabeRequest`), `server/routes/classes.py` (`open_class` setzt
+  es, neuer Endpunkt `/api/context-live-ausgabe`), `server/routes/modus_b.py`
+  (Pairing-Gate), `web/host.html` + `web/host-render.js` + `web/host-state.js`
+  (Switch, Rendering, Persistenz). Keine IServ-Writes, rein In-Memory.
+
+## 2026-08-04 — Host/Klassen-Reiter: „Klasseneinstellungen"-Block
+
+- **Bisher** ließ sich rechts der Klasse nur „Schüler hinzufügen" aufklappen;
+  die Drucker-Auswahl stand separat unten in der Betrieb-Spalte. Neu heißen
+  beide zusammen **„Klasseneinstellungen"** (aufklappbarer `<details>`-Block
+  in der linken Setup-Spalte, Drucker-Karte oberhalb der Schüler-hinzufügen-Karte).
+- **Platz zurückgeben beim Zuklappen:** ist der Block geschlossen, wird das
+  Zweispalten-Grid (`minmax(320px,360px) 1fr`) per CSS-`:has()` einspaltig
+  (`1fr`) — die Klassen-Übersicht (Now-Serving, Pairing, Queue) nutzt die volle
+  Breite. Beim Aufklappen greift wieder das Zweispalten-Grid.
+- **Abstand zum Button:** geschlossener Block setzt das Summary-`margin-bottom`
+  auf 0 und die Grid-Gap auf 16px, sodass der Abstand zwischen Button und
+  „Aktuell in Ausgabe"-Box dem Karten-Abstand (16px) entspricht statt 10+18px.
+- **Default geschlossen:** der Block ist beim Öffnen eines Klassen-Reiters
+  initial zu — Übersicht rückt direkt an den Button; Aufklappen per Klick.
+- **„Betrieb — <Klasse>"-Label** entfällt (war nur Orientierungstext).
+- Touch: `web/host-render.js` (`buildClassPanel`) + `web/host.css` (`.layout`
+  `:has`-Regel, Summary-Margin). Keine Test-/Server-Änderung.
+
 ## 2026-08-04 — Drucker-Display: Reiter-Aufräumen beim Trennen
 
 - **Nicht eingeschaltete Displays verschwinden beim Schließen:** bislang blieb

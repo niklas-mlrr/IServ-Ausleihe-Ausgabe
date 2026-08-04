@@ -141,9 +141,34 @@ window.__host = window.__host || {};
     const form = escapeHtml(ctx.form || 'Klasse');
     div.innerHTML = `
       <div class="layout">
-        <details class="setup-col" open>
-          <summary>Schüler hinzufügen</summary>
+        <details class="setup-col">
+          <summary>Klasseneinstellungen</summary>
           <div class="card">
+            <h2 style="margin:0 0 8px">Drucker für ${form}</h2>
+            <div data-ctx-printers="${id}" style="display:flex;flex-direction:column;gap:10px"></div>
+            <p class="hint" style="margin-top:8px">Auf welche Drucker der Leihschein dieser Klasse gedruckt wird. Kein Haken = kein Drucker (Leihschein-Druck nur per manueller Auswahl).</p>
+            <p class="ctx-coupling-warn" data-ctx-printer-warn="${id}" style="display:none"></p>
+            <h2 style="margin:4px 0 8px;border-top:1px solid var(--border);padding-top:12px">Live-Ausgabe für ${form}</h2>
+            <label class="switch" style="margin-top:10px" title="Modus B (Live-Ausgabe) für diese Klasse ein/aus. Aus = kein Modus-B-Kasten in dieser Klassenansicht, keine Pairing-Zuordnung.">
+              <input type="checkbox" data-ctx-live="${id}">
+              <span class="track"></span>
+              Live-Ausgabe (Modus B) aktivieren
+            </label>
+            <p class="ctx-coupling-warn" data-ctx-live-warn="${id}" style="display:none"></p>
+            <p class="hint" style="margin-top:8px">Schüler können sich per iPad selbst zum Scannen einreihen. Ausgeschaltet bleibt der Modus-B-Kasten in dieser Ansicht ausgeblendet.</p>
+            <div data-ctx-done-opts="${id}" style="margin-top:14px;display:flex;flex-direction:column;gap:10px">
+              <label class="check-line" title="Schüler erst als fertig markieren, wenn der Leihschein unterschrieben ist — sonst bereits nach dem Drucken. Nur bei aktiver Live-Ausgabe.">
+                <input type="checkbox" data-ctx-done-signed="${id}">
+                <span>Leihschein unterschreiben</span>
+              </label>
+              <label class="check-line" title="Der unterschriebene Leihschein wird vom Lehrer eingesammelt. Nur relevant, wenn „Leihschein unterschreiben" angehakt ist.">
+                <input type="checkbox" data-ctx-done-collected="${id}">
+                <span>Leihschein wird vom Lehrer eingesammelt</span>
+              </label>
+            </div>
+          </div>
+          <div class="card">
+            <h2 style="margin:0 0 8px">Schüler hinzufügen</h2>
             <div class="row" style="margin-bottom:8px">
               <select class="ctx-single-class" data-ctx-id="${id}">${classSelectOptions()}</select>
             </div>
@@ -155,17 +180,11 @@ window.__host = window.__host || {};
           </div>
         </details>
         <div class="col">
-          <div class="col-label">Betrieb — ${form}</div>
           <div class="card now-serving" data-ctx-ns="${id}"></div>
-          <div class="card">
+          <div class="card" data-ctx-mb="${id}">
             <h2 style="margin:0 0 8px">Pairing (Modus B)</h2>
             <div class="ctx-arm-banner mb-arm-banner" data-ctx-id="${id}"></div>
             <div class="ctx-codes" data-ctx-id="${id}"></div>
-          </div>
-          <div class="card">
-            <h2 style="margin:0 0 8px">Drucker für ${form}</h2>
-            <div data-ctx-printers="${id}" style="display:flex;flex-direction:column;gap:10px"></div>
-            <p class="hint" style="margin-top:8px">Auf welche Drucker der Leihschein dieser Klasse gedruckt wird. Kein Haken = alle.</p>
           </div>
           <div class="card">
             <h2 style="margin:0 0 8px">Schüler-Queue <span class="queue-count" data-ctx-qc="${id}"></span></h2>
@@ -218,13 +237,15 @@ window.__host = window.__host || {};
     localStorage.setItem(AUTO_DONE_STORAGE_KEY, JSON.stringify(auto_done));
     const printers = getSelectedClassPrinters();
     saveClassPrintersSelection(printers);
+    const liveAusgabe = !!document.getElementById('new-class-live-ausgabe')?.checked;
+    saveClassLiveAusgabe(liveAusgabe);
     // Ein einziger persistenter Toast: steht während des gesamten Ladens
     // („Lade Klasse …") und wird in-place zum Abschluss-Hinweis, sobald die
     // Klasse geladen ist. So gibt es nie zwei gleichzeitig sichtbare Toasts.
     const loadToast = showMsgPersistent(`Lade ${form}…`);
     let r, d;
     try {
-      r = await fetch('/api/open-class', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ form, force, auto_done, printers }) });
+      r = await fetch('/api/open-class', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ form, force, auto_done, printers, live_ausgabe: liveAusgabe }) });
       d = await r.json();
     } catch (err) {
       finalizeToast(loadToast, 'Fehler beim Laden der Klasse');
@@ -817,7 +838,8 @@ window.__host = window.__host || {};
   // ---- Drucker-Allowlist pro Klasse (panel-new + Klassen-Tab) ------------
   // Checkbox-Liste der Pool-Drucker. Im panel-new wird die Auswahl mit
   // `/api/open-class` geschickt; im Klassen-Tab live per `/api/context-printers`
-  // gesetzt. Leere Auswahl = alle Pool-Drucker (Server-Seite None).
+  // gesetzt. Leere Auswahl = `[]` = bewusst kein Drucker (Server speichert leere
+  // Menge, nicht „alle"); `None` (Feld fehlt) = alle. S. _resolve_allowed_printers.
 
   function _printerCheckboxHTML(p, checked, dataCtxId) {
     const pid = escapeHtml(p.id);
@@ -841,11 +863,45 @@ window.__host = window.__host || {};
       return;
     }
     const saved = loadClassPrintersSelection();  // Set | null (null = alle)
-    host.innerHTML = pool.map(p => _printerCheckboxHTML(p, saved === null || saved.has(p.id), null)).join('');
+    const checkboxes = pool.map(p => _printerCheckboxHTML(p, saved === null || saved.has(p.id), null)).join('');
+    // Bewusst leere Auswahl (gespeichertes leeres Set) ehrlich anzeigen: kein
+    // Drucker für die nächste zu öffnende Klasse — Druck nur per manueller
+    // Auswahl. Default (nichts gespeichert) = alle angehakt.
+    const noneSelected = saved !== null && saved.size === 0;
+    host.innerHTML = noneSelected
+      ? checkboxes + '<p class="hint" style="margin-top:6px">Kein Drucker ausgewählt — Leihschein-Druck nur per manueller Auswahl im Druckdialog.</p>'
+      : checkboxes;
+    // Live-Ausgabe-Schalter für die nächste zu öffnende Klasse aus localStorage
+    // vorbelegen (Default true).
+    const liveCb = document.getElementById('new-class-live-ausgabe');
+    if (liveCb) liveCb.checked = loadClassLiveAusgabe();
+    // Kopplung Drucker ↔ Live-Ausgabe aus dem gerenderten Zustand synchronisieren
+    // (Schalter deaktiviert + roter Hinweis, wenn kein Drucker gewählt).
+    updateNewClassLiveGate();
+    updateNewClassDoneOpts();
+  }
+
+  // Kopplung panel-new: der „mindestens ein Drucker"-Hinweis erscheint NICHT
+  // dauerhaft bei fehlendem Drucker, sondern erst beim Versuch, Live-Ausgabe zu
+  // aktivieren (s. Live-Schalter-Listener). Hier nur Warnungen räumen, sobald
+  // wieder ein Drucker gewählt ist.
+  function newClassPrinterCheckedCount() {
+    return document.querySelectorAll('#new-class-printers input[data-pid]:checked').length;
+  }
+  function updateNewClassLiveGate() {
+    if (newClassPrinterCheckedCount() > 0) {
+      for (const eid of ['new-class-live-warn', 'new-class-printer-warn']) {
+        const el = document.getElementById(eid);
+        if (el) { el.textContent = ''; el.style.display = 'none'; }
+      }
+    }
   }
 
   // Klassen-Tab: Checkboxen je Kontext aus `ctx.allowed_printers` (Snapshot).
-  // `null` = alle Pool-Drucker (alle angehakt); sonst nur die IDs in der Menge.
+  // `null` = alle Pool-Drucker (alle angehakt, Default bei Öffnen ohne Angabe);
+  // `[]` = bewusst kein Drucker ausgewählt (nichts angehakt). Letzteres ist
+  // keine „alle"-Falle mehr: der Helfer-Druckdialog bekommt keine Vorauswahl,
+  // der Druck bleibt aber per manueller Auswahl möglich.
   function renderCtxPrinters(id) {
     const host = document.querySelector(`[data-ctx-printers="${id}"]`);
     if (!host) return;
@@ -858,19 +914,124 @@ window.__host = window.__host || {};
       host.innerHTML = '<p class="hint">Kein Drucker konfiguriert.</p>';
       return;
     }
-    host.innerHTML = pool.map(p => _printerCheckboxHTML(p, allowedSet === null || allowedSet.has(p.id), id)).join('');
+    const checkboxes = pool.map(p => _printerCheckboxHTML(p, allowedSet === null || allowedSet.has(p.id), id)).join('');
+    // Bewusst leere Auswahl (= `[]`, nicht `null`) ehrlich anzeigen: kein
+    // Drucker für diese Klasse gewählt — Druck nur per manueller Auswahl.
+    const noneSelected = allowedSet !== null && allowedSet.size === 0;
+    host.innerHTML = noneSelected
+      ? checkboxes + '<p class="hint" style="margin-top:6px">Kein Drucker für diese Klasse ausgewählt — Leihschein-Druck nur per manueller Auswahl im Druckdialog.</p>'
+      : checkboxes;
+    // Live-Ausgabe-Schalter dieser Klasse aus dem Snapshot setzen + Modus-B-
+    // Kasten (Pairing) entsprechend ein/ausblenden. Default `true` (kompatibel
+    // mit Kontexten, die das Feld noch nicht liefern — z. B. alte Snapshots).
+    const liveOn = ctx.live_ausgabe !== false;
+    const liveCb = document.querySelector(`input[data-ctx-live="${id}"]`);
+    if (liveCb) liveCb.checked = liveOn;
+    const mbCard = document.querySelector(`[data-ctx-mb="${id}"]`);
+    if (mbCard) mbCard.style.display = liveOn ? '' : 'none';
+    // Kopplung Drucker ↔ Live-Ausgabe: der „mindestens ein Drucker"-Hinweis
+    // erscheint NICHT dauerhaft bei fehlendem Drucker, sondern erst beim Versuch,
+    // Live-Ausgabe zu aktivieren (s. setContextLiveAusgabe). Hier nur Warnungen
+    // räumen, sobald wieder ein Drucker gewählt ist (Snapshot nach Änderung).
+    updateCtxCouplingHints(id, noneSelected);
+    // Fertig-Optionen („Leihschein unterschrieben" / „… eingesammelt")
+    // an den Live-Schalter koppeln: beide ausgegraut bei Live aus, „eingesammelt"
+    // zusätzlich ausgegraut, wenn „unterschrieben" nicht angehakt ist.
+    updateCtxDoneOpts(id);
+  }
+
+  // Klassen-Tab: Fertig-Optionen unter der Live-Ausgabe. „Leihschein
+  // eingesammelt" ist ausgegraut, wenn „Leihschein unterschrieben" nicht
+  // angehakt ist (= fertig bereits bei gedruckt); beide ausgegraut, wenn
+  // Live-Ausgabe aus. Reine UI — die eigentliche Funktion folgt später
+  // (noch kein Serverkontakt, keine Persistenz).
+  function updateCtxDoneOpts(id) {
+    const live = document.querySelector(`input[data-ctx-live="${id}"]`);
+    const signed = document.querySelector(`input[data-ctx-done-signed="${id}"]`);
+    const collected = document.querySelector(`input[data-ctx-done-collected="${id}"]`);
+    if (!live || !signed || !collected) return;
+    const liveOn = !!live.checked;
+    signed.disabled = !liveOn;
+    collected.disabled = !liveOn || !signed.checked;
+  }
+
+  // Kopplungs-Hinweise für eine Klasse nach einem Re-Render räumen. Die roten
+  // Hinweise werden nur beim Versuch gezeigt (Live an ohne Drucker bzw. letzter
+  // Drucker bei aktiver Live-Ausgabe) — s. setContextLiveAusgabe /
+  // setContextPrinters. Ist wieder ≥1 Drucker gewählt, beide Warnungen löschen.
+  function updateCtxCouplingHints(id, noneSelected) {
+    if (noneSelected) return;
+    for (const sel of [`[data-ctx-printer-warn="${id}"]`, `[data-ctx-live-warn="${id}"]`]) {
+      const el = document.querySelector(sel);
+      if (el) { el.textContent = ''; el.style.display = 'none'; }
+    }
   }
 
   // Checkbox-Änderung im Klassen-Tab → Allowlist sofort ans Server senden.
-  // Leere Auswahl = alle (Server None), s. _resolve_allowed_printers.
-  async function setContextPrinters(id) {
+  // Leere Auswahl = `[]` = bewusst kein Drucker (Server speichert leere Menge,
+  // nicht „alle"); s. _resolve_allowed_printers. `changedEl` = die gerade
+  // geänderte Checkbox — wird zurückgesetzt, wenn die Änderung blockiert wird.
+  async function setContextPrinters(id, changedEl) {
     const host = document.querySelector(`[data-ctx-printers="${id}"]`);
     if (!host) return;
-    const ids = Array.from(host.querySelectorAll('input[data-pid]')).filter(el => el.checked).map(el => el.dataset.pid);
-    await fetch('/api/context-printers', {
+    const boxes = Array.from(host.querySelectorAll('input[data-pid]'));
+    const ids = boxes.filter(el => el.checked).map(el => el.dataset.pid);
+    const liveOn = !!document.querySelector(`input[data-ctx-live="${id}"]`)?.checked;
+    // Letzten Drucker bei aktiver Live-Ausgabe nicht abwählen — Schalter erst
+    // ausschalten. Checkbox revertieren, roten Hinweis zeigen, nicht senden.
+    if (!ids.length && liveOn) {
+      if (changedEl) changedEl.checked = true;
+      const warn = document.querySelector(`[data-ctx-printer-warn="${id}"]`);
+      if (warn) { warn.textContent = 'Zuerst Live-Ausgabe schließen'; warn.style.display = ''; }
+      return;
+    }
+    // Drucker-Warnung räumen, sobald wieder ≥1 Drucker gewählt ist.
+    const pWarn = document.querySelector(`[data-ctx-printer-warn="${id}"]`);
+    if (pWarn) { pWarn.textContent = ''; pWarn.style.display = 'none'; }
+    const r = await fetch('/api/context-printers', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ context_id: id, printers: ids }),
-    }).catch(() => showMsg('Drucker-Auswahl konnte nicht gespeichert werden'));
+    });
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      showMsg(d.detail?.msg || d.detail || 'Drucker-Auswahl konnte nicht gespeichert werden');
+      // Server hat abgewiesen (z. B. „Zuerst Live-Ausgabe schließen") → Checkbox
+      // zurücksetzen, damit die UI zum Server-Snapshot passt (Broadcast folgt).
+      if (changedEl) changedEl.checked = true;
+    }
+  }
+
+  // Live-Ausgabe-Schalter im Klassen-Tab geändert → ans Server senden. Der
+  // Server broadcastet den neuen Snapshot; daraufhin blendet renderCtxPrinters
+  // den Modus-B-Kasten ein/aus und der Queue-Pairing-Button folgt nach.
+  // `el` = der Schalter — wird zurückgesetzt, wenn das Aktivieren blockiert
+  // wird (kein Drucker gewählt).
+  async function setContextLiveAusgabe(id, on, el) {
+    if (on) {
+      const host = document.querySelector(`[data-ctx-printers="${id}"]`);
+      const boxes = host ? Array.from(host.querySelectorAll('input[data-pid]')) : [];
+      const hasPrinter = boxes.some(b => b.checked);
+      // Mindestens eine Checkbox angehakt (keine angehakt = `[]` = kein Drucker).
+      if (!hasPrinter) {
+        if (el) el.checked = false;
+        const warn = document.querySelector(`[data-ctx-live-warn="${id}"]`);
+        if (warn) { warn.textContent = 'Es ist mindestens ein Drucker auszuwählen'; warn.style.display = ''; }
+        updateCtxDoneOpts(id);
+        return;
+      }
+    }
+    const liveWarn = document.querySelector(`[data-ctx-live-warn="${id}"]`);
+    if (liveWarn) { liveWarn.textContent = ''; liveWarn.style.display = 'none'; }
+    const r = await fetch('/api/context-live-ausgabe', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ context_id: id, live_ausgabe: !!on }),
+    });
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      showMsg(d.detail?.msg || d.detail || 'Live-Ausgabe konnte nicht gespeichert werden');
+      if (el) el.checked = !on;  // revert
+    }
+    updateCtxDoneOpts(id);
   }
 
 
@@ -895,7 +1056,12 @@ window.__host = window.__host || {};
 
     let body;
     if (!active.length) {
-      body = '<div class="ns-empty">Niemand aktiv — Schüler per „Pairing" oder „Nächster" zuweisen.</div>';
+      // Live-Ausgabe aus → kein Pairing-Hinweis (Modus-B-Kasten ist ausgeblendet);
+      // dann bleibt nur „Nächster" als Weg, einen Schüler zu aktivieren.
+      const liveOn = ctx.live_ausgabe !== false;
+      body = liveOn
+        ? '<div class="ns-empty">Niemand aktiv — Schüler per „Pairing" oder „Nächster" zuweisen.</div>'
+        : '<div class="ns-empty">Niemand aktiv — Schüler per „Nächster" zuweisen.</div>';
     } else {
       body = '<div class="ns-grid">' + active.map(s => {
         const helper = helpers.find(h => h.student_id === s.student_id);
@@ -1628,7 +1794,7 @@ window.__host = window.__host || {};
     tbody.innerHTML = queue.map(s => {
       const badgeClass = { pending: 'badge-pending', active: 'badge-active', done: 'badge-done', skipped: 'badge-skipped' }[s.status] || '';
       const statusLabel = { pending: 'Wartend', active: 'Aktiv', done: 'Fertig', skipped: 'Übersprungen' }[s.status] || s.status;
-      const pairBtn = (state.modus_b && state.modus_b.open)
+      const pairBtn = (state.modus_b && state.modus_b.open && ctx.live_ausgabe !== false)
         ? `<button class="success" data-action="pair-student" data-student-id="${s.student_id}">Pairing</button> ` : '';
       const printBtn = `<button class="secondary" data-action="print" data-student-id="${s.student_id}" title="Leihschein drucken" aria-label="Leihschein drucken">${ICON_PRINTER}</button>`;
       // Trennen: löst Helfer-/Schüler-Verbindung und setzt den Schüler zurück auf "Wartend".
@@ -2201,6 +2367,49 @@ window.__host = window.__host || {};
   });
   document.getElementById('open-class-btn').addEventListener('click', () => openClass());
   document.getElementById('open-test-config-btn').addEventListener('click', () => openTestConfig());
+  // panel-new: Drucker-Checkbox ↔ Live-Ausgabe-Schalter Kopplung. Letzten
+  // Drucker bei aktiver Live-Ausgabe nicht abwählen (roter Hinweis, revert);
+  // sonst Auswahl persistieren + Gate (Schalter disabled bei keinem Drucker).
+  document.getElementById('new-class-printers').addEventListener('change', (e) => {
+    const el = e.target;
+    if (!el || !el.dataset || !el.dataset.pid) return;
+    const liveCb = document.getElementById('new-class-live-ausgabe');
+    if (newClassPrinterCheckedCount() === 0 && liveCb && liveCb.checked) {
+      el.checked = true;
+      const warn = document.getElementById('new-class-printer-warn');
+      if (warn) { warn.textContent = 'Zuerst Live-Ausgabe schließen'; warn.style.display = ''; }
+      return;
+    }
+    saveClassPrintersSelection(getSelectedClassPrinters());
+    updateNewClassLiveGate();
+  });
+  document.getElementById('new-class-live-ausgabe').addEventListener('change', (e) => {
+    const el = e.target;
+    const on = !!el.checked;
+    if (on && newClassPrinterCheckedCount() === 0) {
+      el.checked = false;
+      const warn = document.getElementById('new-class-live-warn');
+      if (warn) { warn.textContent = 'Es ist mindestens ein Drucker auszuwählen'; warn.style.display = ''; }
+      return;
+    }
+    saveClassLiveAusgabe(on);
+    updateNewClassLiveGate();
+    updateNewClassDoneOpts();
+  });
+  // panel-new: Fertig-Optionen unter der Live-Ausgabe. „Leihschein
+  // eingesammelt" ausgegraut, wenn „Leihschein unterschrieben" nicht angehakt
+  // ist; beide ausgegraut, wenn Live-Ausgabe aus. Reine UI — die eigentliche
+  // Funktion folgt später (noch kein Serverkontakt, keine Persistenz).
+  function updateNewClassDoneOpts() {
+    const live = document.getElementById('new-class-live-ausgabe');
+    const signed = document.getElementById('new-class-done-signed');
+    const collected = document.getElementById('new-class-done-collected');
+    if (!live || !signed || !collected) return;
+    const liveOn = !!live.checked;
+    signed.disabled = !liveOn;
+    collected.disabled = !liveOn || !signed.checked;
+  }
+  document.getElementById('new-class-done-signed').addEventListener('change', updateNewClassDoneOpts);
   document.getElementById('mb-open-btn').addEventListener('click', openModusB);
   document.getElementById('mb-close-btn').addEventListener('click', closeModusB);
   document.getElementById('mb-display-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') authorizeDisplay(); });
@@ -2320,7 +2529,9 @@ window.__host = window.__host || {};
     const el = e.target;
     if (el.classList.contains('ctx-single-class')) ctxLoadStudents(el.dataset.ctxId);
     else if (el.classList.contains('ctx-single-student')) ctxOnStudentChange(el.dataset.ctxId);
-    else if (el.classList.contains('printer-check')) setContextPrinters(el.dataset.ctxId);
+    else if (el.classList.contains('printer-check')) setContextPrinters(el.dataset.ctxId, el);
+    else if (el.hasAttribute('data-ctx-done-signed')) updateCtxDoneOpts(el.dataset.ctxDoneSigned);
+    else if (el.hasAttribute('data-ctx-live')) setContextLiveAusgabe(el.dataset.ctxLive, el.checked, el);
   });
   document.getElementById('helper-tbody').addEventListener('click', handleDelegatedAction);
   document.getElementById('helper-tbody').addEventListener('change', (e) => {

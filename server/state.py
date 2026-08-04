@@ -415,6 +415,13 @@ class ClassContext:
     # der Klasse wirkt erst auf künftige Drucke. Rein In-Memory (Kontexte leben
     # nicht persistiert), kein DB-/IServ-Zugriff.
     allowed_printer_ids: set[str] | None = None
+    # Live-Ausgabe (Modus B) für diese Klasse sichtbar? `True` (Default) → der
+    # „Pairing (Modus B)"-Kasten erscheint im Klassen-Tab und Pairing-Codes
+    # lassen sich Schülern dieser Klasse zuordnen; `False` → beides ausgeblendet
+    # bzw. abgewiesen. Das globale Modus-B-Backend (Join-Secret/QR, pending-
+    # Sessions, iPad-Freischalt) bleibt davon unberührt — nur die Sichtbarkeit
+    # pro Klasse wird gesteuert. Rein In-Memory, wie `allowed_printer_ids`.
+    live_ausgabe: bool = True
     # Während `open_class` Schüler/Flags/Katalog lädt, steht der Kontext schon in
     # `self.contexts` (für interne Lookups wie `_ensure_class_catalog`), soll aber
     # NOCH nicht an Clients gehen — sonst snapshottet ein nebenläufiger Broadcast
@@ -661,6 +668,8 @@ class AppState:
                 "allowed_printers": (
                     None if c.allowed_printer_ids is None else sorted(c.allowed_printer_ids)
                 ),
+                # Live-Ausgabe (Modus B) für diese Klasse sichtbar? S. ClassContext.
+                "live_ausgabe": c.live_ausgabe,
             }
             for c in self.contexts.values()
             if not c.loading

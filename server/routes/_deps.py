@@ -104,6 +104,9 @@ class OpenClassRequest(BaseModel):
     # oder leer = kein Filter (alle Pool-Drucker, Default). s. classes.py
     # `open_class` + `set_context_printers`.
     printers: list[str] | None = None
+    # Live-Ausgabe (Modus B) für diese Klasse sichtbar? Default `True` (kompatibel
+    # mit bestehenden Öffnungen ohne Angabe). S. ClassContext.live_ausgabe.
+    live_ausgabe: bool = True
 
 
 class CloseClassRequest(BaseModel):
@@ -124,6 +127,17 @@ class ContextPrintersRequest(BaseModel):
 
     context_id: str = ""
     printers: list[str] | None = None
+
+
+class ContextLiveAusgabeRequest(BaseModel):
+    """Body für `POST /api/context-live-ausgabe`: Live-Ausgabe (Modus B) für
+    eine bereits geöffnete Klasse nachträglich ein-/ausschalten. `live_ausgabe`
+    steuert nur die Sichtbarkeit des Modus-B-Kastens in dieser Klassenansicht
+    sowie die Pairing-Zuordnung; das globale Modus-B-Backend bleibt unberührt
+    (s. ClassContext.live_ausgabe)."""
+
+    context_id: str = ""
+    live_ausgabe: bool = True
 
 
 # Modul-Level-Singleton als Body-Default (statt `= ContextIdBody()` direkt im
