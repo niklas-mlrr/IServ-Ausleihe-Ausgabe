@@ -43,6 +43,45 @@ async def printer_display_page(request: Request) -> FileResponse | RedirectRespo
     return FileResponse(str(_WEB_DIR / "drucker-display.html"))
 
 
+@router.post("/api/drucker-display/departed")
+async def printer_display_departed(request: Request) -> dict:
+    """Vom Drucker-Display beim **Entladen der Seite** (Navigation auf einen
+    anderen URL / Tab-Schließen) via ``navigator.sendBeacon`` gerufen. Räumt die
+    Display-Session auf — derselbe Effekt wie der ``finally``-Block des
+    WS-Handlers beim Tab-Schließen: autorisiert → ``ws=None`` (grauer Punkt),
+    nicht autorisiert → Session entfernen (Reiter weg). Zusätzlich wird die WS
+    geschlossen. Der Client benachrichtigt den Server hier aktiv, weil der
+    Close-Frame bei Navigation unzuverlässig ankommt.
+
+    Idempotent: ein zweiter Aufruf (Session schon weg bzw. ``ws=None``) ist ein
+    No-op. Unauthentifiziert wie das Display selbst — der Token ist ohnehin
+    öffentlich in der URL; ein gezielter Fremd-Aufruf würde lediglich die WS der
+    genannten Display-Session trennen (das Display verbindet sich ggf. neu)."""
+    token = (request.query_params.get("token") or "").strip().lower()
+    if not token or len(token) != 12 or any(c not in "0123456789abcdef" for c in token):
+        return {"ok": False}
+    state = get_state()
+    d = state.printer_displays.get(token)
+    if d is None:
+        return {"ok": False}
+    ws = d.ws
+    # Aufräumen (Spiegel des WS-Handler-``finally``). ws-Referenz VOR dem Close
+    # lösen, damit der ``finally``-Block (der durch den Close getriggert wird)
+    # nichts mehr doppelt macht (``d.ws is websocket`` ist dann False).
+    d.ws = None
+    if not d.authorized:
+        state.printer_displays.pop(token, None)
+    if ws is not None:
+        try:
+            await ws.close(code=1001, reason="display navigated away")
+        except Exception:  # noqa: BLE001 — Schließen darf Endpoint nicht crashen
+            pass
+    from ..hub import get_hub
+
+    await get_hub().broadcast_host(state.state_snapshot())
+    return {"ok": True}
+
+
 @host_router.get("/api/drucker-display/qr")
 async def printer_display_qr(request: Request, display_id: str | None = None) -> dict:
     """QR, mit dem ein Gerät die Drucker-Display-Seite (`/drucker-display`)

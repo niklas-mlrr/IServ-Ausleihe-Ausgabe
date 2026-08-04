@@ -30,13 +30,18 @@ from server.state import AppState, PrinterDisplaySession
 
 
 class _FakeWS:
-    """Sammelt gesendete JSON-Nachrichten (Drucker-Display-WS)."""
+    """Sammelt gesendete JSON-Nachrichten (Drucker-Display-WS) und merkt sich
+    einen ``close()``-Aufruf (für den ``/departed``-Endpunkt)."""
 
     def __init__(self) -> None:
         self.sent = []
+        self.closed = False
 
     async def send_json(self, msg) -> None:
         self.sent.append(msg)
+
+    async def close(self, code: int = 1000, reason: str = "") -> None:
+        self.closed = True
 
 
 class _FakeHub:
@@ -378,6 +383,110 @@ def test_theme_invalid_value_400(client, ctx):
         cookies={"session_id": "sid"},
     )
     assert r.status_code == 400
+
+
+# ---- WS-Disconnect: Reiter aufräumen --------------------------------------
+# Nicht eingeschaltete Displays werden beim Trennen entfernt (Reiter weg);
+# eingeschaltete bleiben als getrennter Reiter stehen (grauer Punkt). Betrifft
+# sowohl Schließen vor dem Einschalten als auch Ablösung durch einen erneuten
+# /drucker-display-Aufruf mit frischem Token (die alte WS trennt dabei).
+
+
+def test_ws_unauthorized_display_removed_on_disconnect(client, ctx, monkeypatch):
+    import server.routes.ws as ws_module
+
+    state, _, _ = ctx
+    monkeypatch.setattr(ws_module, "get_state", lambda: state)
+    monkeypatch.setattr(ws_module, "get_hub", lambda: ctx[2])
+    token = "abc123def456"
+    with client.websocket_connect(f"/ws/drucker-display?token={token}") as ws:
+        assert ws.receive_json()["type"] == "registration"
+    # Nach dem Trennen: nicht autorisiert → Session entfernt (Reiter weg).
+    assert token not in state.printer_displays
+
+
+def test_ws_authorized_display_kept_as_grey_on_disconnect(client, ctx, monkeypatch):
+    import server.routes.ws as ws_module
+
+    state, _, _ = ctx
+    monkeypatch.setattr(ws_module, "get_state", lambda: state)
+    monkeypatch.setattr(ws_module, "get_hub", lambda: ctx[2])
+    token = "abc123def456"
+    d = PrinterDisplaySession(
+        display_id=token, registration_code="ABCD", authorized=True
+    )
+    state.printer_displays[token] = d
+    with client.websocket_connect(f"/ws/drucker-display?token={token}") as ws:
+        assert ws.receive_json()["type"] == "queue"
+    # Nach dem Trennen: autorisiert → Session bleibt, ws=None (grauer Punkt).
+    assert token in state.printer_displays
+    assert state.printer_displays[token].authorized is True
+    assert state.printer_displays[token].ws is None
+
+
+# ---- Departed: aktive Abmeldung beim Entladen (sendBeacon) ----------------
+
+
+def test_departed_removes_unauthorized_display(client, ctx):
+    """sendBeacon-Endpunkt beim Entladen: nicht autorisierte Session wird
+    entfernt (Reiter weg), die WS geschlossen."""
+    state, _, _ = ctx
+    token = "abc123def456"
+    d = PrinterDisplaySession(display_id=token, registration_code="ABCD")
+    fake = _FakeWS()
+    d.ws = fake
+    state.printer_displays[token] = d
+    r = client.post(f"/api/drucker-display/departed?token={token}")
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+    assert token not in state.printer_displays  # nicht autorisiert → entfernt
+    assert fake.closed is True  # WS wurde geschlossen
+
+
+def test_departed_marks_authorized_grey(client, ctx):
+    """sendBeacon-Endpunkt beim Entladen: autorisierte Session bleibt, aber
+    ws=None (grauer Punkt); WS geschlossen."""
+    state, _, _ = ctx
+    token = "abc123def456"
+    d = PrinterDisplaySession(
+        display_id=token, registration_code="ABCD", authorized=True
+    )
+    fake = _FakeWS()
+    d.ws = fake
+    state.printer_displays[token] = d
+    r = client.post(f"/api/drucker-display/departed?token={token}")
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+    assert token in state.printer_displays  # autorisiert → Session bleibt
+    assert state.printer_displays[token].ws is None  # grauer Punkt
+    assert state.printer_displays[token].authorized is True
+    assert fake.closed is True  # WS wurde geschlossen
+
+
+def test_departed_unknown_or_invalid_token_noop(client, ctx):
+    """Ungültiger/unbekannter Token → No-op (kein Crash, ok=False)."""
+    r = client.post("/api/drucker-display/departed?token=nope")
+    assert r.status_code == 200
+    assert r.json()["ok"] is False
+    # Ungültiger Token (kein 12-Hex):
+    assert client.post("/api/drucker-display/departed?token=xyz").json()["ok"] is False
+
+
+def test_departed_idempotent(client, ctx):
+    """Zweite Aufruf (WS schon None) ist ein No-op — pagehide + beforeunload
+    können beide feuern."""
+    state, _, _ = ctx
+    token = "abc123def456"
+    d = PrinterDisplaySession(
+        display_id=token, registration_code="ABCD", authorized=True
+    )
+    d.ws = _FakeWS()
+    state.printer_displays[token] = d
+    assert client.post(f"/api/drucker-display/departed?token={token}").json()["ok"] is True
+    # Zweiter Aufruf: Session noch da (autorisiert), ws bleibt None, kein Close.
+    second = client.post(f"/api/drucker-display/departed?token={token}")
+    assert second.json()["ok"] is True
+    assert state.printer_displays[token].ws is None
 
 
 # ---- send_printer_display_update: Payload je Zustand ----------------------

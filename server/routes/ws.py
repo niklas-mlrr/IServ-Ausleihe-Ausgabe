@@ -889,8 +889,10 @@ async def ws_drucker_display(websocket: WebSocket, token: str | None = None) -> 
     Identität = Token in der URL (``?token=<12-hex>``), den die Seite beim Öffnen
     per Redirect zugewiesen bekommt. Ein Reload liefert denselben Token → dieselbe
     Session (gleicher Code, gleicher Freigabe-/Drucker-Stand) wird wiederverwen-
-    det. Per × am Host verbotene Token erhalten eine ``forbidden``-Antwort und
-    keine Session."""
+    det — für EINGESCHALTETE (autorisierte) Displays. NICHT eingeschaltete
+    Displays werden beim Trennen der Verbindung ganz entfernt (s. ``finally``-
+    Block), ein Reload legt sie also mit frischem Code neu an. Per × am Host
+    verbotene Token erhalten eine ``forbidden``-Antwort und keine Session."""
     state = get_state()
     hub = get_hub()
 
@@ -926,15 +928,30 @@ async def ws_drucker_display(websocket: WebSocket, token: str | None = None) -> 
     try:
         while True:
             # Display sendet nichts Inhaltliches; receive dient der Trennungserkennung.
+            # Beim Navigieren/Schließen benachrichtigt die Seite den Server zusätzlich
+            # aktiv via sendBeacon (s. /api/drucker-display/departed), weil der
+            # Close-Frame bei Navigation unzuverlässig ankommt.
             await websocket.receive_text()
     except WebSocketDisconnect:
         pass
     finally:
-        # Session NICHT entfernen — Reload soll sie wiederfinden. Nur die ws-
-        # Referenz lösen (falls die Session nicht schon per × entsorgt wurde).
+        # Beim Trennen die ws-Referenz lösen. Wurde das Display noch nicht
+        # eingeschaltet (nicht autorisiert), wird die Session GANZ entfernt —
+        # der Reiter verschwindet am Host. Das deckt zwei Fälle zusammen:
+        #  (1) das Display wurde vor dem Einschalten geschlossen (Tab zu), und
+        #  (2) das Display wurde durch einen erneuten /drucker-display-Aufruf
+        #      abgelöst: die neue Seite erhält einen frischen Token (Redirect)
+        #      und öffnet eine neue Session; die alte WS trennt dabei.
+        # Eingeschaltete (autorisierte) Displays bleiben als getrennter Reiter
+        # stehen (grauer Punkt, ``connected=False``); ein Reload mit demselben
+        # Token verbindet sie wieder (grün). Nur lösen/entfernen, wenn zwischen-
+        # zeitlich KEIN Reconnect denselben Token übernommen hat (``d.ws`` ist
+        # dann ein anderer Socket als der gerade trennende).
         d = state.printer_displays.get(token)
         if d is not None and d.ws is websocket:
             d.ws = None
+            if not d.authorized:
+                state.printer_displays.pop(token, None)
         await safe_broadcast(hub, state)
 
 

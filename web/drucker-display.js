@@ -476,13 +476,54 @@ function handleServerMessage(msg) {
 const token = new URLSearchParams(location.search).get('token') || '';
 
 applySystemTheme();
+
+// Beim Entladen der Seite (Navigation auf einen neuen Token via /drucker-display
+// oder Tab-Schließen) den Server AKTIV benachrichtigen, damit die alte Session
+// sofort als getrennt erkannt wird (grauer Punkt, falls autorisiert; entfernt,
+// falls nicht) — wie beim Tab-Schließen, nur dass der Close-Frame bei Navigation
+// unzuverlässig ankommt. Zwei Hebel:
+//  (1) ``navigator.sendBeacon`` auf /api/drucker-display/departed — sendBeacon ist
+//      genau für „Server beim Entladen zuverlässig benachrichtigen" gemacht und
+//      kommt auch beim Navigieren/Redirect verlässlich an. Der Server schließt
+//      daraufhin die WS und räumt auf.
+//  (2) zusätzlich die WS sauber mit Code 1001 schließen (Best-Effort) + das
+//      ``unloading``-Flag unterdrückt den Auto-Reconnect, damit die alte Session
+//      nicht wiederbelebt wird.
+// Andere Tabs auf demselben Gerät (weitere Displays) sind unberührt — jeweils nur
+// die geschlossene/navigierte Seite gibt ihre WS auf.
+let unloading = false;
+let unloadNotified = false;
+let currentSocket = null;
+function onUnload() {
+  unloading = true;
+  try {
+    if (currentSocket && currentSocket.readyState === WebSocket.OPEN) {
+      currentSocket.close(1001, 'page unload');
+    }
+  } catch (_) { /* no-op — Seite wird ohnehin entladen */ }
+  // Beacon nur einmal senden (pagehide + beforeunload können beide feuern).
+  if (!unloadNotified && navigator.sendBeacon) {
+    unloadNotified = true;
+    try {
+      navigator.sendBeacon(
+        `/api/drucker-display/departed?token=${encodeURIComponent(token)}`,
+      );
+    } catch (_) { /* no-op — Fallback ist der uvicorn-Ping */ }
+  }
+}
+window.addEventListener('pagehide', onUnload);
+window.addEventListener('beforeunload', onUnload);
+
 connectWebSocket(() => `wss://${location.host}/ws/drucker-display?token=${encodeURIComponent(token)}`, {
+  onSocket: (ws) => { currentSocket = ws; },
   onOpen: () => { connDot.style.background = '#30d158'; connText.textContent = 'verbunden'; },
   onClose: (e, reconnect) => {
     connDot.style.background = '#ff6b6b';
     connText.textContent = 'getrennt — neu verbinden…';
-    // Gesperrte Displays versuchen keinen Reconnect (Token bleibt verboten).
-    if (!forbidden) reconnect();
+    // Gesperrte (forbidden) und entladene (unloading) Displays versuchen keinen
+    // Reconnect — sonst würde die alte Session wiederbelebt und bliebe am Host
+    // fälschlich grün, obwohl die Seite längst weg/navigiert ist.
+    if (!forbidden && !unloading) reconnect();
   },
   onError: () => { connDot.style.background = '#ff6b6b'; connText.textContent = 'Verbindungsfehler'; },
   onMessage: e => {

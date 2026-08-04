@@ -8,6 +8,54 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-04 — Drucker-Display: Reiter-Aufräumen beim Trennen
+
+- **Nicht eingeschaltete Displays verschwinden beim Schließen:** bislang blieb
+  jede Drucker-Display-Session beim WS-Trennen erhalten (damit Reload dieselbe
+  Session wiederverwendet). Neu: im `finally`-Block von `ws_drucker_display`
+  (`server/routes/ws.py`) werden **nicht autorisierte** Sessions beim Trennen
+  **ganz entfernt** — der Host-Reiter verschwindet automatisch. Das deckt zwei
+  Fälle zusammen: (1) Display wird vor dem Einschalten geschlossen (Tab zu),
+  (2) Display wird durch einen erneuten `/drucker-display`-Aufruf abgelöst
+  (frischer Token via Redirect → neue Session; die alte WS trennt dabei).
+- **Eingeschaltete Displays bleiben als grauer Punkt:** autorisierte Sessions
+  werden beim Trennen NICHT entfernt, nur `ws=None` (`connected=False` → grauer
+  Punkt). Ein Reload mit demselben Token verbindet sie wieder (grün). So bleibt
+  ein versehentlich geschlossenes, bereits eingerichtetes Display am Host
+  sichtbar und per QR wiederbelebbar.
+- Takeover-Schutz erhalten: löst/entfernt nur, wenn `d.ws is websocket` (kein
+  zwischenzeitlicher Reconnect hat den Token übernommen).
+- **Zuverlässige Disconnect-Erkennung (Follow-up):** das `finally`-Aufräumen
+  greift nur, wenn der Server den WS-Disconnect erkennt. Beim Navigieren auf
+  einen neuen Token (`/drucker-display` ohne Token → Redirect) schließt der
+  Browser die alte WS, aber der Close-Frame erreichte den Server unzuverlässig
+  — die alte Seite blieb am Host fälschlich grün (bis zum uvicorn-Ping, Default
+  20+20 s). Wie beim Tab-Schließen den Server jetzt **aktiv beim Entladen
+  benachrichtigen** — beides male wird die Seite mit Token geschlossen, nur der
+  Benachrichtigungsweg unterscheidet sich:
+  - **`navigator.sendBeacon` auf `/api/drucker-display/departed`** (`pagehide`/
+    `beforeunload`): sendBeacon ist genau für „Server beim Entladen zuverlässig
+    benachrichtigen" gemacht und kommt auch beim Navigieren/Redirect verlässlich
+    an. Der neue unauthentifizierte Endpunkt (`server/routes/drucker_display.py`)
+    schließt die WS und räumt auf (autorisiert → grau, nicht autorisiert →
+    entfernt) — derselbe Effekt wie der `finally`-Block, nur Client-getriggert.
+    Sofort, kein Warten auf einen Ping. Idempotent (pagehide + beforeunload
+    können beide feuern).
+  - **Client schließt zusätzlich sauber:** `pagehide`/`beforeunload` schließen
+    die WS mit Code 1001; ein `unloading`-Flag unterdrückt den Auto-Reconnect,
+    damit die alte Session nicht wiederbelebt wird.
+  - Ein früherer Heartbeat-Ansatz (Client-Ping alle 10 s + `asyncio.wait_for`-
+    Timeout 20 s) wurde wieder entfernt — er machte die Erkennung erst nach 20 s
+    bemerkbar; `sendBeacon` ist sofort und simpler. Für den Restfall (echter
+    Verbindungsabbruch ohne Entladen, z. B. WLAN weg) bleibt der uvicorn-Ping
+    als Fallback. Greift nur pro geschlossener Display-Seite — weitere Displays
+    auf demselben Gerät (andere Tabs) bleiben unberührt (mehrere pro Gerät
+    weiterhin möglich).
+- Tests: `tests/test_drucker_display.py` — zwei WS-Disconnect-Tests
+  (unautorisiert → entfernt; autorisiert → bleibt `ws=None`) + vier
+  `/departed`-Endpunkt-Tests (unautorisiert → entfernt; autorisiert → grau;
+  ungültig/unbekannt → No-op; idempotent).
+
 ## 2026-08-03 — Klassen-Lade-Hinweis + Snapshot-Race beim nebenläufigen Broadcast
 
 - **Host-Hinweis beim Klassen-Öffnen:** der bisherige „Lade Schüler…"-Toast
