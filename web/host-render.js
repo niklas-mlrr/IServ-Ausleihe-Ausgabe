@@ -195,7 +195,7 @@ window.__host = window.__host || {};
             </div>
             <div class="table-scroll">
               <table class="queue-table">
-                <thead><tr><th>Name</th><th>Klasse</th><th>Status</th><th>Info</th><th></th></tr></thead>
+                <thead><tr><th>Name</th><th>Klasse</th><th>Status</th><th></th></tr></thead>
                 <tbody data-ctx-queue="${id}"></tbody>
               </table>
             </div>
@@ -1745,23 +1745,17 @@ window.__host = window.__host || {};
     if (!r.ok) { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Umbindung fehlgeschlagen'); }
   }
 
-  // Info-Spalte der Queue: rein INFORMATIVE Hinweise zu einem Schüler, strikt
-  // getrennt vom Status (Wartend/Aktiv/Fertig/Übersprungen), der den Ablauf
-  // steuert. Nichts hier verändert die Queue-Logik.
-  //   • X/Y  — ausgegebene / angemeldete Bücher (ausgeblendete Reihen zählen in
-  //            beiden nicht mit); erst ab dem ersten Laden des Schülers bekannt.
-  //   • Leihschein — Schein wurde für diesen Schüler bereits gedruckt.
-  //   • Anmelde-/Zahlstatus aus IServ (`null` = noch nicht abgefragt → kein
-  //     Badge, statt einen unbekannten Stand als „okay" darzustellen).
-  //     „Nicht angemeldet" steht allein: ohne Anmeldung liefert IServ zu Zahlung
+  // Rote Info-Hinweise zu einem Schüler (Anmelde-/Zahlstatus aus IServ) —
+  // wandern aus der ehemaligen Info-Spalte in die Status-Spalte: ergänzend
+  // hinter dem Status (Wartend/Aktiv/X/Y/Leihschein/Übersprungen), und bei
+  // „fertig" ersetzt der Hinweis das „Fertig"-Badge. Immer rot (badge-info-warn).
+  //   • `null` = noch nicht abgefragt → kein Badge, statt einen unbekannten
+  //     Stand als „okay" darzustellen.
+  //   • „Nicht angemeldet" steht allein: ohne Anmeldung liefert IServ zu Zahlung
   //     und Anträgen nichts Belastbares (s. QueueStudent.set_info_flags).
-  function infoBadges(s) {
+  // Liefert ein Array von Badge-HTML-Strings (leer = kein Hinweis bekannt).
+  function hintBadges(s) {
     const out = [];
-    if (s.books_total) {
-      const full = s.books_done >= s.books_total;
-      out.push(`<span class="badge badge-info-neutral${full ? ' badge-info-ok' : ''}" title="ausgegebene / angemeldete Bücher">${s.books_done}/${s.books_total}</span>`);
-    }
-    if (s.slip_printed) out.push('<span class="badge badge-slip" title="Leihschein wurde gedruckt">Leihschein</span>');
     if (s.enrolled === false) {
       out.push('<span class="badge badge-info-warn">Nicht angemeldet</span>');
     } else if (s.enrolled) {
@@ -1776,7 +1770,7 @@ window.__host = window.__host || {};
       if (s.remission_pending) out.push('<span class="badge badge-info-warn">Ermäßigungsantrag ausstehend</span>');
       if (s.exemption_pending) out.push('<span class="badge badge-info-warn">Befreiungsantrag ausstehend</span>');
     }
-    return `<div class="q-info">${out.join('')}</div>`;
+    return out;
   }
 
   // Queue-Tabelle eines Klassen-Tabs.
@@ -1788,12 +1782,56 @@ window.__host = window.__host || {};
     if (qc) qc.textContent = `(${queue.filter(q => q.status === 'pending').length} offen / ${queue.length} gesamt)`;
     if (!tbody) return;
     if (!queue.length) {
-      tbody.innerHTML = '<tr><td colspan="5" style="opacity:.4;text-align:center">Keine Schüler — Klasse hinzufügen</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="4" style="opacity:.4;text-align:center">Keine Schüler — Klasse hinzufügen</td></tr>';
       return;
     }
     tbody.innerHTML = queue.map(s => {
-      const badgeClass = { pending: 'badge-pending', active: 'badge-active', done: 'badge-done', skipped: 'badge-skipped' }[s.status] || '';
-      const statusLabel = { pending: 'Wartend', active: 'Aktiv', done: 'Fertig', skipped: 'Übersprungen' }[s.status] || s.status;
+      // Status-Spalte eines aktiven Schülers zeigt den Fortschritt statt starr
+      // „Aktiv": X/Y (ausgegebene/angemeldete Bücher) → „Leihschein" während
+      // der Druck läuft → „Aktiv" nach fertigen Druck.
+      //
+      // X/Y ist zweizeilig, wenn beim Aufrufen schon Bücher ausgeliehen waren
+      // (`loaned_at_load > 0`): oben die session-basierten Zahlen (seit Aufrufen
+      // ausgeliehene / beim Aufrufen noch offene vorgemerkte — dieselben wie im
+      // Druck- und Nächster-Schüler-Hinweis des Helfers), unten die gesamt
+      // (ausgeliehene / angemeldete). Ohne Vorbestand sind beide identisch →
+      // eine Zeile.
+      //
+      // Rote Info-Hinweise (Nicht angemeldet, Bezahlung ausstehend, …) hängen
+      // ergänzend hinter dem Status; bei „fertig" ersetzt der Hinweis das
+      // „Fertig"-Badge (s. hintBadges). Die ehemalige Info-Spalte ist entfallen.
+      const hints = hintBadges(s);
+      let statusBadge;
+      if (s.status === 'active') {
+        if (s.slip_printing) {
+          statusBadge = `<span class="badge badge-active">Leihschein</span>`;
+        } else if (s.slip_printed) {
+          statusBadge = `<span class="badge badge-active">Aktiv</span>`;
+        } else if (s.books_total) {
+          const loaned = s.loaned_at_load || 0;
+          const sessionX = s.books_done - loaned;
+          const sessionY = s.books_total - loaned;
+          if (loaned > 0 && sessionY > 0) {
+            statusBadge = `<span class="badge badge-active q-progress" title="seit Aufrufen ${sessionX}/${sessionY} (offene vorgemerkte) · insgesamt ${s.books_done}/${s.books_total} (ausgeliehene/angemeldete)"><span class="q-progress-main">${sessionX}/${sessionY} ohne Mjb</span><span class="q-progress-sub">${s.books_done}/${s.books_total} gesamt</span></span>`;
+          } else {
+            statusBadge = `<span class="badge badge-active" title="ausgegebene / angemeldete Bücher">${s.books_done}/${s.books_total} gesamt</span>`;
+          }
+        } else {
+          statusBadge = `<span class="badge badge-active">Aktiv</span>`; // noch nicht geladen
+        }
+      } else if (s.status === 'done') {
+        // Fertig: statt „Fertig" der rote Hinweis, falls einer bekannt ist;
+        // ohne Hinweis bleibt es beim grünen „Fertig".
+        statusBadge = hints.length ? hints.join('') : `<span class="badge badge-done">Fertig</span>`;
+      } else {
+        const badgeClass = { pending: 'badge-pending', skipped: 'badge-skipped' }[s.status] || '';
+        const statusLabel = { pending: 'Wartend', skipped: 'Übersprungen' }[s.status] || s.status;
+        statusBadge = `<span class="badge ${badgeClass}">${statusLabel}</span>`;
+      }
+      // Hinweise ergänzend hinter den Status — außer bei „fertig", dort schon
+      // als Ersatz für „Fertig" gesetzt.
+      const trailingHints = s.status === 'done' ? '' : hints.join('');
+      const statusCell = `<div class="q-status">${statusBadge}${trailingHints}</div>`;
       const pairBtn = (state.modus_b && state.modus_b.open && ctx.live_ausgabe !== false)
         ? `<button class="success" data-action="pair-student" data-student-id="${s.student_id}">Pairing</button> ` : '';
       const printBtn = `<button class="secondary" data-action="print" data-student-id="${s.student_id}" title="Leihschein drucken" aria-label="Leihschein drucken">${ICON_PRINTER}</button>`;
@@ -1809,8 +1847,7 @@ window.__host = window.__host || {};
       return `<tr class="${s.status === 'active' ? 'row-active' : ''}">
         <td>${escapeHtml(s.lastname)}, ${escapeHtml(s.firstname)}</td>
         <td>${escapeHtml((s.form || '').replace(/^Klasse\s+/i, ''))}</td>
-        <td><span class="badge ${badgeClass}">${statusLabel}</span></td>
-        <td>${infoBadges(s)}</td>
+        <td>${statusCell}</td>
         <td><div class="row-actions">${actions}</div></td>
       </tr>`;
     }).join('');

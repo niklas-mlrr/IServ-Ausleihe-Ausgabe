@@ -50,6 +50,24 @@ def test_init_counts_lent_books_as_done():
         st, 7, _info(("A", "vorgemerkt"), ("B", "ausgeliehen"), ("C", "vorgemerkt"))
     )
     assert (s.as_dict()["books_done"], s.as_dict()["books_total"]) == (1, 3)
+    # Bei Laden bereits ausgeliehene Bücher — Grundlage für den session-
+    # basierten Fortschritt in der Host-Status-Spalte.
+    assert s.as_dict()["loaned_at_load"] == 1
+
+
+def test_session_progress_excludes_pre_loaned_books():
+    """Session-basierter Fortschritt (wie Druck-/Nächster-Schüler-Hinweis):
+    X = seit Aufrufen ausgeliehene = books_done - loaned_at_load,
+    Y = beim Aufrufen noch offene vorgemerkte = books_total - loaned_at_load.
+    Vorbestand (bei Laden schon ausgeliehen) fließt in beide NICHT ein."""
+    st, s = _state_with_student()
+    sessions.init_book_progress(
+        st, 7, _info(("A", "vorgemerkt"), ("B", "ausgeliehen"), ("C", "vorgemerkt"))
+    )
+    sessions.mark_book_done(st, 7, "A")  # ein offenes vorgemerktes ausgegeben
+    d = s.as_dict()
+    loaned = d["loaned_at_load"]
+    assert (d["books_done"] - loaned, d["books_total"] - loaned) == (1, 2)
 
 
 def test_hidden_books_count_in_neither_x_nor_y():
@@ -97,10 +115,12 @@ def test_reset_to_pending_clears_progress_and_slip():
     Marker fallen auf Null zurück (done/skipped behalten ihren Stand)."""
     _st, s = _state_with_student()
     s.books_total, s.done_isbns, s.slip_printed = 2, {"A"}, True
+    s.loaned_at_load = 1
     s.reset_progress()
     assert s.as_dict()["books_total"] is None
     assert s.as_dict()["books_done"] == 0
     assert s.as_dict()["slip_printed"] is False
+    assert s.as_dict()["loaned_at_load"] == 0
 
 
 def test_info_flags_from_student_info():

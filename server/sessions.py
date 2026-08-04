@@ -140,6 +140,10 @@ def init_book_progress(state: AppState, student_id: int | None, info: dict) -> N
     student.done_isbns = {
         b["isbn"] for b in books if b.get("isbn") and b.get("status") == "ausgeliehen"
     }
+    # Bei Laden bereits ausgeliehene Bücher — Grundlage für den session-
+    # basierten Fortschritt in der Host-Status-Spalte („seit Aufrufen … /
+    # beim Aufrufen offene …"). Entspricht `done_isbns` zum Ladezeitpunkt.
+    student.loaned_at_load = len(student.done_isbns)
 
 
 def mark_book_done(state: AppState, student_id: int, isbn: str | None) -> None:

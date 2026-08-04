@@ -139,7 +139,8 @@ function renderQueueGroupItem(s, withCallBtn) {
 }
 
 // Info-Spalte links vom Aufrufen-Button: rein INFORMATIVE Hinweise zu einem
-// Schüler, analog zur Info-Spalte im Host (s. host-render.js infoBadges),
+// Schüler, analog zu den roten Hinweis-Badges im Host-Status
+// (s. host-render.js hintBadges),
 // hier aber als kompakte Icons statt Text-Badges — in der schmalen
 // Queue-Zeile ist kein Platz für ausgeschriebene Labels. Icons bestehen
 // ausschließlich aus geometrischen Formen (+ je einem großen Kennbuchstaben

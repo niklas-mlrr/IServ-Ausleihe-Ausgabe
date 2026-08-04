@@ -8,6 +8,45 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-04 — Host-Status-Spalte: X/Y / Leihschein / Aktiv
+
+- **Status-Spalte aktiver Schüler** zeigt statt starr „Aktiv" den Fortschritt:
+  - **X/Y** (ausgegebene/angemeldete Bücher) — wie bisher das Info-Badge, nun in
+    der Status-Spalte. **Zweizeilig**, wenn beim Aufrufen schon Bücher ausgeliehen
+    waren (`loaned_at_load > 0`): oben **session-basiert** (seit Aufrufen
+    ausgeliehene / beim Aufrufen noch offene vorgemerkte — dieselben Zahlen wie
+    im Druck- und Nächster-Schüler-Hinweis des Helfers), unten **gesamt**
+    (ausgeliehene / angemeldete). Ohne Vorbestand identisch → eine Zeile.
+  - **„Leihschein"** während ein Druckauftrag für den Schüler läuft
+    (`slip_printing`).
+  - **„Aktiv"** nach fertigen Druck (`slip_printed`); **„Fertig"** beim
+    Abschließen (wie bisher).
+- **Info-Spalte:** X/Y- und Leihschein-Badges entfernt (in die Status-Spalte
+  gewandert); nur noch Anmelde-/Zahlstatus-Badges.
+- **Info-Spalte ganz entfallen** — die roten Anmelde-/Zahlstatus-Hinweise
+  („Nicht angemeldet", „… € offen", „Ermäßigungs-/Befreiungsantrag ausstehend")
+  wandern ebenfalls in die Status-Spalte: ergänzend hinter dem Status-Badge
+  (immer rot); bei **fertig** ersetzt der Hinweis das grüne „Fertig"-Badge
+  (kein Hinweis bekannt → bleibt „Fertig"). Tabellenkopf/`colspan` angepasst
+  (5 → 4 Spalten); `infoBadges` → `hintBadges` (liefert Badge-Array);
+  `.q-info` → `.q-status` (Flex-Container, `align-items: center`).
+- **Server:**
+  - `slip_printing` wird **dynamisch** aus der Print-Queue im Snapshot
+    abgeleitet (`PrintQueue.in_flight_student_ids()`, abgefragt in
+    `AppState.state_snapshot`), nicht auf dem `QueueStudent` gemutet. Da
+    `_notify_all` der Print-Queue bei jedem Druck-Übergang den vollen
+    Host-Snapshot broadcastet, folgt die Anzeige live — vom Enqueue
+    („Leihschein") bis zur Fertigstellung („Aktiv"). `QueueStudent.as_dict(slip_printing=…)`
+    ergänzt das Feld; Default `False` hält die Helfer-Client-Pfade unverändert.
+  - `loaned_at_load` (bei Hydration bereits ausgeliehene Bücher) auf dem
+    `QueueStudent` gespeichert, gesetzt in `init_book_progress`, zurückgesetzt in
+    `reset_progress`. Im Snapshot ausgeliefert; der Host leitet daraus die
+    session-basierten Zahlen ab.
+- **CSS:** `.q-progress` (zweizeiliger Badge: `.q-progress-main` / `.q-progress-sub`).
+- **Tests:** `test_in_flight_student_ids_tracks_enqueue_and_done` sichert den
+  Übergang Enqueue→fertig im Snapshot; `test_session_progress_excludes_pre_loaned_books`
+  sichert die session-basierte X/Y-Ableitung.
+
 ## 2026-08-04 — Fertig-Optionen unter der Live-Ausgabe (UI-Scaffold)
 
 - **Host, Klassen-Tab + panel-new:** unter dem Live-Ausgabe-Schalter zwei

@@ -465,6 +465,25 @@ class PrintQueue:
         await self._notify_all()
         self._wake.set()  # Kapazität frei → Scheduler füllt nach.
 
+    def in_flight_student_ids(self) -> set[int]:
+        """student_ids mit aktuell laufendem Druckauftrag (zentrale Warteschlange
+        + bereits an einen Drucker dispatcht/spooled/printing, noch nicht
+        finalisiert). Für die Host-Status-Spalte: solange für einen aktiven
+        Schüler ein Auftrag läuft, zeigt dieser dort „Leihschein" statt X/Y.
+
+        Read-only ohne Lock — analog den anderen Snapshot-Lesern
+        (`pool_printers`/`pool_summary`/`waiting_list`), die `state_snapshot()`
+        ebenfalls ohne Lock aufruft. Finalisierte Jobs sind nicht mehr in
+        `waiting` (done/failed/pop) bzw. über die Status-Whitelist aus den Slots
+        ausgeschlossen (stalled/peer_error bleiben zwar im Slot, zählen aber
+        nicht als laufend)."""
+        ids: set[int] = {j.student_id for j in self.waiting}
+        for s in self.slots.values():
+            for j in s.jobs:
+                if j.status in ("dispatching", "spooled", "printing"):
+                    ids.add(j.student_id)
+        return ids
+
     def _remove_from_slot(self, printer_id: str, job: PrintJob) -> None:
         """Job aus der Kapazitäts-Liste seines Druckers nehmen (falls noch
         vorhanden). Idempotent — mehrfacher Aufruf schadet nicht."""

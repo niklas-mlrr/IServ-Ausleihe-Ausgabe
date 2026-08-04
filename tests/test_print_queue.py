@@ -1260,3 +1260,50 @@ def test_display_view_printed_carries_job_id_and_originator():
     assert v2["printers"][0]["printed_name"] is None
     assert v2["printers"][0]["printed_job_id"] is None
     assert v2["printers"][0]["printed_originator"] is None
+
+
+# ---- slip_printing im Snapshot (Status-Spalte „Leihschein") ------------
+
+
+def test_in_flight_student_ids_tracks_enqueue_and_done(monkeypatch):
+    """`in_flight_student_ids` liefert die student_ids mit laufendem Druck-
+    auftrag; der Host-Snapshot spiegelt das als `slip_printing` in der
+    Kontext-Queue (Status-Spalte zeigt „Leihschein" statt X/Y). Nach
+    Fertigstellung des Auftrags ist der Schüler nicht mehr in-flight →
+    slip_printing False."""
+    from server.state import QueueStudent
+
+    st = AppState()
+    _patch(monkeypatch, st)
+    ctx = st.open_context("Klasse 5a")
+    s = QueueStudent(
+        student_id=42, lastname="Müller", firstname="Max",
+        form="Klasse 5a", status="active",
+    )
+    ctx.queue.append(s)
+    pq = st.print_queue
+
+    def slip_printing_flag() -> bool:
+        snap = st.state_snapshot()
+        entry = next(q for q in snap["contexts"][ctx.id]["queue"] if q["student_id"] == 42)
+        return entry["slip_printing"]
+
+    # Vor dem Druck: nicht in-flight, slip_printing False.
+    assert 42 not in pq.in_flight_student_ids()
+    assert slip_printing_flag() is False
+
+    async def run():
+        pq.start()
+        job = _job("host", 42, host_sid="s1", name="Müller, Max (Klasse 5a)")
+        await pq.enqueue(job)
+        # Enqueue reicht zum Anzeigen „Leihschein" — unabhängig vom Dispatch.
+        assert 42 in pq.in_flight_student_ids()
+        assert slip_printing_flag() is True
+        # Auftrag fertig abarbeiten (file-Backend-Mock → sofort done).
+        await asyncio.wait_for(job.done.wait(), timeout=5)
+        await pq.stop()
+
+    asyncio.run(run())
+    # Nach Fertigstellung: nicht mehr in-flight, slip_printing False.
+    assert 42 not in pq.in_flight_student_ids()
+    assert slip_printing_flag() is False

@@ -70,6 +70,14 @@ class QueueStudent:
     # `process_scan`; 0/None solange der Schüler noch nie geladen wurde.
     books_total: int | None = None
     done_isbns: set[str] = field(default_factory=set)
+    # Bei Hydration bereits ausgeliehene Bücher (status == „ausgeliehen" beim
+    # Laden) — die Grundlage für den session-basierten Fortschritt in der Host-
+    # Status-Spalte: „seit Aufrufen ausgeliehene" = books_done - loaned_at_load,
+    # „beim Aufrufen noch offene vorgemerkte" = books_total - loaned_at_load
+    # (dieselben Zahlen wie im Druck-/Nächster-Schüler-Hinweis des Helfers,
+    # s. scan-state.computeOpenBooks). Gefüllt in `init_book_progress`, auf 0
+    # wenn der Schüler noch nie geladen wurde.
+    loaned_at_load: int = 0
     # Anmelde-/Zahlstatus aus IServ (`get_student_info`) — rein INFORMATIV für
     # die Queue-Anzeige, ohne Einfluss auf `status` (die Zuweisungs-Zustands-
     # maschine). `None` = noch nicht abgefragt. Gefüllt beim Klassen-Laden
@@ -87,7 +95,7 @@ class QueueStudent:
     # bleibt davon unberührt; „Leihschein" ist eine reine Info-Anzeige.
     slip_printed: bool = False
 
-    def as_dict(self) -> dict:
+    def as_dict(self, *, slip_printing: bool = False) -> dict:
         return {
             "student_id": self.student_id,
             "lastname": self.lastname,
@@ -97,7 +105,13 @@ class QueueStudent:
             "assigned_helper": self.assigned_helper,
             "books_total": self.books_total,
             "books_done": len(self.done_isbns),
+            "loaned_at_load": self.loaned_at_load,
             "slip_printed": self.slip_printed,
+            # Leihschein-Druck läuft gerade (Auftrag in der Print-Queue, noch
+            # nicht finalisiert) — dynamisch aus der Print-Queue im Snapshot
+            # abgeleitet (s. `AppState.state_snapshot`), nicht auf dem Schüler
+            # gemutet. Default False hält die Helfer-Client-Pfade unverändert.
+            "slip_printing": slip_printing,
             "enrolled": self.enrolled,
             "paid": self.paid,
             "amount_open": self.amount_open,
@@ -134,6 +148,7 @@ class QueueStudent:
         mit den Zählern des alten startet."""
         self.books_total = None
         self.done_isbns = set()
+        self.loaned_at_load = 0
         self.slip_printed = False
 
     @classmethod
@@ -617,11 +632,18 @@ class AppState:
             return []
         return [s.as_dict() for s in ctx.queue if s.status == "pending"]
 
-    def queue_as_list(self, context_id: str | None = None) -> list[dict]:
+    def queue_as_list(
+        self, context_id: str | None = None, *, printing_ids: set[int] | None = None
+    ) -> list[dict]:
         ctx = self.ctx_or_active(context_id)
         if ctx is None:
             return []
-        return [s.as_dict() for s in ctx.queue]
+        return [
+            s.as_dict(slip_printing=(s.student_id in printing_ids))
+            if printing_ids is not None
+            else s.as_dict()
+            for s in ctx.queue
+        ]
 
     def real_contexts_summary(self) -> list[dict]:
         """Alle offenen Klassen-Kontexte für den Helferclient: je Kontext id,
@@ -657,11 +679,20 @@ class AppState:
             else {"total": 0, "available": 0, "in_use": 0}
         )
         ctx = self.active_context
+        # student_ids mit aktuell laufendem Leihschein-Druck — für die
+        # `slip_printing`-Marker in der Host-Status-Spalte („Leihschein" statt
+        # X/Y, solange der Auftrag in der Print-Queue läuft). Einmal pro Snapshot
+        # berechnet; `_notify_all` der Print-Queue broadcastet den Snapshot bei
+        # jedem Druck-Übergang, sodass der Host live folgt.
+        printing_ids = self.print_queue.in_flight_student_ids()
         contexts = {
             c.id: {
                 "id": c.id,
                 "form": c.form,
-                "queue": [s.as_dict() for s in c.queue],
+                "queue": [
+                    s.as_dict(slip_printing=(s.student_id in printing_ids))
+                    for s in c.queue
+                ],
                 # Drucker-Allowlist dieser Klasse — `None` = alle Pool-Drucker
                 # (Default), sonst sortierte ID-Liste der erlaubten Drucker.
                 # Der Host-Client rendert daraus die Checkboxen im Klassen-Tab.
@@ -682,7 +713,7 @@ class AppState:
             "active_context_id": self.active_context_id,
             "contexts": contexts,
             "selected_schoolyear": self.selected_schoolyear,
-            "queue": self.queue_as_list(),
+            "queue": self.queue_as_list(printing_ids=printing_ids),
             "helpers": self.helpers_as_dict(),
             "modus_b": self.modus_b_snapshot(),
             "allow_booking": get_config().allow_booking,
