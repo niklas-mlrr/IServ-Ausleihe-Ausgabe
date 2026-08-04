@@ -8,6 +8,60 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-04 — Lehreransicht für Modus B geplant
+
+- Beschlossen: Eine Lehrkraft wird innerhalb eines konkreten Klassen-Tabs per
+  QR-Token und nachgeschaltetem Host-Registrierungscode gepaart. Sie sieht live
+  ausschließlich diese Klasse und kann nur wartende Schüler als abwesend
+  überspringen bzw. zurück auf wartend setzen.
+- Datenschutz-/Rechte-Grenze: eigener minimierter Teacher-Snapshot statt
+  Host-Snapshot; keine anderen Klassen, Zahlungs-/Buchdaten, QR-Secrets oder
+  Host-Steuerung. „Ausgabe abgeschlossen" bedeutet alle Bücher gescannt plus
+  Leihschein gedruckt, nicht eine zusätzliche IServ-Buchungsbehauptung.
+- Detail-Zielbild und Abnahmekriterien: `docs/teacher_status_page_plan.md`.
+
+## 2026-08-04 — Leihschein-Druckmodus am Schülerclient (slip_trigger)
+
+- **Host-Dropdown „Leihschein Druck:"** (Automatisch / Schülerauslöser /
+  Betreuerauslöser / Barcode; im vorigen Schritt als UI-Scaffold eingebaut)
+  **an echtes Verhalten gebunden**. pro Klasse persistiert (In-Memory),
+  per Snapshot an den Host und per `worker_ready` an den Schülerclient
+  gepusht.
+- **Druckmodus am Schülerclient (Modus B):** sobald alle vorgemerkten Bücher
+  gescannt sind (clientseitig erkannt aus `currentBooks` + `scannedIsbns`;
+  geprüft nach `worker_ready`, jedem erfolgreichen Scan **und** nach
+  `booklist_update` — eine nachträglich ausgeblendete Reihe kann den
+  Druckmodus erst auslösen), geht der Schüler in eine neue `#view-print`-
+  Ansicht. Verhalten je `slip_trigger`:
+  - **Automatisch** — Druckauftrag sofort gesendet.
+  - **Schülerauslöser** — Druck per Button.
+  - **Betreuerauslöser** — Hinweis „bei einem Betreuer melden"; Druck läuft
+    über das bestehende Helfer-/Host-Druckmenü.
+  - **Barcode** — Platzhalter (kein Verhalten, folgt später).
+- **Druckauftrag role="student":** neuer WS-Message-Typ `print_request` im
+  Schüler-WS; enqueued über die Druckerwarteschlange mit der Klassen-Druck-
+  Allowlist (`allowed_printers_for`), `pages` am globalen
+  `slip_second_page_default` orientiert. `PrintJob.student_token` ergänzt;
+  `print_progress`/`print_result` werden ans Schüler-WS geroutet (Guard:
+  Session kann nach Auto-Fertig weg sein).
+- **Auto-Fertig nach Druck:** `_mark_slip_printed` ist die einzige Stelle, an
+  der `slip_printed` true wird (für alle Druckpfade — Host-Endpoint,
+  Helfer-WS, Queue-dispatched Student-Job). Dort wird für aktive Modus-B-
+  Sessions (`find_session_by_student` + `state == "paired"`) automatisch
+  `end_student(done/completed)` aufgerufen → `closed` an den Schüler →
+  „Vorgang abgeschlossen". Modus A unberührt (keine Modus-B-Session).
+- **Server:** `ClassContext.slip_trigger` (Default `"auto"`) +
+  `state_snapshot`; `OpenClassRequest.slip_trigger` (Literal-validiert) +
+  neuer Endpoint `POST /api/context-slip-trigger`; `slip_trigger_for()`
+  Helfer; `worker_ready`-Payload in `load_and_push_paired_student` + WS-
+  Reconnect um `slip_trigger` ergänzt.
+- **Host-UI:** `load/saveClassSlipTrigger` (localStorage); Two-Way-Binding
+  in `openClass`/`renderNewClassPrinters`/`renderCtxPrinters`;
+  `setContextSlipTrigger` (Spiegel von `setContextLiveAusgabe`) +
+  delegierter Change-Handler.
+- **Tests:** `tests/test_loan_slip.py` FakeState um `find_session_by_student`
+  ergänzt (Auto-Fertig-Hook). Suite grün (336 passed).
+
 ## 2026-08-04 — Host-Status-Spalte: X/Y / Leihschein / Aktiv
 
 - **Status-Spalte aktiver Schüler** zeigt statt starr „Aktiv" den Fortschritt:

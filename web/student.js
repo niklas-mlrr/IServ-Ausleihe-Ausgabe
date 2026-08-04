@@ -2,6 +2,7 @@
 const views = {
   pending: document.getElementById('view-pending'),
   active: document.getElementById('view-active'),
+  print: document.getElementById('view-print'),
   done: document.getElementById('view-done'),
   error: document.getElementById('view-error'),
 };
@@ -33,6 +34,12 @@ const scannedIsbns = new Set();     // in dieser Session gescannte ISBNs
 const scanOrder = new Map();        // ISBN -> Scan-Sequenz (für „zuletzt ausgegeben oben")
 let scanSeq = 0;
 let bookOrder = [];                 // klassenweite ISBN-Reihenfolge (vom Host konfiguriert)
+// ---- Druckmodus (Modus B) ----
+// slip_trigger der Klasse (vom Server mit worker_ready gepusht) bestimmt, wer
+// den Leihschein auslöst, sobald alle vorgemerkten Bücher gescannt sind.
+let slipTrigger = 'auto';
+let druckmodusEntered = false;       // Druckmodus bereits betreten (nur 1× pro Session)
+let printSent = false;               // Druckauftrag bereits gesendet (Retry-Sperre)
 
 function showError(title, text) {
   if (title) document.getElementById('error-title').textContent = title;
@@ -102,8 +109,10 @@ function handleServerMessage(msg) {
     // Worker buchungsbereit: Bücherliste rendern, Status flippen, Scans frei.
     workerPending = false;
     currentBooks = msg.books || [];
+    if (msg.slip_trigger) slipTrigger = msg.slip_trigger;
     renderBooks(currentBooks);
     setStatusText('Scanner bereit — Buch scannen');
+    maybeEnterDruckmodus();   // Randfall: schon beim Laden alles erledigt
   } else if (msg.type === 'scan_result') {
     // Jeder nicht-verbuchbare Scan → Hinweis-Modal (wie bisher bei
     // ausgemustert / verliehen / an-sich-selbst, jetzt auch für „nicht
@@ -124,6 +133,9 @@ function handleServerMessage(msg) {
       scannedIsbns.add(msg.isbn);
       scanOrder.set(msg.isbn, ++scanSeq);
       renderBooks(currentBooks, true);   // FLIP: Zeilen an neue Position fahren
+      // Nach jedem erfolgreichen Scan prüfen, ob alle vorgemerkten Bücher
+      // erledigt sind → Druckmodus.
+      maybeEnterDruckmodus();
     }
   } else if (msg.type === 'book_alert_clear') {
     // Der Host gibt frei — nur das Modal schließt. Die Statuszeile behält
@@ -138,10 +150,95 @@ function handleServerMessage(msg) {
     if (Array.isArray(msg.book_order)) bookOrder = msg.book_order;
     if (Array.isArray(msg.books)) currentBooks = msg.books;
     renderBooks(currentBooks);
+    // Wird eine Reihe nachträglich ausgeblendet, fällt ein bisher noch offenes
+    // vorgemerktes Buch aus der Liste → evtl. sind die verbleibenden nun alle
+    // erledigt → Druckmodus prüfen (auf dem aktualisierten Stand).
+    maybeEnterDruckmodus();
+  } else if (msg.type === 'print_progress') {
+    // Druck läuft in der Warteschlange/am Drucker — Druckmodus-Text live halten.
+    if (views.print.classList.contains('show')) {
+      const t = document.getElementById('print-text');
+      if (t && msg.status !== 'done') t.textContent = 'Leihschein wird gedruckt…';
+    }
+  } else if (msg.type === 'print_result') {
+    handlePrintResult(msg);
   } else if (msg.type === 'closed') {
     finished = true; clearToken(); show('done');
   } else if (msg.type === 'error') {
     setStatusText('Fehler: ' + (msg.msg || ''));
+  }
+}
+
+// ---- Druckmodus (Modus B): alle vorgemerkten Bücher gescannt ----
+// `true`, wenn mindestens ein vorgemerktes Buch vorhanden und alle vorgemerkten
+// erledigt (ausgeliehen oder in dieser Session gescannt) sind. Ausgeblendete
+// Reihen fallen aus `currentBooks` heraus und gelten daher nicht als offen.
+function allVorgemerkteDone() {
+  const vorgemerkt = currentBooks.filter(b => b.status === 'vorgemerkt');
+  return vorgemerkt.length > 0 && vorgemerkt.every(b => isBookDone(b, scannedIsbns));
+}
+
+// Einmaliger Eintritt in den Druckmodus. Wird nach worker_ready, jedem
+// erfolgreichen Scan und jeder booklist_update geprüft (s. oben).
+function maybeEnterDruckmodus() {
+  if (druckmodusEntered || finished) return;
+  if (!allVorgemerkteDone()) return;
+  druckmodusEntered = true;
+  enterDruckmodus();
+}
+
+function enterDruckmodus() {
+  show('print');
+  const title = document.getElementById('print-title');
+  const text = document.getElementById('print-text');
+  const actions = document.getElementById('print-actions');
+  if (title) title.textContent = 'Alle Bücher eingescannt';
+  switch (slipTrigger) {
+    case 'auto':
+      if (text) text.textContent = 'Leihschein wird gedruckt…';
+      if (actions) actions.style.display = 'none';
+      sendPrintRequest();
+      break;
+    case 'student':
+      if (text) text.textContent = 'Tippe auf „Leihschein drucken", um deinen Leihschein zu drucken.';
+      if (actions) actions.style.display = '';
+      break;
+    case 'helper':
+      if (text) text.textContent = 'Bitte melde dich bei einem Betreuer, um deinen Leihschein drucken zu lassen.';
+      if (actions) actions.style.display = 'none';
+      break;
+    default:  // 'barcode' — Platzhalter, kein Verhalten (folgt später)
+      if (text) text.textContent = 'Druckmodus (Barcode) — folgt.';
+      if (actions) actions.style.display = 'none';
+      break;
+  }
+}
+
+function sendPrintRequest() {
+  if (printSent) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  printSent = true;
+  ws.send(JSON.stringify({ type: 'print_request' }));
+}
+
+function handlePrintResult(msg) {
+  if (!views.print.classList.contains('show')) return;   // z. B. schon auf done
+  const text = document.getElementById('print-text');
+  if (msg.ok) {
+    // Auto-Fertig (closed) folgt serverseitig; nur kurz bestätigen.
+    if (text) text.textContent = 'Leihschein gedruckt — wird abgeschlossen…';
+  } else {
+    // Druck fehlgeschlagen → Retry freigeben (Schülerauslöser kann erneut
+    // tippen; bei Automatisch zeigt der Hinweis den Fehler, ein Betreuer
+    // kann eingreifen). Auto-Modus sendet nicht automatisch erneut.
+    printSent = false;
+    if (text) text.textContent = 'Druck fehlgeschlagen: ' + (msg.msg || 'unbekannt') + (slipTrigger === 'student' ? ' — bitte erneut versuchen.' : ' — bitte melde dich bei einem Betreuer.');
+    // Retry-Button freigeben bei selbst auslösbaren Modi (Automatisch &
+    // Schülerauslöser) — falls z. B. erst ein Drucker konfiguriert werden muss.
+    if (slipTrigger === 'auto' || slipTrigger === 'student') {
+      const actions = document.getElementById('print-actions');
+      if (actions) actions.style.display = '';
+    }
   }
 }
 
@@ -247,6 +344,14 @@ function closeBookAlertModal() { bookAlertModalEl.classList.remove('show'); }
 // „An sich selbst verliehen"-Hinweis: lokal schließbar (kein Host-Bezug).
 bookAlertCloseBtn.addEventListener('click', closeBookAlertModal);
 
+// Druckmodus (Schülerauslöser): Button sendet den Leihschein-Druckauftrag.
+const printTriggerBtn = document.getElementById('print-trigger-btn');
+if (printTriggerBtn) {
+  printTriggerBtn.addEventListener('click', () => {
+    sendPrintRequest();
+  });
+}
+
 function renderStudent(s, overridden) {
   bookAlertOpen = false;
   closeBookAlertModal();
@@ -283,6 +388,10 @@ function renderStudent(s, overridden) {
   workerPending = true;
   currentBooks = [];
   scannedIsbns.clear(); scanOrder.clear(); scanSeq = 0;
+  // Druckmodus-Zustand für den neuen Schüler zurücksetzen.
+  druckmodusEntered = false;
+  printSent = false;
+  slipTrigger = 'auto';
   document.getElementById('book-rows').innerHTML =
     '<div class="book-empty">Bücher werden geladen…</div>';
   setStatusText('Wird geladen…');
@@ -361,11 +470,6 @@ function renderBooks(books, animate = false) {
     });
   }
 }
-
-// ---- Finish ----
-document.getElementById('finish-btn').addEventListener('click', () => {
-  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'finish' }));
-});
 
 // ================= Scanner (aus scan.html übernommen) =================
 let lastValue = '', cooldown = false, html5QrCode = null, currentCameraId = null,

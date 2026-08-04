@@ -150,8 +150,6 @@
       .book-row { transition: transform .01ms !important; }
     }
 
-    #finish-btn { margin-top: 10px; width: 100%; background: #30d158; color: #000; font-weight: 600; font-size: 1.05rem; padding: 14px; }
-
     /* ---- Ausgemustertes-Buch-Hinweis (Modal) ---- */
     .modal-overlay {
       position: fixed; inset: 0; z-index: 100; padding: 20px;
@@ -177,6 +175,11 @@
     .ico { width: 1em; height: 1em; vertical-align: -0.125em; flex: none; }
     .big-msg .title { font-size: 1.4rem; font-weight: 600; margin-bottom: 8px; }
     .big-msg .text { opacity: .6; }
+    /* Druckmodus: Druck-Button nicht vollbreit, sondern dezent mittig. */
+    #view-print .big-msg { margin-top: 90px; }
+    #print-actions { max-width: 320px; width: 100%; margin: 16px auto 0; }
+    #print-actions button { padding: 14px; font-size: 1rem; }
+    #print-text { white-space: normal; }
   </style>
 </head>
 <body>
@@ -216,7 +219,21 @@
     <div class="book-table-wrap">
       <div id="book-rows"></div>
     </div>
-    <button id="finish-btn">Fertig — Vorgang abschließen</button>
+  </div>
+
+  <!-- Druckmodus (Modus B): alle vorgemerkten Bücher gescannt. Ansicht hängt
+       am slip_trigger der Klasse (Automatisch / Schülerauslöser /
+       Betreuerauslöser / Barcode). Nach erfolgreichem Druck geht der Schüler
+       automatisch auf „Vorgang abgeschlossen" (serverseitig via closed). -->
+  <div class="view" id="view-print">
+    <div class="big-msg">
+      <div class="icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg></div>
+      <div class="title" id="print-title">Alle Bücher eingescannt</div>
+      <div class="text" id="print-text"></div>
+      <div class="modal-actions" id="print-actions" style="display:none">
+        <button id="print-trigger-btn">Leihschein drucken</button>
+      </div>
+    </div>
   </div>
 
   <!-- Buch-Hinweis-Modal. Bei ausgemustert / verliehen-an-andere: bewusst

@@ -107,6 +107,25 @@ window.__host = window.__host || {};
   function saveClassLiveAusgabe(on) {
     localStorage.setItem(CLASS_LIVE_AUSGABE_STORAGE_KEY, on ? 'true' : 'false');
   }
+
+  // Leihschein-Druckmodus (slip_trigger) für neu zu öffnende Klassen (panel-new):
+  // Dropdown `#new-class-slip-trigger`, das mit `/api/open-class` als
+  // `slip_trigger` geschickt wird. Bestimmt, wer am Schülerclient den Druck
+  // auslöst, sobald alle vorgemerkten Bücher gescannt sind. Default "auto".
+  // Wird für das nächste Öffnen gemerkt. S. ClassContext.slip_trigger.
+  const CLASS_SLIP_TRIGGER_STORAGE_KEY = 'classSlipTrigger';
+  const SLIP_TRIGGER_VALUES = ['auto', 'student', 'helper', 'barcode'];
+
+  function loadClassSlipTrigger() {
+    const raw = localStorage.getItem(CLASS_SLIP_TRIGGER_STORAGE_KEY);
+    return SLIP_TRIGGER_VALUES.includes(raw) ? raw : 'auto';
+  }
+
+  function saveClassSlipTrigger(value) {
+    if (SLIP_TRIGGER_VALUES.includes(value)) {
+      localStorage.setItem(CLASS_SLIP_TRIGGER_STORAGE_KEY, value);
+    }
+  }
   // ---- Bücherlisten ordnen (Einstellungen-Dialog, Reiter je Jahrgang) ----
   // Analog zur Klassen-Bücher-Reihenfolge, aber jahrgangsweit und vorab: pro
   // Booklist ein Reiter, Katalog wird beim Anklicken lazy geladen. Änderungen

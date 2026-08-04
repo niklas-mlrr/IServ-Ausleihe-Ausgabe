@@ -590,6 +590,18 @@ def allowed_printers_for(state: AppState, student_id: int) -> set[str] | None:
     return None if ctx.allowed_printer_ids is None else set(ctx.allowed_printer_ids)
 
 
+def slip_trigger_for(state: AppState, student_id: int) -> str:
+    """`slip_trigger` der Klasse eines Schülers — bestimmt den Druckmodus am
+    Schülerclient (Modus B), sobald alle vorgemerkten Bücher gescannt sind.
+    Sucht den besitzenden Klassen-Kontext via `find_student_with_ctx`. Ohne
+    Kontext → ``"auto"`` (Default). Rein lesend."""
+    found = state.find_student_with_ctx(student_id)
+    if found is None:
+        return "auto"
+    ctx, _s = found
+    return ctx.slip_trigger
+
+
 async def print_loan_slip_for(
     state: AppState,
     student_id: int,
@@ -711,6 +723,21 @@ async def _mark_slip_printed(state: AppState, student_id: int) -> None:
         await get_hub().broadcast_host(state.state_snapshot())
     except Exception:  # noqa: BLE001 — Druck darf an einem Broadcast nicht scheitern
         log.debug("Host-Broadcast nach Leihschein-Druck fehlgeschlagen", exc_info=True)
+    # Auto-Fertig für Modus B (Live-Ausgabe): hat dieser Schüler eine aktive
+    # Modus-B-Session (Schüler scannt selbst am iPad), geht er nach dem Druck
+    # automatisch auf „abgeschlossen" — unabhängig davon, wer den Druck
+    # ausgelöst hat (Automatisch/Schülerauslöser per print_request, oder
+    # Betreuerauslöser per Helfer-/Host-Menü). Modus-A-Schüler haben keine
+    # Modus-B-Session und bleiben unberührt (Host beendet sie wie bisher).
+    session = state.find_session_by_student(student_id)
+    if session is not None and session.state == "paired":
+        try:
+            await end_student(
+                state, get_hub(), student_id,
+                queue_status="done", session_state="completed",
+            )
+        except Exception:  # noqa: BLE001 — Auto-Fertig darf den Druckerfolg nicht widerrufen
+            log.debug("Auto-Fertig (Modus B) nach Leihschein-Druck fehlgeschlagen", exc_info=True)
 
 
 async def _download_slip_to_host(
@@ -1394,7 +1421,14 @@ async def load_and_push_paired_student(
     # Worker bereit (oder Degraded-Modus ohne worker_pool): Bücherliste an den
     # Schüler pushen + Client flippt von „Wird geladen…" auf „Scanner bereit".
     if session.ws is not None:
-        await get_hub().send_websocket(session.ws, {"type": "worker_ready", "books": books})
+        await get_hub().send_websocket(
+            session.ws,
+            {
+                "type": "worker_ready",
+                "books": books,
+                "slip_trigger": slip_trigger_for(state, student.student_id),
+            },
+        )
 
     await hub.broadcast_host(state.state_snapshot())
 

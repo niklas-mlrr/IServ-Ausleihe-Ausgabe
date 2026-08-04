@@ -156,6 +156,15 @@
       <p class="ctx-coupling-warn" id="new-class-live-warn" style="display:none"></p>
       <p class="hint">Schüler können sich per iPad selbst zum Scannen einreihen. Ausgeschaltet bleibt der Modus-B-Kasten in dieser Klassenansicht ausgeblendet.</p>
       <div id="new-class-done-opts" style="margin-top:14px;display:flex;flex-direction:column;gap:10px">
+        <label class="slip-trigger-line" for="new-class-slip-trigger" title="Wann der Leihschein dieser Klasse gedruckt wird. Nur bei aktiver Live-Ausgabe.">
+          <span>Leihschein Druck:</span>
+          <select id="new-class-slip-trigger">
+            <option value="auto">Automatisch</option>
+            <option value="student">Schülerauslöser</option>
+            <option value="helper">Betreuerauslöser</option>
+            <option value="barcode">Barcode</option>
+          </select>
+        </label>
         <label class="check-line" title="Schüler erst als fertig markieren, wenn der Leihschein unterschrieben ist — sonst bereits nach dem Drucken. Nur bei aktiver Live-Ausgabe.">
           <input type="checkbox" id="new-class-done-signed">
           <span>Leihschein unterschreiben</span>

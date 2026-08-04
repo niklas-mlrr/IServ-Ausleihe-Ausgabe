@@ -157,6 +157,15 @@ window.__host = window.__host || {};
             <p class="ctx-coupling-warn" data-ctx-live-warn="${id}" style="display:none"></p>
             <p class="hint" style="margin-top:8px">Schüler können sich per iPad selbst zum Scannen einreihen. Ausgeschaltet bleibt der Modus-B-Kasten in dieser Ansicht ausgeblendet.</p>
             <div data-ctx-done-opts="${id}" style="margin-top:14px;display:flex;flex-direction:column;gap:10px">
+              <label class="slip-trigger-line" for="ctx-slip-trigger-${id}" title="Wann der Leihschein dieser Klasse gedruckt wird. Nur bei aktiver Live-Ausgabe.">
+                <span>Leihschein Druck:</span>
+                <select id="ctx-slip-trigger-${id}" data-ctx-slip-trigger="${id}">
+                  <option value="auto">Automatisch</option>
+                  <option value="student">Schülerauslöser</option>
+                  <option value="helper">Betreuerauslöser</option>
+                  <option value="barcode">Barcode</option>
+                </select>
+              </label>
               <label class="check-line" title="Schüler erst als fertig markieren, wenn der Leihschein unterschrieben ist — sonst bereits nach dem Drucken. Nur bei aktiver Live-Ausgabe.">
                 <input type="checkbox" data-ctx-done-signed="${id}">
                 <span>Leihschein unterschreiben</span>
@@ -239,13 +248,15 @@ window.__host = window.__host || {};
     saveClassPrintersSelection(printers);
     const liveAusgabe = !!document.getElementById('new-class-live-ausgabe')?.checked;
     saveClassLiveAusgabe(liveAusgabe);
+    const slipTrigger = document.getElementById('new-class-slip-trigger')?.value || 'auto';
+    saveClassSlipTrigger(slipTrigger);
     // Ein einziger persistenter Toast: steht während des gesamten Ladens
     // („Lade Klasse …") und wird in-place zum Abschluss-Hinweis, sobald die
     // Klasse geladen ist. So gibt es nie zwei gleichzeitig sichtbare Toasts.
     const loadToast = showMsgPersistent(`Lade ${form}…`);
     let r, d;
     try {
-      r = await fetch('/api/open-class', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ form, force, auto_done, printers, live_ausgabe: liveAusgabe }) });
+      r = await fetch('/api/open-class', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ form, force, auto_done, printers, live_ausgabe: liveAusgabe, slip_trigger: slipTrigger }) });
       d = await r.json();
     } catch (err) {
       finalizeToast(loadToast, 'Fehler beim Laden der Klasse');
@@ -875,6 +886,10 @@ window.__host = window.__host || {};
     // vorbelegen (Default true).
     const liveCb = document.getElementById('new-class-live-ausgabe');
     if (liveCb) liveCb.checked = loadClassLiveAusgabe();
+    // Leihschein-Druckmodus für die nächste zu öffnende Klasse aus localStorage
+    // vorbelegen (Default "auto").
+    const slipSel = document.getElementById('new-class-slip-trigger');
+    if (slipSel) slipSel.value = loadClassSlipTrigger();
     // Kopplung Drucker ↔ Live-Ausgabe aus dem gerenderten Zustand synchronisieren
     // (Schalter deaktiviert + roter Hinweis, wenn kein Drucker gewählt).
     updateNewClassLiveGate();
@@ -927,6 +942,13 @@ window.__host = window.__host || {};
     const liveOn = ctx.live_ausgabe !== false;
     const liveCb = document.querySelector(`input[data-ctx-live="${id}"]`);
     if (liveCb) liveCb.checked = liveOn;
+    // Leihschein-Druckmodus dieser Klasse aus dem Snapshot setzen (Default
+    // "auto", kompatibel mit Kontexten, die das Feld noch nicht liefern).
+    const slipSel = document.querySelector(`select[data-ctx-slip-trigger="${id}"]`);
+    if (slipSel) {
+      slipSel.value = ctx.slip_trigger || 'auto';
+      slipSel.dataset.prevValue = slipSel.value;
+    }
     const mbCard = document.querySelector(`[data-ctx-mb="${id}"]`);
     if (mbCard) mbCard.style.display = liveOn ? '' : 'none';
     // Kopplung Drucker ↔ Live-Ausgabe: der „mindestens ein Drucker"-Hinweis
@@ -949,10 +971,12 @@ window.__host = window.__host || {};
     const live = document.querySelector(`input[data-ctx-live="${id}"]`);
     const signed = document.querySelector(`input[data-ctx-done-signed="${id}"]`);
     const collected = document.querySelector(`input[data-ctx-done-collected="${id}"]`);
+    const slipTrigger = document.querySelector(`select[data-ctx-slip-trigger="${id}"]`);
     if (!live || !signed || !collected) return;
     const liveOn = !!live.checked;
     signed.disabled = !liveOn;
     collected.disabled = !liveOn || !signed.checked;
+    if (slipTrigger) slipTrigger.disabled = !liveOn;
   }
 
   // Kopplungs-Hinweise für eine Klasse nach einem Re-Render räumen. Die roten
@@ -1032,6 +1056,26 @@ window.__host = window.__host || {};
       if (el) el.checked = !on;  // revert
     }
     updateCtxDoneOpts(id);
+  }
+
+  // Klassen-Tab: Leihschein-Druckmodus (slip_trigger) dieser Klasse nachträglich
+  // speichern (Dropdown unter „Leihschein Druck:"). Spiegel von
+  // setContextLiveAusgabe — ohne Druckerkopplung (jeder Wert ist unabhängig von
+  // der Druckerauswahl erlaubbar). Persistiert serverseitig via
+  // /api/context-slip-trigger; bei Fehler revert + Toast.
+  async function setContextSlipTrigger(id, value, el) {
+    const prev = el && el.dataset.prevValue;
+    const r = await fetch('/api/context-slip-trigger', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ context_id: id, slip_trigger: value }),
+    });
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      showMsg(d.detail?.msg || d.detail || 'Druckmodus konnte nicht gespeichert werden');
+      if (el && prev) el.value = prev;  // revert
+    } else if (el) {
+      el.dataset.prevValue = value;
+    }
   }
 
 
@@ -2433,6 +2477,9 @@ window.__host = window.__host || {};
     updateNewClassLiveGate();
     updateNewClassDoneOpts();
   });
+  document.getElementById('new-class-slip-trigger').addEventListener('change', (e) => {
+    saveClassSlipTrigger(e.target.value);
+  });
   // panel-new: Fertig-Optionen unter der Live-Ausgabe. „Leihschein
   // eingesammelt" ausgegraut, wenn „Leihschein unterschrieben" nicht angehakt
   // ist; beide ausgegraut, wenn Live-Ausgabe aus. Reine UI — die eigentliche
@@ -2441,10 +2488,12 @@ window.__host = window.__host || {};
     const live = document.getElementById('new-class-live-ausgabe');
     const signed = document.getElementById('new-class-done-signed');
     const collected = document.getElementById('new-class-done-collected');
+    const slipTrigger = document.getElementById('new-class-slip-trigger');
     if (!live || !signed || !collected) return;
     const liveOn = !!live.checked;
     signed.disabled = !liveOn;
     collected.disabled = !liveOn || !signed.checked;
+    if (slipTrigger) slipTrigger.disabled = !liveOn;
   }
   document.getElementById('new-class-done-signed').addEventListener('change', updateNewClassDoneOpts);
   document.getElementById('mb-open-btn').addEventListener('click', openModusB);
@@ -2569,6 +2618,7 @@ window.__host = window.__host || {};
     else if (el.classList.contains('printer-check')) setContextPrinters(el.dataset.ctxId, el);
     else if (el.hasAttribute('data-ctx-done-signed')) updateCtxDoneOpts(el.dataset.ctxDoneSigned);
     else if (el.hasAttribute('data-ctx-live')) setContextLiveAusgabe(el.dataset.ctxLive, el.checked, el);
+    else if (el.hasAttribute('data-ctx-slip-trigger')) setContextSlipTrigger(el.dataset.ctxSlipTrigger, el.value, el);
   });
   document.getElementById('helper-tbody').addEventListener('click', handleDelegatedAction);
   document.getElementById('helper-tbody').addEventListener('change', (e) => {

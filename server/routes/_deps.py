@@ -15,6 +15,8 @@ registriert) sind.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request
 from pydantic import BaseModel
 
@@ -107,6 +109,10 @@ class OpenClassRequest(BaseModel):
     # Live-Ausgabe (Modus B) für diese Klasse sichtbar? Default `True` (kompatibel
     # mit bestehenden Öffnungen ohne Angabe). S. ClassContext.live_ausgabe.
     live_ausgabe: bool = True
+    # Wann der Leihschein am Schülerclient gedruckt wird, sobald alle vorgemerkten
+    # Bücher gescannt sind (Druckmodus). Default "auto" (kompatibel mit Öffnungen
+    # ohne Angabe). S. ClassContext.slip_trigger.
+    slip_trigger: Literal["auto", "student", "helper", "barcode"] = "auto"
 
 
 class CloseClassRequest(BaseModel):
@@ -138,6 +144,16 @@ class ContextLiveAusgabeRequest(BaseModel):
 
     context_id: str = ""
     live_ausgabe: bool = True
+
+
+class ContextSlipTriggerRequest(BaseModel):
+    """Body für `POST /api/context-slip-trigger`: Wann der Leihschein dieser
+    Klasse am Schülerclient (Modus B) gedruckt wird, sobald alle vorgemerkten
+    Bücher gescannt sind (Druckmodus). `slip_trigger` aus
+    {"auto","student","helper","barcode"} (s. ClassContext.slip_trigger)."""
+
+    context_id: str = ""
+    slip_trigger: Literal["auto", "student", "helper", "barcode"] = "auto"
 
 
 # Modul-Level-Singleton als Body-Default (statt `= ContextIdBody()` direkt im

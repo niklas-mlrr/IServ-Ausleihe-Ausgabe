@@ -24,6 +24,7 @@ from ._deps import (
     ContextIdBody,
     ContextLiveAusgabeRequest,
     ContextPrintersRequest,
+    ContextSlipTriggerRequest,
     OpenClassRequest,
     SelectSchoolyearRequest,
     host_router,
@@ -244,6 +245,7 @@ async def open_class(body: OpenClassRequest) -> dict:
         _require_printer_for_live(resolved if body.live_ausgabe else None)
         existing.allowed_printer_ids = resolved
         existing.live_ausgabe = body.live_ausgabe
+        existing.slip_trigger = body.slip_trigger
         await hub.broadcast_host(state.state_snapshot())
         # Druck-Allowlist dieser Klasse geändert → Helfer-Vorauswahl neu pushen.
         await hub.broadcast_settings(state)
@@ -266,6 +268,7 @@ async def open_class(body: OpenClassRequest) -> dict:
     _require_printer_for_live(resolved if body.live_ausgabe else None)
     ctx.allowed_printer_ids = resolved
     ctx.live_ausgabe = body.live_ausgabe
+    ctx.slip_trigger = body.slip_trigger
     ctx.queue = [QueueStudent.from_iserv(s, form=form) for s in students]
     # Immer (nicht nur bei gewählten Auto-Fertig-Filtern): der Abruf füllt auch
     # die Info-Flags für die Queue-Anzeige. Fehler sind pro Schüler gekapselt
@@ -397,6 +400,25 @@ async def set_context_live_ausgabe(body: ContextLiveAusgabeRequest) -> dict:
     ctx.live_ausgabe = bool(body.live_ausgabe)
     await hub.broadcast_host(state.state_snapshot())
     return {"ok": True, "context_id": context_id, "live_ausgabe": ctx.live_ausgabe}
+
+
+@host_router.post("/api/context-slip-trigger")
+async def set_context_slip_trigger(body: ContextSlipTriggerRequest) -> dict:
+    """Wann der Leihschein dieser Klasse am Schülerclient (Modus B) gedruckt
+    wird, sobald alle vorgemerkten Bücher gescannt sind (Druckmodus) —
+    nachträglich setzbar (Dropdown im Klassen-Tab unter „Leihschein Druck:").
+    Rein In-Memory, kein DB-/IServ-Zugriff. Wert aus
+    {"auto","student","helper","barcode"} (s. ClassContext.slip_trigger)."""
+
+    state = get_state()
+    hub = get_hub()
+    context_id = body.context_id.strip()
+    ctx = state.contexts.get(context_id)
+    if ctx is None:
+        raise HTTPException(404, "Kontext unbekannt")
+    ctx.slip_trigger = body.slip_trigger
+    await hub.broadcast_host(state.state_snapshot())
+    return {"ok": True, "context_id": context_id, "slip_trigger": ctx.slip_trigger}
 
 
 @host_router.get("/api/students-for-class")

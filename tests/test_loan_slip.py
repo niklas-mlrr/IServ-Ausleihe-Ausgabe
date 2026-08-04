@@ -146,6 +146,10 @@ def test_print_loan_slip_applies_class_override(tmp_path, monkeypatch):
                     return qs
             return None
 
+        def find_session_by_student(self, student_id):
+            # Keine Modus-B-Session im Test → kein Auto-Fertig nach Druck.
+            return None
+
     cfg = Config(
         iserv_domain="example.org",
         iserv_username="u",

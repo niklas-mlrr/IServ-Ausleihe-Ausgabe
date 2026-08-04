@@ -25,6 +25,7 @@ from ..sessions import (
     rebind_helper_to_context,
     send_display_update,
     send_printer_display_update,
+    slip_trigger_for,
     spectate_student,
 )
 from ..state import (
@@ -1003,7 +1004,14 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
             load_inflight = session.load_task is not None and not session.load_task.done()
             worker_present = state.student_worker_sessions.get(session.student_id) is not None
             if not load_inflight or worker_present:
-                await hub.send_websocket(websocket, {"type": "worker_ready", "books": books})
+                await hub.send_websocket(
+                    websocket,
+                    {
+                        "type": "worker_ready",
+                        "books": books,
+                        "slip_trigger": slip_trigger_for(state, session.student_id),
+                    },
+                )
             # Blockierendes Ausgemustert-Hinweis-Modal überlebt einen Reconnect
             # (z. B. Seiten-Reload) — erst der Host darf es per Button schließen.
             if session.book_alert_open and session.book_alert_payload:
@@ -1078,6 +1086,64 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
                     session.book_alert_open = True
                     session.book_alert_payload = payload
                 await hub.send_websocket(websocket, payload)
+                await hub.broadcast_host(state.state_snapshot())
+
+            elif mtype == "print_request":
+                # Druckmodus am Schülerclient (Modus B): Schüler hat alle
+                # vorgemerkten Bücher gescannt und löst den Leihschein-Druck
+                # aus („Automatisch" sendet sofort, „Schülerauslöser" per
+                # Button). Enqueue über die Druckerwarteschlange mit der
+                # Klassen-Druck-Allowlist; Progress/Result kommen via
+                # `print_progress`/`print_result` zurück (Routing via
+                # `student_token`). Read-only PDF-Abruf + lokaler Druck, kein
+                # IServ-Submit. Nach erfolgreichem Druck auto-fertig via
+                # `_mark_slip_printed` (sendet `closed`).
+                if session.state != "paired" or session.student_id is None:
+                    await hub.send_websocket(
+                        websocket,
+                        {"type": "print_result", "ok": False, "msg": "Noch nicht freigegeben"},
+                    )
+                    continue
+                if not state.settings.printers:
+                    await hub.send_websocket(
+                        websocket,
+                        {"type": "print_result", "ok": False, "msg": "Kein Drucker konfiguriert"},
+                    )
+                    continue
+                pool_ids = {p.id for p in state.settings.printers}
+                allowed = allowed_printers_for(state, session.student_id)
+                if allowed is not None and not (allowed & pool_ids):
+                    await hub.send_websocket(
+                        websocket,
+                        {
+                            "type": "print_result",
+                            "ok": False,
+                            "msg": "Kein erlaubter Drucker im Pool für diese Klasse",
+                        },
+                    )
+                    continue
+                # Seite 1 immer; Seite 2 (Schüler-Leihschein) nur, wenn der
+                # globale Host-Default es vorgibt (am Schülerclient gibt es keine
+                # Einzelauswahl).
+                pages = None if state.settings.slip_second_page_default else "1"
+                qs = state.find_student(session.student_id)
+                if qs is not None:
+                    name = _slip_name(qs.lastname, qs.firstname, qs.form)
+                else:
+                    name = _slip_name(
+                        getattr(session, "lastname", ""),
+                        getattr(session, "firstname", ""),
+                        getattr(session, "form", ""),
+                    )
+                job = PrintJob.create(
+                    role="student",
+                    student_id=session.student_id,
+                    pages=pages,
+                    name=name,
+                    student_token=session_token,
+                    allowed_printers=allowed,
+                )
+                await state.print_queue.enqueue(job)
                 await hub.broadcast_host(state.state_snapshot())
 
             elif mtype == "finish":

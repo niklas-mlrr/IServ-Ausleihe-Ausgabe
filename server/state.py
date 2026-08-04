@@ -437,6 +437,15 @@ class ClassContext:
     # Sessions, iPad-Freischalt) bleibt davon unberührt — nur die Sichtbarkeit
     # pro Klasse wird gesteuert. Rein In-Memory, wie `allowed_printer_ids`.
     live_ausgabe: bool = True
+    # Wann der Leihschein dieser Klasse am Schülerclient (Modus B) gedruckt wird,
+    # sobald alle vorgemerkten Bücher gescannt sind („Druckmodus"):
+    #   "auto"    — Druckauftrag wird sofort automatisch gesendet,
+    #   "student" — Druck per Button am Schülerclient,
+    #   "helper"  — Hinweis „Betreuer melden"; Druck via Helfer/Host-Menü,
+    #   "barcode" — Platzhalter (kein Verhalten, folgt später).
+    # Nach erfolgreichem Druck geht der Schüler automatisch auf „abgeschlossen".
+    # Nur Modus B; Modus A unberührt. Rein In-Memory, wie `live_ausgabe`.
+    slip_trigger: str = "auto"
     # Während `open_class` Schüler/Flags/Katalog lädt, steht der Kontext schon in
     # `self.contexts` (für interne Lookups wie `_ensure_class_catalog`), soll aber
     # NOCH nicht an Clients gehen — sonst snapshottet ein nebenläufiger Broadcast
@@ -701,6 +710,9 @@ class AppState:
                 ),
                 # Live-Ausgabe (Modus B) für diese Klasse sichtbar? S. ClassContext.
                 "live_ausgabe": c.live_ausgabe,
+                # Wann der Leihschein am Schülerclient gedruckt wird (Druckmodus).
+                # S. ClassContext.slip_trigger.
+                "slip_trigger": c.slip_trigger,
             }
             for c in self.contexts.values()
             if not c.loading

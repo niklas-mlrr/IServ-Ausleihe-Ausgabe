@@ -110,6 +110,11 @@ class PrintJob:
     name: str  # „Nachname, Vorname (Form)" fürs Host-Popup
     helper_token: str | None = None  # Urheber ist ein Helfer (WS-Ziel)
     host_sid: str | None = None  # Urheber ist ein Host-Browser (sid-Ziel)
+    # Urheber ist ein Schülerclient (Modus B, Druckmodus): Session-Token als
+    # WS-Ziel für print_progress/print_result. Auto-Fertig nach Druck läuft
+    # serverseitig in `_mark_slip_printed` (sendet `closed`); die Progress-/
+    # Result-Nachrichten hier sind rein informativ für die Druckmodus-Anzeige.
+    student_token: str | None = None
     status: JobStatus = "queued"
     result: dict | None = None  # Druck-Result (mit job_handle); Finalresult für HTTP
     job_handle: dict | None = None  # OS-Job-Handle für Status-Polling
@@ -1128,6 +1133,10 @@ class PrintQueue:
         if job.host_sid:
             for ws in list(state.host_ws_by_sid.get(job.host_sid, [])):
                 await hub.send_websocket(ws, msg)
+        if job.student_token:
+            session = state.student_sessions.get(job.student_token)
+            if session is not None and session.ws is not None:
+                await hub.send_websocket(session.ws, msg)
 
     async def _notify_result(self, job: PrintJob) -> None:
         await self._notify_result_if(job)
@@ -1171,3 +1180,9 @@ class PrintQueue:
         if job.host_sid:
             for ws in list(state.host_ws_by_sid.get(job.host_sid, [])):
                 await hub.send_websocket(ws, base)
+        if job.student_token:
+            # Session kann nach Auto-Fertig (`end_student` in `_mark_slip_printed`)
+            # bereits entwertet/entfernt sein → still überspringen.
+            session = state.student_sessions.get(job.student_token)
+            if session is not None and session.ws is not None:
+                await hub.send_websocket(session.ws, base)
