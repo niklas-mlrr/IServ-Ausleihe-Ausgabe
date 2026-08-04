@@ -8,6 +8,18 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-04 — Schülerclient: Druckmodus nach Laden und Buchlisten-Änderung
+
+- **Druckmodus-Prüfung korrigiert:** bereits beim Laden ausgeliehene Bücher
+  werden nun als erledigt berücksichtigt. Die Prüfung läuft damit nicht nur
+  nach einem erfolgreichen Scan, sondern greift zuverlässig bei
+  `worker_ready` sowie bei `booklist_update` nach Ausblenden oder Einblenden
+  durch den Host.
+- Wenn das Ausblenden die letzte sichtbare Reihe entfernt, merkt sich der
+  Client, dass zuvor Bücher geladen waren, und schaltet ebenfalls in den
+  Druckmodus. Eine von Anfang an leere Bücherliste löst weiterhin keinen
+  Druckmodus aus.
+
 ## 2026-08-04 — Klasseneinstellungen: Drucker-Default-Fix, Fertig-Optionen persistiert, iPad-Freischalt ohne Tippen
 
 Drei Nachbesserungen aus der frisch gebauten Klassen-Feature-Session:

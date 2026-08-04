@@ -30,6 +30,7 @@ let token = sessionStorage.getItem('mb_token');
 let ws = null, finished = false, scannerStarted = false;
 let workerPending = false;         // Schüler zugewiesen, aber Worker noch nicht bereit
 let currentBooks = [];              // Buchliste des Schülers
+let bookListHadBooks = false;       // verhindert einen Druckmodus bei „keine Bücher"
 const scannedIsbns = new Set();     // in dieser Session gescannte ISBNs
 const scanOrder = new Map();        // ISBN -> Scan-Sequenz (für „zuletzt ausgegeben oben")
 let scanSeq = 0;
@@ -109,6 +110,7 @@ function handleServerMessage(msg) {
     // Worker buchungsbereit: Bücherliste rendern, Status flippen, Scans frei.
     workerPending = false;
     currentBooks = msg.books || [];
+    bookListHadBooks = currentBooks.length > 0;
     if (msg.slip_trigger) slipTrigger = msg.slip_trigger;
     renderBooks(currentBooks);
     setStatusText('Scanner bereit — Buch scannen');
@@ -149,6 +151,11 @@ function handleServerMessage(msg) {
     // Scan-Fortschritt (scannedIsbns/scanOrder) unangetastet.
     if (Array.isArray(msg.book_order)) bookOrder = msg.book_order;
     if (Array.isArray(msg.books)) currentBooks = msg.books;
+    // Wenn die letzte sichtbare Reihe ausgeblendet wird, ist die Liste leer.
+    // Merken, dass zuvor trotzdem Bücher geladen waren, damit die leere Liste
+    // als „alle sichtbaren Bücher erledigt“ gewertet werden kann. Beim
+    // Einblenden einer Reihe wird der Merker entsprechend wieder gesetzt.
+    bookListHadBooks ||= currentBooks.length > 0;
     renderBooks(currentBooks);
     // Wird eine Reihe nachträglich ausgeblendet, fällt ein bisher noch offenes
     // vorgemerktes Buch aus der Liste → evtl. sind die verbleibenden nun alle
@@ -170,12 +177,18 @@ function handleServerMessage(msg) {
 }
 
 // ---- Druckmodus (Modus B): alle vorgemerkten Bücher gescannt ----
-// `true`, wenn mindestens ein vorgemerktes Buch vorhanden und alle vorgemerkten
-// erledigt (ausgeliehen oder in dieser Session gescannt) sind. Ausgeblendete
+// `true`, wenn alle aktuell sichtbaren Bücher erledigt sind (ausgeliehen oder
+// in dieser Session gescannt). Die Buchliste enthält vorgemerkte und bereits
+// ausgeliehene Bücher; nur auf `status === 'vorgemerkt'` zu filtern würde den
+// Fall „beim Laden schon alles ausgeliehen“ fälschlich übersehen. Ausgeblendete
 // Reihen fallen aus `currentBooks` heraus und gelten daher nicht als offen.
 function allVorgemerkteDone() {
-  const vorgemerkt = currentBooks.filter(b => b.status === 'vorgemerkt');
-  return vorgemerkt.length > 0 && vorgemerkt.every(b => isBookDone(b, scannedIsbns));
+  const relevantBooks = currentBooks.filter(
+    b => b.status === 'vorgemerkt' || b.status === 'ausgeliehen',
+  );
+  return bookListHadBooks
+    && relevantBooks.length === currentBooks.length
+    && relevantBooks.every(b => isBookDone(b, scannedIsbns));
 }
 
 // Einmaliger Eintritt in den Druckmodus. Wird nach worker_ready, jedem
@@ -387,6 +400,7 @@ function renderStudent(s, overridden) {
   // Statuszeile „Wird geladen…", Placeholder im Bücher-Bereich, Scans ignoriert.
   workerPending = true;
   currentBooks = [];
+  bookListHadBooks = false;
   scannedIsbns.clear(); scanOrder.clear(); scanSeq = 0;
   // Druckmodus-Zustand für den neuen Schüler zurücksetzen.
   druckmodusEntered = false;
