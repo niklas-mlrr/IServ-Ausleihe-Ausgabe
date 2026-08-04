@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Klassen-Status</title>
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <script src="/common.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      color-scheme: light dark;
+      --bg:#0f0f0f; --fg:#fff; --surface:#1e1e1e; --surface-2:#2a2a2a;
+      --border:#333; --muted:#9a9a9e;
+      --pending:#8e8e93; --active:#0a84ff; --done:#30d158; --skipped:#98989d;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg:#f2f2f7; --fg:#1c1c1e; --surface:#fff; --surface-2:#e5e5ea;
+        --border:#d0d0d5; --muted:#6e6e73;
+        --pending:#8e8e93; --active:#0a84ff; --done:#248a3d; --skipped:#8e8e93;
+      }
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg); color: var(--fg);
+      min-height: 100dvh; padding: 16px;
+      max-width: 640px; margin: 0 auto;
+    }
+    h1 { font-size: 1.3rem; font-weight: 600; margin-bottom: 4px; }
+    .sub { color: var(--muted); font-size: .9rem; margin-bottom: 16px; }
+    .view { display: none; flex-direction: column; align-items: center; text-align: center; padding-top: 15vh; }
+    .view.show { display: flex; }
+    .reg-code {
+      font-size: 3.2rem; font-weight: 700; letter-spacing: .25em;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px; padding: 16px 28px; margin: 16px 0;
+    }
+    .muted { color: var(--muted); }
+    #view-class { display: none; }
+    #view-class.show { display: block; }
+    .counts { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+    .count-pill {
+      flex: 1 1 70px; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; padding: 8px 10px; text-align: center;
+    }
+    .count-pill .n { font-size: 1.3rem; font-weight: 700; display: block; }
+    .count-pill .l { font-size: .72rem; color: var(--muted); }
+    .hint { color: var(--muted); font-size: .82rem; text-align: left; }
+    .swipe-tip { margin: -6px 0 12px; display: none; }
+    .swipe-tip.show { display: block; }
+    .swipe-hint {
+      flex: none; color: var(--muted); opacity: .45; font-size: 1rem;
+      letter-spacing: -2px; line-height: 1;
+    }
+    .stud-list { display: flex; flex-direction: column; gap: 8px; }
+    /* Swipe-Container: hält die (verdeckte) rote „Abwesend"-Fläche hinter der
+       eigentlichen Zeile; nur wartende Schüler sind swipebar (s. teacher.js). */
+    .stud-swipe { position: relative; border-radius: 10px; overflow: hidden; }
+    .stud-swipe-bg {
+      position: absolute; inset: 0; display: flex; align-items: center;
+      padding: 0 18px; background: #ff3b30; color: #fff; font-weight: 600;
+      font-size: .88rem;
+    }
+    .stud-row {
+      position: relative; z-index: 1;
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; padding: 10px 12px;
+      transition: transform .18s ease, opacity .18s ease;
+      touch-action: pan-y;
+      user-select: none;
+    }
+    .stud-row.swipeable { cursor: grab; }
+    .stud-row.swiping { transition: none; }
+    .stud-name { flex: 1 1 auto; min-width: 0; }
+    .stud-name .n { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .stud-name .s { font-size: .82rem; color: var(--muted); }
+    .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+    .dot.pending { background: var(--pending); }
+    .dot.active { background: var(--active); }
+    .dot.done { background: var(--done); }
+    .dot.skipped { background: var(--skipped); }
+    button.act {
+      border: none; border-radius: 8px; background: var(--surface-2); color: var(--fg);
+      font-size: .82rem; padding: 8px 10px; cursor: pointer; flex: none;
+    }
+    button.act:active { opacity: .7; }
+    .slip-check {
+      display: flex; align-items: center; gap: 6px; flex: none;
+      font-size: .78rem; color: var(--muted); white-space: nowrap; cursor: pointer;
+    }
+    .slip-check input { width: 18px; height: 18px; flex: none; }
+    #conn { position: fixed; top: 10px; right: 12px; font-size: .75rem; color: var(--muted); }
+    #conn .dot2 { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: var(--pending); margin-right: 5px; }
+    #conn .dot2.ok { background: var(--done); }
+    /* Einfaches Bestätigungs-Modal (Skip/Undo) */
+    .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; align-items: center; justify-content: center; padding: 20px; z-index: 10; }
+    .modal-bg.show { display: flex; }
+    .modal-box { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; max-width: 360px; width: 100%; }
+    .modal-box p { margin-bottom: 16px; }
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+    .modal-actions button { border: none; border-radius: 8px; padding: 10px 16px; cursor: pointer; font-size: .9rem; }
+    .modal-actions .cancel { background: var(--surface-2); color: var(--fg); }
+    .modal-actions .confirm { background: #ff3b30; color: #fff; }
+  </style>
+</head>
+<body>
+  <div id="conn"><span class="dot2" id="conn-dot"></span><span id="conn-text">verbinde…</span></div>
+
+  <!-- Kein/ungültiger Token in der URL -->
+  <div class="view" id="view-invalid">
+    <h1>Kein gültiger Zugang</h1>
+    <p class="muted">Bitte den QR-Code erneut vom Host scannen.</p>
+  </div>
+
+  <!-- Registrierung: wartet auf Freischaltung durch den Host -->
+  <div class="view" id="view-register">
+    <h1>Warten auf Freischaltung</h1>
+    <p class="muted">Diesen Code zeigt der Host im Klassen-Tab:</p>
+    <div class="reg-code" id="reg-code">····</div>
+    <p class="muted">Die Ansicht öffnet sich automatisch, sobald der Host bestätigt hat.</p>
+  </div>
+
+  <!-- Zugang beendet (Host-Trennen, Klasse geschlossen, Token ersetzt) -->
+  <div class="view" id="view-forbidden">
+    <h1>Zugang beendet</h1>
+    <p class="muted">Der Host hat diese Ansicht beendet. Für einen neuen Zugang bitte einen frischen QR-Code scannen.</p>
+  </div>
+
+  <!-- Klassenansicht (autorisiert) -->
+  <div id="view-class">
+    <h1 id="class-form">Klasse</h1>
+    <div class="sub">Live-Status der Bücherausgabe</div>
+    <div class="counts" id="counts"></div>
+    <p class="hint swipe-tip" id="swipe-tip">Wartende Schüler nach rechts wischen, um sie als abwesend zu markieren.</p>
+    <div class="stud-list" id="stud-list"></div>
+  </div>
+
+  <div class="modal-bg" id="modal-bg">
+    <div class="modal-box">
+      <p id="modal-text"></p>
+      <div class="modal-actions">
+        <button class="cancel" id="modal-cancel">Abbrechen</button>
+        <button class="confirm" id="modal-confirm">Bestätigen</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/teacher.js"></script>
+</body>
+</html>

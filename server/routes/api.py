@@ -26,6 +26,7 @@ from . import (  # noqa: F401 — Import NUR wegen Seiteneffekt (Routen-Registri
     queue,
     settings,
     slips,
+    teacher,
 )
 from ._deps import (  # re-export für app.py / Tests
     _base_url,

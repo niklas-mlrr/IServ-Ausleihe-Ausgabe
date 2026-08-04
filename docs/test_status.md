@@ -5,7 +5,7 @@
 > Risiko hier unter „Offen / zu testen" eintragen; nach erfolgreichem Test in
 > „Verifiziert" verschieben (mit Datum + Skript/Befund). Bezug: `docs/PLAN.md`.
 >
-> Stand: 2026-08-04 (Drucker ↔ Live-Ausgabe-Kopplung pro Klasse + leere Drucker-Auswahl = kein Drucker, 334 Tests grün).
+> Stand: 2026-08-04 (Klassen-Lehreransicht `/teacher`: Wisch-Geste + Leihschein-Eingang, 378 Tests grün).
 > Alle bisherigen Tests sind **read-only** gegen IServ
 > (kein Submit, keine Buchung — PLAN §6).
 >
@@ -56,7 +56,47 @@
 | V37 | **Drucker-Display: Reiter-Aufräumen beim Trennen** — Im `finally`-Block von `ws_drucker_display` (`server/routes/ws.py`) werden **nicht autorisierte** Sessions beim WS-Trennen ganz entfernt (Host-Reiter verschwindet), **autorisierte** bleiben stehen (`ws=None` → grauer Punkt). Vereinheitlicht zwei Fälle: (1) Display wird vor dem Einschalten geschlossen, (2) Display wird durch erneuten `/drucker-display`-Aufruf abgelöst (frischer Token → neue Session, alte WS trennt). Takeover-Schutz: nur lösen/entfernen, wenn `d.ws is websocket` (kein zwischenzeitlicher Reconnect). Reload eines autorisierten Displays verbindet denselben Token wieder (grün); Reload eines unautorisierten legt eine neue Session mit frischem Code an. **Aktive Abmeldung beim Entladen (Follow-up):** beim Navigieren auf einen neuen Token erreichte der Close-Frame den Server unzuverlässig → alte Seite blieb am Host fälschlich grün (bis zum uvicorn-Ping 20+20 s). Fix wie beim Tab-Schließen: der Client benachrichtigt den Server aktiv via `navigator.sendBeacon` auf den neuen unauthentifizierten Endpunkt `POST /api/drucker-display/departed` (`pagehide`/`beforeunload`) — sendBeacon kommt auch beim Navigieren/Redirect zuverlässig an; der Endpunkt schließt die WS und räumt auf (autorisiert → grau, nicht autorisiert → entfernt), sofort. Zusätzlich schließt der Client die WS sauber mit Code 1001; `unloading`-Flag unterdrückt den Auto-Reconnect. Ein zuvor probierter Heartbeat-Ansatz (10 s-Ping + 20 s-Timeout) wurde wieder entfernt (erkennte erst nach 20 s); für echten Verbindungsabbruch ohne Entladen bleibt der uvicorn-Ping als Fallback. Greift nur pro geschlossener Display-Seite — mehrere Displays auf demselben Gerät bleiben möglich. | `tests/test_drucker_display.py` (+6: 2 WS-Disconnect-Tests + 4 `/departed`-Endpunkt-Tests: unautorisiert → entfernt; autorisiert → grau; ungültig/unbekannt → No-op; idempotent) | 2026-08-04 | **331 Tests grün**, Ruff clean, `node --check` OK. **Live-Check (Reiter verschwindet/grau SOFORT beim Navigieren auf neuen Token am echten Gerät; grauer Punkt + Wieder-Verbinden via Reload/QR) noch offen** |
 | V38 | **Leere Drucker-Auswahl = kein Drucker + Kopplung Drucker ↔ Live-Ausgabe pro Klasse** — (1) `_resolve_allowed_printers` (server/routes/classes.py) unterscheidet jetzt `None` (Feld fehlt = alle Pool-Drucker, Default) von `[]` (explizit leer = bewusst kein Drucker, leere Menge). Bisher mappte die Funktion beides auf `None` (alle) — alle Checkboxen abwählen lieferte still alle Drucker als Vorauswahl. `null` bleibt „alle", `[]` wird im Snapshot zu `[]` (nicht mehr `null`). (2) **Kopplung:** Live-Ausgabe (Modus B) pro Klasse setzt ≥1 Drucker voraus; bei aktiver Live-Ausgabe darf der letzte Drucker nicht abgewählt werden (erst Live-Ausgabe schließen). `None` (alle) gilt als „Drucker gewählt". Server (Helfer `_require_printer_for_live`): `open_class` `printers:[]`+`live_ausgabe:true` → 400 „Es ist mindestens ein Drucker auszuwählen" (beide Pfade neu+reused); `set_context_printers` leere Menge + Live an → 400 „Zuerst Live-Ausgabe schließen"; `set_context_live_ausgabe` Aktivieren ohne Drucker → 400, Ausschalten immer erlaubt. Client (Klassen-Tab + panel-new): roter Hinweis (`var(--danger-text)`) „Es ist mindestens ein Drucker auszuwählen" **erst beim Versuch**, den Schalter ohne Drucker zu aktivieren (Schalter revertiert); „Zuerst Live-Ausgabe schließen" beim Versuch, bei aktiver Live-Ausgabe den letzten Drucker abzuwählen (Checkbox revertiert); beide Hinweise verschwinden, sobald wieder ein Drucker gewählt ist. panel-new persistiert die Auswahl jetzt bei jeder Änderung (vorher nur beim Öffnen), damit ein `applyState`-Re-Render sie nicht verwirft. | `tests/test_api_guards.py` (+`test_context_live_ausgabe_requires_printer`, `+test_context_printers_last_not_removable_while_live_on`; `test_open_class_empty_printers_means_none_not_all` um `live_ausgabe`-Fälle ergänzt) | 2026-08-04 | **334 Tests grün**, Ruff clean, `node --check` OK. **Live-Check (Kopplung + rote Hinweise + Revert am echten Gerät, Klassen-Tab + panel-new) noch offen** (s. „Offen" unten) |
 
+| V39 | **Klassen-Lehreransicht `/teacher`** — QR-Minten/-Ersetzen einer noch unautorisierten Session pro Klassen-Tab, Blockieren bei bereits autorisierter (409, Host muss erst trennen), Host-Autorisieren per Registrierungscode, explizites Trennen; token-authentifizierte `pending <-> skipped`-Statuswechsel strikt auf die eigene Klasse beschränkt (Schüler einer anderen Klasse → 404); `AppState.teacher_snapshot` liefert nachweislich nur Klassenname/Summen/Name/Status/Buch-Fortschritt/Druckstatus (kein `paid`/`amount_open`/`assigned_helper`, keine andere Klasse); Host-Snapshot-Kachel je Klassen-Tab leakt nie den Token; `/ws/teacher` zeigt vor Autorisierung nur den Code, danach `teacher_state`, unbekannter/entwerteter Token → sofortiges `forbidden`+Close (kein Reconnect möglich), gültige autorisierte Session reconnectet weiter; `Hub.broadcast_host` pusht Lehrer-Updates bei jeder Zustandsänderung mit; `close_class`/`select_schoolyear` entwerten gebundene Sessions hart. | `tests/test_teacher.py` (38 Tests: HTTP-Endpunkte + `AppState.teacher_snapshot` + `websocket_connect`-WS-Flow + 2 direkte `Hub`/`sessions`-Einheitstests) | 2026-08-04 | **373 Tests grün**, Ruff clean, `node --check web/teacher.js web/host-render.js` OK. **Live-Check (QR-Scan + Pairing + Live-Updates am echten Lehrkraft-Handy im Schul-WLAN) noch offen** (s. „Offen" unten) |
+| V40 | **Lehreransicht-Nachbesserung: Wisch-Geste + Leihschein-Eingang** — „Als abwesend" läuft jetzt über eine Wisch-Geste nach rechts (Pointer Events, Touch + Maus) statt eines Buttons, Ziehschwelle dient als Bestätigung (kein Modal mehr für diese Aktion). Neues Flag `QueueStudent.slip_collected` (analog `slip_printed`, in `reset_progress()` zurückgesetzt); neuer token-authentifizierter Endpunkt `POST /api/teacher/slip-collected` verlangt `slip_printed=True` (409 sonst) und ist klassenscharf isoliert (andere Klasse → 404); `AppState.teacher_snapshot` liefert das Flag je Schüler + `slip_collected_count` als Summe. Host sieht die Statistik read-only (eigener Endpunkt setzt sie nicht) über `state_snapshot()`'s bereits vorhandenes `as_dict()`. **Folgekorrektur (selbe Session):** `teacher_qr` broadcastete den Snapshot nach dem Minten bisher nicht (Code-Anzeige im Klassen-Tab blieb bis zu einer zufälligen anderen Aktion veraltet) — behoben; „Abbrechen"-Button jetzt `secondary` statt `ghost warn` (gleiche Größe wie „Bestätigen"); Wisch-Schwelle relativ zur Zeilenbreite (55 %/90 % statt fixer 90px, Label vollständig lesbar) plus Chevron-Hinweis + Hinweistext gegen Zufallsauffindbarkeit. | `tests/test_teacher.py` (+5 neue: Auth-Gate, „kein Leihschein gedruckt"-Gate, Setzen/Zurücknehmen, Klassen-Isolation, `teacher_snapshot`-Zähler; +1 Regression-Assertion für den QR-Broadcast) + `tests/test_queue_progress.py` (`slip_collected` in `reset_progress()`-Assertion) | 2026-08-04 | **378 Tests grün**, Ruff clean, `node --check web/teacher.js web/host-render.js` OK. **Live-Check (Wisch-Geste auf echtem Touchscreen, Checkbox-Sync Lehrkraft↔Host) noch offen** (s. „Offen" unten) |
+
 ## Offen / zu testen
+
+### Offen 2026-08-04 (Klassen-Lehreransicht `/teacher`: Live-Check)
+
+Pairing-Flow, Klassen-Isolation, Snapshot-Privacy und die erlaubten/verbotenen
+Statusübergänge sind per Unit-/HTTP-/WS-Suite abgesichert (V39); reiner
+In-Memory-Runtime-State, kein IServ-Write. Am echten Lehrkraft-Handy im
+Schul-WLAN noch offen:
+
+- [ ] Host klickt „QR für Lehrkraft anzeigen" im Klassen-Tab → QR öffnet
+      `/teacher?token=...` auf dem Handy und zeigt **nur** den
+      Registrierungscode (keine Klassen-/Schülerdaten sichtbar, auch nicht
+      kurz beim Laden).
+- [ ] Host bestätigt im selben Klassen-Tab → Lehrkraft-Ansicht öffnet sich
+      automatisch (ohne Reload) mit Klassenname + Summen + Statusliste.
+- [ ] Live-Updates ohne Reload: Pairing eines Schülers, Scan-Fortschritt
+      (X/Y), Leihschein-Druckstart/-Ende, Abschluss — alle Übergänge kommen
+      am Lehrkraft-Handy live an.
+- [ ] Lehrkraft wischt einen wartenden Schüler nach rechts („Als abwesend
+      markieren") → Status „Übersprungen" — am Host zeitgleich sichtbar;
+      Rücknahme („Nicht abwesend", mit Bestätigungsdialog) funktioniert ebenso.
+- [ ] Host klickt „Lehrkraft trennen" (autorisierte Session) → Handy zeigt
+      sofort „Zugang beendet", kein Reload stellt den Zugang wieder her.
+- [ ] Klassen-Tab schließen (×) bei verbundener Lehrkraft-Session → dieselbe
+      sofortige Entwertung.
+- [ ] Zwei parallel offene Klassen mit je eigener Lehrkraft-Session: kein
+      Vermischen der Daten, kein QR der einen Klasse öffnet die andere.
+- [ ] **Wisch-Geste (V40):** auf einem echten Touchscreen einen wartenden
+      Schüler nach rechts wischen → rote „Als abwesend markieren"-Fläche wird
+      beim Ziehen sichtbar, unterhalb der Schwelle (`SWIPE_THRESHOLD_PX=90`)
+      schnellt die Zeile zurück, oberhalb löst sie aus (Status „Übersprungen").
+      Kurzes Antippen/Verrutschen darf nichts auslösen.
+- [ ] **Leihschein-Checkbox (V40):** bei einem abgeschlossenen Schüler auf dem
+      Lehrkraft-Gerät „Leihschein entgegengenommen" ankreuzen → die fünfte
+      Kachel „abgegeben" zählt hoch; am Host erscheint zeitgleich das grüne
+      „Leihschein ✓"-Badge in der Queue-Tabelle und die Zeile „Leihschein
+      entgegengenommen: X / Y" in der Lehrkraft-Ansicht-Karte. Häkchen wieder
+      entfernen → beide Seiten fallen zurück.
 
 ### Offen 2026-08-04 (Drucker ↔ Live-Ausgabe-Kopplung + leere Auswahl: Live-Check)
 

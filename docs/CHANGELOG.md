@@ -8,6 +8,116 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-04 — Lehreransicht: QR-Bugfix, Button-Größe, Wisch-Schwelle + Hinweis
+
+Drei weitere Nachbesserungen im direkten Anschluss:
+
+- **Bugfix (fehlender Broadcast):** `GET /api/teacher/qr` mintete zwar die
+  Session serverseitig, pushte aber nie einen frischen Host-Snapshot — die
+  Code-/Bestätigen-Anzeige im Klassen-Tab blieb deshalb auf altem Stand,
+  bis zufällig eine ANDERE Aktion einen Snapshot auslöste (z. B. Tab-Wechsel,
+  der `POST /api/set-active-context` feuert). Fix: `teacher_qr` broadcastet
+  jetzt selbst nach dem Minten (`server/routes/teacher.py`), Regression in
+  `tests/test_teacher.py::test_qr_mints_session_with_token_in_url` mitgeprüft.
+- **Button-Größe:** „Abbrechen" neben „Bestätigen" im Klassen-Tab nutzte
+  `ghost warn` (kleinere Schrift/Padding als der Default-Button) statt
+  `secondary` (gleiche Größe wie `success`) — jetzt einheitlich groß
+  (`web/host-render.js`).
+- **Wisch-Schwelle + Auffindbarkeit:** die Auslöseschwelle der „Als
+  abwesend"-Wisch-Geste ist jetzt relativ zur tatsächlichen Zeilenbreite
+  (55 % zum Auslösen, bis 90 % ausziehbar) statt fixer 90px — die rote
+  „Als abwesend markieren"-Fläche ist beim Ziehen vollständig lesbar, auch
+  auf schmalen Geräten. Zusätzlich zwei dezente Wisch-Chevrons (›​›) am
+  rechten Rand jeder wartenden Zeile plus ein Hinweistext oberhalb der Liste
+  („Wartende Schüler nach rechts wischen, um sie als abwesend zu
+  markieren.", nur sichtbar solange es wartende Schüler gibt) — die Geste
+  war vorher nur durch Zufall auffindbar (`web/teacher.html`/`teacher.js`).
+- **378 Tests grün** (Regression-Assertion in bestehendem Testfall ergänzt,
+  keine neue Testfunktion), Ruff clean, `node --check web/teacher.js
+  web/host-render.js` OK.
+
+## 2026-08-04 — Lehreransicht: Wisch-Geste, Leihschein-Eingang, Wording-Fix
+
+Drei Nachbesserungen an der frisch implementierten `/teacher`-Ansicht:
+
+- **Wisch statt Button:** „Als abwesend" ist jetzt eine Wisch-Geste nach
+  rechts auf der Schüler-Zeile (`web/teacher.js`, Pointer Events — Touch UND
+  Maus) statt eines Buttons. Die Ziehweite (`SWIPE_THRESHOLD_PX = 90`) dient
+  zugleich als Bestätigung — kein Modal mehr für diese Aktion (`Wieder
+  wartend" behält das Bestätigungs-Modal, da Rücknahme weiterhin ein Button
+  ist). `POST /api/teacher/skip` unverändert.
+- **„Leihschein entgegengenommen"-Checkbox je Schüler:** neues Flag
+  `QueueStudent.slip_collected` (`server/state.py`, orthogonal zu `status`
+  wie `slip_printed`; zurückgesetzt in `reset_progress()`). Neuer Endpunkt
+  `POST /api/teacher/slip-collected` (token-authentifiziert, klassenscharf,
+  verlangt `slip_printed=True` — ohne gedruckten Schein nichts entgegen-
+  genommen). `AppState.teacher_snapshot()` liefert das Flag je Schüler plus
+  `slip_collected_count` als Summe; die Lehrer-Ansicht zeigt es als fünfte
+  Kachel „abgegeben" neben den vier Status-Kacheln. **Host sieht die
+  Statistik mit** (read-only, Host setzt das Flag nicht selbst): eine
+  Zeile „Leihschein entgegengenommen: X / Y abgeschlossen" in der
+  „Lehrkraft-Ansicht"-Karte je Klassen-Tab (`teacherSlipStat`,
+  `web/host-render.js`) sowie ein grünes „Leihschein ✓"-Badge in der
+  Queue-Tabelle bei abgeschlossenen Schülern.
+- **Wording-Fix:** der Hinweistext im Klassen-Tab behauptete „ohne
+  Steuerung" — nicht mehr korrekt, seit die Lehrkraft Anwesenheit und
+  Leihschein-Eingang selbst steuert. Neu: „mit eingeschränkter Steuerung
+  (nur „Als abwesend"-Markierung und Leihschein-Eingang)".
+- Tests: `tests/test_teacher.py` (+5: slip-collected-Endpunkt Auth/Gate/
+  Isolation/Toggle, `teacher_snapshot`-Zähler), `tests/test_queue_progress.py`
+  (`slip_collected` in `reset_progress()`-Assertion ergänzt) — **378 Tests
+  grün**, Ruff clean, `node --check web/teacher.js web/host-render.js` OK.
+  **Live-Check (Wisch-Geste auf echtem Touchscreen, Checkbox-Sync
+  Lehrkraft↔Host) noch offen.**
+
+## 2026-08-04 — Lehreransicht für Modus B implementiert (`/teacher`)
+
+- Umsetzung des am selben Tag beschlossenen Plans (`docs/teacher_status_page_plan.md`).
+- **State/Lifecycle:** neue `TeacherSession` (`server/state.py`) — Token
+  (lang, zufällig, der eigentliche Zugangs-Credential), `context_id`
+  (unveränderlich an eine Klasse gebunden), `registration_code` (nur
+  menschlich vermittelte Host-Zuordnung), `authorized`, `ws`. Neuer
+  `AppState.teacher_snapshot(context_id)` liefert ausschließlich Klassenname,
+  Summen je Status und je Schüler Name/Status/Buch-Fortschritt/Druckstatus —
+  bewusst nicht `state_snapshot()`. Host-Snapshot bekommt pro Klassen-Tab eine
+  `teacher`-Kachel (Registrierungscode/autorisiert/verbunden), **ohne** den
+  Token zu leaken.
+- **API** (`server/routes/teacher.py`): `GET /api/teacher/qr?context_id=`
+  mintet/ersetzt eine noch unautorisierte Session (blockt bei bereits
+  autorisierter mit 409 — der Host muss zuerst trennen); `POST
+  /api/teacher/authorize` bestätigt den Registrierungscode im Klassen-Tab;
+  `POST /api/teacher/disconnect` trennt explizit; die token-authentifizierten
+  `POST /api/teacher/skip` / `/undo-skip` erlauben ausschließlich
+  `pending -> skipped` bzw. die Rücknahme, strikt auf die eigene Klasse
+  beschränkt (Schüler einer anderen Klasse → 404, nicht 403 — keine
+  Existenzbestätigung über Klassengrenzen).
+- **WebSocket** (`/ws/teacher?token=...`, `server/routes/ws.py`):
+  unauthentifiziert im Cookie-Sinn (der lange Token ist der Credential, wie
+  bei `/ws/student/{session_token}`); vor Autorisierung nur `registration`,
+  danach `teacher_state`. Unbekannter/entwerteter Token → `forbidden` + Close
+  4009, kein Session-Aufbau. `Hub.broadcast_host` pusht bei **jeder**
+  Zustandsänderung zusätzlich an alle verbundenen Lehrer-Sessions
+  (`sessions.broadcast_teacher_sessions`) — dieselbe zentrale Stelle, die
+  auch die Helfer-Queue-Größe nachzieht.
+- **Teardown:** `close_class` und `select_schoolyear` entwerten gebundene
+  Lehrer-Sessions hart (`sessions.revoke_teacher_session(s)_for_context` /
+  `revoke_all_teacher_sessions`) — Token wird aus dem State entfernt statt auf
+  eine Bannliste gesetzt (lang & zufällig, nie wiederverwendet reicht ein
+  „unbekannt" beim nächsten Connect).
+- **Host-UI:** neue Karte „Lehrkraft-Ansicht" im jeweiligen Klassen-Tab
+  (`web/host-render.js`) — QR-Button, Registrierungscode + Bestätigen/
+  Abbrechen vor Autorisierung, Verbindungsstatus + sichtbares „Lehrkraft
+  trennen" danach (verhindert versehentliches Kappen einer laufenden Ansicht).
+- **Teacher-UI:** `web/teacher.html`/`teacher.js` + Clean-Route `/teacher`
+  (`server/app.py::_CLEAN_PAGES`) — Registrierungscode-Ansicht, Klassenname +
+  Summen `abgeschlossen/aktiv/offen/übersprungen`, Statusliste mit
+  Skip-/Undo-Bestätigungsdialog; kein Login, keine Host-/Druck-Steuerung.
+- **Tests:** `tests/test_teacher.py` (38 neue Tests) — QR-Minten/-Ersetzen/
+  -Blockieren, Autorisieren, Trennen, `teacher_snapshot`-Privacy (keine
+  fremde Klasse/Zahl-/Buchdaten), Klassen-Isolation bei skip/undo-skip,
+  WS-Pairing/Reconnect/Entwertung, Teardown bei Klassen-Schließen +
+  Schuljahreswechsel, direkte `Hub.broadcast_host`-Verdrahtung.
+
 ## 2026-08-04 — Lehreransicht für Modus B geplant
 
 - Beschlossen: Eine Lehrkraft wird innerhalb eines konkreten Klassen-Tabs per

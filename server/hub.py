@@ -58,6 +58,12 @@ class Hub:
         # Jede Host-Statusänderung kann die Warteschlange verändert haben –
         # darum die aktuelle Größe live an alle unzugewiesenen Scanner schicken.
         await self.broadcast_queue_size(s)
+        # Ebenso jede verbundene Lehrer-Session ihres Klassen-Ausschnitts
+        # (Pairing/Scan/Druck/Abschluss/Skip — jede Mutation läuft über
+        # `broadcast_host`). Lokaler Import wegen des Zyklus hub↔sessions.
+        from .sessions import broadcast_teacher_sessions
+
+        await broadcast_teacher_sessions(s)
 
     async def send_all_hosts(self, msg: dict, state: AppState | None = None) -> int:
         """Eine Nachricht an alle verbundenen Host-Browser schicken; Anzahl der

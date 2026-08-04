@@ -15,6 +15,8 @@ from ..sessions import (
     apply_hidden_books,
     booking_isbn_sets_from_info,
     end_student,
+    revoke_all_teacher_sessions,
+    revoke_teacher_sessions_for_context,
     teardown_students,
 )
 from ..state import AppState, ClassContext, QueueStudent, get_state
@@ -177,6 +179,10 @@ async def select_schoolyear(body: SelectSchoolyearRequest) -> dict:
     )
     for helper in state.helper_sessions.values():
         helper.context_id = None  # Klassen-Bindung hinfällig (Kontexte fliegen weg)
+    # Alle Kontexte fallen weg → jede Lehrkraft-Session wird ungültig (ihr
+    # Kontext existiert gleich nicht mehr); Reconnect mit ihrem Token muss
+    # danach zuverlässig scheitern.
+    await revoke_all_teacher_sessions(state, reason="schuljahreswechsel")
 
     state.selected_schoolyear = schoolyear
     # Alle Klassen-Kontexte fallen — Klassen/Schüler sind jahresspezifisch.
@@ -321,6 +327,10 @@ async def close_class(body: CloseClassRequest) -> dict:
     for helper in state.helper_sessions.values():
         if helper.context_id == context_id:
             helper.context_id = None
+
+    # Eine ggf. gebundene Lehrkraft-Session entwerten — ihr Kontext verschwindet
+    # gleich, ein Reconnect mit ihrem Token darf danach nicht mehr klappen.
+    await revoke_teacher_sessions_for_context(state, context_id, reason="klasse-geschlossen")
 
     state.close_context(context_id)
     await hub.broadcast_host(state.state_snapshot())

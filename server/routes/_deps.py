@@ -315,6 +315,40 @@ class PrinterDisplayThemeRequest(BaseModel):
     theme: str = "dark"
 
 
+class TeacherAuthorizeRequest(BaseModel):
+    """Body für `POST /api/teacher/authorize` — Host bestätigt den am Handy
+    der Lehrkraft angezeigten Registrierungscode im selben Klassen-Tab."""
+
+    context_id: str = ""
+    registration_code: str = ""
+
+
+class TeacherDisconnectRequest(BaseModel):
+    """Body für `POST /api/teacher/disconnect` — Lehrkraft-Session einer
+    Klasse hart trennen (autorisiert oder nicht)."""
+
+    context_id: str = ""
+
+
+class TeacherStatusRequest(BaseModel):
+    """Body für die token-authentifizierten `POST /api/teacher/skip` bzw.
+    `/api/teacher/undo-skip` — `token` ist der Lehrer-Session-Credential aus
+    der `/teacher?token=...`-URL, keine Host-Cookie-Auth."""
+
+    token: str = ""
+    student_id: int | None = None
+
+
+class TeacherSlipCollectedRequest(BaseModel):
+    """Body für `POST /api/teacher/slip-collected` — die Lehrkraft markiert,
+    ob sie den (unterschriebenen) Leihschein eines Schülers ihrer Klasse
+    entgegengenommen hat. Token-authentifiziert wie `TeacherStatusRequest`."""
+
+    token: str = ""
+    student_id: int | None = None
+    collected: bool = True
+
+
 class StudentJoinRequest(BaseModel):
     join_secret: str = ""
 

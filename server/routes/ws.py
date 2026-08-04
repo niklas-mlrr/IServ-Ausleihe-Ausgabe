@@ -25,6 +25,7 @@ from ..sessions import (
     rebind_helper_to_context,
     send_display_update,
     send_printer_display_update,
+    send_teacher_update,
     slip_trigger_for,
     spectate_student,
 )
@@ -954,6 +955,58 @@ async def ws_drucker_display(websocket: WebSocket, token: str | None = None) -> 
             if not d.authorized:
                 state.printer_displays.pop(token, None)
         await safe_broadcast(hub, state)
+
+
+# ---------------------------------------------------------------------------
+# Lehrkraft-Statusansicht (`/teacher`)
+# ---------------------------------------------------------------------------
+
+
+@router.websocket("/ws/teacher")
+async def ws_teacher(websocket: WebSocket, token: str | None = None) -> None:
+    """Lehrkraft-Statusansicht einer einzelnen Modus-B-Klasse. Unauthentifiziert
+    im üblichen Sinn (kein Host-Cookie) — der lange, zufällige Token IST der
+    Zugangs-Credential (analog `/ws/student/{session_token}`). Vor der
+    Host-Freischaltung liefert die Verbindung nur den Registrierungscode
+    (`send_teacher_update`), danach den klassenscharften `teacher_state`.
+    Ein unbekannter Token (nie gemintet, oder bereits entwertet — neuer QR,
+    explizites Trennen, Klassen-Schließen/Schuljahreswechsel) wird sofort mit
+    `forbidden` abgewiesen; ein Reload kann den Zugang dann nicht mehr
+    wiederherstellen (PLAN-Abnahmekriterium)."""
+    state = get_state()
+    hub = get_hub()
+
+    await websocket.accept()
+
+    if not token or len(token) < 32:
+        await websocket.close(code=1008, reason="Token fehlt/ungültig")
+        return
+
+    session = state.teacher_sessions.get(token)
+    if session is None:
+        await hub.send_websocket(websocket, {"type": "forbidden"})
+        await websocket.close(code=4009, reason="Unbekannter oder entwerteter Token")
+        return
+
+    await _take_over_ws(session, websocket)
+    await send_teacher_update(state, session)
+
+    try:
+        while True:
+            # Die Lehrkraft-Ansicht sendet nichts Inhaltliches über die WS
+            # (Statuswechsel laufen über /api/teacher/skip|undo-skip); receive
+            # dient nur der Trennungserkennung.
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        # Session bleibt bestehen (Reconnect mit demselben Token funktioniert
+        # weiter, solange sie nicht entwertet wurde) — nur die ws-Referenz
+        # lösen, und auch nur, wenn zwischenzeitlich kein Reconnect denselben
+        # Token übernommen hat (Spiegel des Drucker-Display-Musters).
+        current = state.teacher_sessions.get(token)
+        if current is not None and current.ws is websocket:
+            current.ws = None
 
 
 # ---------------------------------------------------------------------------

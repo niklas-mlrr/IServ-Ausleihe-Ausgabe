@@ -94,6 +94,11 @@ class QueueStudent:
     # ist die Zuweisungs-Zustandsmaschine (pending/active/done/skipped) und
     # bleibt davon unberührt; „Leihschein" ist eine reine Info-Anzeige.
     slip_printed: bool = False
+    # Leihschein wurde von der Lehrkraft (unterschrieben) entgegengenommen —
+    # von der Lehrkraft-Ansicht (`/teacher`) gesetzt, s. routes/teacher.py
+    # ::teacher_set_slip_collected. Eigenes Flag wie `slip_printed`: rein
+    # informativ, ändert nie die Zuweisungs-Zustandsmaschine `status`.
+    slip_collected: bool = False
 
     def as_dict(self, *, slip_printing: bool = False) -> dict:
         return {
@@ -112,6 +117,7 @@ class QueueStudent:
             # abgeleitet (s. `AppState.state_snapshot`), nicht auf dem Schüler
             # gemutet. Default False hält die Helfer-Client-Pfade unverändert.
             "slip_printing": slip_printing,
+            "slip_collected": self.slip_collected,
             "enrolled": self.enrolled,
             "paid": self.paid,
             "amount_open": self.amount_open,
@@ -150,6 +156,7 @@ class QueueStudent:
         self.done_isbns = set()
         self.loaned_at_load = 0
         self.slip_printed = False
+        self.slip_collected = False
 
     @classmethod
     def from_iserv(cls, d: dict, *, form: str) -> QueueStudent:
@@ -347,6 +354,29 @@ class PrinterDisplaySession:
 
 
 @dataclass
+class TeacherSession:
+    """Lehrkraft-Statusansicht (`/teacher`) — genau eine Klasse (Kontext) im
+    Blick. Pairing-Flow wie `PrinterDisplaySession`/`DisplaySession`: vor der
+    Host-Freischaltung liefert die WS nur den Registrierungscode, danach
+    ausschließlich Daten der gebundenen Klasse (nie `state_snapshot()`, s.
+    `AppState.teacher_snapshot`).
+
+    `token` ist der eigentliche Zugangs-Credential (lang, zufällig, in der
+    URL `/teacher?token=...`) — analog `StudentSessionB.session_token`.
+    `registration_code` ist nur die menschlich vermittelte Zuordnungshilfe am
+    Host (visueller Abgleich vor der Freischaltung) und gewährt für sich
+    genommen nie Datenzugriff. `context_id` bindet die Session unveränderlich
+    an genau eine Klasse — kein Wechsel nach dem Minten."""
+
+    token: str
+    context_id: str
+    registration_code: str
+    authorized: bool = False
+    ws: object | None = None
+    created_at: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
 class RuntimeSettings:
     """Die vier Host-/Entwickler-Bool-Toggles + der Drucker-Pool — im
     Einstellungen-Dialog gesetzt, gemeinsam in `routes/settings.py::_BOOL_SETTINGS`
@@ -519,6 +549,13 @@ class AppState:
         # eine „gesperrt"-Antwort statt einer Session. Ein neu geöffnetes
         # Display (frischer Token) ist erlaubt.
         self.banned_printer_display_tokens: set[str] = set()
+        # Lehrkraft-Statusansichten (`/teacher`): token -> Session. Höchstens
+        # eine Session pro Kontext (durchgesetzt in routes/teacher.py, nicht
+        # hier). Ein entwerteter Token wird aus diesem Dict entfernt statt auf
+        # eine Bannliste gesetzt (anders als Drucker-Displays) — der Token ist
+        # lang & zufällig (nie wiederverwendet), ein einfaches „unbekannt"
+        # reicht, um einen Reconnect zuverlässig abzuweisen.
+        self.teacher_sessions: dict[str, TeacherSession] = {}
 
     # -----------------------------------------------------------------
     # Kontext-Verwaltung
@@ -713,6 +750,12 @@ class AppState:
                 # Wann der Leihschein am Schülerclient gedruckt wird (Druckmodus).
                 # S. ClassContext.slip_trigger.
                 "slip_trigger": c.slip_trigger,
+                # Lehrkraft-Statusansicht dieser Klasse (`/teacher`) — nur der
+                # Verbindungs-/Freigabestand für den Host-Reiter, NIE der Token
+                # (der bleibt Server-intern + in der einmalig ausgelieferten
+                # QR-URL, s. routes/teacher.py). `None` = noch keine Session
+                # (Host hat noch keinen QR gemintet).
+                "teacher": _teacher_tab_view(self.teacher_session_for_context(c.id)),
             }
             for c in self.contexts.values()
             if not c.loading
@@ -797,6 +840,58 @@ class AppState:
         im ``print_queue``-Modul (dort ist die Job-Allowlist beheimatet), s.
         ``PrintQueue.display_view``."""
         return self.print_queue.display_view(self, display.assigned_printer_ids)
+
+    # --- Lehrkraft-Statusansicht (`/teacher`) ---
+
+    def teacher_session_for_context(self, context_id: str) -> TeacherSession | None:
+        """Die (höchstens eine) Lehrer-Session einer Klasse — autorisiert oder
+        nicht. Für Host-Endpunkte (QR minten/ersetzen, Autorisieren, Trennen),
+        die pro Klassen-Tab genau eine Session verwalten."""
+        return next(
+            (s for s in self.teacher_sessions.values() if s.context_id == context_id), None
+        )
+
+    def teacher_snapshot(self, context_id: str) -> dict:
+        """Minimierter, klassenscharfer Snapshot für eine autorisierte
+        Lehrer-Session — bewusst NICHT `state_snapshot()`: keine anderen
+        Klassen, keine Zahl-/Anmeldedaten, keine Buchdetails, keine Drucker-/
+        Worker-/Host-Einstellungen, kein Pairing-/QR-Secret. Nur Klassenname,
+        Summen je Status und je Schüler Name/Status/Buch-Fortschritt/Druckstatus
+        — exakt das, was PLAN „Sichtbare Status" + „Erlaubte Daten" vorsieht.
+        `slip_collected_count` ist die einzige zusätzliche Kennzahl (orthogonal
+        zu `status`, s. `QueueStudent.slip_collected`) — von der Lehrkraft
+        selbst über `/api/teacher/slip-collected` gesetzt, sobald sie den
+        unterschriebenen Leihschein eines Schülers entgegengenommen hat."""
+        ctx = self.contexts.get(context_id)
+        counts = {"pending": 0, "active": 0, "done": 0, "skipped": 0}
+        if ctx is None or ctx.loading:
+            return {"class_form": None, "counts": counts, "students": [], "slip_collected_count": 0}
+        printing_ids = self.print_queue.in_flight_student_ids()
+        students = []
+        slip_collected_count = 0
+        for s in ctx.queue:
+            counts[s.status] += 1
+            if s.slip_collected:
+                slip_collected_count += 1
+            students.append(
+                {
+                    "student_id": s.student_id,
+                    "lastname": s.lastname,
+                    "firstname": s.firstname,
+                    "status": s.status,
+                    "books_total": s.books_total,
+                    "books_done": len(s.done_isbns),
+                    "slip_printing": s.student_id in printing_ids,
+                    "slip_printed": s.slip_printed,
+                    "slip_collected": s.slip_collected,
+                }
+            )
+        return {
+            "class_form": ctx.form,
+            "counts": counts,
+            "students": students,
+            "slip_collected_count": slip_collected_count,
+        }
 
     # --- Modus-B-Lookups ---
 
@@ -938,6 +1033,18 @@ def bind_state(state: AppState) -> Token[AppState | None]:
 
 def reset_state(token: Token[AppState | None]) -> None:
     _bound_state.reset(token)
+
+
+def _teacher_tab_view(session: TeacherSession | None) -> dict | None:
+    """Lehrkraft-Kachel eines Klassen-Tabs für den Host-Snapshot — bewusst
+    OHNE `token` (der bleibt Server-intern/in der einmaligen QR-URL)."""
+    if session is None:
+        return None
+    return {
+        "registration_code": session.registration_code,
+        "authorized": session.authorized,
+        "connected": session.ws is not None,
+    }
 
 
 # ---- Druckerauswahl für den Helfer-Druck-Dialog ----

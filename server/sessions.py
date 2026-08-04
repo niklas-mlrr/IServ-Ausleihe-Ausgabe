@@ -31,6 +31,7 @@ from .state import (
     QueueStudent,
     SpectatorWaiter,
     StudentSessionB,
+    TeacherSession,
     get_state,
 )
 
@@ -1504,6 +1505,70 @@ async def broadcast_printer_displays(state: AppState) -> None:
     (``print_queue._notify_all``) und Pool-Mutationen (``_after_pool_change``)."""
     for display in list(state.printer_displays.values()):
         await send_printer_display_update(state, display)
+
+
+# ---------------------------------------------------------------------------
+# Lehrkraft-Statusansicht (`/teacher`)
+# ---------------------------------------------------------------------------
+
+
+async def send_teacher_update(state: AppState, session: TeacherSession) -> None:
+    """Aktuellen Zustand an eine Lehrer-Session schicken. Nicht autorisiert →
+    nur der Registrierungscode (keine Klassen-/Schülerdaten). Autorisiert →
+    der minimierte, klassenscharfe `teacher_snapshot` (NIE `state_snapshot()`).
+    `send_websocket` liefert False statt zu werfen — Cleanup dediziert am
+    Rückgabewert (wie bei den Drucker-Displays)."""
+    if session.ws is None:
+        return
+    if not session.authorized:
+        msg = {"type": "registration", "code": session.registration_code}
+    else:
+        msg = {"type": "teacher_state", **state.teacher_snapshot(session.context_id)}
+    if not await get_hub().send_websocket(session.ws, msg):
+        session.ws = None
+
+
+async def broadcast_teacher_sessions(state: AppState) -> None:
+    """Jeder verbundenen Lehrer-Session ihren aktuellen (klassenscharfen)
+    Zustand pushen. Aufgerufen von `Hub.broadcast_host` bei JEDER
+    Zustandsänderung — analog `Hub.broadcast_queue_size` für Helfer."""
+    for session in list(state.teacher_sessions.values()):
+        await send_teacher_update(state, session)
+
+
+async def revoke_teacher_session(state: AppState, session: TeacherSession, *, reason: str) -> None:
+    """Eine Lehrer-Session hart entwerten: aus `state.teacher_sessions`
+    entfernen und ihre WebSocket schließen. Der Token ist lang & zufällig und
+    wird nie wiederverwendet — anders als bei den Drucker-Displays braucht es
+    keine Bannliste, ein einfaches „Token unbekannt" beim nächsten Verbindungs-
+    versuch (s. routes/ws.py::ws_teacher) reicht, um einen Reconnect zuverlässig
+    abzuweisen (PLAN: „Ein Reload kann den Zugang nicht wiederherstellen")."""
+    state.teacher_sessions.pop(session.token, None)
+    ws = session.ws
+    session.ws = None
+    if ws is not None:
+        try:
+            await get_hub().send_websocket(ws, {"type": "forbidden"})
+            await ws.close(code=4009, reason=reason)
+        except Exception:  # noqa: BLE001 — Schließen darf den Aufrufer nicht crashen
+            pass
+
+
+async def revoke_teacher_sessions_for_context(
+    state: AppState, context_id: str, *, reason: str
+) -> None:
+    """Alle Lehrer-Sessions einer Klasse entwerten (Klasse schließen/Tab ×).
+    In der Praxis höchstens eine (s. `AppState.teacher_session_for_context`),
+    aber defensiv über eine Liste statt einer Annahme."""
+    for session in [s for s in state.teacher_sessions.values() if s.context_id == context_id]:
+        await revoke_teacher_session(state, session, reason=reason)
+
+
+async def revoke_all_teacher_sessions(state: AppState, *, reason: str) -> None:
+    """Alle Lehrer-Sessions entwerten (Schuljahreswechsel — alle Kontexte
+    fallen weg, s. routes/classes.py::select_schoolyear)."""
+    for session in list(state.teacher_sessions.values()):
+        await revoke_teacher_session(state, session, reason=reason)
 
 
 # ---------------------------------------------------------------------------

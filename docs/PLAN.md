@@ -261,6 +261,13 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
       Erschöpfung), WS-Reconnect-Leak, Host-Login-TTL (`HOST_SESSION_TTL_S`),
       QR-IP-Override (`HOST_IP`), Pairing-TOCTOU, `commit-book`-ok-nur-bei-booked
       u. a. Write-Pfad-Gating unangetastet. Details: `docs/hardening_2026-06-18.md`.
+- [x] **Klassen-Lehreransicht `/teacher`:** QR-Token + Host-Pairing pro
+      Klassen-Kontext, strikt minimierte Live-Statusansicht und nur
+      `wartend ↔ übersprungen` als Lehreraktion — implementiert 2026-08-04
+      (`server/routes/teacher.py`, `server/routes/ws.py::ws_teacher`,
+      `AppState.teacher_snapshot`, `web/teacher.html`/`teacher.js`). Detailplan:
+      `docs/teacher_status_page_plan.md`. Live-Check im Schul-WLAN offen
+      (`docs/test_status.md`).
 - [ ] O6 fachlich mit Hr. Pühn finalisieren (Wortlaut „Nachweis fehlt" +
       kombinierter Host-Freigabe-Dialog bei nicht-bezahlt/Nachweis, 2026-07-06)
 - [ ] Generalprobe vor Schuljahresbeginn

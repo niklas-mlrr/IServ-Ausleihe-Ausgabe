@@ -116,11 +116,13 @@ def test_reset_to_pending_clears_progress_and_slip():
     _st, s = _state_with_student()
     s.books_total, s.done_isbns, s.slip_printed = 2, {"A"}, True
     s.loaned_at_load = 1
+    s.slip_collected = True
     s.reset_progress()
     assert s.as_dict()["books_total"] is None
     assert s.as_dict()["books_done"] == 0
     assert s.as_dict()["slip_printed"] is False
     assert s.as_dict()["loaned_at_load"] == 0
+    assert s.as_dict()["slip_collected"] is False
 
 
 def test_info_flags_from_student_info():

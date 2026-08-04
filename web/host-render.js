@@ -196,6 +196,10 @@ window.__host = window.__host || {};
             <div class="ctx-codes" data-ctx-id="${id}"></div>
           </div>
           <div class="card">
+            <h2 style="margin:0 0 8px">Lehrkraft-Ansicht</h2>
+            <div class="ctx-teacher-body" data-ctx-id="${id}"></div>
+          </div>
+          <div class="card">
             <h2 style="margin:0 0 8px">Schüler-Queue <span class="queue-count" data-ctx-qc="${id}"></span></h2>
             <div class="row" style="align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px">
               <button class="ghost" data-action="ctx-reset" data-ctx-id="${id}"><span class="ghost-ico">${ICO_RESET}</span> Status zurücksetzen</button>
@@ -843,7 +847,98 @@ window.__host = window.__host || {};
     renderCtxNowServing(id);
     renderCtxQueue(id);
     renderCtxPairing(id);
+    renderCtxTeacher(id);
     renderCtxPrinters(id);
+  }
+
+  // Lehrkraft-Ansicht-Kachel eines Klassen-Tabs: kein Fokus-Schutz nötig
+  // (keine Texteingabe hier — der Registrierungscode wird nur ANGEZEIGT, s.
+  // PLAN „Host-Ablauf"). Drei Zustände aus `ctx.teacher`
+  // (`null` | `{authorized:false,…}` | `{authorized:true,…}`):
+  //   1. noch keine Session → Button „QR für Lehrkraft anzeigen".
+  //   2. Session wartet auf Freischaltung → Code + „Bestätigen"/„Abbrechen".
+  //   3. autorisiert → Verbindungsstatus + sichtbare „Lehrkraft trennen"-Aktion
+  //      (verhindert, dass ein späterer QR-Klick eine laufende Ansicht killt).
+  // Statistik „Leihschein entgegengenommen" — von der Lehrkraft in ihrer
+  // eigenen Ansicht je Schüler angekreuzt (`slip_collected`), hier nur
+  // read-only aus der ohnehin vorhandenen Klassen-Queue abgeleitet (der Host
+  // steuert dieses Flag nicht selbst). Nur relevant, sobald mindestens ein
+  // Schüler abgeschlossen ist — sonst kein Leihschein zum Entgegennehmen.
+  function teacherSlipStat(ctx) {
+    const queue = ctx.queue || [];
+    const done = queue.filter(s => s.status === 'done');
+    if (!done.length) return '';
+    const collected = done.filter(s => s.slip_collected).length;
+    return `<p class="hint" style="margin-top:8px">Leihschein entgegengenommen: <b>${collected} / ${done.length}</b> abgeschlossen</p>`;
+  }
+
+  function renderCtxTeacher(id) {
+    const ctx = (state.contexts || {})[id];
+    if (!ctx) return;
+    const host = document.querySelector(`.ctx-teacher-body[data-ctx-id="${id}"]`);
+    if (!host) return;
+    const t = ctx.teacher;
+    const slipStat = teacherSlipStat(ctx);
+    if (!t) {
+      host.innerHTML = `<button class="secondary" data-action="teacher-qr" data-ctx-id="${id}">QR für Lehrkraft anzeigen</button>
+        <p class="hint" style="margin-top:8px">Zeigt einer Lehrkraft live nur diese Klasse (Status je Schüler) — mit eingeschränkter Steuerung (nur „Als abwesend"-Markierung und Leihschein-Eingang), ohne andere Klassen/Bücher/Zahldaten.</p>
+        ${slipStat}`;
+      return;
+    }
+    if (!t.authorized) {
+      host.innerHTML = `<div class="row" style="align-items:center;gap:10px;flex-wrap:wrap">
+          <span>Code: <b>${escapeHtml(t.registration_code)}</b></span>
+          <button class="secondary" data-action="teacher-qr" data-ctx-id="${id}">QR erneut zeigen</button>
+          <button class="success" data-action="teacher-authorize" data-ctx-id="${id}">Bestätigen</button>
+          <button class="secondary" data-action="teacher-disconnect" data-ctx-id="${id}">Abbrechen</button>
+        </div>
+        <p class="hint" style="margin-top:8px">Wartet auf Bestätigung — das Lehrkraft-Gerät zeigt denselben Code.</p>
+        ${slipStat}`;
+      return;
+    }
+    const dot = t.connected ? '<span style="color:#30d158">●</span>' : '<span style="color:#888">○</span>';
+    host.innerHTML = `<div class="row" style="align-items:center;gap:10px">
+        <span>${dot} ${t.connected ? 'verbunden' : 'getrennt (Reconnect möglich)'}</span>
+        <button class="ghost warn" data-action="teacher-disconnect" data-ctx-id="${id}">Lehrkraft trennen</button>
+      </div>
+      ${slipStat}`;
+  }
+
+  // QR für die Lehrkraft-Ansicht dieser Klasse holen (mintet bzw. ersetzt eine
+  // noch nicht autorisierte Session serverseitig) und im gemeinsamen QR-Modal
+  // zeigen.
+  async function showTeacherQr(id) {
+    const r = await fetch(`/api/teacher/qr?context_id=${encodeURIComponent(id)}`);
+    if (!r.ok) { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'QR für Lehrkraft konnte nicht erzeugt werden'); return; }
+    const d = await r.json();
+    showQr(d.qr, d.url || '');
+  }
+
+  // Host bestätigt den (im eigenen State bereits bekannten) Registrierungscode.
+  async function authorizeTeacher(id) {
+    const ctx = (state.contexts || {})[id];
+    const code = ctx && ctx.teacher && ctx.teacher.registration_code;
+    if (!code) return;
+    const r = await fetch('/api/teacher/authorize', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ context_id: id, registration_code: code }),
+    });
+    if (r.ok) showMsg('Lehrkraft freigeschaltet');
+    else { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Freischaltung fehlgeschlagen'); }
+  }
+
+  // Lehrkraft-Session dieser Klasse trennen — bei einer bereits autorisierten
+  // Session (laufende Ansicht) erst nach Bestätigung.
+  async function disconnectTeacher(id) {
+    const ctx = (state.contexts || {})[id];
+    const authorized = !!(ctx && ctx.teacher && ctx.teacher.authorized);
+    if (authorized && !await confirmDialog('Lehrkraft-Ansicht dieser Klasse trennen?', 'Trennen')) return;
+    const r = await fetch('/api/teacher/disconnect', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ context_id: id }),
+    });
+    if (r.ok) showMsg('Lehrkraft-Session getrennt');
+    else { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Trennen fehlgeschlagen'); }
   }
 
   // ---- Drucker-Allowlist pro Klasse (panel-new + Klassen-Tab) ------------
@@ -1865,8 +1960,14 @@ window.__host = window.__host || {};
         }
       } else if (s.status === 'done') {
         // Fertig: statt „Fertig" der rote Hinweis, falls einer bekannt ist;
-        // ohne Hinweis bleibt es beim grünen „Fertig".
+        // ohne Hinweis bleibt es beim grünen „Fertig". Zusätzlich, sobald die
+        // Lehrkraft den Leihschein entgegengenommen hat (read-only Anzeige,
+        // s. renderCtxTeacher/teacherSlipStat — der Host setzt das Flag nicht
+        // selbst), ein kleines grünes Häkchen mit Titel-Tooltip.
         statusBadge = hints.length ? hints.join('') : `<span class="badge badge-done">Fertig</span>`;
+        if (s.slip_collected) {
+          statusBadge += `<span class="badge badge-done" title="Leihschein von der Lehrkraft entgegengenommen">Leihschein ✓</span>`;
+        }
       } else {
         const badgeClass = { pending: 'badge-pending', skipped: 'badge-skipped' }[s.status] || '';
         const statusLabel = { pending: 'Wartend', skipped: 'Übersprungen' }[s.status] || s.status;
@@ -2608,6 +2709,9 @@ window.__host = window.__host || {};
       case 'ctx-clear': ctxClearQueue(id); break;
       case 'ctx-disconnect-all': ctxDisconnectAll(id); break;
       case 'ctx-add-student': ctxAddSingleStudent(id); break;
+      case 'teacher-qr': showTeacherQr(id); break;
+      case 'teacher-authorize': authorizeTeacher(id); break;
+      case 'teacher-disconnect': disconnectTeacher(id); break;
     }
   }
   document.getElementById('class-panels').addEventListener('click', handleDelegatedAction);
