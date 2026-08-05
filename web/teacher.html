@@ -40,13 +40,13 @@
     .muted { color: var(--muted); }
     #view-class { display: none; }
     #view-class.show { display: block; }
-    .counts { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+    .counts { display: flex; gap: 8px; flex-wrap: nowrap; margin-bottom: 16px; }
     .count-pill {
-      flex: 1 1 70px; background: var(--surface); border: 1px solid var(--border);
+      flex: 1 1 0; min-width: 0; background: var(--surface); border: 1px solid var(--border);
       border-radius: 10px; padding: 8px 10px; text-align: center;
     }
     .count-pill .n { font-size: 1.3rem; font-weight: 700; display: block; }
-    .count-pill .l { font-size: .72rem; color: var(--muted); }
+    .count-pill .l { display: block; font-size: .72rem; color: var(--muted); overflow-wrap: anywhere; }
     .hint { color: var(--muted); font-size: .82rem; text-align: left; }
     .swipe-tip { margin: -6px 0 12px; display: none; }
     .swipe-tip.show { display: block; }

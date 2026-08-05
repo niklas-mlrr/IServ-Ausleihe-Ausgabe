@@ -8,6 +8,20 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-05 — UI-Visual-Audit: vier Inkonsistenzen behoben
+
+- Die Klassen-Reiter in der Host-Tab-Leiste nehmen jetzt wie der Host-Reiter
+  an der vollen Höhe teil; Status-Badges für Warnhinweise verwenden dasselbe
+  Schriftgewicht wie die übrigen Badge-Typen (`web/host.css`).
+- Die Teacher-Statistik-Kacheln bleiben auf schmalen Viewports in einer
+  gleichmäßig breiten Zeile, auch wenn der optionale fünfte Zähler erscheint;
+  lange Bezeichnungen dürfen innerhalb der Kachel umbrechen (`web/teacher.html`).
+- Der Verbindungsindikator des Drucker-Displays steht jetzt wie bei QR- und
+  Teacher-Display oben rechts (`web/drucker-display.html`).
+- Read-only-Playwright-Visualprüfung gegen den lokalen Server mit Login und
+  `POST /api/open-test-config`: Tab- und Badge-Messwerte, Kachel-Geometrie
+  sowie die `#conn`-Positionen bestätigt; keine IServ-Writes.
+
 ## 2026-08-05 — Lehreransicht: rotes Wisch-Hintergrund-Bleeding behoben
 
 - Die Schülerzeilen behalten wieder ihre normalen runden Ecken; zusätzlich ist

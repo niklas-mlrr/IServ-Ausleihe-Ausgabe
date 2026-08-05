@@ -280,7 +280,7 @@
     .q-progress-main { font-variant-numeric: tabular-nums; }
     .q-progress-sub  { font-size: 0.68rem; font-weight: 500; opacity: .7; font-variant-numeric: tabular-nums; }
     .badge-info-ok      { background: var(--ok-tint); color: var(--ok); }
-    .badge-info-warn    { background: var(--danger-tint); color: var(--danger-text); font-weight: 500; }
+    .badge-info-warn    { background: var(--danger-tint); color: var(--danger-text); font-weight: 600; }
     .code-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border-faint); flex-wrap: wrap; }
     .code-row:last-child { border-bottom: none; }
     .code-val { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1.25rem; font-weight: 700; letter-spacing: .12em; color: var(--info); }
@@ -327,6 +327,9 @@
       display: flex; align-items: stretch; gap: 2px; flex-wrap: wrap;
       border-bottom: 1px solid var(--border);
     }
+    /* Die Klassen-Reiter sollen wie die direkten Buttons an der gesamten
+       Querachse der Tab-Leiste teilnehmen. */
+    #tab-class-list { display: contents; }
     #tab-bar button {
       background: transparent; color: var(--text-muted);
       padding: 8px 16px; font-size: .9rem; cursor: pointer;
