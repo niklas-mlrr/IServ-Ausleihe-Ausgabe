@@ -8,6 +8,14 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-05 — Lehreransicht: rotes Wisch-Hintergrund-Bleeding behoben
+
+- Die Schülerzeilen behalten wieder ihre normalen runden Ecken; zusätzlich ist
+  die rote Reveal-Fläche minimal eingerückt und separat abgerundet. Dadurch
+  scheint sie in Ruhe nicht mehr an den Zeilenecken durch (`web/teacher.html`).
+- Verifiziert mit einem gerenderten Chromium-Eckentest, `git diff --check` und
+  `node --check web/teacher.js`.
+
 ## 2026-08-05 — Teacher-QR-Modal schließt nach Scan automatisch
 
 - Der Host registriert beim Anzeigen des Lehrer-QR-Codes jetzt einen
