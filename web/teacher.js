@@ -80,11 +80,17 @@
       // Dezenter Wisch-Hinweis (Chevrons) am rechten Rand wartender Zeilen —
       // die Geste ist sonst nur durch Zufall auffindbar.
       const swipeHint = swipeable ? '<span class="swipe-hint" aria-hidden="true">‹&#8202;‹</span>' : '';
+      const actions = extra ? `<div class="stud-actions">${extra}</div>` : '';
       const row = `<div class="stud-row${swipeable ? ' swipeable' : ''}" data-row-id="${s.student_id}" data-status="${s.status}">
-        <span class="dot ${s.status}"></span>
-        <div class="stud-name"><div class="n">${name}</div><div class="s">${escapeHtml(statusText(s))}</div></div>
-        ${extra}
-        ${swipeHint}
+        <div class="stud-row-head">
+          <span class="dot ${s.status}"></span>
+          <div class="stud-name"><div class="n">${name}</div></div>
+          ${swipeHint}
+        </div>
+        <div class="stud-row-status">
+          <div class="stud-status"><div class="s">${escapeHtml(statusText(s))}</div></div>
+          ${actions}
+        </div>
       </div>`;
       // Wartende Schüler bekommen den Wisch-Container mit der (verdeckten)
       // roten „Abwesend"-Fläche dahinter; alle anderen Status ohne Wisch-Geste.

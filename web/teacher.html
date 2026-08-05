@@ -65,7 +65,7 @@
     }
     .stud-row {
       position: relative; z-index: 1;
-      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      display: grid; gap: 6px;
       background: var(--surface); border: 1px solid var(--border);
       border-radius: 10px; padding: 10px 12px;
       transition: transform .18s ease, opacity .18s ease;
@@ -74,9 +74,19 @@
     }
     .stud-row.swipeable { cursor: grab; }
     .stud-row.swiping { transition: none; }
+    .stud-row-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .stud-row-status {
+      display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px;
+      min-width: 0; padding-left: 19px;
+    }
     .stud-name { flex: 1 1 auto; min-width: 0; }
     .stud-name .n { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .stud-name .s { font-size: .82rem; color: var(--muted); }
+    .stud-status { flex: 1 1 auto; min-width: min-content; }
+    .stud-status .s {
+      font-size: .82rem; color: var(--muted); line-height: 1.25;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .stud-actions { flex: 0 0 auto; max-width: 100%; margin-left: auto; }
     .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
     .dot.pending { background: var(--pending); }
     .dot.active { background: var(--active); }
@@ -92,6 +102,12 @@
       font-size: .78rem; color: var(--muted); white-space: nowrap; cursor: pointer;
     }
     .slip-check input { width: 18px; height: 18px; flex: none; }
+    @media (max-width: 420px) {
+      .slip-check { white-space: normal; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .stud-row { transition: opacity .18s ease; }
+    }
     #conn { position: absolute; top: 10px; right: 12px; font-size: .75rem; color: var(--muted); }
     #conn .dot2 { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: var(--pending); margin-right: 5px; }
     #conn .dot2.ok { background: var(--done); }

@@ -8,6 +8,20 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-05 — Teacher-Statuszeilen zweizeilig und wortfest
+
+- Jede Schülerzeile der Teacher-Ansicht ist jetzt in eine Kopfzeile mit Name,
+  Statuspunkt und rechtem Wisch-Chevron sowie eine eigene Status-/Aktionszeile
+  geteilt. Dadurch bleiben Statuslabels wie „Ausgabe abgeschlossen“ und
+  „Übersprungen / abwesend“ als vollständige Wörter erhalten.
+- Status- und Aktionsbereich reagieren weiterhin auf schmale Viewports; die
+  Rücknahmeaktion bleibt erreichbar, während die bestehende Links-Wisch-Geste
+  und die rechte Chevron-Position unverändert bleiben (`web/teacher.html`,
+  `web/teacher.js`).
+- Verifiziert mit 385 pytest-Tests, Ruff, `node --check web/*.js` und einem
+  lokalen Chromium-Check bei 390px/1024px inklusive Links-Wisch; keine
+  IServ-Schreibzugriffe.
+
 ## 2026-08-05 — Teacher-Wischhinweis rechts ausgerichtet
 
 - Der dezente linke Chevron-Hinweis in wartenden Schülerzeilen steht jetzt am
