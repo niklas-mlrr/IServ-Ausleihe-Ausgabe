@@ -68,7 +68,7 @@
     document.getElementById('stud-list').innerHTML = students.map(s => {
       const name = `${escapeHtml(s.lastname)}, ${escapeHtml(s.firstname)}`;
       let extra = '';
-      if (s.status === 'skipped') {
+      if (s.status === 'skipped' && !s.auto_skipped) {
         extra = `<button class="act" data-undo="${s.student_id}">Nicht abwesend</button>`;
       } else if (s.status === 'done' && data.done_collected === true && s.slip_printed) {
         extra = `<label class="slip-check">
@@ -77,14 +77,14 @@
         </label>`;
       }
       const swipeable = s.status === 'pending';
-      // Dezenter Wisch-Hinweis (Chevrons) am linken Rand wartender Zeilen —
+      // Dezenter Wisch-Hinweis (Chevrons) am rechten Rand wartender Zeilen —
       // die Geste ist sonst nur durch Zufall auffindbar.
       const swipeHint = swipeable ? '<span class="swipe-hint" aria-hidden="true">‹&#8202;‹</span>' : '';
       const row = `<div class="stud-row${swipeable ? ' swipeable' : ''}" data-row-id="${s.student_id}" data-status="${s.status}">
-        ${swipeHint}
         <span class="dot ${s.status}"></span>
         <div class="stud-name"><div class="n">${name}</div><div class="s">${escapeHtml(statusText(s))}</div></div>
         ${extra}
+        ${swipeHint}
       </div>`;
       // Wartende Schüler bekommen den Wisch-Container mit der (verdeckten)
       // roten „Abwesend"-Fläche dahinter; alle anderen Status ohne Wisch-Geste.

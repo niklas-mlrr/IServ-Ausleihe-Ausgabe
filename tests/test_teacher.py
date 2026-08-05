@@ -360,12 +360,30 @@ def test_teacher_snapshot_shape_and_privacy(ctx):
     s = snap["students"][0]
     assert set(s.keys()) == {
         "student_id", "lastname", "firstname", "status",
+        "auto_skipped",
         "books_total", "books_done", "slip_printing", "slip_printed", "slip_collected",
     }
     assert s["books_done"] == 2
     assert snap["slip_collected_count"] == 0
     assert "10b" not in str(snap)  # andere Klasse taucht nirgends auf
     assert "paid" not in str(snap.keys())
+
+
+def test_teacher_snapshot_maps_auto_skipped_done_to_skipped(ctx):
+    state, _, _ = ctx
+    c = _open_ctx(state, students=2)
+    c.queue[0].status = "done"
+    c.queue[0].auto_skipped = True
+    c.queue[1].status = "done"
+
+    snap = state.teacher_snapshot(c.id)
+
+    assert snap["counts"] == {"pending": 0, "active": 0, "done": 1, "skipped": 1}
+    by_id = {student["student_id"]: student for student in snap["students"]}
+    assert by_id[c.queue[0].student_id]["status"] == "skipped"
+    assert by_id[c.queue[0].student_id]["auto_skipped"] is True
+    assert by_id[c.queue[1].student_id]["status"] == "done"
+    assert by_id[c.queue[1].student_id]["auto_skipped"] is False
 
 
 def test_teacher_snapshot_unknown_context_is_empty(ctx):

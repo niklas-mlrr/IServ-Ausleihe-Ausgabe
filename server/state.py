@@ -99,6 +99,11 @@ class QueueStudent:
     # ::teacher_set_slip_collected. Eigenes Flag wie `slip_printed`: rein
     # informativ, ändert nie die Zuweisungs-Zustandsmaschine `status`.
     slip_collected: bool = False
+    # Beim Klassen-Laden automatisch übersprungen (z. B. nicht angemeldet oder
+    # ohne offene vorgemerkte Bücher). Bleibt intern, damit die Host-Queue ihre
+    # bestehende `done`-/Info-Badge-Darstellung behält; die Lehreransicht kann
+    # den Eintrag dadurch korrekt als übersprungen ausweisen.
+    auto_skipped: bool = False
 
     def as_dict(self, *, slip_printing: bool = False) -> dict:
         return {
@@ -157,6 +162,7 @@ class QueueStudent:
         self.loaned_at_load = 0
         self.slip_printed = False
         self.slip_collected = False
+        self.auto_skipped = False
 
     @classmethod
     def from_iserv(cls, d: dict, *, form: str) -> QueueStudent:
@@ -880,7 +886,9 @@ class AppState:
         `done_collected` steuert, ob die Lehrkraft Leihschein-Eingänge erfassen
         darf; `slip_collected_count` zählt dann die abgeschlossenen Schüler,
         deren gedruckter Leihschein über `/api/teacher/slip-collected` als
-        entgegengenommen markiert wurde."""
+        entgegengenommen markiert wurde. Automatisch beim Klassen-Laden
+        übersprungene Schüler werden für diese Ansicht als `skipped` abgebildet,
+        obwohl die Host-Queue ihren Ablaufstatus `done` behält."""
         ctx = self.contexts.get(context_id)
         counts = {"pending": 0, "active": 0, "done": 0, "skipped": 0}
         if ctx is None or ctx.loading:
@@ -895,15 +903,17 @@ class AppState:
         students = []
         slip_collected_count = 0
         for s in ctx.queue:
-            counts[s.status] += 1
-            if ctx.done_collected and s.status == "done" and s.slip_collected:
+            teacher_status = "skipped" if s.status == "done" and s.auto_skipped else s.status
+            counts[teacher_status] += 1
+            if ctx.done_collected and teacher_status == "done" and s.slip_collected:
                 slip_collected_count += 1
             students.append(
                 {
                     "student_id": s.student_id,
                     "lastname": s.lastname,
                     "firstname": s.firstname,
-                    "status": s.status,
+                    "status": teacher_status,
+                    "auto_skipped": s.auto_skipped,
                     "books_total": s.books_total,
                     "books_done": len(s.done_isbns),
                     "slip_printing": s.student_id in printing_ids,

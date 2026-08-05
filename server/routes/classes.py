@@ -108,9 +108,11 @@ async def _load_student_flags(state: AppState, ctx: ClassContext, auto_done: lis
             )
             return
         student.set_info_flags(info)
+        student.auto_skipped = False
         if not info.get("enrolled"):
             if "not_enrolled" in filters:
                 student.status = "done"
+                student.auto_skipped = True
             return
         if (
             ("unpaid" in filters and not info.get("paid"))
@@ -118,6 +120,7 @@ async def _load_student_flags(state: AppState, ctx: ClassContext, auto_done: lis
             or ("exemption_pending" in filters and info.get("exemption_pending"))
         ):
             student.status = "done"
+            student.auto_skipped = True
             return
         if "all_lent" in filters:
             hidden = await get_hidden_isbns_for_form(state, student.form)
@@ -125,6 +128,7 @@ async def _load_student_flags(state: AppState, ctx: ClassContext, auto_done: lis
             vormerk, _lent, _lent_codes = booking_isbn_sets_from_info(info)
             if not vormerk:
                 student.status = "done"
+                student.auto_skipped = True
 
     await asyncio.gather(*(_check(s) for s in ctx.queue))
 

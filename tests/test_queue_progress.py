@@ -174,6 +174,24 @@ def test_load_student_flags_fills_flags_without_auto_done_filters():
     asyncio.run(classes._load_student_flags(st, st.active_context, []))
     assert s.paid is False and s.enrolled is True
     assert s.status == "pending"
+    assert s.auto_skipped is False
+
+
+def test_load_student_flags_marks_auto_done_as_auto_skipped():
+    from server.routes import classes
+
+    st, s = _state_with_student()
+    s.status = "pending"
+
+    class _FakeIServ:
+        async def get_student_info(self, student_id, schoolyear):
+            return {"enrolled": False, "books": []}
+
+    st.iserv = _FakeIServ()
+    asyncio.run(classes._load_student_flags(st, st.active_context, ["not_enrolled"]))
+
+    assert s.status == "done"
+    assert s.auto_skipped is True
 
 
 def test_load_student_flags_survives_iserv_error():

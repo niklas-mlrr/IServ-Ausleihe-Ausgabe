@@ -283,6 +283,7 @@
     .badge-info-warn    { background: var(--danger-tint); color: var(--danger-text); font-weight: 600; }
     .code-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border-faint); flex-wrap: wrap; }
     .code-row:last-child { border-bottom: none; }
+    .code-row select { margin-bottom: 0; }
     .code-val { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1.25rem; font-weight: 700; letter-spacing: .12em; color: var(--info); }
     .code-meta { color: var(--text-muted); font-size: .78rem; }
     .code-chip { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1.1rem; font-weight: 700; letter-spacing: .1em; padding: 6px 12px; }

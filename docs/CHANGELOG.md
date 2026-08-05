@@ -8,6 +8,26 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-05 — Teacher-Wischhinweis rechts ausgerichtet
+
+- Der dezente linke Chevron-Hinweis in wartenden Schülerzeilen steht jetzt am
+  rechten Rand und zeigt damit konsistent zur Wischrichtung nach links.
+- Verifiziert mit `node --check` und einem gerenderten Chromium-Check bei
+  390px Viewportbreite.
+
+## 2026-08-05 — Teacher-Status und Modus-B-Pairing korrigiert
+
+- Der Verbindungsindikator der Teacher-Ansicht scrollt jetzt mit dem Dokument
+  statt dauerhaft am Viewport zu kleben.
+- Beim Klassen-Laden automatisch übersprungene Schüler (z. B. „Nicht
+  angemeldet") bleiben in der Host-Queue als `done` mit dem bestehenden
+  Hinweis sichtbar, erscheinen in der Teacher-Ansicht aber korrekt als
+  „Übersprungen / abwesend" und werden dort nicht als abgeschlossen gezählt.
+- Das Modus-B-Pairing richtet Code, Schülerauswahl und „Zuordnen"-Button
+  sauber aus; der globale Select-Abstand wird für diese Zeile aufgehoben.
+- Verifiziert mit 385 pytest-Tests, Ruff, JavaScript-Syntaxchecks und einem
+  lokalen Playwright-Check ohne IServ-Writes.
+
 ## 2026-08-05 — UI-Visual-Audit: vier Inkonsistenzen behoben
 
 - Die Klassen-Reiter in der Host-Tab-Leiste nehmen jetzt wie der Host-Reiter
