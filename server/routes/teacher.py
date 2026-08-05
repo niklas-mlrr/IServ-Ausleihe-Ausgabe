@@ -174,9 +174,9 @@ async def teacher_undo_skip(body: TeacherStatusRequest) -> dict:
 async def teacher_set_slip_collected(body: TeacherSlipCollectedRequest) -> dict:
     """Die Lehrkraft markiert, ob sie den (unterschriebenen) Leihschein eines
     Schülers ihrer Klasse entgegengenommen hat — rein informatives Flag
-    (`QueueStudent.slip_collected`), ändert nie `status`. Voraussetzung: für
-    den Schüler wurde bereits ein Leihschein gedruckt (`slip_printed`) — ohne
-    gedruckten Schein kann nichts entgegengenommen worden sein."""
+    (`QueueStudent.slip_collected`), ändert nie `status`. Die Klassenoption
+    `done_collected` und der Status `done` müssen aktiv sein; außerdem muss für
+    den Schüler bereits ein Leihschein gedruckt worden sein (`slip_printed`)."""
     state = get_state()
     session = _authorized_session(state, body.token)
     if body.student_id is None:
@@ -184,7 +184,14 @@ async def teacher_set_slip_collected(body: TeacherSlipCollectedRequest) -> dict:
     found = state.find_student_with_ctx(body.student_id)
     if found is None or found[0].id != session.context_id:
         raise HTTPException(404, "Schüler nicht in dieser Klasse")
-    student = found[1]
+    ctx, student = found
+    if not ctx.done_collected:
+        raise HTTPException(409, "Leihschein-Einsammeln für diese Klasse nicht aktiviert")
+    if student.status != "done":
+        raise HTTPException(
+            409,
+            f"Leihschein erst bei abgeschlossenem Schüler erfassbar (Status: {student.status})",
+        )
     if not student.slip_printed:
         raise HTTPException(409, "Für diesen Schüler wurde noch kein Leihschein gedruckt")
     student.slip_collected = bool(body.collected)

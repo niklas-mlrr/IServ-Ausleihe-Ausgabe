@@ -355,6 +355,7 @@ def test_teacher_snapshot_shape_and_privacy(ctx):
     snap = state.teacher_snapshot(c.id)
     assert snap["class_form"] == "10a"
     assert snap["counts"] == {"pending": 1, "active": 0, "done": 0, "skipped": 0}
+    assert snap["done_collected"] is False
     assert len(snap["students"]) == 1
     s = snap["students"][0]
     assert set(s.keys()) == {
@@ -374,6 +375,7 @@ def test_teacher_snapshot_unknown_context_is_empty(ctx):
         "class_form": None,
         "counts": {"pending": 0, "active": 0, "done": 0, "skipped": 0},
         "students": [],
+        "done_collected": False,
         "slip_collected_count": 0,
     }
 
@@ -488,6 +490,7 @@ def test_slip_collected_requires_authorized_session(client, ctx):
 def test_slip_collected_requires_printed_slip(client, ctx):
     state, _, _ = ctx
     c = _open_ctx(state, students=1)
+    c.done_collected = True
     state.teacher_sessions["tok"] = TeacherSession(
         token="tok", context_id=c.id, registration_code="AAAA", authorized=True
     )
@@ -498,11 +501,30 @@ def test_slip_collected_requires_printed_slip(client, ctx):
     assert c.queue[0].slip_collected is False
 
 
+def test_slip_collected_requires_class_option(client, ctx):
+    state, _, _ = ctx
+    c = _open_ctx(state, students=1)
+    c.queue[0].status = "done"
+    c.queue[0].slip_printed = True
+    state.teacher_sessions["tok"] = TeacherSession(
+        token="tok", context_id=c.id, registration_code="AAAA", authorized=True
+    )
+
+    r = client.post(
+        "/api/teacher/slip-collected",
+        json={"token": "tok", "student_id": 100, "collected": True},
+    )
+
+    assert r.status_code == 409
+    assert c.queue[0].slip_collected is False
+
+
 def test_slip_collected_sets_and_unsets_flag(client, ctx):
     state, _, hub_inst = ctx
     c = _open_ctx(state, students=1)
     c.queue[0].status = "done"
     c.queue[0].slip_printed = True
+    c.done_collected = True
     state.teacher_sessions["tok"] = TeacherSession(
         token="tok", context_id=c.id, registration_code="AAAA", authorized=True
     )
@@ -513,6 +535,7 @@ def test_slip_collected_sets_and_unsets_flag(client, ctx):
     assert r.json() == {"ok": True, "slip_collected": True}
     assert c.queue[0].slip_collected is True
     assert len(hub_inst.broadcasts) == 1
+    assert hub_inst.broadcasts[0]["contexts"][c.id]["queue"][0]["slip_collected"] is True
 
     r = client.post(
         "/api/teacher/slip-collected", json={"token": "tok", "student_id": 100, "collected": False}
@@ -540,6 +563,7 @@ def test_slip_collected_student_of_other_class_404(client, ctx):
 def test_teacher_snapshot_slip_collected_count(ctx):
     state, _, _ = ctx
     c = _open_ctx(state, students=2)
+    c.done_collected = True
     c.queue[0].status = "done"
     c.queue[0].slip_printed = True
     c.queue[0].slip_collected = True
@@ -548,6 +572,19 @@ def test_teacher_snapshot_slip_collected_count(ctx):
     collected_flags = {s["student_id"]: s["slip_collected"] for s in snap["students"]}
     assert collected_flags[c.queue[0].student_id] is True
     assert collected_flags[c.queue[1].student_id] is False
+
+
+def test_slip_collected_is_ignored_in_teacher_count_when_option_disabled(ctx):
+    state, _, _ = ctx
+    c = _open_ctx(state, students=1)
+    c.queue[0].status = "done"
+    c.queue[0].slip_printed = True
+    c.queue[0].slip_collected = True
+
+    snap = state.teacher_snapshot(c.id)
+
+    assert snap["done_collected"] is False
+    assert snap["slip_collected_count"] == 0
 
 
 # ---- WebSocket --------------------------------------------------------------
@@ -691,6 +728,10 @@ def test_hub_broadcast_host_pushes_teacher_updates(monkeypatch):
     state = AppState()
     ctx_a = state.open_context("10a")
     ctx_a.queue.append(QueueStudent(student_id=1, lastname="A", firstname="a", form="10a"))
+    ctx_a.done_collected = True
+    ctx_a.queue[0].status = "done"
+    ctx_a.queue[0].slip_printed = True
+    ctx_a.queue[0].slip_collected = True
     ws_unauth = _FakeWS()
     ws_auth = _FakeWS()
     state.teacher_sessions["unauth"] = TeacherSession(
@@ -705,6 +746,8 @@ def test_hub_broadcast_host_pushes_teacher_updates(monkeypatch):
     assert ws_unauth.sent[-1] == {"type": "registration", "code": "CODE"}
     assert ws_auth.sent[-1]["type"] == "teacher_state"
     assert ws_auth.sent[-1]["class_form"] == "10a"
+    assert ws_auth.sent[-1]["done_collected"] is True
+    assert ws_auth.sent[-1]["slip_collected_count"] == 1
 
 
 def test_send_teacher_update_dead_ws_cleared(monkeypatch):

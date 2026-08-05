@@ -877,20 +877,26 @@ class AppState:
         Worker-/Host-Einstellungen, kein Pairing-/QR-Secret. Nur Klassenname,
         Summen je Status und je Schüler Name/Status/Buch-Fortschritt/Druckstatus
         — exakt das, was PLAN „Sichtbare Status" + „Erlaubte Daten" vorsieht.
-        `slip_collected_count` ist die einzige zusätzliche Kennzahl (orthogonal
-        zu `status`, s. `QueueStudent.slip_collected`) — von der Lehrkraft
-        selbst über `/api/teacher/slip-collected` gesetzt, sobald sie den
-        unterschriebenen Leihschein eines Schülers entgegengenommen hat."""
+        `done_collected` steuert, ob die Lehrkraft Leihschein-Eingänge erfassen
+        darf; `slip_collected_count` zählt dann die abgeschlossenen Schüler,
+        deren gedruckter Leihschein über `/api/teacher/slip-collected` als
+        entgegengenommen markiert wurde."""
         ctx = self.contexts.get(context_id)
         counts = {"pending": 0, "active": 0, "done": 0, "skipped": 0}
         if ctx is None or ctx.loading:
-            return {"class_form": None, "counts": counts, "students": [], "slip_collected_count": 0}
+            return {
+                "class_form": None,
+                "counts": counts,
+                "students": [],
+                "done_collected": False,
+                "slip_collected_count": 0,
+            }
         printing_ids = self.print_queue.in_flight_student_ids()
         students = []
         slip_collected_count = 0
         for s in ctx.queue:
             counts[s.status] += 1
-            if s.slip_collected:
+            if ctx.done_collected and s.status == "done" and s.slip_collected:
                 slip_collected_count += 1
             students.append(
                 {
@@ -909,6 +915,7 @@ class AppState:
             "class_form": ctx.form,
             "counts": counts,
             "students": students,
+            "done_collected": ctx.done_collected,
             "slip_collected_count": slip_collected_count,
         }
 

@@ -881,9 +881,10 @@ window.__host = window.__host || {};
   // Statistik „Leihschein entgegengenommen" — von der Lehrkraft in ihrer
   // eigenen Ansicht je Schüler angekreuzt (`slip_collected`), hier nur
   // read-only aus der ohnehin vorhandenen Klassen-Queue abgeleitet (der Host
-  // steuert dieses Flag nicht selbst). Nur relevant, sobald mindestens ein
-  // Schüler abgeschlossen ist — sonst kein Leihschein zum Entgegennehmen.
+  // steuert dieses Flag nicht selbst). Nur relevant, sobald die Klassenoption
+  // aktiv ist und mindestens ein Schüler abgeschlossen ist.
   function teacherSlipStat(ctx) {
+    if (ctx.done_collected !== true) return '';
     const queue = ctx.queue || [];
     const done = queue.filter(s => s.status === 'done');
     if (!done.length) return '';
@@ -2023,7 +2024,7 @@ window.__host = window.__host || {};
         // s. renderCtxTeacher/teacherSlipStat — der Host setzt das Flag nicht
         // selbst), ein kleines grünes Häkchen mit Titel-Tooltip.
         statusBadge = hints.length ? hints.join('') : `<span class="badge badge-done">Fertig</span>`;
-        if (s.slip_collected) {
+        if (ctx.done_collected === true && s.slip_collected) {
           statusBadge += `<span class="badge badge-done" title="Leihschein von der Lehrkraft entgegengenommen">Leihschein ✓</span>`;
         }
       } else {

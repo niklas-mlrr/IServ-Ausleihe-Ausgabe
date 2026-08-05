@@ -3,11 +3,12 @@
 // den Registrierungscode (`type: "registration"`); danach ausschließlich den
 // minimierten `teacher_state` dieser einen Klasse (nie Host-`state_snapshot`,
 // s. server/state.py::AppState.teacher_snapshot). Der Lehrkraft sind zwei
-// Aktionen erlaubt: ein wartender Schüler wird per Wisch-Geste (nach rechts,
+// Aktionen erlaubt: ein wartender Schüler wird per Wisch-Geste (nach links,
 // Touch-first via Pointer Events) als abwesend markiert bzw. per Button
 // zurückgesetzt (`pending <-> skipped`); zusätzlich kann sie je abgeschlossenem
 // Schüler ankreuzen, ob sie den unterschriebenen Leihschein entgegengenommen
-// hat (`slip_collected`, rein informativ). Alles andere ist reine Anzeige.
+// hat (`slip_collected`, rein informativ; nur bei aktivem `done_collected`).
+// Alles andere ist reine Anzeige.
 
 (() => {
   const token = new URLSearchParams(location.search).get('token') || '';
@@ -52,9 +53,12 @@
     document.getElementById('class-form').textContent = data.class_form || 'Klasse';
     const c = data.counts || { pending: 0, active: 0, done: 0, skipped: 0 };
     const pills = COUNT_PILLS.map(([k, l]) => `<div class="count-pill"><span class="n">${c[k] || 0}</span><span class="l">${l}</span></div>`);
-    // Fünfte Kachel: wie viele Leihscheine die Lehrkraft bereits entgegengenommen
-    // hat (orthogonal zu den Status-Zahlen, s. AppState.teacher_snapshot).
-    pills.push(`<div class="count-pill"><span class="n">${data.slip_collected_count || 0}</span><span class="l">abgegeben</span></div>`);
+    // Die Sammel-Funktion ist eine Klassenoption. Ohne sie weder den Counter
+    // noch die Checkboxen anzeigen; `done_collected` kommt aus dem
+    // minimierten Teacher-Snapshot (s. AppState.teacher_snapshot).
+    if (data.done_collected === true) {
+      pills.push(`<div class="count-pill"><span class="n">${data.slip_collected_count || 0}</span><span class="l">abgegeben</span></div>`);
+    }
     document.getElementById('counts').innerHTML = pills.join('');
     // Wisch-Hinweis nur zeigen, solange es überhaupt wartende Schüler gibt —
     // die Geste ist sonst nur durch Zufall auffindbar (s. Wisch-Chevron je Zeile).
@@ -66,20 +70,21 @@
       let extra = '';
       if (s.status === 'skipped') {
         extra = `<button class="act" data-undo="${s.student_id}">Nicht abwesend</button>`;
-      } else if (s.status === 'done') {
+      } else if (s.status === 'done' && data.done_collected === true && s.slip_printed) {
         extra = `<label class="slip-check">
           <input type="checkbox" data-slip="${s.student_id}"${s.slip_collected ? ' checked' : ''}>
           Leihschein entgegengenommen
         </label>`;
       }
       const swipeable = s.status === 'pending';
-      // Dezenter Wisch-Hinweis (Chevrons) am rechten Rand wartender Zeilen —
+      // Dezenter Wisch-Hinweis (Chevrons) am linken Rand wartender Zeilen —
       // die Geste ist sonst nur durch Zufall auffindbar.
-      const swipeHint = swipeable ? '<span class="swipe-hint" aria-hidden="true">›&#8202;›</span>' : '';
+      const swipeHint = swipeable ? '<span class="swipe-hint" aria-hidden="true">‹&#8202;‹</span>' : '';
       const row = `<div class="stud-row${swipeable ? ' swipeable' : ''}" data-row-id="${s.student_id}" data-status="${s.status}">
+        ${swipeHint}
         <span class="dot ${s.status}"></span>
         <div class="stud-name"><div class="n">${name}</div><div class="s">${escapeHtml(statusText(s))}</div></div>
-        ${extra}${swipeHint}
+        ${extra}
       </div>`;
       // Wartende Schüler bekommen den Wisch-Container mit der (verdeckten)
       // roten „Abwesend"-Fläche dahinter; alle anderen Status ohne Wisch-Geste.
@@ -91,7 +96,7 @@
     wireSwipeRows();
   }
 
-  // ---- Wisch-Geste „nach rechts = abwesend" (Touch-first, per Pointer Events
+  // ---- Wisch-Geste „nach links = abwesend" (Touch-first, per Pointer Events
   // auch mit Maus nutzbar) — ersetzt den früheren „Als abwesend"-Button. Die
   // Auslöseschwelle dient zugleich als Bestätigung: ein kurzes Antippen/
   // Verrutschen löst nichts aus, erst ein bewusst weiter gezogener Wisch
@@ -125,18 +130,18 @@
         dx = e.clientX - startX;
         if (!moved && Math.abs(dx) > 6) moved = true;
         if (!moved) return;
-        const clamped = Math.max(0, Math.min(dx, maxDrag));
+        const clamped = Math.max(-maxDrag, Math.min(dx, 0));
         row.classList.add('swiping');
         row.style.transform = `translateX(${clamped}px)`;
       });
       function finish() {
         if (!dragging) return;
         dragging = false;
-        if (moved && dx > threshold) {
+        if (moved && dx < -threshold) {
           // Committen: Zeile sichtbar rausschieben, dann Server-Aktion feuern
           // (der nächste teacher_state-Push rendert die Liste ohnehin neu).
           row.classList.remove('swiping');
-          row.style.transform = 'translateX(120%)';
+          row.style.transform = 'translateX(-120%)';
           row.style.opacity = '0';
           setTimeout(() => postAction('/api/teacher/skip', studentId), 140);
         } else {

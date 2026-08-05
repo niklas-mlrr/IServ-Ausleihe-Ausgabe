@@ -5,7 +5,7 @@
 > Risiko hier unter „Offen / zu testen" eintragen; nach erfolgreichem Test in
 > „Verifiziert" verschieben (mit Datum + Skript/Befund). Bezug: `docs/PLAN.md`.
 >
-> Stand: 2026-08-04 (Klasseneinstellungen: Drucker-Default-Fix, Fertig-Optionen persistiert, iPad-Freischalt ohne Tippen, 381 Tests grün).
+> Stand: 2026-08-05 (Klassen-Lehreransicht: Wischrichtung und Leihschein-Eingang, 383 Tests grün).
 > Alle bisherigen Tests sind **read-only** gegen IServ
 > (kein Submit, keine Buchung — PLAN §6).
 >
@@ -60,9 +60,11 @@
 | V40 | **Lehreransicht-Nachbesserung: Wisch-Geste + Leihschein-Eingang** — „Als abwesend" läuft jetzt über eine Wisch-Geste nach rechts (Pointer Events, Touch + Maus) statt eines Buttons, Ziehschwelle dient als Bestätigung (kein Modal mehr für diese Aktion). Neues Flag `QueueStudent.slip_collected` (analog `slip_printed`, in `reset_progress()` zurückgesetzt); neuer token-authentifizierter Endpunkt `POST /api/teacher/slip-collected` verlangt `slip_printed=True` (409 sonst) und ist klassenscharf isoliert (andere Klasse → 404); `AppState.teacher_snapshot` liefert das Flag je Schüler + `slip_collected_count` als Summe. Host sieht die Statistik read-only (eigener Endpunkt setzt sie nicht) über `state_snapshot()`'s bereits vorhandenes `as_dict()`. **Folgekorrektur (selbe Session):** `teacher_qr` broadcastete den Snapshot nach dem Minten bisher nicht (Code-Anzeige im Klassen-Tab blieb bis zu einer zufälligen anderen Aktion veraltet) — behoben; „Abbrechen"-Button jetzt `secondary` statt `ghost warn` (gleiche Größe wie „Bestätigen"); Wisch-Schwelle relativ zur Zeilenbreite (55 %/90 % statt fixer 90px, Label vollständig lesbar) plus Chevron-Hinweis + Hinweistext gegen Zufallsauffindbarkeit. | `tests/test_teacher.py` (+5 neue: Auth-Gate, „kein Leihschein gedruckt"-Gate, Setzen/Zurücknehmen, Klassen-Isolation, `teacher_snapshot`-Zähler; +1 Regression-Assertion für den QR-Broadcast) + `tests/test_queue_progress.py` (`slip_collected` in `reset_progress()`-Assertion) | 2026-08-04 | **378 Tests grün**, Ruff clean, `node --check web/teacher.js web/host-render.js` OK. **Live-Check (Wisch-Geste auf echtem Touchscreen, Checkbox-Sync Lehrkraft↔Host) noch offen** (s. „Offen" unten) |
 | V41 | **Klasseneinstellungen: drei Nachbesserungen** — (1) Drucker-Default im panel-new überlebt jetzt einen Server-Neustart: Persistenz über den stabilen `printer.name` (`printerStableKey()`) statt der laufzeit-instabilen `id` (`printer_store.py` vergibt `id`s bei jedem Start neu — dokumentiertes Verhalten, brach aber die `localStorage`-Auswahl). (2) `ClassContext.done_signed`/`done_collected` (In-Memory, Muster wie `live_ausgabe`/`slip_trigger`) — Klasseneinstellungen-Checkboxen „Leihschein unterschreiben"/„…wird vom Lehrer eingesammelt" waren bisher reine UI ohne Serverkontakt; jetzt in `state_snapshot()`, gesetzt via `/api/open-class` (beide Zweige) und neuem `POST /api/context-done-options`; `done_collected` wird serverseitig auf `False` normalisiert, wenn `done_signed=False`. Weiterhin ohne Auswirkung auf den Fertig-Übergang selbst (folgt später). (3) iPad-Freischalten vereinheitlicht mit Drucker-Display/Lehrkraft/Modus-B-Schüler: `POST /api/display/authorize` nimmt jetzt `display_id` (Klick auf einen Host-Listeneintrag) statt getipptem `registration_code`; `modus_b_snapshot()` liefert den Code je Display nur noch zum visuellen Abgleich. | `tests/test_api_guards.py` (+4: `test_open_class_seeds_done_options`, `test_context_done_options_collected_requires_signed`, `test_display_authorize_by_id_not_code`) | 2026-08-04 | **381 Tests grün**, Ruff clean, `node --check` auf allen `web/*.js` OK. **Live-Check (Drucker-Persistenz über echten Neustart, iPad-Freischalt-Klick am echten Gerät) noch offen** (s. „Offen" unten) |
 
+| V42 | **Klassen-Lehreransicht nachgebessert:** Wisch-Geste für „Als abwesend" gespiegelt auf **nach links** (Pointer-Drag, rote Fläche rechts, Chevrons/Hinweis/Animation angepasst). `done_collected` wird im `teacher_snapshot` geführt; die Teacher-UI zeigt „abgegeben" und die Leihschein-Checkboxen nur bei aktivierter Klassenoption (und gedrucktem Schein). `POST /api/teacher/slip-collected` erzwingt zusätzlich `done_collected=true` und `status=done`; `teacher_snapshot` zählt nur abgeschlossene Eingänge bei aktivierter Option. Host-Zeile und grünes Badge folgen derselben Option. | `tests/test_teacher.py` (+2: Klassenoption-Gate, Counter bei deaktivierter Option; bestehende Counter-/Hub-/Host-Assertions erweitert) + `uv run pytest -q` + `uvx ruff check server/ automation/ tests/` + `node --check web/*.js` | 2026-08-05 | **383 Tests grün**, Ruff clean, JavaScript-Syntaxprüfung grün. **Live-Check (Wisch-Geste nach links auf echtem Touchscreen, Checkbox/Counter-Sync Lehrkraft↔Host) noch offen** |
+
 ## Offen / zu testen
 
-### Offen 2026-08-04 (Klassen-Lehreransicht `/teacher`: Live-Check)
+### Offen 2026-08-05 (Klassen-Lehreransicht `/teacher`: Live-Check)
 
 Pairing-Flow, Klassen-Isolation, Snapshot-Privacy und die erlaubten/verbotenen
 Statusübergänge sind per Unit-/HTTP-/WS-Suite abgesichert (V39); reiner
@@ -78,7 +80,7 @@ Schul-WLAN noch offen:
 - [ ] Live-Updates ohne Reload: Pairing eines Schülers, Scan-Fortschritt
       (X/Y), Leihschein-Druckstart/-Ende, Abschluss — alle Übergänge kommen
       am Lehrkraft-Handy live an.
-- [ ] Lehrkraft wischt einen wartenden Schüler nach rechts („Als abwesend
+- [ ] Lehrkraft wischt einen wartenden Schüler nach links („Als abwesend
       markieren") → Status „Übersprungen" — am Host zeitgleich sichtbar;
       Rücknahme („Nicht abwesend", mit Bestätigungsdialog) funktioniert ebenso.
 - [ ] Host klickt „Lehrkraft trennen" (autorisierte Session) → Handy zeigt
@@ -87,13 +89,14 @@ Schul-WLAN noch offen:
       sofortige Entwertung.
 - [ ] Zwei parallel offene Klassen mit je eigener Lehrkraft-Session: kein
       Vermischen der Daten, kein QR der einen Klasse öffnet die andere.
-- [ ] **Wisch-Geste (V40):** auf einem echten Touchscreen einen wartenden
-      Schüler nach rechts wischen → rote „Als abwesend markieren"-Fläche wird
-      beim Ziehen sichtbar, unterhalb der Schwelle (`SWIPE_THRESHOLD_PX=90`)
+- [ ] **Wisch-Geste (V42):** auf einem echten Touchscreen einen wartenden
+      Schüler nach links wischen → rote „Als abwesend markieren"-Fläche wird
+      beim Ziehen sichtbar, unterhalb der relativen Schwelle (55 % der Zeilenbreite)
       schnellt die Zeile zurück, oberhalb löst sie aus (Status „Übersprungen").
       Kurzes Antippen/Verrutschen darf nichts auslösen.
-- [ ] **Leihschein-Checkbox (V40):** bei einem abgeschlossenen Schüler auf dem
-      Lehrkraft-Gerät „Leihschein entgegengenommen" ankreuzen → die fünfte
+- [ ] **Leihschein-Checkbox (V42):** bei aktivierter Klassenoption bei einem
+      abgeschlossenen Schüler auf dem Lehrkraft-Gerät „Leihschein entgegengenommen"
+      ankreuzen → die fünfte
       Kachel „abgegeben" zählt hoch; am Host erscheint zeitgleich das grüne
       „Leihschein ✓"-Badge in der Queue-Tabelle und die Zeile „Leihschein
       entgegengenommen: X / Y" in der Lehrkraft-Ansicht-Karte. Häkchen wieder

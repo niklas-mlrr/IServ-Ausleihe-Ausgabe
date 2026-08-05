@@ -8,6 +8,24 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-05 — Klassen-Lehreransicht: Wischrichtung und Leihschein-Eingang
+
+- **Abwesenheits-Geste gespiegelt:** Wartende Schüler werden jetzt per Wisch
+  nach **links** als abwesend markiert. Rote Reveal-Fläche, Chevrons,
+  Hinweistext und Rücksprung-Animation zeigen dieselbe Richtung.
+- **Leihschein-Eingang an Klasseneinstellung gekoppelt:**
+  `done_collected` wird im minimierten `teacher_snapshot` mitgeliefert. Die
+  Lehreransicht blendet Counter und „Leihschein entgegengenommen"-Checkboxen
+  nur bei aktivierter Klassenoption und gedrucktem Schein ein; der Endpunkt
+  prüft zusätzlich Klassenoption, Abschlussstatus und `slip_printed`.
+- **Counter-Synchronisierung korrigiert/abgesichert:** Der Zähler zählt nur
+  abgeschlossene Schüler bei aktivierter Option. Host-Snapshot und Teacher-WS
+  erhalten das Flag weiterhin über denselben `Hub.broadcast_host`-Pfad; dafür
+  gibt es jetzt Regressionstests für beide Ausgabeseiten und für deaktivierte
+  Optionen.
+- **Tests:** **383 Tests grün**, Ruff clean, `node --check` für die Web-JS
+  erfolgreich. Live-Check am echten Touchscreen/Lehrkraft-Handy bleibt offen.
+
 ## 2026-08-04 — Schülerclient: Druckmodus nach Laden und Buchlisten-Änderung
 
 - **Druckmodus-Prüfung korrigiert:** bereits beim Laden ausgeliehene Bücher
