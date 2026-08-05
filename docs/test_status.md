@@ -5,7 +5,7 @@
 > Risiko hier unter „Offen / zu testen" eintragen; nach erfolgreichem Test in
 > „Verifiziert" verschieben (mit Datum + Skript/Befund). Bezug: `docs/PLAN.md`.
 >
-> Stand: 2026-08-05 (Klassen-Lehreransicht: zweizeilige Statuszeilen, 385 Tests grün).
+> Stand: 2026-08-05 (Klassen-Lehreransicht: mobile Statuszähler, 385 Tests grün).
 > Alle bisherigen Tests sind **read-only** gegen IServ
 > (kein Submit, keine Buchung — PLAN §6).
 >
@@ -63,6 +63,7 @@
 | V42 | **Klassen-Lehreransicht nachgebessert:** Wisch-Geste für „Als abwesend" gespiegelt auf **nach links** (Pointer-Drag, rote Fläche rechts, Chevrons/Hinweis/Animation angepasst). `done_collected` wird im `teacher_snapshot` geführt; die Teacher-UI zeigt „abgegeben" und die Leihschein-Checkboxen nur bei aktivierter Klassenoption (und gedrucktem Schein). `POST /api/teacher/slip-collected` erzwingt zusätzlich `done_collected=true` und `status=done`; `teacher_snapshot` zählt nur abgeschlossene Eingänge bei aktivierter Option. Host-Zeile und grünes Badge folgen derselben Option. | `tests/test_teacher.py` (+2: Klassenoption-Gate, Counter bei deaktivierter Option; bestehende Counter-/Hub-/Host-Assertions erweitert) + `uv run pytest -q` + `uvx ruff check server/ automation/ tests/` + `node --check web/*.js` | 2026-08-05 | **383 Tests grün**, Ruff clean, JavaScript-Syntaxprüfung grün. **Live-Check (Wisch-Geste nach links auf echtem Touchscreen, Checkbox/Counter-Sync Lehrkraft↔Host) noch offen** |
 | V43 | **Lehrer-QR-Modal schließt nach Scan:** `showTeacherQr()` setzt einen kontextgebundenen `qrWatch`; `maybeCloseQrOnScan()` schließt das Modal, sobald `state.contexts[context_id].teacher.connected` wahr ist. Der Lehrer-WebSocket broadcastet den Host-Snapshot jetzt beim Verbinden und Trennen — analog zum QR-Display — sodass der Watcher den Scan-Zustand tatsächlich erhält. | `tests/test_teacher.py` (bestehende WS-Prüfung um Connect-/Disconnect-Snapshot erweitert) + `node --check web/host-render.js web/host-ws.js` | 2026-08-05 | **383 Tests grün**, Syntaxprüfung grün. **Live-Check (QR auf echtem Lehrkraft-Handy scannen → Host-Modal schließt vor der Autorisierung) noch offen** |
 | V44 | **Teacher-Statuszeilen responsive zweizeilig:** Jede Schülerzeile trennt Kopfzeile (Name/Punkt/Chevron) von Status-/Aktionszeile; Statuslabels werden mit `white-space: nowrap` und Wortschutz gerendert, Zusatzaktionen bleiben bei schmalen Breiten erreichbar. | `uv run pytest -q` + `uvx ruff check server/ automation/ tests/` + `node --check web/*.js` + lokaler Chromium-Check bei 390px/1024px mit Links-Wisch | 2026-08-05 | **385 Tests grün**, Ruff und Syntaxchecks grün. **Live-Check am echten Lehrkraft-Handy/Touchscreen weiterhin offen** |
+| V45 | **Teacher-Statuszähler mobil als 2×2-Raster:** Die vier Statuszähler brechen bei ≤520px in zwei Spalten um; bei fünf Zählern wird derselbe responsive Grid-Pfad verwendet. Labels bleiben vollständig und ungeteilt. | `uv run pytest -q` + `uvx ruff check server/ automation/ tests/` + `node --check web/*.js` + lokaler Chromium-Check bei 390px/1024px | 2026-08-05 | **385 Tests grün**, Ruff und Syntaxchecks grün. **Live-Check am echten Lehrkraft-Handy weiterhin offen** |
 
 ## Offen / zu testen
 

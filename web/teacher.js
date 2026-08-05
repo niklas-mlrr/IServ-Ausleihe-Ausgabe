@@ -59,7 +59,9 @@
     if (data.done_collected === true) {
       pills.push(`<div class="count-pill"><span class="n">${data.slip_collected_count || 0}</span><span class="l">abgegeben</span></div>`);
     }
-    document.getElementById('counts').innerHTML = pills.join('');
+    const counts = document.getElementById('counts');
+    counts.classList.toggle('has-collected', data.done_collected === true);
+    counts.innerHTML = pills.join('');
     // Wisch-Hinweis nur zeigen, solange es überhaupt wartende Schüler gibt —
     // die Geste ist sonst nur durch Zufall auffindbar (s. Wisch-Chevron je Zeile).
     document.getElementById('swipe-tip').classList.toggle('show', (c.pending || 0) > 0);
