@@ -931,7 +931,15 @@ window.__host = window.__host || {};
     const r = await fetch(`/api/teacher/qr?context_id=${encodeURIComponent(id)}`);
     if (!r.ok) { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'QR für Lehrkraft konnte nicht erzeugt werden'); return; }
     const d = await r.json();
+    // Wie bei Helfer-/Schüler-/Display-QRs den nächsten State-Broadcast
+    // beobachten: sobald die Lehrkraft den QR scannt und ihre WS verbunden ist,
+    // schließt sich das gemeinsame QR-Modal automatisch.
+    qrWatch = { kind: 'teacher', context_id: id };
     showQr(d.qr, d.url || '');
+    // Falls die WS-Verbindung genau zwischen dem Server-Broadcast und dem
+    // Öffnen des Modals entstanden ist, den bereits aktuellen Snapshot direkt
+    // auswerten statt auf einen weiteren Broadcast zu warten.
+    maybeCloseQrOnScan();
   }
 
   // Host bestätigt den (im eigenen State bereits bekannten) Registrierungscode.

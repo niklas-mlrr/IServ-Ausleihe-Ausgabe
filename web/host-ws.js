@@ -97,6 +97,10 @@ window.__host = window.__host || {};
       if ((state.helpers || {})[qrWatch.token]?.connected) closeQr();
       return;
     }
+    if (qrWatch.kind === 'teacher') {
+      if ((state.contexts || {})[qrWatch.context_id]?.teacher?.connected) closeQr();
+      return;
+    }
     const mb = state.modus_b || {};
     const grown = qrWatch.kind === 'student'
       ? (mb.pending_count || 0) > qrWatch.baseline

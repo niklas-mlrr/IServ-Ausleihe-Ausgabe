@@ -990,6 +990,10 @@ async def ws_teacher(websocket: WebSocket, token: str | None = None) -> None:
 
     await _take_over_ws(session, websocket)
     await send_teacher_update(state, session)
+    # Der Host muss den Verbindungswechsel sofort sehen, damit ein dort
+    # geöffnetes Lehrer-QR-Modal nach dem Scan schließen kann (analog zu
+    # `/ws/display` und `/ws/drucker-display`).
+    await hub.broadcast_host(state.state_snapshot())
 
     try:
         while True:
@@ -1007,6 +1011,7 @@ async def ws_teacher(websocket: WebSocket, token: str | None = None) -> None:
         current = state.teacher_sessions.get(token)
         if current is not None and current.ws is websocket:
             current.ws = None
+            await safe_broadcast(hub, state)
 
 
 # ---------------------------------------------------------------------------

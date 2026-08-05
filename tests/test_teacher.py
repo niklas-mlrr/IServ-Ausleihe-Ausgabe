@@ -622,9 +622,11 @@ def test_ws_teacher_shows_registration_before_authorize(client, ctx, monkeypatch
     with client.websocket_connect(f"/ws/teacher?token={token}") as ws:
         msg = ws.receive_json()
         assert msg == {"type": "registration", "code": "WXYZ"}
+        assert hub_inst.broadcasts[-1]["contexts"][c.id]["teacher"]["connected"] is True
     # ws-Referenz nach dem Trennen gelöst, Session bleibt (Reconnect möglich).
     assert token in state.teacher_sessions
     assert state.teacher_sessions[token].ws is None
+    assert hub_inst.broadcasts[-1]["contexts"][c.id]["teacher"]["connected"] is False
 
 
 def test_ws_teacher_shows_class_state_when_already_authorized(client, ctx, monkeypatch):

@@ -8,6 +8,21 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-05 — Teacher-QR-Modal schließt nach Scan automatisch
+
+- Der Host registriert beim Anzeigen des Lehrer-QR-Codes jetzt einen
+  `qrWatch` für den jeweiligen Klassen-Kontext. Sobald die Lehrkraft den QR
+  scannt und ihre WebSocket-Verbindung sichtbar verbunden ist, schließt sich
+  das gemeinsame QR-Modal automatisch — analog zu Helfer-, Schüler- und
+  Display-QRs. Ein zusätzlicher Direktcheck deckt den engen Broadcast-/Modal-
+  Race ab.
+- Der Lehrer-WebSocket broadcastet den Host-Snapshot jetzt beim Verbinden und
+  Trennen. Dadurch wird `teacher.connected` nach dem Scan tatsächlich an den
+  Host übertragen; zuvor konnte der Frontend-Watcher keinen Zustandswechsel
+  erkennen.
+- Verifiziert mit `node --check web/host-render.js web/host-ws.js`; der echte
+  Scan im Schul-WLAN bleibt Bestandteil des offenen Live-Checks.
+
 ## 2026-08-05 — Klassen-Lehreransicht: Wischrichtung und Leihschein-Eingang
 
 - **Abwesenheits-Geste gespiegelt:** Wartende Schüler werden jetzt per Wisch
