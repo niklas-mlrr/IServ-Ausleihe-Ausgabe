@@ -44,7 +44,9 @@
       display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 8px; margin-bottom: 16px;
     }
-    .counts.has-collected { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+    .counts.has-collected {
+      grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(0, 2fr);
+    }
     .count-pill {
       min-width: 0; background: var(--surface); border: 1px solid var(--border);
       border-radius: 10px; padding: 8px 10px; text-align: center;
@@ -55,6 +57,7 @@
     }
     @media (max-width: 520px) {
       .counts, .counts.has-collected { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .count-pill-collected { grid-column: span 2; }
     }
     .hint { color: var(--muted); font-size: .82rem; text-align: left; }
     .swipe-tip { margin: -6px 0 12px; display: none; }

@@ -57,7 +57,7 @@
     // noch die Checkboxen anzeigen; `done_collected` kommt aus dem
     // minimierten Teacher-Snapshot (s. AppState.teacher_snapshot).
     if (data.done_collected === true) {
-      pills.push(`<div class="count-pill"><span class="n">${data.slip_collected_count || 0}</span><span class="l">abgegeben</span></div>`);
+      pills.push(`<div class="count-pill count-pill-collected"><span class="n">${data.slip_collected_count || 0}</span><span class="l">Leihschein abgegeben</span></div>`);
     }
     const counts = document.getElementById('counts');
     counts.classList.toggle('has-collected', data.done_collected === true);

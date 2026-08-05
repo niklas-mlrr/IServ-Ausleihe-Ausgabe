@@ -8,6 +8,26 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-05 — Schüler-Scanner verarbeitet nur einen Scan gleichzeitig
+
+- Der Schülerclient sperrt nach dem Absenden eines Barcodes weitere Scans,
+  bis das zugehörige `scan_result` eingetroffen ist.
+- Bei ausgemusterten oder anderweitig verliehenen Büchern bleibt die Sperre bis
+  zur Host-Freigabe (`book_alert_clear`) bestehen; unbekannte Codes und andere
+  selbst schließbare Hinweise geben den Scanner direkt nach der Antwort frei.
+- Verifiziert mit 385 pytest-Tests, Ruff und `node --check web/*.js`; keine
+  IServ-Schreibzugriffe.
+
+## 2026-08-05 — Teacher-Kachel „Leihschein abgegeben“ verbreitert
+
+- Der optionale Zähler heißt jetzt vollständig „Leihschein abgegeben“ statt
+  nur „abgegeben“.
+- Die Kachel ist bei aktivierter Leihschein-Sammlung auf Desktop-Viewports
+  doppelt so breit wie die vier Statuskacheln; mobil spannt sie beide Spalten
+  der Zählerzeile.
+- Verifiziert mit 385 pytest-Tests, Ruff, `node --check web/*.js` und einem
+  lokalen Chromium-Check bei 390px/1024px; keine IServ-Schreibzugriffe.
+
 ## 2026-08-05 — Teacher-Statuszähler mobil als Raster
 
 - Die Statuszähler „abgeschlossen“, „aktiv“, „offen“ und „übersprungen“ stehen
