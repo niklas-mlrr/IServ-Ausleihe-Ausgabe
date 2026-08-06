@@ -70,6 +70,46 @@ function scanResultStatusText(msg, books, targetLabel = 'dich') {
   return `${msg.barcode} — ${msg.msg || msg.status}`;
 }
 
+// Gemeinsame Statuszeilen für den Leihschein-Druck im Helfer- und
+// Schülerclient. Die Queue liefert dieselben Felder an beide Clients; die
+// studentenspezifische Positionsberechnung passiert serverseitig.
+function printProgressStatusText(msg) {
+  if (msg.peer_error) {
+    return msg.msg || 'Es dauert ungewöhnlich lange, vielleicht liegt ein Fehler vor.';
+  }
+  const printer = msg.printer_label;
+  if (msg.status === 'printing') {
+    return printer ? `Leihschein wird von ${printer} gedruckt…` : 'Leihschein wird gedruckt…';
+  }
+  if (typeof msg.position === 'number' && msg.position === 0) {
+    return printer ? `Leihschein wartet an ${printer} auf Druck…` : 'Leihschein wartet auf Druck…';
+  }
+  if (typeof msg.position === 'number' && msg.position === 1) {
+    return printer
+      ? `Leihschein an 1. Druckerwarteschlangenposition von ${printer}`
+      : 'Leihschein an 1. Druckerwarteschlangenposition';
+  }
+  if (typeof msg.position === 'number' && msg.position >= 2) {
+    return `Leihschein an ${msg.position}. Druckerwarteschlangenposition`;
+  }
+  return 'Leihschein in Druckerwarteschlange…';
+}
+
+function printResultStatusText(msg) {
+  if (msg.stalled) {
+    return msg.msg || 'Druck dauert ungewöhnlich lange';
+  }
+  if (msg.peer_error) {
+    return msg.msg || 'Es dauert ungewöhnlich lange, vielleicht liegt ein Fehler vor.';
+  }
+  if (msg.ok) {
+    return msg.printer_label
+      ? `Leihschein von ${msg.printer_label} gedruckt.`
+      : 'Leihschein gedruckt.';
+  }
+  return `Druck fehlgeschlagen: ${msg.msg || ''}`;
+}
+
 // ---- Beeper: Scan-Ton, kapselt AudioContext/-Buffer als Closure-State ----
 // Gemeinsam für scan.js/student.html. Aufrufer prüfen weiterhin SELBST
 // `soundEnabled`, AUSSERHALB von playBeep() — Beeper entscheidet nicht,

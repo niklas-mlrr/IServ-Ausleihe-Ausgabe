@@ -1162,6 +1162,27 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
                         {"type": "print_result", "ok": False, "msg": "Noch nicht freigegeben"},
                     )
                     continue
+                # Der Betreuerauslöser wird ausschließlich über das bestehende
+                # Helfer-/Host-Druckmenü bedient. Der Guard verhindert, dass ein
+                # Schülerclient die Klasseneinstellung durch ein manuelles WS-
+                # Frame umgeht.
+                student_trigger = slip_trigger_for(state, session.student_id)
+                if student_trigger == "helper":
+                    msg = "Bitte den Leihschein über den Betreuer drucken lassen"
+                elif student_trigger not in ("auto", "student"):
+                    msg = "Dieser Druckmodus ist noch nicht verfügbar"
+                else:
+                    msg = None
+                if msg is not None:
+                    await hub.send_websocket(
+                        websocket,
+                        {
+                            "type": "print_result",
+                            "ok": False,
+                            "msg": msg,
+                        },
+                    )
+                    continue
                 if not state.settings.printers:
                     await hub.send_websocket(
                         websocket,

@@ -135,6 +135,7 @@ let printerPool = [];
 let printDefaultIds = [];
 let printPicker = null;             // gemountete Druckerauswahl (mountPrinterPicker)
 let pendingScans = 0;               // noch nicht quittierte Scans (Sequenzierung)
+let scanInFlight = false;            // genau ein Scan bis zum terminalen Ergebnis
 const scanWaiters = [];             // Resolver, die auf pendingScans===0 warten
 let printThenNext = false;          // „Drucken & nächster Schüler" angeklickt?
 
@@ -318,6 +319,9 @@ const modalLendYesBtn = document.getElementById('modal-lend-yes');
 const modalLendNoBtn = document.getElementById('modal-lend-no');
 let scanFlashTimeout = null;
 const OK_STATUSES = new Set(['staged', 'booked']);
+// Bei diesen Ergebnissen bleibt der Helfer-Scan bis zum bewussten Schließen
+// des Hinweises gesperrt; dabei wird auch die Host-Meldung aufgeräumt.
+const BLOCKING_STATUSES = new Set(['book_deleted', 'not_in_stock']);
 // status → {title, color} für das Hinweis-Modal.
 const ALERT_META = {
   book_deleted:        { title: 'Ausgemustertes Buch gescannt',  color: '#f44336' },

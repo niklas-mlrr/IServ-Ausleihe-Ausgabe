@@ -28,6 +28,8 @@ function setStatusText(text, alertClass = null) {
 const joinSecret = new URLSearchParams(location.search).get('j');
 let token = sessionStorage.getItem('mb_token');
 let ws = null, finished = false, scannerStarted = false;
+let scanInFlight = false;              // genau ein Scan bis zur Serverantwort
+let lastValue = '', cooldown = false, scanCooldownTimer = null;
 let workerPending = false;         // Schüler zugewiesen, aber Worker noch nicht bereit
 let currentBooks = [];              // Buchliste des Schülers
 let bookListHadBooks = false;       // verhindert einen Druckmodus bei „keine Bücher"
@@ -48,6 +50,14 @@ function showError(title, text) {
   show('error');
 }
 function clearToken() { token = null; sessionStorage.removeItem('mb_token'); }
+
+function resetScanLock() {
+  scanInFlight = false;
+  lastValue = '';
+  cooldown = false;
+  clearTimeout(scanCooldownTimer);
+  scanCooldownTimer = null;
+}
 
 async function join() {
   if (!joinSecret) { showError('Kein QR-Code', 'Bitte scanne den QR-Code am Display.'); return false; }
@@ -127,6 +137,10 @@ function handleServerMessage(msg) {
     const ok = OK_STATUSES_STUDENT.has(msg.status);
     const blocking = BLOCKING_STATUSES_STUDENT.has(msg.status);
     const dismissible = !ok && !blocking;
+    // Jeder nicht-blockierende Status ist ein terminales Ergebnis dieses
+    // Scans. Bei ausgemusterten/anderweitig verliehenen Büchern bleibt die
+    // Sperre bestehen, bis der Host mit `book_alert_clear` freigibt.
+    if (!blocking) scanInFlight = false;
     setStatusText(scanResultStatusText(msg, currentBooks), statusAlertClass(msg.status));
     if (blocking) { bookAlertOpen = true; showBookAlertModal(msg, false); }
     else if (dismissible) { showBookAlertModal(msg, true); }
@@ -144,6 +158,7 @@ function handleServerMessage(msg) {
     // Text UND Aussehen (z. B. rot „ausgemustert") bis zur nächsten
     // scan_result-Meldung; sie ändert sich nur zusammen mit neuem Text.
     bookAlertOpen = false;
+    scanInFlight = false;
     closeBookAlertModal();
   } else if (msg.type === 'booklist_update') {
     // Live-Nachzug der Bücherliste nach einer Ausblendungs-/Reihenfolge-Änderung
@@ -165,7 +180,7 @@ function handleServerMessage(msg) {
     // Druck läuft in der Warteschlange/am Drucker — Druckmodus-Text live halten.
     if (views.print.classList.contains('show')) {
       const t = document.getElementById('print-text');
-      if (t && msg.status !== 'done') t.textContent = 'Leihschein wird gedruckt…';
+      if (t && msg.status !== 'done') t.textContent = printProgressStatusText(msg);
     }
   } else if (msg.type === 'print_result') {
     handlePrintResult(msg);
@@ -238,14 +253,15 @@ function handlePrintResult(msg) {
   if (!views.print.classList.contains('show')) return;   // z. B. schon auf done
   const text = document.getElementById('print-text');
   if (msg.ok) {
-    // Auto-Fertig (closed) folgt serverseitig; nur kurz bestätigen.
-    if (text) text.textContent = 'Leihschein gedruckt — wird abgeschlossen…';
+    // Auto-Fertig (closed) folgt serverseitig; bis dahin dieselbe Meldung wie
+    // im Helferclient anzeigen.
+    if (text) text.textContent = printResultStatusText(msg);
   } else {
     // Druck fehlgeschlagen → Retry freigeben (Schülerauslöser kann erneut
     // tippen; bei Automatisch zeigt der Hinweis den Fehler, ein Betreuer
     // kann eingreifen). Auto-Modus sendet nicht automatisch erneut.
     printSent = false;
-    if (text) text.textContent = 'Druck fehlgeschlagen: ' + (msg.msg || 'unbekannt') + (slipTrigger === 'student' ? ' — bitte erneut versuchen.' : ' — bitte melde dich bei einem Betreuer.');
+    if (text) text.textContent = printResultStatusText(msg) + (slipTrigger === 'student' ? ' — bitte erneut versuchen.' : ' — bitte melde dich bei einem Betreuer.');
     // Retry-Button freigeben bei selbst auslösbaren Modi (Automatisch &
     // Schülerauslöser) — falls z. B. erst ein Drucker konfiguriert werden muss.
     if (slipTrigger === 'auto' || slipTrigger === 'student') {
@@ -368,8 +384,15 @@ if (printTriggerBtn) {
 function renderStudent(s, overridden) {
   bookAlertOpen = false;
   closeBookAlertModal();
-  document.getElementById('s-name').textContent = `${s.lastname}, ${s.firstname}`;
-  document.getElementById('s-form').textContent = (s.form || '').replace(/^Klasse\s+/i, '');
+  const studentName = `${s.lastname}, ${s.firstname}`;
+  const studentForm = (s.form || '').replace(/^Klasse\s+/i, '');
+  document.getElementById('s-name').textContent = studentName;
+  document.getElementById('s-form').textContent = studentForm;
+  // Die aktive Ansicht wird im Druckmodus ausgeblendet. Name und Klasse daher
+  // zusätzlich dort pflegen, damit ein Betreuer bei einem Druckfehler direkt
+  // erkennt, zu welchem Schüler der Vorgang gehört.
+  document.getElementById('print-name').textContent = studentName;
+  document.getElementById('print-form').textContent = studentForm;
   const pay = document.getElementById('s-pay');
   if (!s.enrolled) {
     pay.innerHTML = '<span class="pay-badge wait">Nicht angemeldet</span>';
@@ -399,6 +422,7 @@ function renderStudent(s, overridden) {
   // Bücherliste bleibt ausgeblendet, bis der Worker bereit ist (`worker_ready`):
   // Statuszeile „Wird geladen…", Placeholder im Bücher-Bereich, Scans ignoriert.
   workerPending = true;
+  resetScanLock();
   currentBooks = [];
   bookListHadBooks = false;
   scannedIsbns.clear(); scanOrder.clear(); scanSeq = 0;
@@ -486,7 +510,7 @@ function renderBooks(books, animate = false) {
 }
 
 // ================= Scanner (aus scan.html übernommen) =================
-let lastValue = '', cooldown = false, html5QrCode = null, currentCameraId = null,
+let html5QrCode = null, currentCameraId = null,
     isTorchOn = false, isRestarting = false, soundEnabled = false;
 const cameraSelect = document.getElementById('camera-select');
 const ICON_VOLUME_ON = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>';
@@ -512,7 +536,10 @@ soundBtn.addEventListener('click', async () => {
 });
 
 function onScanSuccess(value) {
-  if (cooldown || value === lastValue) return;
+  // Während der Server den vorherigen Code bearbeitet, werden auch andere
+  // Codes verworfen. Sonst kann die Kamera mehrere Scans puffern, die später
+  // nacheinander verarbeitet werden (z. B. wiederholt „bereits verliehen").
+  if (scanInFlight || cooldown || value === lastValue) return;
   // Worker noch nicht bereit (Schüler gerade gepaart, open_student läuft) —
   // Scan ignorieren, nicht senden (wie beim ausgemusterten-Buch-Block).
   if (workerPending) return;
@@ -522,10 +549,13 @@ function onScanSuccess(value) {
   // Dismissibler Hinweis („an sich selbst verliehen") offen → beim nächsten
   // Scan selbst schließen (nicht-blockierend, kein Host-Bezug).
   if (bookAlertModalEl.classList.contains('show')) closeBookAlertModal();
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
   if (soundEnabled) Beeper.playBeep();
-  lastValue = value; cooldown = true;
-  setTimeout(() => { cooldown = false; lastValue = ''; }, 2000);
-  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'scan', value }));
+  lastValue = value; cooldown = true; scanInFlight = true;
+  scanCooldownTimer = setTimeout(() => {
+    cooldown = false; lastValue = ''; scanCooldownTimer = null;
+  }, 2000);
+  ws.send(JSON.stringify({ type: 'scan', value }));
   if (navigator.vibrate) navigator.vibrate(80);
   readerEl.classList.add('scan-success');
   clearTimeout(scanFlashTimeout);

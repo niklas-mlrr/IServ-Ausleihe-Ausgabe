@@ -418,15 +418,16 @@ modalNextCancelBtn.addEventListener('click', closeNextModal);
 nextModal.addEventListener('click', (e) => { if (e.target === nextModal) closeNextModal(); });
 
 // ---- Buch-Hinweis-Modal (ausgemustert / verliehen-an-andere / verliehen-an-
-// sich-selbst). Der Helfer schließt es selbst (Button/Klick-außerhalb/Escape/
-// nächster Scan). Bei ausgemustert/verliehen-an-andere räumt der Schließen-
-// Button zusätzlich die Host-Meldung auf (server: clear_book_alert); bei
-// „an sich selbst verliehen" wird der Host gar nicht informiert → das Clear
-// ist dort ein No-op. ----
+// sich-selbst). Der Helfer schließt es selbst (Button/Klick-außerhalb/Escape);
+// selbst schließbare Hinweise zusätzlich beim nächsten Scan. Bei
+// ausgemustert/verliehen-an-andere räumt das Schließen zusätzlich die
+// Host-Meldung auf (server: clear_book_alert); bei „an sich selbst verliehen"
+// wird der Host gar nicht informiert → das Clear ist dort ein No-op. ----
 // Status, die den Scan nicht verbuchen (kein staged/booked) → Hinweis-Modal
 // am Gerät. Der Helfer schließt JEDES dieser Modal selbst (Button / Klick
-// außerhalb / Escape / nächster Scan); clear_book_alert räumt ggfls. die
-// Host-Meldung auf (No-op für Status ohne Host-Broadcast).
+// außerhalb / Escape); selbst schließbare Hinweise auch beim nächsten Scan.
+// Bei blockierenden Hinweisen bleibt der Scanner bis zum Schließen gesperrt;
+// clear_book_alert räumt ggfls. die Host-Meldung auf.
 function showBookAlertModal(msg) {
   const meta = ALERT_META[msg.status] || { title: 'Buch-Hinweis', color: '#f44336' };
   // book_deleted zerfällt in zwei Fälle (server-seitig per loaned_to
@@ -517,6 +518,7 @@ function closeBookAlertModal() { bookAlertModal.classList.remove('show'); update
 function dismissBookAlert() {
   const wasOpen = bookAlertModal.classList.contains('show');
   closeBookAlertModal();
+  if (wasOpen) scanInFlight = false;
   if (wasOpen && ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: 'clear_book_alert' }));
   }
@@ -630,9 +632,11 @@ function closeLendModal() { lendConfirmModal.classList.remove('show'); updateFoc
 // Pfad denselben Sendeweg nutzt). `pendingScans++` nur hier → zurückgehaltene
 // Scans erzeugen keinen Drift in der Sequenzierung.
 function sendScan(value) {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
   pendingScans++;
+  scanInFlight = true;
   ws.send(JSON.stringify({ type: 'scan', value }));
+  return true;
 }
 
 // „Ja, ausleihen": Freigabe merken, Modal schließen, gehaltenen Scan senden.
@@ -647,7 +651,7 @@ modalLendYesBtn.addEventListener('click', () => {
   lastValue = v; cooldown = true;
   setTimeout(() => { cooldown = false; lastValue = ''; }, 2000);
   setStatusText('Gesendet: ' + v);
-  sendScan(v);
+  if (!sendScan(v)) scanInFlight = false;
 });
 
 // „Nicht ausleihen": Scan verwerfen, nichts senden. Flag bleibt false → beim
@@ -655,12 +659,14 @@ modalLendYesBtn.addEventListener('click', () => {
 modalLendNoBtn.addEventListener('click', () => {
   closeLendModal();
   heldScanValue = null;
+  scanInFlight = false;
   setStatusText('Nicht ausgeliehen — Buch nicht eingegeben');
 });
 lendConfirmModal.addEventListener('click', (e) => {
   if (e.target === lendConfirmModal) {  // Click außerhalb der Box = verwerfen
     closeLendModal();
     heldScanValue = null;
+    scanInFlight = false;
     setStatusText('Nicht ausgeliehen — Buch nicht eingegeben');
   }
 });
@@ -672,6 +678,7 @@ document.addEventListener('keydown', (e) => {
   if (lendConfirmModal.classList.contains('show')) {
     closeLendModal();
     heldScanValue = null;
+    scanInFlight = false;
     setStatusText('Nicht ausgeliehen — Buch nicht eingegeben');
   }
 });
@@ -1146,12 +1153,18 @@ function onScanSuccess(value) {
   // Freigabe-Dialog noch offen → Helfer entscheidet gerade; Scan nicht erneut
   // feuern (kein Doppelt-Beep, kein Überschreiben des gehaltenen Werts).
   if (lendConfirmModal.classList.contains('show')) return;
+  // Während der Server den vorherigen Code bearbeitet, werden auch andere
+  // Codes verworfen. Sonst können sie im WebSocket gepuffert und später
+  // nacheinander verarbeitet werden.
+  if (scanInFlight) return;
   if (cooldown || value === lastValue) return;
-  // Nächster Scan → evtl. offenes Hinweis-Modal bewusst schließen (auch Host
-  // aufräumen); war keins offen, ist dismissBookAlert ein No-op.
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  // Nächster Scan → ein evtl. offenes selbst schließbares Hinweis-Modal bewusst
+  // schließen (auch Host aufräumen); blockierende Hinweise erreichen diesen
+  // Pfad wegen scanInFlight nicht.
   dismissBookAlert();
   if (soundEnabled) Beeper.playBeep();
-  lastValue = value; cooldown = true;
+  lastValue = value; cooldown = true; scanInFlight = true;
   setTimeout(() => { cooldown = false; lastValue = ''; }, 2000);
   // Unstimmigkeit (Nachweis fehlt / Rechnung offen) und noch nicht freigegeben:
   // Scan zurückhalten und Freigabe-Dialog zeigen — erst nach „Ja" geht der Scan
@@ -1164,7 +1177,7 @@ function onScanSuccess(value) {
     setStatusText('Freigabe erforderlich — Buch zurückgehalten');
   } else {
     setStatusText('Gesendet: ' + value);
-    sendScan(value);
+    if (!sendScan(value)) scanInFlight = false;
   }
   if (navigator.vibrate) navigator.vibrate(80);
   readerEl.classList.add('scan-success');

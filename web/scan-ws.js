@@ -45,6 +45,7 @@ function handleServerMessage(msg) {
     if (Array.isArray(s.book_order)) bookOrder = s.book_order;
     currentBooks = s.books || [];
     resetScannedState();
+    scanInFlight = false;
     renderBooks(currentBooks);
     closeBookAlertModal();
     // Bücher sofort sichtbar; Scans+„Scanner bereit"-Status aber erst, sobald
@@ -86,6 +87,7 @@ function handleServerMessage(msg) {
     sPayEl.innerHTML = '';
     currentBooks = [];
     resetScannedState();
+    scanInFlight = false;
     bookRowsEl.innerHTML = '<div class="book-empty">Schüler wird geladen …</div>';
     closeBookAlertModal();
     currentStudent = null;
@@ -110,6 +112,10 @@ function handleServerMessage(msg) {
       return;
     }
     if (pendingScans > 0) pendingScans--;
+    // Jeder normale Status beendet die Bearbeitung dieses Scans. Bei einem
+    // blockierenden Hinweis muss der Helfer zuerst bewusst schließen, damit
+    // auch die Host-Meldung aufgeräumt wird (s. dismissBookAlert()).
+    if (!BLOCKING_STATUSES.has(msg.status)) scanInFlight = false;
     // Erfolgreicher Scan → Buch in der Liste als „erledigt" markieren:
     // 'booked' = tatsächlich gebucht (ALLOW_BOOKING an), 'staged' = nur ins
     // Feld gefüllt (Gate aus / read-only Betrieb).
@@ -120,8 +126,8 @@ function handleServerMessage(msg) {
     }
     drainScanWaiters();
     // Jeder nicht-verbuchbare Scan (alles außer staged/booked) → Statuszeile
-    // deutlich + Hinweis-Modal am Gerät. Der Helfer schließt es selbst
-    // (Button/Klick-außerhalb/Escape/nächster Scan). Bei ausgemustert /
+    // deutlich + Hinweis-Modal am Gerät. Der Helfer schließt es selbst;
+    // selbst schließbare Hinweise auch beim nächsten Scan. Bei ausgemustert /
     // verliehen-an-andere räumt dismissBookAlert zusätzlich die Host-Meldung
     // auf (server: clear_book_alert); bei den reinen Hinweisen (nicht
     // bestellt, unbekannt, noch nicht geladen, Prüf-Fehler, an sich selbst
@@ -183,21 +189,7 @@ function handleServerMessage(msg) {
     if (msg.peer_error) {
       setStatusText(msg.msg || 'Es dauert ungewöhnlich lange, vielleicht liegt ein Fehler vor.', null, 'print');
     } else {
-      const pname = msg.printer_label;
-      let text;
-      if (msg.status === 'printing') {
-        text = pname ? `Leihschein wird von ${pname} gedruckt…` : 'Leihschein wird gedruckt…';
-      } else if (typeof msg.position === 'number' && msg.position === 0) {
-        text = pname ? `Leihschein wartet an ${pname} auf Druck…` : 'Leihschein wartet auf Druck…';
-      } else if (typeof msg.position === 'number' && msg.position === 1) {
-        text = pname
-          ? `Leihschein an 1. Druckerwarteschlangenposition von ${pname}`
-          : 'Leihschein an 1. Druckerwarteschlangenposition';
-      } else if (typeof msg.position === 'number' && msg.position >= 2) {
-        text = `Leihschein an ${msg.position}. Druckerwarteschlangenposition`;
-      } else {
-        text = 'Leihschein in Druckerwarteschlange…';
-      }
+      const text = printProgressStatusText(msg);
       // Drucker-Fortschritt = aktive Meldung: aktualisiert nur die `print`-
       // Zeile. Aktive Meldungen in `trans`/`wait` (z.B. „Warten …") bleiben
       // sichtbar; terminale (z.B. „Scanner bereit") werden als End-Meldungen
@@ -214,8 +206,7 @@ function handleServerMessage(msg) {
     } else if (msg.peer_error) {
       setStatusText(msg.msg || 'Es dauert ungewöhnlich lange, vielleicht liegt ein Fehler vor.', null, 'print');
     } else if (msg.ok) {
-      const pname = msg.printer_label;
-      const base = pname ? `Leihschein von ${pname} gedruckt.` : 'Leihschein gedruckt.';
+      const base = printResultStatusText(msg);
       // „gedruckt." = terminal: überschreibt die vorige Druckmeldung im selben
       // Slot, ist aber danach von jeder neuen Meldung überschreibbar. Aktive
       // Meldungen anderer Slots (z.B. „Warten …") bleiben sichtbar; terminale
@@ -228,7 +219,7 @@ function handleServerMessage(msg) {
       if (wasPrintThenNext) startNextCountdown(base);
     } else {
       // Druck endgültig gescheitert → terminal (End-Meldung).
-      setStatusText(`Druck fehlgeschlagen: ${msg.msg || ''}`, null, 'print', true);
+      setStatusText(printResultStatusText(msg), null, 'print', true);
     }
   } else if (msg.type === 'waiting') {
     studentActive = false;
@@ -245,6 +236,7 @@ function handleServerMessage(msg) {
     currentBooks = [];
     resetScannedState();
     pendingScans = 0;
+    scanInFlight = false;
     drainScanWaiters();
     closeBookAlertModal();
     currentStudent = null;

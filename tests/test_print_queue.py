@@ -697,6 +697,77 @@ def test_positions_one_printing_one_spooled():
     assert positions[c.id] == 2
 
 
+def test_student_positions_ignore_earlier_host_and_helper_waiters():
+    """Schüleraufträge erhalten in der zentralen Queue eine relative Position:
+    frühere Host-/Helferaufträge werden dort nicht als Vorgänger gezählt, zuvor
+    gesendete Schüleraufträge dagegen schon. Die bereits belegten Drucker-Slots
+    bleiben physisch verbindlich und zählen weiterhin mit."""
+    st = AppState()
+    st.settings.printers = _two_printers()
+    pq = st.print_queue
+
+    first_host = _job("host", 1, name="Host")
+    first_helper = _job("helper", 2, name="Helfer")
+    first_student = _job("student", 3, name="Schüler A")
+    second_student = _job("student", 4, name="Schüler B")
+    # p1 ist voll; alle Jobs in der zentralen Queue sind auf p1 beschränkt,
+    # damit der Positionsunterschied eindeutig ist.
+    first_host.allowed_printers = {"p1"}
+    first_helper.allowed_printers = {"p1"}
+    first_student.allowed_printers = {"p1"}
+    second_student.allowed_printers = {"p1"}
+    slot_a = _job("helper", 5, name="Slot A")
+    slot_b = _job("host", 6, name="Slot B")
+    slot_a.status = "printing"
+    slot_b.status = "spooled"
+    pq.slots["p1"] = print_queue._Slots(jobs=[slot_a, slot_b])
+    pq.waiting = [first_host, first_helper, first_student, second_student]
+
+    global_positions = pq._compute_positions(list(st.settings.printers))
+    student_positions = pq._compute_positions(
+        list(st.settings.printers), waiting_ahead_role="student"
+    )
+
+    assert global_positions[first_student.id] == 4
+    assert global_positions[second_student.id] == 5
+    assert student_positions[first_student.id] == 2
+    assert student_positions[second_student.id] == 3
+
+
+def test_student_progress_notification_uses_relative_position(monkeypatch):
+    """Die globale Queue-Position bleibt für Host/Helfer unverändert; an den
+    Schülerclient wird für denselben Schülerauftrag die relative Position aus
+    vorherigen Schüleraufträgen gesendet."""
+    from server.state import PrinterConfig, StudentSessionB
+
+    st = AppState()
+    st.settings.printers = [PrinterConfig(id="p1", name="P1")]
+    _patch(monkeypatch, st)
+    student_ws = _FakeWS()
+    st.student_sessions["student-token"] = StudentSessionB(
+        session_token="student-token",
+        pairing_code="1234",
+        student_id=3,
+        state="paired",
+        ws=student_ws,
+    )
+    pq = st.print_queue
+    pq.waiting = [
+        _job("helper", 1, name="Helfer"),
+        _job("student", 2, name="Schüler A"),
+        _job("student", 3, name="Schüler B"),
+    ]
+    pq.waiting[-1].student_token = "student-token"
+
+    asyncio.run(pq._notify_all())
+
+    progress = [m for m in student_ws.sent if m["type"] == "print_progress"]
+    assert progress
+    # Global: Helfer + Schüler A liegen vor B → 2. Relative Schülerposition:
+    # A liegt vor B → 1.
+    assert progress[-1]["position"] == 1
+
+
 # ---- Inaktivitäts-Stall + Peer-Error + fehlerhafte Drucker ----------------
 
 

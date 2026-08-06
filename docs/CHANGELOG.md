@@ -8,13 +8,43 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
-## 2026-08-05 — Schüler-Scanner verarbeitet nur einen Scan gleichzeitig
+## 2026-08-06 — Schülerclient zeigt den Druckstatus
 
-- Der Schülerclient sperrt nach dem Absenden eines Barcodes weitere Scans,
-  bis das zugehörige `scan_result` eingetroffen ist.
+- Der Druckmodus des Schülerclients übernimmt die Statusmeldungen des
+  Helferclients: Warten in der Queue, Druckbeginn, Druckerposition,
+  erfolgreicher Druck sowie Fehler-/Stallmeldungen.
+- Für Schüleraufträge berechnet der Server die Position in der zentralen
+  Warteschlange relativ zu den zuvor von Schülerclients gesendeten Aufträgen;
+  Host-/Helferaufträge vor ihnen werden in diesem Queue-Anteil nicht gezählt.
+- Die physische Reihenfolge bereits an einen Drucker gesendeter Aufträge bleibt
+  unverändert verbindlich. Verifiziert mit 389 Offline-Tests, Ruff und
+  JavaScript-Syntaxchecks; kein IServ-Schreibzugriff.
+
+## 2026-08-06 — Schülerclient zeigt Name und Klasse im Druckmodus
+
+- Name und Klasse bleiben im Modus B auch bei einer Druckfehlermeldung sichtbar.
+  So kann ein Betreuer den betroffenen Schüler direkt zuordnen und den Druck
+  gegebenenfalls übernehmen.
+
+## 2026-08-06 — Schülerclient: Betreuerauslöser serverseitig abgesichert
+
+- Der Schülerclient verarbeitet beim Eintritt in den Druckmodus die Einstellung
+  der zugehörigen Klasse: „Automatisch“ druckt sofort, „Schülerauslöser“ zeigt
+  den Druckbutton, „Betreuerauslöser“ verweist an den Betreuer.
+- „Barcode“ bleibt als auswählbare Einstellung vorbereitet, hat aber weiterhin
+  keine Funktion.
+- Der Schüler-WebSocket weist print_request im Betreuerauslöser-Modus ab; der
+  Betreuer-/Host-Druckweg bleibt dafür zuständig. Der vorbereitete Barcode-
+  Modus wird serverseitig ebenfalls noch nicht als Druckauslöser akzeptiert.
+
+## 2026-08-05 — Schüler- und Helfer-Scanner verarbeiten nur einen Scan gleichzeitig
+
+- Schüler- und Helferclient sperren nach dem Annehmen eines Barcodes weitere
+  Scans, bis das zugehörige `scan_result` eingetroffen ist.
 - Bei ausgemusterten oder anderweitig verliehenen Büchern bleibt die Sperre bis
-  zur Host-Freigabe (`book_alert_clear`) bestehen; unbekannte Codes und andere
-  selbst schließbare Hinweise geben den Scanner direkt nach der Antwort frei.
+  zum bewussten Aufräumen der blockierenden Meldung bestehen; unbekannte Codes
+  und andere selbst schließbare Hinweise geben den Scanner direkt nach der
+  Antwort frei.
 - Verifiziert mit 385 pytest-Tests, Ruff und `node --check web/*.js`; keine
   IServ-Schreibzugriffe.
 

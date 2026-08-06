@@ -5,7 +5,8 @@
 > Risiko hier unter „Offen / zu testen" eintragen; nach erfolgreichem Test in
 > „Verifiziert" verschieben (mit Datum + Skript/Befund). Bezug: `docs/PLAN.md`.
 >
-> Stand: 2026-08-05 (Klassen-Lehreransicht: Leihschein-Kachel, 385 Tests grün).
+> Stand: 2026-08-06 (Schülerclient-Druckmodus: Statusanzeige und relative
+> Queue-Position, 389 Tests grün).
 > Alle bisherigen Tests sind **read-only** gegen IServ
 > (kein Submit, keine Buchung — PLAN §6).
 >
@@ -65,6 +66,8 @@
 | V44 | **Teacher-Statuszeilen responsive zweizeilig:** Jede Schülerzeile trennt Kopfzeile (Name/Punkt/Chevron) von Status-/Aktionszeile; Statuslabels werden mit `white-space: nowrap` und Wortschutz gerendert, Zusatzaktionen bleiben bei schmalen Breiten erreichbar. | `uv run pytest -q` + `uvx ruff check server/ automation/ tests/` + `node --check web/*.js` + lokaler Chromium-Check bei 390px/1024px mit Links-Wisch | 2026-08-05 | **385 Tests grün**, Ruff und Syntaxchecks grün. **Live-Check am echten Lehrkraft-Handy/Touchscreen weiterhin offen** |
 | V45 | **Teacher-Statuszähler mobil als 2×2-Raster:** Die vier Statuszähler brechen bei ≤520px in zwei Spalten um; bei fünf Zählern wird derselbe responsive Grid-Pfad verwendet. Labels bleiben vollständig und ungeteilt. | `uv run pytest -q` + `uvx ruff check server/ automation/ tests/` + `node --check web/*.js` + lokaler Chromium-Check bei 390px/1024px | 2026-08-05 | **385 Tests grün**, Ruff und Syntaxchecks grün. **Live-Check am echten Lehrkraft-Handy weiterhin offen** |
 | V46 | **Leihschein-Zähler präzisiert und verbreitert:** Der fünfte Zähler heißt „Leihschein abgegeben“, ist auf Desktop doppelt so breit wie die übrigen Kacheln und spannt mobil beide Rasterspalten. | `uv run pytest -q` + `uvx ruff check server/ automation/ tests/` + `node --check web/*.js` + lokaler Chromium-Check bei 390px/1024px | 2026-08-05 | **385 Tests grün**, Ruff und Syntaxchecks grün. **Live-Check am echten Lehrkraft-Handy weiterhin offen** |
+| V47 | **Schülerclient-Druckmodus behält Name und Klasse:** Die Identitätszeile wird zusätzlich in `#view-print` gerendert und bei `student_info` gemeinsam mit der aktiven Ansicht aktualisiert; Druckfehler und Betreuerauslöser bleiben dadurch direkt einem Schüler zuordenbar. | `uv run pytest` + `uvx ruff check server/ automation/ tests/` + `node --check web/*.js` | 2026-08-06 | **387 Tests grün**, Ruff und Syntaxchecks grün; echter Touchscreen-/Browser-Livecheck noch offen |
+| V48 | **Schülerclient-Druckstatus + relative Position:** `web/student.js` zeigt dieselben Druckfortschritts-/Ergebnistexte wie der Helferclient; `_notify_all` sendet für Schüleraufträge in der zentralen Queue eine Position, die nur vorherige Schüleraufträge berücksichtigt. Bereits belegte Druckerslots bleiben physisch verbindlich. | `tests/test_print_queue.py` (+2 Positions-/WS-Tests) + `uv run pytest -q` + `uvx ruff check server/ automation/ tests/` + `node --check web/*.js` | 2026-08-06 | **389 Tests grün**, Ruff und Syntaxchecks grün; echter Touchscreen-/Drucker-Livecheck noch offen |
 
 ## Offen / zu testen
 

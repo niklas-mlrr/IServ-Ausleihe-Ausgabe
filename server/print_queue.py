@@ -31,7 +31,9 @@ wirklich parallel, und „wird gedruckt" erscheint erst, wenn das OS aktiv druck
 **Position** (für Notifications + zentrale-Queue-Anzeige): je Job das Minimum
 über alle erlaubten Drucker, wie viele Aufträge dort noch vor ihm liegen —
 0 = druckt, 1 = gesendet/wartet, 2+ = in der zentralen Warteschlange (s.
-`_compute_positions`).
+`_compute_positions`). Für Schüler-Notifications werden im zentralen Anteil
+nur frühere Schüleraufträge gezählt; bereits gesendete Slot-Aufträge bleiben
+physisch verbindlich.
 
 Leerer Pool (`state.settings.printers == []`): der Scheduler dispatcht nichts —
 Aufträge bleiben in `waiting`. Die Enqueue-Stellen (Host-Endpoint / Scanner-WS)
@@ -663,7 +665,8 @@ class PrintQueue:
     # ---- Positionen ----------------------------------------------------
 
     def _compute_positions(
-        self, printers: list, faulty_ids: set[str] | None = None
+        self, printers: list, faulty_ids: set[str] | None = None,
+        *, waiting_ahead_role: Role | None = None,
     ) -> dict[str, int]:
         """Pro Job seine Warteschlangen-Position als Minimum über die
         relevanten erlaubten Drucker, wie viele Aufträge dort noch vor ihm
@@ -678,7 +681,12 @@ class PrintQueue:
           druckender erster Job den zweiten fälschlich auf Position 2 schieben.
         - Zentrale-Warteschlangen-Job `waiting[i]`: ``min`` über die
           **nicht-fehlerhaften** erlaubten Drucker P von ``load(P) + (Anzahl
-          früherer waiting-Jobs, die für P erlaubt sind)``. Hat der Job
+          früherer waiting-Jobs, die für P erlaubt sind)``. Wenn
+          ``waiting_ahead_role`` gesetzt ist, werden dabei nur frühere Jobs
+          dieser Rolle berücksichtigt. Das wird für Schüleraufträge verwendet:
+          ihre Anzeige zählt in der zentralen Warteschlange nur zuvor von
+          Schülerclients gesendete Aufträge, nicht Host-/Helferaufträge. Hat der
+          Job
           *keinen* Ersatzdrucker (alle erlaubten Drucker sind fehlerhaft),
           wird die Position stattdessen über die fehlerhaften erlaubten
           Drucker berechnet (seine Position in der hängenden Schlange —
@@ -725,7 +733,10 @@ class PrintQueue:
                 ahead = 0
                 for k in range(ci):
                     other = self.waiting[k]
-                    if other.allowed_printers is None or p.id in other.allowed_printers:
+                    if (
+                        (waiting_ahead_role is None or other.role == waiting_ahead_role)
+                        and (other.allowed_printers is None or p.id in other.allowed_printers)
+                    ):
                         ahead += 1
                 pos = load + ahead
                 if best is None or pos < best:
@@ -1006,7 +1017,9 @@ class PrintQueue:
 
     async def _notify_all(self) -> None:
         """Allen Aufträgen ihre aktuelle Position + Status pushen (nur an den
-        jeweiligen Urheber). Position aus `_compute_positions`; für Jobs an
+        jeweiligen Urheber). Position aus `_compute_positions`; für
+        Schüleraufträge wird die zentrale Queue dabei relativ zu vorherigen
+        Schüleraufträgen gezählt. Für Jobs an
         fehlerhaften Druckern bzw. ohne Ersatzdrucker wird `peer_error` wahr
         → der Client zeigt die Inaktivitäts-Meldung („Es dauert ungewöhnlich
         lange … - <Label>") statt einer normalen Warteposition. Die Meldung
@@ -1019,15 +1032,30 @@ class PrintQueue:
         printers = list(state.settings.printers)
         async with self._lock:
             positions = self._compute_positions(printers, faulty_ids=self.faulty_printers)
+            # Schülerclients sehen ihre relative Position in der zentralen
+            # Warteschlange: Host-/Helferaufträge vor ihnen werden für den
+            # zentralen Warteschlangenanteil nicht mitgezählt. Bereits an einen
+            # Drucker gesendete Aufträge bleiben dagegen physisch verbindlich
+            # und zählen über den Slot-Index wie bei Helfer/Host.
+            student_positions = self._compute_positions(
+                printers,
+                faulty_ids=self.faulty_printers,
+                waiting_ahead_role="student",
+            )
             snapshot: list[tuple[PrintJob, int, JobStatus, str | None, bool, str | None]] = []
             for j in self.waiting:
+                job_positions = student_positions if j.role == "student" else positions
                 pname = self._printer_name(j.assigned_printer_id)
                 peer = self._is_peer_error(j, printers, in_slot=False)
                 msg = (
-                    self._error_msg(j.status, positions.get(j.id, 0), self._peer_pname(j, printers))
+                    self._error_msg(
+                        j.status,
+                        job_positions.get(j.id, 0),
+                        self._peer_pname(j, printers),
+                    )
                     if peer else None
                 )
-                snapshot.append((j, positions.get(j.id, 0), j.status, pname, peer, msg))
+                snapshot.append((j, job_positions.get(j.id, 0), j.status, pname, peer, msg))
             for s in self.slots.values():
                 for j in s.jobs:
                     # Finalisierte (blockierte) Aufträge nicht mehr mit Progress
@@ -1036,15 +1064,16 @@ class PrintQueue:
                     # geräumt).
                     if j.status in ("stalled", "peer_error", "failed"):
                         continue
+                    job_positions = student_positions if j.role == "student" else positions
                     pname = self._printer_name(j.assigned_printer_id)
                     # Slot-Job an fehlerhaftem Drucker → peer_error (kurzes
                     # Fenster, bis der Stall ihn finalisiert aus dem Slot nimmt).
                     peer = j.assigned_printer_id in self.faulty_printers
                     msg = (
-                        self._error_msg(j.status, positions.get(j.id, 0), pname)
+                        self._error_msg(j.status, job_positions.get(j.id, 0), pname)
                         if peer else None
                     )
-                    snapshot.append((j, positions.get(j.id, 0), j.status, pname, peer, msg))
+                    snapshot.append((j, job_positions.get(j.id, 0), j.status, pname, peer, msg))
         hub = get_hub()
         for job, position, status, printer, peer_error, msg in snapshot:
             await self._send_progress(

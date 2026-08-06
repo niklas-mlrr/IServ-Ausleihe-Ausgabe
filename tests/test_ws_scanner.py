@@ -28,7 +28,7 @@ import pytest
 
 import server.hub as hub_module
 import server.routes.ws as ws_module
-from server.state import AppState, HelperSession, QueueStudent
+from server.state import AppState, HelperSession, QueueStudent, StudentSessionB
 
 
 class _FakeIServ:
@@ -127,6 +127,48 @@ def test_scan_without_student_yields_error(client, ws_env):
         msg = _recv_until(ws, "scan_result")
         assert msg["status"] == "error"
         assert msg["barcode"] == "B1"
+
+
+# ---------------------------------------------------------------------------
+# 2b) Der Schülerclient darf die Klassenregel nicht per print_request umgehen:
+#     Betreuerauslöser läuft über Helfer/Host, Barcode ist noch ohne Funktion.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("trigger", "expected_message"),
+    [
+        ("helper", "Betreuer"),
+        ("barcode", "noch nicht verfügbar"),
+    ],
+)
+def test_student_print_request_respects_class_trigger(client, ws_env, trigger, expected_message):
+    state, _ = ws_env
+    ctx = state.open_context("10a")
+    ctx.slip_trigger = trigger
+    ctx.queue.append(
+        QueueStudent(
+            student_id=42,
+            lastname="Test",
+            firstname="Schüler",
+            form="10a",
+            status="active",
+        )
+    )
+    state.student_sessions["student-token"] = StudentSessionB(
+        session_token="student-token",
+        pairing_code="4242",
+        student_id=42,
+        state="paired",
+    )
+
+    with client.websocket_connect("/ws/student/student-token") as ws:
+        _recv_until(ws, "worker_ready")
+        ws.send_json({"type": "print_request"})
+        msg = _recv_until(ws, "print_result")
+
+    assert msg["ok"] is False
+    assert expected_message in msg["msg"]
 
 
 # ---------------------------------------------------------------------------

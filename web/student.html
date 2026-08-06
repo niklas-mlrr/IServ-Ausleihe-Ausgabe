@@ -176,6 +176,7 @@
     .big-msg .title { font-size: 1.4rem; font-weight: 600; margin-bottom: 8px; }
     .big-msg .text { opacity: .6; }
     /* Druckmodus: Druck-Button nicht vollbreit, sondern dezent mittig. */
+    #view-print .print-name-row { margin-top: 12px; }
     #view-print .big-msg { margin-top: 90px; }
     #print-actions { max-width: 320px; width: 100%; margin: 16px auto 0; }
     #print-actions button { padding: 14px; font-size: 1rem; }
@@ -226,6 +227,12 @@
        Betreuerauslöser / Barcode). Nach erfolgreichem Druck geht der Schüler
        automatisch auf „Vorgang abgeschlossen" (serverseitig via closed). -->
   <div class="view" id="view-print">
+    <div class="name-row print-name-row">
+      <div class="s-name" id="print-name">–</div>
+      <div class="s-meta">
+        <div class="s-form" id="print-form"></div>
+      </div>
+    </div>
     <div class="big-msg">
       <div class="icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg></div>
       <div class="title" id="print-title">Alle Bücher eingescannt</div>
