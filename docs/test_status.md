@@ -71,6 +71,7 @@
 | V49 | **Schülerclient-Abschluss nach Druckende:** `print_loan_slip_for()` setzt den Leihschein nicht mehr beim Dispatch als gedruckt; die PrintQueue schließt die Modus-B-Session erst nach abgeschlossenem OS-Druckauftrag. | `tests/test_printing.py` + `tests/test_print_queue.py` (Dispatch-vs.-Druckende und Session-Abschluss) + `uv run pytest -q` + `uvx ruff check server/ automation/ tests/` + `node --check web/*.js` | 2026-08-06 | **391 Tests grün**, Ruff und Syntaxchecks grün; echter Touchscreen-/Drucker-Livecheck noch offen |
 
 | V50 | **Schülerclient blendet Drucker-Systemnamen aus:** Nur ein konfigurierter Anzeigename wird angezeigt; technische Namen werden auch in Stall-/Fehlermeldungen nicht ausgegeben. | `node --check web/*.js` | 2026-08-06 | JavaScript-Syntax grün; echter Geräte-/Browser-Livecheck noch offen |
+| V51 | **Schülerclient gibt den Worker beim Druckmodus frei:** `print_mode` löst die Playwright-Kartei idempotent aus der Schülerzuordnung, ohne die Modus-B-Session für Druckstatus und Druckabschluss zu schließen; `print_request` bietet einen Reconnect-Fallback. Der Selbstauslöser blendet den Button beim Absenden aus und verweist bei Fehlern an den Betreuer. | `tests/test_ws_scanner.py::test_student_print_mode_releases_worker_but_keeps_session` + `uv run pytest -q` + `uvx ruff check server/ automation/ tests/` + `node --check web/*.js` | 2026-08-06 | **391 Tests grün**, Ruff und Syntaxchecks grün; echter Touchscreen-/Drucker-Livecheck noch offen |
 
 ## Offen / zu testen
 

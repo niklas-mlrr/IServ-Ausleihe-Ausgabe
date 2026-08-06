@@ -43,6 +43,7 @@ let bookOrder = [];                 // klassenweite ISBN-Reihenfolge (vom Host k
 let slipTrigger = 'auto';
 let druckmodusEntered = false;       // Druckmodus bereits betreten (nur 1× pro Session)
 let printSent = false;               // Druckauftrag bereits gesendet
+let printStarted = false;             // Status steht oben anstelle der Überschrift
 
 function showError(title, text) {
   if (title) document.getElementById('error-title').textContent = title;
@@ -185,8 +186,7 @@ function handleServerMessage(msg) {
   } else if (msg.type === 'print_progress') {
     // Druck läuft in der Warteschlange/am Drucker — Druckmodus-Text live halten.
     if (views.print.classList.contains('show')) {
-      const t = document.getElementById('print-text');
-      if (t && msg.status !== 'done') t.textContent = studentPrintProgressStatusText(msg);
+      if (msg.status !== 'done') startPrintStatus(studentPrintProgressStatusText(msg));
     }
   } else if (msg.type === 'print_result') {
     handlePrintResult(msg);
@@ -227,7 +227,10 @@ function enterDruckmodus() {
   const title = document.getElementById('print-title');
   const text = document.getElementById('print-text');
   const actions = document.getElementById('print-actions');
-  if (title) title.textContent = 'Alle Bücher eingescannt';
+  if (title) title.textContent = 'Leihschein Drucken';
+  printStarted = false;
+  views.print.classList.remove('print-started');
+  if (title) title.classList.remove('print-status-title');
   switch (slipTrigger) {
     case 'auto':
       if (text) text.textContent = 'Leihschein wird gedruckt…';
@@ -258,12 +261,30 @@ function sendPrintRequest() {
   if (printSent) return;
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   printSent = true;
+  startPrintStatus('Leihschein wird gedruckt…');
   // Der Selbstauslöser ist genau einmal pro Schüler vorgesehen. Button direkt
   // beim Absenden ausblenden, damit er auch bei langsamer Druckerwarteschlange
   // oder einem Fehler nicht erneut verwendet wird.
   const actions = document.getElementById('print-actions');
   if (actions) actions.style.display = 'none';
   ws.send(JSON.stringify({ type: 'print_request' }));
+}
+
+function setPrintStatusText(statusText) {
+  const text = document.getElementById('print-text');
+  if (text) text.textContent = statusText;
+  if (printStarted) {
+    const title = document.getElementById('print-title');
+    if (title) title.textContent = `Status: ${statusText}`;
+  }
+}
+
+function startPrintStatus(statusText) {
+  printStarted = true;
+  views.print.classList.add('print-started');
+  const title = document.getElementById('print-title');
+  if (title) title.classList.add('print-status-title');
+  setPrintStatusText(statusText);
 }
 
 // Schüler sehen niemals den technischen Druckernamen. printer_label ist für
@@ -303,15 +324,14 @@ function studentPrintResultStatusText(msg) {
 
 function handlePrintResult(msg) {
   if (!views.print.classList.contains('show')) return;   // z. B. schon auf done
-  const text = document.getElementById('print-text');
   if (msg.ok) {
     // Auto-Fertig (closed) folgt serverseitig; bis dahin dieselbe Meldung wie
     // im Helferclient anzeigen.
-    if (text) text.textContent = studentPrintResultStatusText(msg);
+    startPrintStatus(studentPrintResultStatusText(msg));
   } else {
     // Druck fehlgeschlagen → kein weiterer Selbstversuch. Der Button bleibt
     // verborgen; der Schüler soll sich an einen Betreuer wenden.
-    if (text) text.textContent = studentPrintResultStatusText(msg) + ' — bitte melde dich bei einem Betreuer.';
+    startPrintStatus(studentPrintResultStatusText(msg) + ' — bitte melde dich bei einem Betreuer.');
   }
 }
 

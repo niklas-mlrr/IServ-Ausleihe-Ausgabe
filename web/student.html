@@ -175,12 +175,33 @@
     .ico { width: 1em; height: 1em; vertical-align: -0.125em; flex: none; }
     .big-msg .title { font-size: 1.4rem; font-weight: 600; margin-bottom: 8px; }
     .big-msg .text { opacity: .6; }
-    /* Druckmodus: Druck-Button nicht vollbreit, sondern dezent mittig. */
+    /* Druckmodus: Erklärung, Status und Druck-Button klar voneinander trennen. */
     #view-print .print-name-row { margin-top: 12px; }
     #view-print .big-msg { margin-top: 90px; }
+    #print-intro {
+      max-width: 520px; margin: 0 auto 18px; line-height: 1.45;
+    }
+    #print-status {
+      width: 100%; max-width: 520px; margin: 0 auto; padding: 14px 18px;
+      border: 2px solid #0a84ff; border-radius: 12px;
+      background: rgba(10,132,255,.1); text-align: left;
+    }
+    #print-status-label {
+      margin-bottom: 5px; color: #0a84ff; font-size: .78rem;
+      font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+    }
+    #print-title.print-status-title {
+      max-width: 520px; margin: 0 auto 18px; padding: 14px 18px;
+      border: 2px solid #0a84ff; border-radius: 12px;
+      background: rgba(10,132,255,.1); color: #0a84ff;
+      font-size: 1rem; line-height: 1.4; text-align: left;
+    }
+    #view-print.print-started #print-status { display: none; }
+    #print-text {
+      font-size: 1rem; font-weight: 600; line-height: 1.4; white-space: normal;
+    }
     #print-actions { max-width: 320px; width: 100%; margin: 16px auto 0; }
     #print-actions button { padding: 14px; font-size: 1rem; }
-    #print-text { white-space: normal; }
   </style>
 </head>
 <body>
@@ -235,8 +256,12 @@
     </div>
     <div class="big-msg">
       <div class="icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg></div>
-      <div class="title" id="print-title">Alle Bücher eingescannt</div>
-      <div class="text" id="print-text"></div>
+      <div class="title" id="print-title">Leihschein Drucken</div>
+      <div id="print-intro">Du hast alle Bücher ausgeliehen. Als nächstes muss der Leihschein gedruckt werden.</div>
+      <div id="print-status" role="status" aria-live="polite">
+        <div id="print-status-label">Status</div>
+        <div id="print-text"></div>
+      </div>
       <div class="modal-actions" id="print-actions" style="display:none">
         <button id="print-trigger-btn">Leihschein drucken</button>
       </div>
