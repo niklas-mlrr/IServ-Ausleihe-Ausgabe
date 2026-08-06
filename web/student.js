@@ -180,7 +180,7 @@ function handleServerMessage(msg) {
     // Druck läuft in der Warteschlange/am Drucker — Druckmodus-Text live halten.
     if (views.print.classList.contains('show')) {
       const t = document.getElementById('print-text');
-      if (t && msg.status !== 'done') t.textContent = printProgressStatusText(msg);
+      if (t && msg.status !== 'done') t.textContent = studentPrintProgressStatusText(msg);
     }
   } else if (msg.type === 'print_result') {
     handlePrintResult(msg);
@@ -249,19 +249,54 @@ function sendPrintRequest() {
   ws.send(JSON.stringify({ type: 'print_request' }));
 }
 
+// Schüler sehen niemals den technischen Druckernamen. printer_label ist für
+// Host/Helfer absichtlich „Anzeigename (Systemname)"; hier wird der Klammerteil
+// entfernt. Wenn kein eigener Anzeigename gesetzt ist, wird der Systemname
+// vollständig ausgeblendet (der Standarddrucker darf als generischer Begriff
+// „Standarddrucker“ erscheinen).
+function studentPrinterLabel(msg) {
+  const label = String(msg.printer_label || '').trim();
+  const system = String(msg.printer || '').trim();
+  if (!label || (system && label === system)) return '';
+  const suffix = system ? ` (${system})` : '';
+  return suffix && label.endsWith(suffix)
+    ? label.slice(0, -suffix.length).trim()
+    : label;
+}
+
+function studentPrintProgressStatusText(msg) {
+  // Serverseitige Stalltexte können den Systemnamen enthalten. Diese Meldungen
+  // werden am Schülergerät bewusst neutral formuliert.
+  if (msg.peer_error) {
+    return typeof msg.position === 'number' && msg.position >= 1
+      ? `Fehler bei vorigem Druckauftrag - ${msg.position}. Warteschlangenposition`
+      : 'Es dauert ungewöhnlich lange, vielleicht liegt ein Fehler vor.';
+  }
+  return printProgressStatusText({ ...msg, printer_label: studentPrinterLabel(msg) });
+}
+
+function studentPrintResultStatusText(msg) {
+  // Auch Stall-/Fehlerdetails kommen ggf. aus dem Backend und dürfen keine
+  // technischen Druckernamen an den Schülerclient durchreichen.
+  if (msg.stalled) return 'Druck dauert ungewöhnlich lange.';
+  if (msg.peer_error) return 'Es dauert ungewöhnlich lange, vielleicht liegt ein Fehler vor.';
+  if (!msg.ok) return 'Druck fehlgeschlagen.';
+  return printResultStatusText({ ...msg, printer_label: studentPrinterLabel(msg) });
+}
+
 function handlePrintResult(msg) {
   if (!views.print.classList.contains('show')) return;   // z. B. schon auf done
   const text = document.getElementById('print-text');
   if (msg.ok) {
     // Auto-Fertig (closed) folgt serverseitig; bis dahin dieselbe Meldung wie
     // im Helferclient anzeigen.
-    if (text) text.textContent = printResultStatusText(msg);
+    if (text) text.textContent = studentPrintResultStatusText(msg);
   } else {
     // Druck fehlgeschlagen → Retry freigeben (Schülerauslöser kann erneut
     // tippen; bei Automatisch zeigt der Hinweis den Fehler, ein Betreuer
     // kann eingreifen). Auto-Modus sendet nicht automatisch erneut.
     printSent = false;
-    if (text) text.textContent = printResultStatusText(msg) + (slipTrigger === 'student' ? ' — bitte erneut versuchen.' : ' — bitte melde dich bei einem Betreuer.');
+    if (text) text.textContent = studentPrintResultStatusText(msg) + (slipTrigger === 'student' ? ' — bitte erneut versuchen.' : ' — bitte melde dich bei einem Betreuer.');
     // Retry-Button freigeben bei selbst auslösbaren Modi (Automatisch &
     // Schülerauslöser) — falls z. B. erst ein Drucker konfiguriert werden muss.
     if (slipTrigger === 'auto' || slipTrigger === 'student') {

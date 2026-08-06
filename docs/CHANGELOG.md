@@ -8,6 +8,13 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-06 — Schülerclient blendet Systemnamen der Drucker aus
+
+- Druckfortschritts- und Ergebnistexte am Schülerclient zeigen nur einen
+  konfigurierten Anzeigenamen.
+- Technische Systemnamen werden auch aus Stall-/Fehlermeldungen entfernt; bei
+  fehlendem Anzeigenamen bleibt der Druckername vollständig verborgen.
+
 ## 2026-08-06 — Schülerclient erst nach abgeschlossenem Druck fertig
 
 - `print_loan_slip_for()` markiert einen Leihschein nicht mehr beim bloßen
