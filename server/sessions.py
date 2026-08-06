@@ -787,6 +787,20 @@ def release_worker(state: AppState, worker) -> None:
 _release_tasks: set[asyncio.Task] = set()
 
 
+def release_student_worker(state: AppState, student_id: int) -> bool:
+    """Den Worker eines Schülers aus der aktiven Zuordnung lösen.
+
+    Der Schüler kann danach weiter über seine Modus-B-Session drucken; nur die
+    Playwright-Kartei wird nicht mehr benötigt. Der Vorgang ist idempotent, weil
+    Druckmodus-Nachrichten bei Reconnects erneut eintreffen können.
+    """
+    worker = state.student_worker_sessions.pop(student_id, None)
+    if worker is None:
+        return False
+    release_worker(state, worker)
+    return True
+
+
 def set_worker_session(state: AppState, student_id: int, worker_session) -> None:
     """Worker-Session eines Schülers registrieren — vorhandene zuvor freigeben.
 
@@ -839,9 +853,7 @@ async def invalidate_session(
 
     # Worker-Context zurück in den Pool (falls vorhanden).
     if session.student_id is not None:
-        worker = state.student_worker_sessions.pop(session.student_id, None)
-        if worker:
-            release_worker(state, worker)
+        release_student_worker(state, session.student_id)
 
     # Schüler-WS informieren und schließen.
     ws = session.ws
@@ -994,9 +1006,7 @@ async def end_student(
     if session:
         await invalidate_session(state, session, session_state, reason=queue_status)
     else:
-        worker = state.student_worker_sessions.pop(student_id, None)
-        if worker:
-            release_worker(state, worker)
+        release_student_worker(state, student_id)
 
     if broadcast:
         await hub.broadcast_host(state.state_snapshot())

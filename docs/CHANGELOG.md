@@ -8,6 +8,27 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-06 — Druckfehler verweist auf den Betreuer
+
+- Bei einem fehlgeschlagenen Druck zeigt der Schülerclient immer den Hinweis,
+  sich bei einem Betreuer zu melden.
+- Der Retry-Button bleibt für den Selbstauslöser weiterhin verfügbar.
+
+## 2026-08-06 — Druckbutton nach erfolgreichem Selbstauslöser ausblenden
+
+- Nach einem erfolgreichen Druck wird der Button „Leihschein drucken“ im
+  Schülerclient ausgeblendet.
+- Bei einem Druckfehler bleibt der Retry-Button wie bisher verfügbar.
+
+## 2026-08-06 — Schülerclient gibt Worker beim Druckmodus frei
+
+- Beim Eintritt in den Druckmodus signalisiert der Schülerclient dem Server,
+  dass seine Playwright-Kartei nicht mehr benötigt wird.
+- Der Worker wird beendet und bleibt nicht bis zum Abschluss des Druckauftrags
+  gebunden; die Modus-B-Session bleibt für Druckstatus und Abschluss bestehen.
+- Das Druck-Request enthält zusätzlich ein idempotentes Fallback für verlorene
+  Druckmodus-Signale nach einem Reconnect.
+
 ## 2026-08-06 — Schülerclient blendet Systemnamen der Drucker aus
 
 - Druckfortschritts- und Ergebnistexte am Schülerclient zeigen nur einen

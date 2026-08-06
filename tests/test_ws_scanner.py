@@ -44,6 +44,14 @@ class _FakeIServ:
         return (None, [])
 
 
+class _FakeWorker:
+    def __init__(self) -> None:
+        self.closed = False
+
+    async def close(self) -> None:
+        self.closed = True
+
+
 @pytest.fixture
 def ws_env(monkeypatch):
     """Frische AppState in ws.py UND hub.py injizieren, Fake-IServ, kein
@@ -169,6 +177,45 @@ def test_student_print_request_respects_class_trigger(client, ws_env, trigger, e
 
     assert msg["ok"] is False
     assert expected_message in msg["msg"]
+
+
+def test_student_print_mode_releases_worker_but_keeps_session(client, ws_env):
+    """Der Druckmodus beendet nur die Playwright-Kartei, nicht die Druck-WS."""
+    state, _ = ws_env
+    ctx = state.open_context("10a")
+    ctx.slip_trigger = "helper"
+    ctx.queue.append(
+        QueueStudent(
+            student_id=42,
+            lastname="Test",
+            firstname="Schüler",
+            form="10a",
+            status="active",
+        )
+    )
+    session = StudentSessionB(
+        session_token="student-token",
+        pairing_code="4242",
+        student_id=42,
+        state="paired",
+    )
+    state.student_sessions["student-token"] = session
+    worker = _FakeWorker()
+    state.student_worker_sessions[42] = worker
+
+    with client.websocket_connect("/ws/student/student-token") as ws:
+        _recv_until(ws, "worker_ready")
+        ws.send_json({"type": "print_mode"})
+        # Ein Folge-Frame erzwingt die Verarbeitung des vorherigen Signals und
+        # bestätigt zugleich, dass die Schüler-Session weiterlebt.
+        ws.send_json({"type": "print_request"})
+        msg = _recv_until(ws, "print_result")
+
+    assert msg["ok"] is False
+    assert "Betreuer" in msg["msg"]
+    assert 42 not in state.student_worker_sessions
+    assert worker.closed is True
+    assert session.state == "paired"
 
 
 # ---------------------------------------------------------------------------

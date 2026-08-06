@@ -23,6 +23,7 @@ from ..sessions import (
     hydrate_student_info,
     process_scan,
     rebind_helper_to_context,
+    release_student_worker,
     send_display_update,
     send_printer_display_update,
     send_teacher_update,
@@ -1146,6 +1147,17 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
                 await hub.send_websocket(websocket, payload)
                 await hub.broadcast_host(state.state_snapshot())
 
+            elif mtype == "print_mode":
+                # Sobald alle Bücher erledigt sind, braucht der Schülerclient
+                # die Playwright-Kartei nicht mehr. Die Modus-B-Session und der
+                # WebSocket bleiben für den Druckstatus bewusst bestehen.
+                if (
+                    session.state == "paired"
+                    and session.student_id is not None
+                    and release_student_worker(state, session.student_id)
+                ):
+                    await hub.broadcast_host(state.state_snapshot())
+
             elif mtype == "print_request":
                 # Druckmodus am Schülerclient (Modus B): Schüler hat alle
                 # vorgemerkten Bücher gescannt und löst den Leihschein-Druck
@@ -1162,6 +1174,12 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
                         {"type": "print_result", "ok": False, "msg": "Noch nicht freigegeben"},
                     )
                     continue
+                # Sicherheitsnetz: Der Client sendet `print_mode` beim Wechsel
+                # in die Ansicht. Falls dieses Frame wegen eines Reconnects
+                # verloren ging, darf der Druckauftrag den Worker trotzdem
+                # nicht weiter belegen.
+                if release_student_worker(state, session.student_id):
+                    await hub.broadcast_host(state.state_snapshot())
                 # Der Betreuerauslöser wird ausschließlich über das bestehende
                 # Helfer-/Host-Druckmenü bedient. Der Guard verhindert, dass ein
                 # Schülerclient die Klasseneinstellung durch ein manuelles WS-

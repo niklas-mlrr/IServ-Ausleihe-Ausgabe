@@ -88,7 +88,13 @@ async function join() {
 function connect() {
   const wsHandle = connectWebSocket(() => `wss://${location.host}/ws/student/${token}`, {
     onSocket: (s) => { ws = s; },
-    onOpen: () => { document.getElementById('dot').className = 'dot ok'; },
+    onOpen: () => {
+      document.getElementById('dot').className = 'dot ok';
+      // Nach einem Reconnect kann der Druckmodus bereits aktiv sein. Das
+      // idempotente Signal stellt dann sicher, dass der Worker nicht hängen
+      // bleibt, falls das erste Frame beim Verbindungswechsel verloren ging.
+      if (druckmodusEntered) notifyDruckmodus();
+    },
     onMessage: e => { let m; try { m = JSON.parse(e.data); } catch (_) { return; } handleServerMessage(m); },
     onError: () => { document.getElementById('dot').className = 'dot err'; },
     onClose: async (e, reconnect) => {
@@ -216,6 +222,7 @@ function maybeEnterDruckmodus() {
 }
 
 function enterDruckmodus() {
+  notifyDruckmodus();
   show('print');
   const title = document.getElementById('print-title');
   const text = document.getElementById('print-text');
@@ -240,6 +247,11 @@ function enterDruckmodus() {
       if (actions) actions.style.display = 'none';
       break;
   }
+}
+
+function notifyDruckmodus() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({ type: 'print_mode' }));
 }
 
 function sendPrintRequest() {
@@ -291,12 +303,18 @@ function handlePrintResult(msg) {
     // Auto-Fertig (closed) folgt serverseitig; bis dahin dieselbe Meldung wie
     // im Helferclient anzeigen.
     if (text) text.textContent = studentPrintResultStatusText(msg);
+    // Ein erfolgreicher Schülerauslöser darf in dieser Session nicht erneut
+    // abgeschickt werden — der Button verschwindet nach dem ersten Druck.
+    if (slipTrigger === 'student') {
+      const actions = document.getElementById('print-actions');
+      if (actions) actions.style.display = 'none';
+    }
   } else {
     // Druck fehlgeschlagen → Retry freigeben (Schülerauslöser kann erneut
     // tippen; bei Automatisch zeigt der Hinweis den Fehler, ein Betreuer
     // kann eingreifen). Auto-Modus sendet nicht automatisch erneut.
     printSent = false;
-    if (text) text.textContent = studentPrintResultStatusText(msg) + (slipTrigger === 'student' ? ' — bitte erneut versuchen.' : ' — bitte melde dich bei einem Betreuer.');
+    if (text) text.textContent = studentPrintResultStatusText(msg) + ' — bitte melde dich bei einem Betreuer.';
     // Retry-Button freigeben bei selbst auslösbaren Modi (Automatisch &
     // Schülerauslöser) — falls z. B. erst ein Drucker konfiguriert werden muss.
     if (slipTrigger === 'auto' || slipTrigger === 'student') {
