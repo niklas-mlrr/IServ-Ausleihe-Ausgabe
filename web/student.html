@@ -183,20 +183,9 @@
     }
     #print-status {
       width: 100%; max-width: 520px; margin: 0 auto; padding: 14px 18px;
-      border: 2px solid #0a84ff; border-radius: 12px;
-      background: rgba(10,132,255,.1); text-align: left;
+      border: 2px solid var(--border); border-radius: 12px;
+      background: var(--surface); text-align: left;
     }
-    #print-status-label {
-      margin-bottom: 5px; color: #0a84ff; font-size: .78rem;
-      font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
-    }
-    #print-title.print-status-title {
-      max-width: 520px; margin: 0 auto 18px; padding: 14px 18px;
-      border: 2px solid #0a84ff; border-radius: 12px;
-      background: rgba(10,132,255,.1); color: #0a84ff;
-      font-size: 1rem; line-height: 1.4; text-align: left;
-    }
-    #view-print.print-started #print-status { display: none; }
     #print-text {
       font-size: 1rem; font-weight: 600; line-height: 1.4; white-space: normal;
     }
@@ -259,7 +248,6 @@
       <div class="title" id="print-title">Leihschein Drucken</div>
       <div id="print-intro">Du hast alle Bücher ausgeliehen. Als nächstes muss der Leihschein gedruckt werden.</div>
       <div id="print-status" role="status" aria-live="polite">
-        <div id="print-status-label">Status</div>
         <div id="print-text"></div>
       </div>
       <div class="modal-actions" id="print-actions" style="display:none">
