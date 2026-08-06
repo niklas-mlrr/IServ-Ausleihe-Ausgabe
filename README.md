@@ -12,6 +12,33 @@ Buchausgabe der Schulbuchausleihe (IServ-Modul) ergänzt, nicht ersetzt.
 Der vollständige Projektplan (Architektur, Sicherheitsmodell, Phasen, offene
 Punkte) steht in **[`docs/PLAN.md`](docs/PLAN.md)**.
 
+## Kurzüberblick
+
+Dieses Seminarfachprojekt unterstützt die Schulbuchausleihe der Schule. Statt
+Bücher und Ausleihvorgänge manuell zu erfassen, verbindet die Anwendung einen
+Host-Rechner mit browserbasierten Handyscannern und dem offiziellen
+IServ-Frontend.
+
+**Zwei Einsatzmodi:**
+
+- **Stapelmodus:** Helfer scannen Bücher per Handykamera; die Anwendung führt
+  durch die Ausgabe, bucht über das IServ-Frontend und druckt Leihscheine.
+- **Live-Ausgabe-Pilot:** Schülerinnen und Schüler verbinden sich selbst über
+  einen QR-Code; der Host ordnet die Sitzung zu und gibt die Ausgabe frei.
+
+**Technik:** Python, FastAPI, WebSockets, Playwright, browserbasierter
+Barcode-Scanner und lokaler Leihschein-Druck.
+
+**Sicherheitsprinzip:** Die Anwendung liest Ausleihdaten über die separate
+[IServ-Ausleihe-API](https://github.com/niklas-mlrr/IServ-Ausleihe-API) und
+führt Buchungen ausschließlich über das offizielle IServ-Frontend aus. Der
+bestehende USB-Scanner bleibt jederzeit als Fallback nutzbar.
+
+**Projektstand (August 2026):** Der Stapelmodus ist funktional fertig.
+Der Live-Ausgabe-Pilot ist implementiert; die Generalprobe im Schul-WLAN und
+der Buchungstest gegen das echte System stehen noch aus. Die Logik ist mit
+394 automatisierten Tests abgesichert.
+
 ## Architektur (Kurzfassung)
 
 ```
