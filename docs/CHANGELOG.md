@@ -12,13 +12,14 @@
 
 - Bei einem fehlgeschlagenen Druck zeigt der Schülerclient immer den Hinweis,
   sich bei einem Betreuer zu melden.
-- Der Retry-Button bleibt für den Selbstauslöser weiterhin verfügbar.
+- Der Druckbutton bleibt nach dem Absenden verborgen.
 
-## 2026-08-06 — Druckbutton nach erfolgreichem Selbstauslöser ausblenden
+## 2026-08-06 — Druckbutton nach Selbstauslöser ausblenden
 
-- Nach einem erfolgreichen Druck wird der Button „Leihschein drucken“ im
-  Schülerclient ausgeblendet.
-- Bei einem Druckfehler bleibt der Retry-Button wie bisher verfügbar.
+- Beim Absenden des Druckauftrags wird der Button „Leihschein drucken“ im
+  Schülerclient sofort ausgeblendet.
+- Bei einem Druckfehler bleibt der Button verborgen; der Schüler soll sich bei
+  einem Betreuer melden.
 
 ## 2026-08-06 — Schülerclient gibt Worker beim Druckmodus frei
 

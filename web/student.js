@@ -42,7 +42,7 @@ let bookOrder = [];                 // klassenweite ISBN-Reihenfolge (vom Host k
 // den Leihschein auslöst, sobald alle vorgemerkten Bücher gescannt sind.
 let slipTrigger = 'auto';
 let druckmodusEntered = false;       // Druckmodus bereits betreten (nur 1× pro Session)
-let printSent = false;               // Druckauftrag bereits gesendet (Retry-Sperre)
+let printSent = false;               // Druckauftrag bereits gesendet
 
 function showError(title, text) {
   if (title) document.getElementById('error-title').textContent = title;
@@ -258,6 +258,11 @@ function sendPrintRequest() {
   if (printSent) return;
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   printSent = true;
+  // Der Selbstauslöser ist genau einmal pro Schüler vorgesehen. Button direkt
+  // beim Absenden ausblenden, damit er auch bei langsamer Druckerwarteschlange
+  // oder einem Fehler nicht erneut verwendet wird.
+  const actions = document.getElementById('print-actions');
+  if (actions) actions.style.display = 'none';
   ws.send(JSON.stringify({ type: 'print_request' }));
 }
 
@@ -303,24 +308,10 @@ function handlePrintResult(msg) {
     // Auto-Fertig (closed) folgt serverseitig; bis dahin dieselbe Meldung wie
     // im Helferclient anzeigen.
     if (text) text.textContent = studentPrintResultStatusText(msg);
-    // Ein erfolgreicher Schülerauslöser darf in dieser Session nicht erneut
-    // abgeschickt werden — der Button verschwindet nach dem ersten Druck.
-    if (slipTrigger === 'student') {
-      const actions = document.getElementById('print-actions');
-      if (actions) actions.style.display = 'none';
-    }
   } else {
-    // Druck fehlgeschlagen → Retry freigeben (Schülerauslöser kann erneut
-    // tippen; bei Automatisch zeigt der Hinweis den Fehler, ein Betreuer
-    // kann eingreifen). Auto-Modus sendet nicht automatisch erneut.
-    printSent = false;
+    // Druck fehlgeschlagen → kein weiterer Selbstversuch. Der Button bleibt
+    // verborgen; der Schüler soll sich an einen Betreuer wenden.
     if (text) text.textContent = studentPrintResultStatusText(msg) + ' — bitte melde dich bei einem Betreuer.';
-    // Retry-Button freigeben bei selbst auslösbaren Modi (Automatisch &
-    // Schülerauslöser) — falls z. B. erst ein Drucker konfiguriert werden muss.
-    if (slipTrigger === 'auto' || slipTrigger === 'student') {
-      const actions = document.getElementById('print-actions');
-      if (actions) actions.style.display = '';
-    }
   }
 }
 
