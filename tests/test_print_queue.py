@@ -19,7 +19,7 @@ import server.printing as printing
 import server.sessions as sessions
 import server.state as state_mod
 from server.print_queue import PrintJob
-from server.state import AppState, HelperSession
+from server.state import AppState, HelperSession, QueueStudent, StudentSessionB
 
 # ---- Helfer ------------------------------------------------------------
 
@@ -155,6 +155,85 @@ def test_pipeline_completes_all_in_order(monkeypatch):
             await asyncio.wait_for(j.done.wait(), timeout=5)
         assert [j.status for j in jobs] == ["done", "done", "done"]
         assert all((j.result or {}).get("ok") for j in jobs)
+        await pq.stop()
+
+    asyncio.run(run())
+
+
+def test_student_session_closes_only_after_print_completion(monkeypatch):
+    """Der Schülerclient bleibt während des OS-Druckauftrags offen.
+
+    Der erfolgreiche Backend-Dispatch darf noch keinen `closed`-Push auslösen;
+    erst wenn der Tracker den Auftrag als `absent` erkennt, wird der Leihschein
+    markiert und die Modus-B-Session abgeschlossen.
+    """
+    st = AppState()
+    _patch(monkeypatch, st)
+    pq = st.print_queue
+
+    ctx = st.open_context("10a")
+    student = QueueStudent(
+        student_id=42,
+        lastname="Test",
+        firstname="Schüler",
+        form="10a",
+        status="active",
+    )
+    ctx.queue.append(student)
+    student_ws = _FakeWS()
+    st.student_sessions["student-token"] = StudentSessionB(
+        session_token="student-token",
+        pairing_code="4242",
+        student_id=42,
+        state="paired",
+        ws=student_ws,
+    )
+
+    os_states = {42: "spooled"}
+
+    async def fake_print(state, student_id, *, pages=None, printer_name=None):
+        return {
+            "ok": True,
+            "backend": "sumatra",
+            "detail": "an Drucker gesendet",
+            "job_handle": {"sid": student_id},
+        }
+
+    async def fake_read_state(handle):
+        return os_states[handle["sid"]]
+
+    monkeypatch.setattr(sessions, "print_loan_slip_for", fake_print)
+    monkeypatch.setattr(printing, "read_job_state", fake_read_state)
+
+    async def run():
+        pq.start()
+        job = PrintJob.create(
+            role="student",
+            student_id=42,
+            pages="1",
+            name="Test, Schüler (10a)",
+            student_token="student-token",
+        )
+        await pq.enqueue(job)
+        await asyncio.sleep(0.05)
+
+        assert "student-token" in st.student_sessions
+        assert student.slip_printed is False
+        assert student.status == "active"
+        assert not any(m["type"] == "closed" for m in student_ws.sent)
+
+        os_states[42] = "absent"
+
+        async def session_is_closed():
+            while "student-token" in st.student_sessions:
+                await asyncio.sleep(0.01)
+
+        await asyncio.wait_for(session_is_closed(), timeout=5)
+        assert job.status == "done"
+        assert student.slip_printed is True
+        assert student.status == "done"
+        types = [m["type"] for m in student_ws.sent]
+        assert types.index("print_result") < types.index("closed")
         await pq.stop()
 
     asyncio.run(run())

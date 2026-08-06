@@ -8,6 +8,16 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-06 — Schülerclient erst nach abgeschlossenem Druck fertig
+
+- `print_loan_slip_for()` markiert einen Leihschein nicht mehr beim bloßen
+  Absenden an das Druck-Backend als gedruckt.
+- Die PrintQueue setzt `slip_printed` und beendet die Modus-B-Session erst,
+  wenn der OS-Druckauftrag abgeschlossen (`absent`) ist. Der Schülerclient
+  erhält davor weiterhin den Druckstatus und bleibt im Druckmodus.
+- Verifiziert mit 391 Offline-Tests, Ruff und `node --check web/*.js`; kein
+  IServ-Schreibzugriff.
+
 ## 2026-08-06 — Schülerclient zeigt den Druckstatus
 
 - Der Druckmodus des Schülerclients übernimmt die Statusmeldungen des

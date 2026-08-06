@@ -666,7 +666,6 @@ async def print_loan_slip_for(
                 student_id,
                 pages or "alle",
             )
-            await _mark_slip_printed(state, student_id)
             return {
                 "ok": True,
                 "backend": "download",
@@ -687,8 +686,6 @@ async def print_loan_slip_for(
             pages=pages,
         )
         result["detail"] = "kein Host-Browser verbunden — " + result.get("detail", "")
-        if result.get("ok"):
-            await _mark_slip_printed(state, student_id)
         return result
 
     result = await print_pdf(
@@ -706,16 +703,19 @@ async def print_loan_slip_for(
         result.get("backend"),
         pages or "alle",
     )
-    if result.get("ok"):
-        await _mark_slip_printed(state, student_id)
     return result
 
 
 async def _mark_slip_printed(state: AppState, student_id: int) -> None:
-    """Queue-Eintrag als „Leihschein gedruckt" markieren und die Hosts
-    aktualisieren — daraus wird im Host-Client das Badge „Leihschein"
-    (zwischen „Aktiv" und „Fertig"). Kein Queue-Eintrag (transienter
-    Lupe-Schüler) → still nichts tun."""
+    """Queue-Eintrag nach abgeschlossenem Druck als „Leihschein gedruckt"
+    markieren und die Hosts aktualisieren — daraus wird im Host-Client das
+    Badge „Leihschein" (zwischen „Aktiv" und „Fertig"). Kein Queue-Eintrag
+    (transienter Lupe-Schüler) → still nichts tun.
+
+    Diese Funktion wird ausschließlich nach der Druckerwarteschlange aufgerufen,
+    wenn der OS-Druckauftrag abgeschlossen ist. Das bloße Absenden an den
+    Drucker darf den Modus-B-Schüler noch nicht abschließen.
+    """
     student = state.find_student(student_id)
     if student is None or student.slip_printed:
         return

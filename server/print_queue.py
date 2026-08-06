@@ -442,6 +442,7 @@ class PrintQueue:
                     # Tracker ist gecancelt, also übernimmt dieser das Notify.
                     for other in finalized_preds:
                         await self._notify_result(other)
+                        await self._mark_slip_printed_after_completion(other)
                     await self._notify_all()
                     # Kapazität wurde frei (Vorgänger aus dem Slot) → Scheduler
                     # wecken, damit der nächste Warteschlangen-Auftrag nachrückt
@@ -469,8 +470,24 @@ class PrintQueue:
             job.done.set()
             finalized = job
         await self._notify_result(finalized)
+        await self._mark_slip_printed_after_completion(finalized)
         await self._notify_all()
         self._wake.set()  # Kapazität frei → Scheduler füllt nach.
+
+    async def _mark_slip_printed_after_completion(self, job: PrintJob) -> None:
+        """Modus-B-Abschluss erst nach dem tatsächlichen Druckende auslösen.
+
+        `print_loan_slip_for()` bestätigt nur, dass der Auftrag erfolgreich an
+        das Druck-Backend übergeben wurde. Erst der Tracker kennt das physische
+        Ende (`absent`) und darf deshalb den Leihschein-Marker setzen bzw. die
+        Schüler-Session schließen.
+        """
+        if not (job.result or {}).get("ok"):
+            return
+        from .sessions import _mark_slip_printed
+        from .state import get_state
+
+        await _mark_slip_printed(get_state(), job.student_id)
 
     def in_flight_student_ids(self) -> set[int]:
         """student_ids mit aktuell laufendem Druckauftrag (zentrale Warteschlange

@@ -53,13 +53,18 @@ def test_print_loan_slip_for_reads_and_prints(tmp_path, monkeypatch):
         printer_name_override = None
         save_pdf_locally = False
 
+    class FakeStudent:
+        slip_printed = False
+
     class FakeState:
         iserv = FakeIServ()
         settings = FakeSettings()
+        student = FakeStudent()
 
-        # Kein Queue-Eintrag → der Leihschein-Marker (Badge „Leihschein") wird
-        # still übersprungen; hier geht es nur um den Druckpfad.
         def find_student(self, student_id):
+            return self.student
+
+        def find_session_by_student(self, student_id):
             return None
 
     cfg = Config(
@@ -77,6 +82,9 @@ def test_print_loan_slip_for_reads_and_prints(tmp_path, monkeypatch):
     assert calls["fetch"] == (2159, "student-always_school-auto")
     assert res["ok"] is True and res["backend"] == "file"
     assert Path(res["path"]).read_bytes().startswith(b"%PDF")
+    # `print_loan_slip_for` bestätigt nur die Übergabe ans Backend. Der
+    # Leihschein-Marker wird erst von der PrintQueue nach dem Abschluss gesetzt.
+    assert FakeState.student.slip_printed is False
 
 
 def _cfg(tmp_path, **kw):
