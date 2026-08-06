@@ -73,14 +73,17 @@ function scanResultStatusText(msg, books, targetLabel = 'dich') {
 // Gemeinsame Statuszeilen für den Leihschein-Druck im Helfer- und
 // Schülerclient. Die Queue liefert dieselben Felder an beide Clients; die
 // studentenspezifische Positionsberechnung passiert serverseitig.
-function capitalizeSentenceStart(text) {
+function capitalizeSentenceStarts(text) {
   const value = String(text || '');
-  return value ? value[0].toLocaleUpperCase('de-DE') + value.slice(1) : value;
+  return value.replace(
+    /(^|[.!?]\s+)([a-zäöüß])/giu,
+    (_match, prefix, first) => prefix + first.toLocaleUpperCase('de-DE'),
+  );
 }
 
 function printProgressStatusText(msg) {
   if (msg.peer_error) {
-    return capitalizeSentenceStart(
+    return capitalizeSentenceStarts(
       msg.msg || 'Es dauert ungewöhnlich lange, vielleicht liegt ein Fehler vor.',
     );
   }
@@ -104,10 +107,10 @@ function printProgressStatusText(msg) {
 
 function printResultStatusText(msg) {
   if (msg.stalled) {
-    return capitalizeSentenceStart(msg.msg || 'Druck dauert ungewöhnlich lange');
+    return capitalizeSentenceStarts(msg.msg || 'Druck dauert ungewöhnlich lange');
   }
   if (msg.peer_error) {
-    return capitalizeSentenceStart(
+    return capitalizeSentenceStarts(
       msg.msg || 'Es dauert ungewöhnlich lange, vielleicht liegt ein Fehler vor.',
     );
   }

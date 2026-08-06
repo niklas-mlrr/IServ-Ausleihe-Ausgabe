@@ -11,7 +11,8 @@
 ## 2026-08-06 — Druckhinweise beginnen großgeschrieben
 
 - Serverseitig gelieferte Drucker-Warnmeldungen werden vor der Anzeige am
-  Satzanfang großgeschrieben.
+  Satzanfang großgeschrieben; das gilt auch für weitere Sätze innerhalb der
+  Meldung, etwa „Bitte überprüfe dies“.
 
 ## 2026-08-06 — Druckfehler verweist auf den Betreuer
 
