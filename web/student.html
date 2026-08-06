@@ -178,19 +178,25 @@
     /* Druckmodus: Erklärung, Status und Druck-Button klar voneinander trennen. */
     #view-print .print-name-row { margin-top: 12px; }
     #view-print .big-msg { margin-top: 90px; }
+    #view-slip .print-name-row { margin-top: 12px; }
+    #view-slip .big-msg { margin-top: 90px; }
     #print-intro {
       max-width: 520px; margin: 0 auto 18px; line-height: 1.45;
     }
     #print-status {
       width: 100%; max-width: 520px; margin: 0 auto; padding: 14px 18px;
       border: 2px solid var(--border); border-radius: 12px;
-      background: var(--surface); text-align: left;
+      background: var(--surface); text-align: center;
     }
     #print-text {
       font-size: 1rem; font-weight: 600; line-height: 1.4; white-space: normal;
     }
     #print-actions { max-width: 320px; width: 100%; margin: 16px auto 0; }
     #print-actions button { padding: 14px; font-size: 1rem; }
+    #slip-intro, #slip-instruction {
+      max-width: 520px; margin: 0 auto 18px; line-height: 1.45;
+    }
+    #slip-instruction { font-size: 1.1rem; font-weight: 600; }
   </style>
 </head>
 <body>
@@ -234,8 +240,8 @@
 
   <!-- Druckmodus (Modus B): alle vorgemerkten Bücher gescannt. Ansicht hängt
        am slip_trigger der Klasse (Automatisch / Schülerauslöser /
-       Betreuerauslöser / Barcode). Nach erfolgreichem Druck geht der Schüler
-       automatisch auf „Vorgang abgeschlossen" (serverseitig via closed). -->
+       Betreuerauslöser / Barcode). Bei aktivierter Unterschrift folgt nach
+       abgeschlossenem Druck der Leihscheinmodus, sonst „Vorgang abgeschlossen". -->
   <div class="view" id="view-print">
     <div class="name-row print-name-row">
       <div class="s-name" id="print-name">–</div>
@@ -253,6 +259,24 @@
       <div class="modal-actions" id="print-actions" style="display:none">
         <button id="print-trigger-btn">Leihschein drucken</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Leihscheinmodus: nur bei aktivierter Klassenoption
+       „Leihschein unterschreiben". Der physische Leihschein wird unterschrieben
+       und anschließend beim Betreuer oder Lehrer abgegeben. -->
+  <div class="view" id="view-slip">
+    <div class="name-row print-name-row">
+      <div class="s-name" id="slip-name">–</div>
+      <div class="s-meta">
+        <div class="s-form" id="slip-form"></div>
+      </div>
+    </div>
+    <div class="big-msg">
+      <div class="icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L8 18l-4 1 1-4Z"/></svg></div>
+      <div class="title">Leihschein unterschreiben</div>
+      <div id="slip-intro">Der Leihschein wurde gedruckt.</div>
+      <div id="slip-instruction">Bitte unterschreibe den Leihschein und gib ihn bei einem Betreuer ab.</div>
     </div>
   </div>
 

@@ -300,6 +300,12 @@ class StudentSessionB:
     # In-flight Lade-Task (load_and_push_paired_student) — cancel bei
     # invalidate_session, sonst leakt der Worker-Context (s. HelperSession).
     load_task: object | None = None
+    # Leihschein nach abgeschlossenem Druck unterschreiben/abgeben. Bleibt
+    # über Reconnects erhalten, bis der Host den Modus-B-Schüler abschließt.
+    # `loan_slip_recipient` ist bewusst nur eine UI-Zielangabe, kein Schüler-
+    # oder Lehrkraftname.
+    loan_slip_mode: bool = False
+    loan_slip_recipient: str | None = None  # "helper" oder "teacher"
     created_at: datetime = field(default_factory=datetime.now)
     paired_at: datetime | None = None
     last_activity: datetime = field(default_factory=datetime.now)
@@ -484,13 +490,11 @@ class ClassContext:
     slip_trigger: str = "auto"
     # „Fertig"-Voraussetzungen für den Leihschein dieser Klasse
     # (Klasseneinstellungen-Checkboxen „Leihschein unterschreiben" / „…wird
-    # vom Lehrer eingesammelt"): `done_signed` — Schüler soll erst nach
-    # unterschriebenem (nicht nur gedrucktem) Leihschein als fertig gelten;
+    # vom Lehrer eingesammelt"): `done_signed` — Schüler bleibt nach dem
+    # Druck im Leihscheinmodus, bis der Host ihn abschließt;
     # `done_collected` — der unterschriebene Schein wird zusätzlich vom Lehrer
     # eingesammelt (nur sinnvoll, wenn `done_signed` gesetzt ist — Endpunkt
-    # erzwingt das). Aktuell reine Einstellung ohne Auswirkung auf den
-    # Fertig-Übergang selbst (folgt später) — nur Persistenz + Anzeige, wie
-    # `live_ausgabe`/`slip_trigger`.
+    # erzwingt das). Die Optionen werden an den Modus-B-Client weitergereicht.
     done_signed: bool = False
     done_collected: bool = False
     # Während `open_class` Schüler/Flags/Katalog lädt, steht der Kontext schon in

@@ -603,6 +603,21 @@ def slip_trigger_for(state: AppState, student_id: int) -> str:
     return ctx.slip_trigger
 
 
+def slip_signature_options_for(state: AppState, student_id: int) -> tuple[bool, bool]:
+    """Leihschein-Workflow der Klasse eines Schülers.
+
+    Liefert `(done_signed, done_collected)`. Ohne Klassenkontext oder bei
+    alten/inkonsistenten Zuständen gilt der normale Abschluss nach dem Druck.
+    `done_collected` wird nur als Lehrer-Ziel verwendet, wenn auch
+    `done_signed` aktiv ist.
+    """
+    found = state.find_student_with_ctx(student_id)
+    if found is None:
+        return False, False
+    ctx, _s = found
+    return ctx.done_signed, ctx.done_collected if ctx.done_signed else False
+
+
 async def print_loan_slip_for(
     state: AppState,
     student_id: int,
@@ -724,14 +739,30 @@ async def _mark_slip_printed(state: AppState, student_id: int) -> None:
         await get_hub().broadcast_host(state.state_snapshot())
     except Exception:  # noqa: BLE001 — Druck darf an einem Broadcast nicht scheitern
         log.debug("Host-Broadcast nach Leihschein-Druck fehlgeschlagen", exc_info=True)
-    # Auto-Fertig für Modus B (Live-Ausgabe): hat dieser Schüler eine aktive
-    # Modus-B-Session (Schüler scannt selbst am iPad), geht er nach dem Druck
-    # automatisch auf „abgeschlossen" — unabhängig davon, wer den Druck
-    # ausgelöst hat (Automatisch/Schülerauslöser per print_request, oder
-    # Betreuerauslöser per Helfer-/Host-Menü). Modus-A-Schüler haben keine
-    # Modus-B-Session und bleiben unberührt (Host beendet sie wie bisher).
+    # Ist das Unterschreiben für die Klasse aktiv, bleibt der Modus-B-Schüler
+    # nach dem Druck offen. Der Client zeigt den Leihscheinmodus; der Host kann
+    # ihn nach der physischen Übergabe wie bisher über „Abschließen" beenden.
+    # `done_collected` wählt dabei nur den angezeigten Empfänger (Betreuer oder
+    # Lehrer) und wird nicht als Schüler-/Lehrkraftname an den Client gegeben.
     session = state.find_session_by_student(student_id)
     if session is not None and session.state == "paired":
+        done_signed, done_collected = slip_signature_options_for(state, student_id)
+        if done_signed:
+            session.loan_slip_mode = True
+            session.loan_slip_recipient = "teacher" if done_collected else "helper"
+            if session.ws is not None:
+                await get_hub().send_websocket(
+                    session.ws,
+                    {
+                        "type": "slip_mode",
+                        "recipient": session.loan_slip_recipient,
+                    },
+                )
+            return
+        # Ohne Unterschriftenmodus geht der Modus-B-Schüler nach dem Druck
+        # automatisch auf „abgeschlossen" — unabhängig davon, wer den Druck
+        # ausgelöst hat. Modus-A-Schüler haben keine Modus-B-Session und
+        # bleiben unberührt (Host beendet sie wie bisher).
         try:
             await end_student(
                 state, get_hub(), student_id,
@@ -1438,6 +1469,8 @@ async def load_and_push_paired_student(
                 "type": "worker_ready",
                 "books": books,
                 "slip_trigger": slip_trigger_for(state, student.student_id),
+                "slip_mode": session.loan_slip_mode,
+                "slip_recipient": session.loan_slip_recipient,
             },
         )
 

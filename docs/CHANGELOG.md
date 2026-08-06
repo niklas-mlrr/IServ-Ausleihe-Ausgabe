@@ -8,6 +8,31 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-06 — Schülerclient-Leihscheinmodus nach dem Druck
+
+- Ist in der Klasse „Leihschein unterschreiben“ aktiviert, bleibt der Modus-B-
+  Schüler nach abgeschlossenem Leihschein-Druck offen und wechselt in einen
+  eigenen Leihscheinmodus.
+- Der Schüler wird aufgefordert, den Leihschein zu unterschreiben und ihn bei
+  einem Betreuer abzugeben. Ist zusätzlich „Leihschein wird vom Lehrer
+  eingesammelt“ aktiv, lautet das Ziel „beim Lehrer“.
+- Der Modus bleibt bei einem Reconnect erhalten. Der Host schließt den Schüler
+  nach der physischen Übergabe wie bisher über „Abschließen“; ohne aktivierte
+  Unterschrift bleibt der automatische Abschluss nach dem Druck unverändert.
+- Tests decken beide Übergabeziele, den offenen Session-Zustand und den
+  Reconnect-Payload ab; keine IServ-Schreibzugriffe.
+
+## 2026-08-06 — Schülerclient-Druckmodus: Überschrift und Status getrennt
+
+- Der Druckmodus zeigt dauerhaft „Leihschein Drucken“ als Überschrift.
+- Die Erklärung für den nächsten Schritt steht getrennt über dem dynamischen
+  Druckstatus; der Status bleibt an seiner bisherigen Stelle.
+- Die blaue „Status“-Beschriftung und blaue Hervorhebung wurden entfernt. Der
+  Status bleibt als neutral abgegrenzter Bereich sichtbar; der optionale
+  Druckbutton folgt darunter.
+- Verifiziert mit `node --check web/student.js` und `git diff --check`; keine
+  IServ-Schreibzugriffe.
+
 ## 2026-08-06 — Druckhinweise beginnen großgeschrieben
 
 - Serverseitig gelieferte Drucker-Warnmeldungen werden vor der Anzeige am

@@ -3,6 +3,7 @@ const views = {
   pending: document.getElementById('view-pending'),
   active: document.getElementById('view-active'),
   print: document.getElementById('view-print'),
+  slip: document.getElementById('view-slip'),
   done: document.getElementById('view-done'),
   error: document.getElementById('view-error'),
 };
@@ -43,6 +44,7 @@ let bookOrder = [];                 // klassenweite ISBN-Reihenfolge (vom Host k
 let slipTrigger = 'auto';
 let druckmodusEntered = false;       // Druckmodus bereits betreten (nur 1× pro Session)
 let printSent = false;               // Druckauftrag bereits gesendet
+let slipModeEntered = false;         // Leihschein nach dem Druck bereits angezeigt
 
 function showError(title, text) {
   if (title) document.getElementById('error-title').textContent = title;
@@ -129,6 +131,10 @@ function handleServerMessage(msg) {
     bookListHadBooks = currentBooks.length > 0;
     if (msg.slip_trigger) slipTrigger = msg.slip_trigger;
     renderBooks(currentBooks);
+    if (msg.slip_mode) {
+      enterLeihscheinmodus(msg.slip_recipient);
+      return;
+    }
     setStatusText('Scanner bereit — Buch scannen');
     maybeEnterDruckmodus();   // Randfall: schon beim Laden alles erledigt
   } else if (msg.type === 'scan_result') {
@@ -190,6 +196,8 @@ function handleServerMessage(msg) {
     }
   } else if (msg.type === 'print_result') {
     handlePrintResult(msg);
+  } else if (msg.type === 'slip_mode') {
+    enterLeihscheinmodus(msg.recipient);
   } else if (msg.type === 'closed') {
     finished = true; clearToken(); show('done');
   } else if (msg.type === 'error') {
@@ -247,6 +255,17 @@ function enterDruckmodus() {
       if (actions) actions.style.display = 'none';
       break;
   }
+}
+
+function enterLeihscheinmodus(recipient) {
+  if (finished || slipModeEntered) return;
+  slipModeEntered = true;
+  druckmodusEntered = true;
+  workerPending = true;
+  show('slip');
+  const destination = recipient === 'teacher' ? 'beim Lehrer' : 'bei einem Betreuer';
+  const text = document.getElementById('slip-instruction');
+  if (text) text.textContent = `Bitte unterschreibe den Leihschein und gib ihn ${destination} ab.`;
 }
 
 function notifyDruckmodus() {
@@ -437,6 +456,8 @@ function renderStudent(s, overridden) {
   // erkennt, zu welchem Schüler der Vorgang gehört.
   document.getElementById('print-name').textContent = studentName;
   document.getElementById('print-form').textContent = studentForm;
+  document.getElementById('slip-name').textContent = studentName;
+  document.getElementById('slip-form').textContent = studentForm;
   const pay = document.getElementById('s-pay');
   if (!s.enrolled) {
     pay.innerHTML = '<span class="pay-badge wait">Nicht angemeldet</span>';
@@ -466,6 +487,7 @@ function renderStudent(s, overridden) {
   // Bücherliste bleibt ausgeblendet, bis der Worker bereit ist (`worker_ready`):
   // Statuszeile „Wird geladen…", Placeholder im Bücher-Bereich, Scans ignoriert.
   workerPending = true;
+  slipModeEntered = false;
   resetScanLock();
   currentBooks = [];
   bookListHadBooks = false;

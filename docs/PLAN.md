@@ -120,8 +120,11 @@ Sicherheitsanforderungen (aus Klärung 2026-06-12, „keine Sicherheitslücken")
    Datenzugriff. Server-seitiger Zustand entscheidet über Gültigkeit.
 2. **Harter Zugriffsentzug:** Nach erfolgreichem Abschluss des Ausgabe-Prozesses
    (oder Timeout/Abbruch durch Host) wird das Token serverseitig
-   invalidiert und die WebSocket-Session beendet. Erneuter Aufruf der URL →
-   neutrale „Vorgang abgeschlossen"-Seite, keine Daten.
+   invalidiert und die WebSocket-Session beendet. Ist „Leihschein unterschreiben"
+   für die Klasse aktiv, gehört die physische Unterschrift/Übergabe noch zum
+   Ausgabe-Prozess; der Host beendet die offene Schüler-Session danach
+   ausdrücklich. Erneuter Aufruf der URL → neutrale
+   „Vorgang abgeschlossen"-Seite, keine Daten.
 3. **Doppelte Bestätigung:** Token allein reicht nicht — die Session wird erst
    aktiv, wenn der Host den 4-stelligen Pairing-Code dem Schüler zuordnet
    und bestätigt.
@@ -268,6 +271,10 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
       `AppState.teacher_snapshot`, `web/teacher.html`/`teacher.js`). Detailplan:
       `docs/teacher_status_page_plan.md`. Live-Check im Schul-WLAN offen
       (`docs/test_status.md`).
+- [x] **Leihscheinmodus im Schülerclient:** Bei aktivierter Klassenoption
+      „Leihschein unterschreiben" folgt nach abgeschlossenem Druck eine
+      offene Ansicht mit Aufforderung zur Unterschrift und Übergabe an
+      Betreuer oder Lehrer; der Zustand überlebt Reconnects — 2026-08-06
 - [ ] O6 fachlich mit Hr. Pühn finalisieren (Wortlaut „Nachweis fehlt" +
       kombinierter Host-Freigabe-Dialog bei nicht-bezahlt/Nachweis, 2026-07-06)
 - [ ] Generalprobe vor Schuljahresbeginn

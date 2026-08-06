@@ -13,6 +13,8 @@ from __future__ import annotations
 import asyncio
 import time
 
+import pytest
+
 import server.hub as hub
 import server.print_queue as print_queue
 import server.printing as printing
@@ -237,6 +239,65 @@ def test_student_session_closes_only_after_print_completion(monkeypatch):
         await pq.stop()
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    ("done_collected", "recipient"),
+    [(False, "helper"), (True, "teacher")],
+)
+def test_student_session_enters_slip_mode_when_signature_required(
+    monkeypatch, done_collected, recipient
+):
+    """Bei aktivierter Unterschrift bleibt Modus B nach dem Druck offen und
+    erhält das richtige Übergabeziel für den Schülerclient."""
+    st = AppState()
+    _patch(monkeypatch, st)
+    pq = st.print_queue
+
+    ctx = st.open_context("10a")
+    ctx.done_signed = True
+    ctx.done_collected = done_collected
+    student = QueueStudent(
+        student_id=43,
+        lastname="Test",
+        firstname="Schülerin",
+        form="10a",
+        status="active",
+    )
+    ctx.queue.append(student)
+    student_ws = _FakeWS()
+    session = StudentSessionB(
+        session_token="student-token",
+        pairing_code="4243",
+        student_id=43,
+        state="paired",
+        ws=student_ws,
+    )
+    st.student_sessions[session.session_token] = session
+
+    async def run():
+        pq.start()
+        job = PrintJob.create(
+            role="student",
+            student_id=43,
+            pages="1",
+            name="Test, Schülerin (10a)",
+            student_token=session.session_token,
+        )
+        await pq.enqueue(job)
+        await asyncio.wait_for(job.done.wait(), timeout=5)
+        await pq.stop()
+
+    asyncio.run(run())
+
+    assert student.slip_printed is True
+    assert student.status == "active"
+    assert session.state == "paired"
+    assert session.loan_slip_mode is True
+    assert session.loan_slip_recipient == recipient
+    slip_modes = [m for m in student_ws.sent if m["type"] == "slip_mode"]
+    assert slip_modes == [{"type": "slip_mode", "recipient": recipient}]
+    assert not any(m["type"] == "closed" for m in student_ws.sent)
 
 
 def test_pipeline_2_in_flight_positions(monkeypatch):

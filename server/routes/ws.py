@@ -1069,6 +1069,8 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
                         "type": "worker_ready",
                         "books": books,
                         "slip_trigger": slip_trigger_for(state, session.student_id),
+                        "slip_mode": session.loan_slip_mode,
+                        "slip_recipient": session.loan_slip_recipient,
                     },
                 )
             # Blockierendes Ausgemustert-Hinweis-Modal überlebt einen Reconnect

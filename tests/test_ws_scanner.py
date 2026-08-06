@@ -218,6 +218,37 @@ def test_student_print_mode_releases_worker_but_keeps_session(client, ws_env):
     assert session.state == "paired"
 
 
+def test_student_slip_mode_survives_reconnect(client, ws_env):
+    """Ein Reload nach dem Druck stellt den Leihscheinmodus wieder her."""
+    state, _ = ws_env
+    ctx = state.open_context("10a")
+    ctx.done_signed = True
+    ctx.done_collected = True
+    ctx.queue.append(
+        QueueStudent(
+            student_id=42,
+            lastname="Test",
+            firstname="Schüler",
+            form="10a",
+            status="active",
+        )
+    )
+    state.student_sessions["student-token"] = StudentSessionB(
+        session_token="student-token",
+        pairing_code="4242",
+        student_id=42,
+        state="paired",
+        loan_slip_mode=True,
+        loan_slip_recipient="teacher",
+    )
+
+    with client.websocket_connect("/ws/student/student-token") as ws:
+        ready = _recv_until(ws, "worker_ready")
+
+    assert ready["slip_mode"] is True
+    assert ready["slip_recipient"] == "teacher"
+
+
 # ---------------------------------------------------------------------------
 # 2) Malformed JSON-Frame darf die Empfangsschleife NICHT töten.
 # ---------------------------------------------------------------------------
