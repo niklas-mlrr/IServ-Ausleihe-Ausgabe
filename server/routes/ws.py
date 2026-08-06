@@ -681,7 +681,12 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
         form = student.form if student is not None else (helper.student_form or "")
         try:
             info = await state.iserv.get_student_info(helper.student_id, state.selected_schoolyear)
-            info = await hydrate_student_info(state, info, form, helper)
+            # reset_baseline=False: Reload derselben Verbindung soll die „seit
+            # Aufrufen"-Baseline (loaned_at_load) NICHT neu setzen — die läuft
+            # erst beim nächsten echten Aufrufen (assign_student_to_helper)
+            # neu an. done_isbns wird trotzdem aus dem aktuellen IServ-Stand
+            # aufgefrischt.
+            info = await hydrate_student_info(state, info, form, helper, reset_baseline=False)
             book_order = info["book_order"]
             helper.last_scan = None  # Worker-Page wird ggf. neu geladen → Feld leer
             # Modus A: Bücherliste sofort. Sends über das Hub-Lock
@@ -742,7 +747,9 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
             info = await state.iserv.get_student_info(
                 helper.spectating_student_id, state.selected_schoolyear
             )
-            info = await hydrate_student_info(state, info, helper.student_form or "", helper)
+            info = await hydrate_student_info(
+                state, info, helper.student_form or "", helper, reset_baseline=False
+            )
             book_order = info["book_order"]
             await hub.send_websocket(
                 websocket, {"type": "student_info", "student": info, "spectator": True}
@@ -1050,7 +1057,11 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
         try:
             info = await state.iserv.get_student_info(session.student_id, state.selected_schoolyear)
             qs = state.find_student(session.student_id)
-            info = await hydrate_student_info(state, info, qs.form if qs else "", session)
+            # reset_baseline=False: Reload derselben Verbindung — die „seit
+            # Aufrufen"-Baseline (loaned_at_load) bleibt stehen, s. ws_scanner.
+            info = await hydrate_student_info(
+                state, info, qs.form if qs else "", session, reset_baseline=False
+            )
             books = info.get("books", [])
             await hub.send_websocket(
                 websocket,

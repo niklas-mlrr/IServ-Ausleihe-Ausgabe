@@ -8,6 +8,42 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-06 — Host-Fortschrittsbaseline übersteht Seiten-Reload
+
+- Die „seit Aufrufen"-Baseline (`loaned_at_load`, Grundlage für X/Y in der
+  Host-Queue-Statusspalte) wurde bislang bei jedem Reload der Helfer-/
+  Schülerseite (WS-Reconnect) neu auf den aktuellen Ausleihstand gesetzt —
+  ein zwischenzeitlich ausgeliehenes Buch verschwand dadurch unbemerkt aus
+  der session-bezogenen Y-Zahl.
+- `init_book_progress`/`hydrate_student_info` bekommen einen neuen Parameter
+  `reset_baseline` (Default `True`). Nur der echte „Aufrufen"-Pfad
+  (`assign_student_to_helper` → `load_and_push_helper_student`/
+  `load_and_push_paired_student`) setzt die Baseline neu; Reconnects
+  (`ws_scanner`, `ws_student`) und reine Booklist-Refreshes
+  (`repush_booklist`) übergeben `reset_baseline=False` — `done_isbns` wird
+  weiterhin aus IServ aufgefrischt, nur `loaned_at_load` bleibt stehen, bis
+  der Schüler erneut aufgerufen wird (neuer Helfer/neue Zuweisung).
+- Neuer Test `test_reconnect_preserves_baseline_but_refreshes_done` in
+  `tests/test_queue_progress.py`. Volle Testsuite und `ruff check` grün.
+
+## 2026-08-06 — Direkter Druckmodus bei bereits vollständig ausgeliehenen Büchern
+
+- Beim Pairing (Code wird Schüler zugeordnet) prüft der Server jetzt vorab
+  anhand der bereits geladenen Bücherliste (`hydrate_student_info`, IServ-
+  Read-API — kein Playwright), ob alle Bücher des Schülers schon ausgeliehen
+  sind (`all_books_already_loaned` in `server/sessions.py`).
+- Trifft das zu, wird **kein** Playwright-Worker mehr geöffnet — `worker_ready`
+  geht sofort mit der vollständigen Bücherliste an den Schülerclient, der wie
+  gehabt in den Druckmodus wechselt und `print_mode` zurückmeldet.
+- Vorher wartete der Client in diesem Fall auf `state.worker_pool.open_student`
+  (mehrsekündige Browser-Navigation) und blockierte, wenn gerade kein Worker
+  frei war — obwohl der Worker sofort danach ungenutzt wieder freigegeben
+  wurde (`release_student_worker` bei `print_mode`).
+- `release_student_worker` ist bereits idempotent (No-op ohne registrierten
+  Worker), der Reconnect-Pfad (`routes/ws.py`) profitiert über denselben
+  `load_task` automatisch mit. Keine IServ-Schreibzugriffe; volle Testsuite
+  und `ruff check` grün.
+
 ## 2026-08-06 — Schülerclient-Leihscheinmodus nach dem Druck
 
 - Ist in der Klasse „Leihschein unterschreiben“ aktiviert, bleibt der Modus-B-

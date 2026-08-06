@@ -90,6 +90,30 @@ def test_scanned_book_counts_and_is_idempotent():
     assert s.as_dict()["books_done"] == 1
 
 
+def test_reconnect_preserves_baseline_but_refreshes_done():
+    """reset_baseline=False (Reload derselben Verbindung): `loaned_at_load`
+    bleibt auf dem Stand vom echten Aufrufen stehen, auch wenn zwischenzeitlich
+    ein vorgemerktes Buch ausgeliehen wurde — Y sinkt dadurch NICHT."""
+    st, s = _state_with_student()
+    sessions.init_book_progress(
+        st, 7, _info(("A", "vorgemerkt"), ("B", "vorgemerkt"), ("C", "vorgemerkt"))
+    )
+    assert s.as_dict()["loaned_at_load"] == 0
+    # Zwischenzeitlich wurde "A" ausgeliehen — ein Reload holt das über IServ
+    # als aktuellen Stand ("ausgeliehen") zurück.
+    sessions.init_book_progress(
+        st,
+        7,
+        _info(("A", "ausgeliehen"), ("B", "vorgemerkt"), ("C", "vorgemerkt")),
+        reset_baseline=False,
+    )
+    d = s.as_dict()
+    assert d["loaned_at_load"] == 0  # Baseline unverändert
+    assert d["books_done"] == 1  # done_isbns trotzdem aufgefrischt
+    loaned = d["loaned_at_load"]
+    assert (d["books_done"] - loaned, d["books_total"] - loaned) == (1, 3)
+
+
 def test_transient_student_without_queue_entry_is_ignored():
     """Lupe-Schüler stehen in keiner Queue — Zähler-Updates laufen still ins Leere."""
     st, _s = _state_with_student()

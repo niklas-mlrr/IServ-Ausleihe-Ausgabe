@@ -97,7 +97,9 @@ async def handle_scan(state: AppState, student_id: int, barcode: str) -> dict:
         return {"status": "error", "msg": str(e)}
 
 
-async def hydrate_student_info(state: AppState, info: dict, form: str, target) -> dict:
+async def hydrate_student_info(
+    state: AppState, info: dict, form: str, target, *, reset_baseline: bool = True
+) -> dict:
     """Reiner Hydrations-Teil, gemeinsam für alle vier Lade-/Reconnect-Pfade
     (Modus A: `load_and_push_helper_student`, `ws_scanner`-Reconnect; Modus B:
     `load_and_push_paired_student`, `ws_student`-Reconnect).
@@ -111,23 +113,41 @@ async def hydrate_student_info(state: AppState, info: dict, form: str, target) -
     `info` vs. eigener Fetch, unterschiedliche Error-Payloads/Sends).
 
     Gibt `info` zurück, damit der Aufrufer `info["book_order"]` weiterverwenden
-    kann (z. B. für die `settings`-Nachricht im Scanner-Reconnect)."""
+    kann (z. B. für die `settings`-Nachricht im Scanner-Reconnect).
+
+    `reset_baseline` (Default True): siehe `init_book_progress`. Reconnect-
+    Aufrufer (Seiten-Reload derselben Verbindung) übergeben False, damit die
+    „seit Aufrufen"-Baseline über den Reload hinweg stehen bleibt."""
     info["form"] = form
     info["book_order"] = await get_book_order_for_form(state, form)
     apply_hidden_books(info, await get_hidden_isbns_for_form(state, form))
     target.expected_isbns = expected_isbns_from_info(info)
     target.vormerk_isbns, target.lent_isbns, target.lent_codes = booking_isbn_sets_from_info(info)
-    init_book_progress(state, getattr(target, "student_id", None), info)
+    init_book_progress(
+        state, getattr(target, "student_id", None), info, reset_baseline=reset_baseline
+    )
     return info
 
 
-def init_book_progress(state: AppState, student_id: int | None, info: dict) -> None:
+def init_book_progress(
+    state: AppState, student_id: int | None, info: dict, *, reset_baseline: bool = True
+) -> None:
     """Startwerte für den „X/Y Bücher"-Zähler der Host-Queue setzen.
 
     Y = alle angemeldeten Bücher des Schülers ohne die ausgeblendeten Reihen
     (`info["books"]` ist hier bereits durch `apply_hidden_books` gelaufen),
     X = die davon bereits ausgeliehenen. Kein Queue-Eintrag (transienter
-    Lupe-Schüler) → nichts zu tun."""
+    Lupe-Schüler) → nichts zu tun.
+
+    `reset_baseline` steuert, ob `loaned_at_load` (die „beim Aufrufen"-Basis
+    für die session-bezogene Host-Anzeige, s. unten) neu gesetzt wird. True
+    nur beim echten „Aufrufen" (`assign_student_to_helper` →
+    `load_and_push_helper_student`/`load_and_push_paired_student`) — dort
+    beginnt eine neue Zählung. Reconnects (Seiten-Reload derselben
+    Verbindung, `ws_scanner`/`ws_student`) und reine Booklist-Refreshes
+    (`repush_booklist`) übergeben False: `done_isbns` wird trotzdem aus dem
+    aktuellen IServ-Stand aufgefrischt (Scans anderswo bleiben sichtbar),
+    aber die Baseline bleibt stehen, bis der Schüler erneut aufgerufen wird."""
     if student_id is None:
         return
     student = state.find_student(student_id)
@@ -141,10 +161,11 @@ def init_book_progress(state: AppState, student_id: int | None, info: dict) -> N
     student.done_isbns = {
         b["isbn"] for b in books if b.get("isbn") and b.get("status") == "ausgeliehen"
     }
-    # Bei Laden bereits ausgeliehene Bücher — Grundlage für den session-
-    # basierten Fortschritt in der Host-Status-Spalte („seit Aufrufen … /
-    # beim Aufrufen offene …"). Entspricht `done_isbns` zum Ladezeitpunkt.
-    student.loaned_at_load = len(student.done_isbns)
+    if reset_baseline:
+        # Bei Laden bereits ausgeliehene Bücher — Grundlage für den session-
+        # basierten Fortschritt in der Host-Status-Spalte („seit Aufrufen … /
+        # beim Aufrufen offene …"). Entspricht `done_isbns` zum Ladezeitpunkt.
+        student.loaned_at_load = len(student.done_isbns)
 
 
 def mark_book_done(state: AppState, student_id: int, isbn: str | None) -> None:
@@ -157,6 +178,16 @@ def mark_book_done(state: AppState, student_id: int, isbn: str | None) -> None:
     student = state.find_student(student_id)
     if student is not None:
         student.done_isbns.add(isbn)
+
+
+def all_books_already_loaned(books: list[dict]) -> bool:
+    """True, wenn jedes Buch der Liste bereits ausgeliehen ist (leere Liste: False).
+
+    Spiegelt `allVorgemerkteDone` in `web/student.js` für den Fall direkt nach
+    dem Pairing, wenn noch nichts in dieser Session gescannt wurde
+    (`scannedIsbns` ist dort leer) — dann reduziert sich „alle vorgemerkten
+    erledigt" auf „alle Bücher haben Status ausgeliehen"."""
+    return bool(books) and all(b.get("status") == "ausgeliehen" for b in books)
 
 
 def apply_hidden_books(info: dict, hidden_isbns: set[str]) -> None:
@@ -1186,7 +1217,9 @@ async def repush_booklist(
     except Exception:  # noqa: BLE001
         log.exception("Schülerinfo für booklist_update (%d) fehlgeschlagen", student_id)
         return
-    info = await hydrate_student_info(state, info, getattr(student, "form", ""), target)
+    info = await hydrate_student_info(
+        state, info, getattr(student, "form", ""), target, reset_baseline=False
+    )
     new_isbns = {b.get("isbn") for b in info.get("books", []) if b.get("isbn")}
     student.done_isbns |= prev_done & new_isbns
     msg = {
@@ -1424,7 +1457,13 @@ async def load_and_push_paired_student(
             },
         )
 
-    if state.worker_pool:
+    # Kurzschluss: sind beim Pairing bereits alle Bücher ausgeliehen, bringt das
+    # Öffnen eines Playwright-Workers nichts — er würde sofort wieder
+    # freigegeben (Client geht mit `worker_ready` direkt in den Druckmodus und
+    # meldet `print_mode` zurück, s. `routes/ws.py`). Direkt `worker_ready`
+    # senden, auch ohne freien Worker — so kommt der Schüler in den Druckmodus,
+    # selbst wenn gerade kein Worker frei ist.
+    if state.worker_pool and not all_books_already_loaned(books):
         try:
             worker_session = await state.worker_pool.open_student(
                 student.student_id,
