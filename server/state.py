@@ -121,6 +121,14 @@ class QueueStudent:
     # Host-Button „Abschließen"), sobald der Helfer die Unterschrift auf dem
     # physischen Leihschein entgegengenommen hat.
     slip_signing: bool = False
+    # Drucker, an dem der Leihschein tatsächlich gedruckt wurde (Systemname +
+    # Anzeige-Label wie in `print_result`/`print_progress`). Bleibt — anders
+    # als das transiente `print_result`-WS-Frame — auf dem Schüler erhalten,
+    # damit ein Reload des Schülerclients zwischen Druckende und „Leihschein
+    # erhalten" weiterhin die „Leihschein von X gedruckt."-Meldung zeigen kann
+    # (s. `sessions._mark_slip_printed`, `worker_ready`-Feld `slip_printer*`).
+    slip_printer: str | None = None
+    slip_printer_label: str | None = None
 
     def as_dict(self, *, slip_printing: bool = False) -> dict:
         return {
@@ -182,6 +190,8 @@ class QueueStudent:
         self.slip_printed = False
         self.slip_collected = False
         self.auto_skipped = False
+        self.slip_printer = None
+        self.slip_printer_label = None
         self.print_mode = False
         self.slip_signing = False
 

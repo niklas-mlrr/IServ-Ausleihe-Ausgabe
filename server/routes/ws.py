@@ -1210,6 +1210,8 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
                         # Client soll den Druckmodus mit sichtbarem Button
                         # fortsetzen, nicht erneut drucken.
                         "slip_printed": bool(qs and qs.slip_printed),
+                        "slip_printer": qs.slip_printer if qs else None,
+                        "slip_printer_label": qs.slip_printer_label if qs else None,
                     },
                 )
             # Blockierendes Ausgemustert-Hinweis-Modal überlebt einen Reconnect

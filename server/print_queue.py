@@ -489,7 +489,12 @@ class PrintQueue:
         from .sessions import _mark_slip_printed
         from .state import get_state
 
-        await _mark_slip_printed(get_state(), job.student_id)
+        await _mark_slip_printed(
+            get_state(),
+            job.student_id,
+            printer=self._printer_name(job.assigned_printer_id),
+            printer_label=self._printer_display_by_id(job.assigned_printer_id),
+        )
 
     async def clear_last_printed_for_student(self, student_id: int) -> bool:
         """Löscht den „Gedruckt"-Marker im Drucker-Display für `student_id`,

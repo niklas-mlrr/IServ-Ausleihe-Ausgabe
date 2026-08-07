@@ -146,7 +146,7 @@ function handleServerMessage(msg) {
       // Bereits gedruckt, aber „Leihschein erhalten" server-seitig noch
       // nicht bestätigt (z. B. Reload zwischen Druckende und Bestätigung) —
       // Druckmodus mit sichtbarem Button fortsetzen, NICHT erneut drucken.
-      enterDruckmodusAwaitingReceipt();
+      enterDruckmodusAwaitingReceipt(msg.slip_printer, msg.slip_printer_label);
       return;
     }
     setStatusText('Scanner bereit — Buch scannen');
@@ -276,7 +276,7 @@ function enterDruckmodus() {
 // Reload/Reconnect zwischen physischem Druckende und „Leihschein erhalten":
 // direkt im „gedruckt"-Zustand mit sichtbarem Button fortsetzen, ohne
 // erneut zu drucken (s. worker_ready-Feld `slip_printed`).
-function enterDruckmodusAwaitingReceipt() {
+function enterDruckmodusAwaitingReceipt(printer, printerLabel) {
   druckmodusEntered = true;
   printSent = true;
   show('print');
@@ -286,7 +286,10 @@ function enterDruckmodusAwaitingReceipt() {
   const receivedActions = document.getElementById('print-received-actions');
   if (title) title.textContent = 'Leihschein Drucken';
   if (actions) actions.style.display = 'none';
-  if (text) text.textContent = 'Leihschein gedruckt.';
+  // Dieselbe „Leihschein von X gedruckt."-Meldung wie direkt nach dem Druck
+  // (handlePrintResult) — überlebt dank `slip_printer(_label)` im
+  // worker_ready-Frame auch einen Reload.
+  if (text) text.textContent = studentPrintResultStatusText({ ok: true, printer, printer_label: printerLabel });
   if (receivedActions) receivedActions.style.display = '';
 }
 

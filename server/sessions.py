@@ -752,7 +752,13 @@ async def print_loan_slip_for(
     return result
 
 
-async def _mark_slip_printed(state: AppState, student_id: int) -> None:
+async def _mark_slip_printed(
+    state: AppState,
+    student_id: int,
+    *,
+    printer: str | None = None,
+    printer_label: str | None = None,
+) -> None:
     """Queue-Eintrag nach abgeschlossenem Druck als „Leihschein gedruckt"
     markieren und die Hosts aktualisieren — daraus wird im Host-Client das
     Badge „Leihschein" (zwischen „Aktiv" und „Fertig"). Kein Queue-Eintrag
@@ -766,11 +772,19 @@ async def _mark_slip_printed(state: AppState, student_id: int) -> None:
     bestätigt. So zeigt ein Reload des Schülerclients zwischen physischem
     Druckende und dieser Bestätigung weiterhin den Druckmodus (mit dem
     Button) statt fälschlich schon den nächsten Schritt.
+
+    `printer`/`printer_label` (vom aufrufenden `PrintQueue._mark_slip_printed_
+    after_completion`) werden auf dem Schüler gemerkt (statt nur im
+    transienten `print_result`-Frame), damit ein Reload zwischen Druckende und
+    Bestätigung weiterhin „Leihschein von X gedruckt." statt nur „Leihschein
+    gedruckt." zeigen kann (s. `worker_ready`-Felder `slip_printer*`).
     """
     student = state.find_student(student_id)
     if student is None or student.slip_printed:
         return
     student.slip_printed = True
+    student.slip_printer = printer
+    student.slip_printer_label = printer_label
     try:
         await get_hub().broadcast_host(state.state_snapshot())
     except Exception:  # noqa: BLE001 — Druck darf an einem Broadcast nicht scheitern
@@ -1542,6 +1556,8 @@ async def load_and_push_paired_student(
                 "slip_mode": session.loan_slip_mode,
                 "slip_recipient": session.loan_slip_recipient,
                 "slip_printed": student.slip_printed,
+                "slip_printer": student.slip_printer,
+                "slip_printer_label": student.slip_printer_label,
             },
         )
 

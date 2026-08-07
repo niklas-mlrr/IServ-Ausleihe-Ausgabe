@@ -32,7 +32,13 @@
   gedruckt, aber noch nicht bestätigt, zeigt der Client beim (Re-)Connect
   direkt wieder den Druckmodus mit sichtbarem Button (`web/student.js`:
   `enterDruckmodusAwaitingReceipt()`), statt erneut zu drucken oder den
-  nächsten Schritt zu überspringen.
+  nächsten Schritt zu überspringen. Damit dabei auch die normale „Leihschein
+  von X gedruckt."-Meldung (statt nur generisch „Leihschein gedruckt.")
+  erhalten bleibt, merkt sich `QueueStudent` jetzt zusätzlich
+  `slip_printer`/`slip_printer_label` (gesetzt von
+  `PrintQueue._mark_slip_printed_after_completion` beim Druckende, per
+  `worker_ready` an den Client gereicht) — das transiente `print_result`-Frame
+  allein hätte einen Reload nicht überlebt.
 - Der Button sendet zusätzlich `{type: "slip_received"}` über die Schüler-WS.
   Derselbe Handler ruft auch `PrintQueue.clear_last_printed_for_student()`
   auf — löscht den „Gedruckt"-Marker im Drucker-Display für diesen Schüler,
