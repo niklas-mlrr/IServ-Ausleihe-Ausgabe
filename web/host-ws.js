@@ -33,21 +33,12 @@ window.__host = window.__host || {};
   }
 
   // „PDF lokal speichern": der Server schickt den Leihschein base64-kodiert über
-  // die Host-WS; hier als Blob-Download im Browser des Host-Rechners auslösen
-  // (Download-Prompt bzw. Ablage im Download-Ordner, je nach Browsereinstellung).
+  // die Host-WS; downloadBase64Pdf (common.js) löst den Blob-Download im
+  // Browser des Host-Rechners aus (Download-Prompt bzw. Ablage im
+  // Download-Ordner, je nach Browsereinstellung).
   function downloadLoanSlip(msg) {
     try {
-      const bin = atob(msg.data_b64 || '');
-      const bytes = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = msg.filename || 'leihschein.pdf';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      downloadBase64Pdf(msg.filename, msg.data_b64);
       showMsg('Leihschein heruntergeladen: ' + (msg.filename || 'leihschein.pdf'));
     } catch (err) {
       console.error('Leihschein-Download fehlgeschlagen', err);

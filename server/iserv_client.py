@@ -607,16 +607,28 @@ class IsServClient:
             log.warning("Klasse zu student_id=%s nicht auflösbar: %s", student_id, e)
             return None
 
-    async def get_loan_slip_pdf(self, student_id: int, variant: str = "student") -> bytes:
+    async def get_loan_slip_pdf(
+        self,
+        student_id: int,
+        variant: str = "student",
+        start_reporting_period: str | None = None,
+    ) -> bytes:
         """Leihschein als PDF-Bytes (read-only GET).
 
         `variant="student"` → 1 Seite (Schüler-Beleg, Default),
         `variant="student-always_school-auto"` → 2 Seiten (Schüler + Schule),
-        identisch zum Webseiten-Download.
+        identisch zum Webseiten-Download. `start_reporting_period` (z. B.
+        `"3months"`) lässt IServ die Aktionen des gewählten Zeitraums auf dem
+        Leihschein mit ausweisen — genutzt für den Schüler-Eigenabruf
+        (`sessions.py::_send_own_slip_download`).
         """
 
         def _sync() -> bytes:
             client = self._get_client()
-            return client.get_loan_slip_pdf(student_id=student_id, variant=variant)
+            return client.get_loan_slip_pdf(
+                student_id=student_id,
+                variant=variant,
+                start_reporting_period=start_reporting_period,
+            )
 
         return await asyncio.to_thread(_sync)

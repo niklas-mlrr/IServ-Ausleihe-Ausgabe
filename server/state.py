@@ -529,7 +529,8 @@ class ClassContext:
     # „Fertig"-Voraussetzungen für den Leihschein dieser Klasse
     # (Klasseneinstellungen-Checkboxen „Leihschein unterschreiben" / „…wird
     # vom Lehrer eingesammelt"): `done_signed` — Schüler bleibt nach dem
-    # Druck im Leihscheinmodus, bis der Host ihn abschließt;
+    # Druck im Leihschein-unterschreiben-Modus, bis der Helfer/Host ihn
+    # abschließt;
     # `done_collected` — der unterschriebene Schein wird zusätzlich vom Lehrer
     # eingesammelt (nur sinnvoll, wenn `done_signed` gesetzt ist — Endpunkt
     # erzwingt das). Die Optionen werden an den Modus-B-Client weitergereicht.

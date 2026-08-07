@@ -8,6 +8,40 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-07 — Schülerleihscheinmodus: Eigenabruf des Leihscheins (letzte 3 Monate) beim Abschluss
+
+- Der bisherige, generisch benannte „Leihscheinmodus" (Unterschriften-Screen
+  nach dem Druck) heißt jetzt konsistent **Leihschein-unterschreiben-Modus**
+  (Kommentare/Doku angepasst, `view-slip`; UI-Text „Leihschein
+  unterschreiben" war unverändert schon vorher sichtbar).
+- Neuer **Schülerleihscheinmodus**: der „Vorgang abgeschlossen"-Screen
+  (`view-done`) des Schülerclients — egal ob er nach dem
+  Leihschein-unterschreiben-Modus oder (ohne aktivierte Klassenoption) direkt
+  nach „Leihschein erhalten" erreicht wird — zeigt jetzt einen Button
+  „Meinen Leihschein herunterladen". Er lädt den eigenen Leihschein mit den
+  Aktionen der letzten drei Monate herunter (IServ-Parameter
+  `startReportingPeriod=3months`, bisher in `IsServClient.get_loan_slip_pdf`
+  nicht durchgereicht — jetzt als optionaler `start_reporting_period`-Parameter
+  ergänzt).
+- Technisch löst der Button **keinen neuen Serverzugriff** aus: der Session-
+  Token wird beim regulären Abschluss (`invalidate_session`) unmittelbar nach
+  dem `closed`-Frame hart entwertet, ein Nachfordern über die WS wäre danach
+  nicht mehr möglich. Der Server fetcht das PDF deshalb bereits **kurz VOR**
+  `closed` (solange die Session/WS noch lebt) und pusht es einmalig
+  base64-kodiert als `own_slip_download` (neue Helferfunktion
+  `sessions._send_own_slip_download`, aufgerufen aus `invalidate_session` bei
+  `new_state == "completed"`); der Client hält die Daten nur im Speicher und
+  löst den Blob-Download beim Klick rein lokal aus. Der IServ-Abruf ist
+  Best-effort (try/except) — ein Fehler (kein IServ-Client, Netzproblem) darf
+  den eigentlichen Sessionabschluss nie verzögern oder verhindern; der Button
+  bleibt dann einfach verborgen (`#own-slip-unavailable`-Hinweis stattdessen).
+- Der Blob-Download (base64 → `Blob` → `<a download>`) war bisher nur in
+  `host-ws.js` (Leihschein-PDF „lokal speichern") implementiert — als
+  `downloadBase64Pdf` nach `common.js` verschoben und in `host-ws.js` sowie
+  `student.js` gemeinsam genutzt.
+- Tests: `tests/test_print_queue.py::test_confirm_slip_received_pushes_own_slip_before_closed_when_no_signature`
+  + `::test_confirm_slip_received_completion_survives_own_slip_fetch_failure`.
+
 ## 2026-08-07 — „Leihschein erhalten"-Bestätigung im Druckmodus (Schülerclient)
 
 - Der Druckmodus (`view-print`) des Schülerclients sprang nach erfolgreichem

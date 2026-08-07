@@ -240,7 +240,8 @@
   <!-- Druckmodus (Modus B): alle vorgemerkten Bücher gescannt. Ansicht hängt
        am slip_trigger der Klasse (Automatisch / Schülerauslöser /
        Betreuerauslöser / Barcode). Bei aktivierter Unterschrift folgt nach
-       abgeschlossenem Druck der Leihscheinmodus, sonst „Vorgang abgeschlossen". -->
+       abgeschlossenem Druck der Leihschein-unterschreiben-Modus, sonst direkt
+       der Schülerleihscheinmodus (view-done). -->
   <div class="view" id="view-print">
     <div class="name-row print-name-row">
       <div class="s-name" id="print-name">–</div>
@@ -264,9 +265,11 @@
     </div>
   </div>
 
-  <!-- Leihscheinmodus: nur bei aktivierter Klassenoption
+  <!-- Leihschein-unterschreiben-Modus: nur bei aktivierter Klassenoption
        „Leihschein unterschreiben". Der physische Leihschein wird unterschrieben
-       und anschließend beim Betreuer oder Lehrer abgegeben. -->
+       und anschließend beim Betreuer oder Lehrer abgegeben; danach schließt der
+       Helfer über den „Leihschein unterschreiben"-Button ab (finish_signed) →
+       Schülerleihscheinmodus (view-done). -->
   <div class="view" id="view-slip">
     <div class="name-row print-name-row">
       <div class="s-name" id="slip-name">–</div>
@@ -303,12 +306,24 @@
     </div>
   </div>
 
-  <!-- Abgeschlossen (neutral, keine Daten) -->
+  <!-- Schülerleihscheinmodus: Abschluss-Screen (Modus B fertig ODER
+       generischer Nicht-mehr-gültig-Fall, s. student.js Close-Code 4006 ohne
+       joinSecret). Der eigene Leihschein (Aktionen der letzten 3 Monate)
+       trifft VOR diesem Screen per `own_slip_download` ein (server/sessions.
+       py::_send_own_slip_download) und wird hier nur zum Download angeboten
+       — kein erneuter Serverzugriff nötig, der Session-Token ist zu diesem
+       Zeitpunkt bereits entwertet. -->
   <div class="view" id="view-done">
     <div class="big-msg">
       <div class="icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.801 10A10 10 0 1 1 17 3.335"/><path d="m9 11 3 3L22 4"/></svg></div>
       <div class="title">Vorgang abgeschlossen</div>
       <div class="text">Du kannst dieses Fenster schließen.</div>
+      <div class="modal-actions" id="own-slip-actions" style="display:none">
+        <button id="own-slip-btn">Meinen Leihschein herunterladen</button>
+      </div>
+      <div class="text" id="own-slip-unavailable" hidden>
+        Download deines Leihscheins gerade nicht verfügbar.
+      </div>
     </div>
   </div>
 

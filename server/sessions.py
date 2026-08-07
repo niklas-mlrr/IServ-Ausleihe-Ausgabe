@@ -871,6 +871,37 @@ async def _download_slip_to_host(
     return await get_hub().send_all_hosts(msg, state)
 
 
+async def _send_own_slip_download(state: AppState, ws, student_id: int) -> None:
+    """Eigenen Leihschein (Aktionen der letzten 3 Monate) einmalig an den
+    Schülerclient pushen, kurz bevor dessen Modus-B-Session regulär endet
+    (Schülerleihscheinmodus — der Abschluss-Screen mit Download-Button, s.
+    `invalidate_session`). Rein lesend gegen IServ; Fehler (kein IServ-Client,
+    Netzproblem) dürfen den Abschluss der Session nicht verzögern/verhindern
+    — der Client zeigt dann einfach keinen funktionierenden Button."""
+    if state.iserv is None:
+        return
+    try:
+        pdf = await state.iserv.get_loan_slip_pdf(
+            student_id, variant="student", start_reporting_period="3months"
+        )
+    except Exception:  # noqa: BLE001 — Download ist Kosmetik, Abschluss nie blockieren
+        log.debug(
+            "Eigener-Leihschein-Download vor Session-Ende fehlgeschlagen (student_id=%s)",
+            student_id,
+            exc_info=True,
+        )
+        return
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    await get_hub().send_websocket(
+        ws,
+        {
+            "type": "own_slip_download",
+            "filename": f"leihschein_{student_id}_{ts}.pdf",
+            "data_b64": base64.b64encode(pdf).decode("ascii"),
+        },
+    )
+
+
 def release_worker(state: AppState, worker) -> None:
     """Worker-Context nach Abschluss zurück in den Pool (statt ihn zu verlieren).
 
@@ -966,6 +997,12 @@ async def invalidate_session(
     ws = session.ws
     session.ws = None
     if ws is not None:
+        # Regulärer Abschluss (Schülerleihscheinmodus): der eigene Leihschein
+        # mit den Aktionen der letzten drei Monate muss VOR dem `closed`/Close
+        # raus — direkt danach wird der Token unten hart entwertet, ein
+        # Nachfordern über die (dann tote) Session ist nicht mehr möglich.
+        if new_state == "completed" and session.student_id is not None:
+            await _send_own_slip_download(state, ws, session.student_id)
         await get_hub().send_websocket(ws, {"type": "closed", "reason": new_state})
         try:
             await ws.close(code=4006)

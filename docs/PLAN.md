@@ -271,10 +271,22 @@ einsatzbereit sein.** Teil 2 zum Schuljahresbeginn (Ende August 2026).
       `AppState.teacher_snapshot`, `web/teacher.html`/`teacher.js`). Detailplan:
       `docs/teacher_status_page_plan.md`. Live-Check im Schul-WLAN offen
       (`docs/test_status.md`).
-- [x] **Leihscheinmodus im Schülerclient:** Bei aktivierter Klassenoption
-      „Leihschein unterschreiben" folgt nach abgeschlossenem Druck eine
-      offene Ansicht mit Aufforderung zur Unterschrift und Übergabe an
-      Betreuer oder Lehrer; der Zustand überlebt Reconnects — 2026-08-06
+- [x] **Leihschein-unterschreiben-Modus im Schülerclient:** Bei aktivierter
+      Klassenoption „Leihschein unterschreiben" folgt nach abgeschlossenem
+      Druck eine offene Ansicht mit Aufforderung zur Unterschrift und
+      Übergabe an Betreuer oder Lehrer; der Zustand überlebt Reconnects —
+      2026-08-06
+- [x] **Schülerleihscheinmodus (Abschluss-Screen mit Eigenabruf):** Der
+      „Vorgang abgeschlossen"-Screen des Schülerclients (nach dem
+      Leihschein-unterschreiben-Modus bzw. direkt nach „Leihschein erhalten"
+      ohne aktivierte Unterschrift) bietet einen Button zum Herunterladen des
+      eigenen Leihscheins mit den Aktionen der letzten drei Monate
+      (`IsServClient.get_loan_slip_pdf(..., start_reporting_period="3months")`).
+      Der Server pusht das PDF base64-kodiert über die noch offene
+      Schüler-WS, BEVOR die Session regulär schließt (`closed`) und der
+      Session-Token hart entwertet wird — ein Nachfordern danach ist nicht
+      mehr möglich (`server/sessions.py::_send_own_slip_download`,
+      `invalidate_session`) — 2026-08-07
 - [ ] O6 fachlich mit Hr. Pühn finalisieren (Wortlaut „Nachweis fehlt" +
       kombinierter Host-Freigabe-Dialog bei nicht-bezahlt/Nachweis, 2026-07-06)
 - [ ] Generalprobe vor Schuljahresbeginn

@@ -46,12 +46,21 @@ let druckmodusEntered = false;       // Druckmodus bereits betreten (nur 1× pro
 let printSent = false;               // Druckauftrag bereits gesendet
 let slipModeEntered = false;         // Leihschein nach dem Druck bereits angezeigt
 // Nach dem Druck wartet die Ansicht auf „Leihschein erhalten" (Button), bevor
-// es weitergeht. Der eigentliche Wechsel (Leihscheinmodus/Abschluss) läuft
-// serverseitig (`confirm_slip_received`) erst NACH dieser Bestätigung — nicht
-// schon beim Druckende — damit ein Reload zwischen Druckende und Bestätigung
-// weiterhin den Druckmodus mit sichtbarem Button zeigt statt den nächsten
-// Schritt vorwegzunehmen. `slipReceiptSent` verhindert nur Doppel-Klicks.
+// es weitergeht. Der eigentliche Wechsel (Leihschein-unterschreiben-Modus
+// bzw. Abschluss/Schülerleihscheinmodus) läuft serverseitig
+// (`confirm_slip_received`) erst NACH dieser Bestätigung — nicht schon beim
+// Druckende — damit ein Reload zwischen Druckende und Bestätigung weiterhin
+// den Druckmodus mit sichtbarem Button zeigt statt den nächsten Schritt
+// vorwegzunehmen. `slipReceiptSent` verhindert nur Doppel-Klicks.
 let slipReceiptSent = false;
+// ---- Schülerleihscheinmodus (Abschluss-Screen mit Eigenabruf) ----
+// Der Server pusht den eigenen Leihschein (Aktionen der letzten 3 Monate)
+// EINMALIG kurz vor dem `closed`-Frame, solange die Session/Token noch lebt
+// (s. `own_slip_download`) — danach ist der Token entwertet, ein Nachfordern
+// über die WS nicht mehr möglich. Der Download-Button auf dem
+// „Vorgang abgeschlossen"-Screen greift daher rein lokal auf diese
+// zwischengespeicherten Daten zurück, statt erneut den Server zu fragen.
+let ownSlipFilename = null, ownSlipDataB64 = null;
 
 function showError(title, text) {
   if (title) document.getElementById('error-title').textContent = title;
@@ -214,8 +223,15 @@ function handleServerMessage(msg) {
     // Kommt serverseitig erst NACH der „Leihschein erhalten"-Bestätigung
     // (`slip_received`) — hier also stets direkt anzeigen.
     enterLeihscheinmodus(msg.recipient);
+  } else if (msg.type === 'own_slip_download') {
+    // Kommt IMMER vor `closed` (s. server/sessions.py::_send_own_slip_download)
+    // — hier nur zwischenspeichern, der Download-Button auf dem
+    // Schülerleihschein-Screen nutzt es beim Klick.
+    ownSlipFilename = msg.filename || null;
+    ownSlipDataB64 = msg.data_b64 || null;
   } else if (msg.type === 'closed') {
     finished = true; clearToken(); show('done');
+    updateOwnSlipButton();
   } else if (msg.type === 'error') {
     setStatusText('Fehler: ' + (msg.msg || ''));
   }
@@ -361,8 +377,9 @@ function handlePrintResult(msg) {
   const text = document.getElementById('print-text');
   if (msg.ok) {
     // Gedruckt — dieselbe Meldung wie im Helferclient anzeigen; das
-    // Weitergehen (Leihscheinmodus/Abschluss) löst erst der Server nach dem
-    // Antippen von „Leihschein erhalten" aus (s. printReceivedBtn).
+    // Weitergehen (Leihschein-unterschreiben-Modus bzw. Abschluss/
+    // Schülerleihscheinmodus) löst erst der Server nach dem Antippen von
+    // „Leihschein erhalten" aus (s. printReceivedBtn).
     if (text) text.textContent = studentPrintResultStatusText(msg);
     const receivedActions = document.getElementById('print-received-actions');
     if (receivedActions) receivedActions.style.display = '';
@@ -485,8 +502,9 @@ if (printTriggerBtn) {
 
 // „Leihschein erhalten": bestätigt den Empfang. Der Server räumt — falls
 // noch nicht durch nächsten Druck/30s-TTL geschehen — den „Gedruckt"-Marker
-// im Drucker-Display auf und löst danach erst die Folgeaktion
-// (Leihscheinmodus/Abschluss, `slip_mode`/`closed`) aus.
+// im Drucker-Display auf und löst danach erst die Folgeaktion aus
+// (Leihschein-unterschreiben-Modus `slip_mode` bzw. direkt Abschluss/
+// Schülerleihscheinmodus `closed`).
 const printReceivedBtn = document.getElementById('print-received-btn');
 if (printReceivedBtn) {
   printReceivedBtn.addEventListener('click', () => {
@@ -497,6 +515,26 @@ if (printReceivedBtn) {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'slip_received' }));
     }
+  });
+}
+
+// Zeigt den Download-Button nur, wenn tatsächlich Daten angekommen sind
+// (IServ nicht erreichbar/Fehler beim Abruf → Button bleibt verborgen, dafür
+// ein knapper Hinweistext statt eines Buttons, der beim Klick ohnehin nichts
+// täte).
+function updateOwnSlipButton() {
+  const actions = document.getElementById('own-slip-actions');
+  const unavailable = document.getElementById('own-slip-unavailable');
+  const has = !!ownSlipDataB64;
+  if (actions) actions.style.display = has ? '' : 'none';
+  if (unavailable) unavailable.hidden = has;
+}
+
+const ownSlipBtn = document.getElementById('own-slip-btn');
+if (ownSlipBtn) {
+  ownSlipBtn.addEventListener('click', () => {
+    if (!ownSlipDataB64) return;
+    downloadBase64Pdf(ownSlipFilename, ownSlipDataB64);
   });
 }
 
@@ -553,6 +591,8 @@ function renderStudent(s, overridden) {
   printSent = false;
   slipTrigger = 'auto';
   slipReceiptSent = false;
+  ownSlipFilename = null;
+  ownSlipDataB64 = null;
   const receivedActions = document.getElementById('print-received-actions');
   if (receivedActions) receivedActions.style.display = 'none';
   document.getElementById('book-rows').innerHTML =

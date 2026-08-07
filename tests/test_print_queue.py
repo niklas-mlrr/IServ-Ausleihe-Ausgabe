@@ -11,6 +11,7 @@ einzelne Tracker-Tasks — alles gegen frische `AppState`-Instanzen (Default-Poo
 from __future__ import annotations
 
 import asyncio
+import base64
 import time
 
 import pytest
@@ -254,6 +255,92 @@ def test_student_session_closes_only_after_print_completion(monkeypatch):
         await pq.stop()
 
     asyncio.run(run())
+
+
+def test_confirm_slip_received_pushes_own_slip_before_closed_when_no_signature(
+    monkeypatch,
+):
+    """Schülerleihscheinmodus (Abschluss-Screen mit Eigenabruf): ohne aktivierte
+    Klassenoption „Leihschein unterschreiben" schließt `confirm_slip_received`
+    die Session sofort ab — der eigene Leihschein (Aktionen der letzten 3
+    Monate) muss dabei VOR `closed` beim Schülerclient ankommen, weil der
+    Session-Token direkt danach hart entwertet wird und ein Nachfordern nicht
+    mehr möglich ist."""
+    st = AppState()
+    _patch(monkeypatch, st)
+
+    calls = []
+
+    class _FakeIServSlip:
+        async def get_loan_slip_pdf(
+            self, student_id, variant="student", start_reporting_period=None
+        ):
+            calls.append((student_id, variant, start_reporting_period))
+            return b"%PDF-own-slip"
+
+    st.iserv = _FakeIServSlip()
+
+    ctx = st.open_context("10a")
+    student = QueueStudent(
+        student_id=44, lastname="Test", firstname="Schüler", form="10a", status="active",
+    )
+    ctx.queue.append(student)
+    student.slip_printed = True
+    student_ws = _FakeWS()
+    st.student_sessions["student-token"] = StudentSessionB(
+        session_token="student-token",
+        pairing_code="4244",
+        student_id=44,
+        state="paired",
+        ws=student_ws,
+    )
+
+    asyncio.run(sessions.confirm_slip_received(st, 44))
+
+    assert calls == [(44, "student", "3months")]
+    types = [m["type"] for m in student_ws.sent]
+    assert types.index("own_slip_download") < types.index("closed")
+    own_slip = next(m for m in student_ws.sent if m["type"] == "own_slip_download")
+    assert base64.b64decode(own_slip["data_b64"]) == b"%PDF-own-slip"
+    assert own_slip["filename"].startswith("leihschein_44_")
+
+
+def test_confirm_slip_received_completion_survives_own_slip_fetch_failure(monkeypatch):
+    """Ein IServ-Fehler beim Eigenabruf darf den regulären Abschluss nicht
+    verhindern — der Client bekommt dann einfach keinen funktionierenden
+    Download-Button (kein `own_slip_download`-Frame), aber `closed` kommt
+    trotzdem an."""
+    st = AppState()
+    _patch(monkeypatch, st)
+
+    class _FailingIServSlip:
+        async def get_loan_slip_pdf(
+            self, student_id, variant="student", start_reporting_period=None
+        ):
+            raise RuntimeError("IServ nicht erreichbar")
+
+    st.iserv = _FailingIServSlip()
+
+    ctx = st.open_context("10a")
+    student = QueueStudent(
+        student_id=45, lastname="Test", firstname="Schüler", form="10a", status="active",
+    )
+    ctx.queue.append(student)
+    student.slip_printed = True
+    student_ws = _FakeWS()
+    st.student_sessions["student-token"] = StudentSessionB(
+        session_token="student-token",
+        pairing_code="4245",
+        student_id=45,
+        state="paired",
+        ws=student_ws,
+    )
+
+    asyncio.run(sessions.confirm_slip_received(st, 45))
+
+    assert not any(m["type"] == "own_slip_download" for m in student_ws.sent)
+    assert any(m["type"] == "closed" for m in student_ws.sent)
+    assert student.status == "done"
 
 
 @pytest.mark.parametrize(

@@ -152,6 +152,26 @@ const Beeper = (() => {
   return { initAudio, playBeep };
 })();
 
+// ---- PDF-Download aus base64 (Host-Leihschein-Download + Schülereigenabruf) ----
+// Server schickt ein PDF base64-kodiert über eine WebSocket; hier als
+// Blob-Download im Browser des Empfängers auslösen (Download-Prompt bzw.
+// Ablage im Download-Ordner, je nach Browsereinstellung). Gemeinsam für
+// host-ws.js (Leihschein-PDF-lokal-speichern) und student.js (eigener
+// Leihschein, s. `own_slip_download`).
+function downloadBase64Pdf(filename, dataB64) {
+  const bin = atob(dataB64 || '');
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename || 'leihschein.pdf';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
 // ---- WebSocket-Reconnect mit Backoff ----
 // Vereinheitlicht die (bis auf Callbacks/Delay identischen) connect()-Varianten
 // aus scan.js/student.html/qr-display.html sowie connectWs() aus host.js.

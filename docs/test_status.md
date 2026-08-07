@@ -5,8 +5,8 @@
 > Risiko hier unter „Offen / zu testen" eintragen; nach erfolgreichem Test in
 > „Verifiziert" verschieben (mit Datum + Skript/Befund). Bezug: `docs/PLAN.md`.
 >
-> Stand: 2026-08-07 („Leihschein erhalten"-Bestätigung im Druckmodus,
-> reload-sicherer State-Übergang, 395 Tests grün).
+> Stand: 2026-08-07 (Schülerleihscheinmodus — Eigenabruf des Leihscheins der
+> letzten 3 Monate beim Abschluss, 397 Tests grün).
 > Alle bisherigen Tests sind **read-only** gegen IServ
 > (kein Submit, keine Buchung — PLAN §6).
 >
@@ -79,7 +79,23 @@
 
 | V54 | **„Leihschein erhalten"-Bestätigung im Druckmodus (Schülerclient) — reload-sicher:** Der Druckmodus bleibt nach dem Druck stehen und zeigt „Leihschein gedruckt." + Button „Leihschein erhalten" (optisch identisch zum „Leihschein drucken"-Button); erst der Klick löst den Wechsel in den Leihscheinmodus bzw. den Auto-Abschluss aus und räumt — falls nicht schon durch nächsten Druckauftrag/30s-TTL geschehen — den „Gedruckt"-Marker im Drucker-Display für diesen Schüler auf (`PrintQueue.clear_last_printed_for_student`, `_last_printed` trägt neu `student_id`). Der eigentliche State-Übergang läuft dabei **serverseitig erst nach der Bestätigung** (`sessions.confirm_slip_received()`, WS `slip_received`, idempotent via `StudentSessionB.slip_receipt_confirmed`) statt automatisch mit dem physischen Druckende (`sessions._mark_slip_printed()` markiert nur noch `slip_printed` fürs Host-Badge) — ein erster Ansatz mit rein client-seitiger Nachrichten-Pufferung ließ einen Reload zwischen Druckende und Bestätigung fälschlich wie einen bereits gedrückten Button aussehen, weil der Server den Übergang schon vorher unwiderruflich ausgelöst hatte. Reload-sicher über neue `worker_ready`-Felder `slip_printed`/`slip_printer`/`slip_printer_label` (letztere zwei erhalten die „Leihschein von X gedruckt."-Meldung über einen Reload hinweg, da das transiente `print_result`-Frame das nicht könnte). | `tests/test_print_queue.py` (2 Tests umgebaut auf die Zwei-Schritt-Sequenz Druckende→`confirm_slip_received`; `_last_printed`-Tupel-Fixtures um `student_id` ergänzt) + `uv run pytest -q` + `uvx ruff check server/ tests/` + `node --check web/student.js` | 2026-08-07 | **395 Tests grün**, Ruff clean, JavaScript-Syntaxprüfung grün. **Live-Check (Reload zwischen Druckende und Bestätigung am echten Gerät, Drucker-Display-Marker-Entfernung am echten Bildschirm) noch offen** |
 
+| V55 | **Schülerleihscheinmodus — Eigenabruf des Leihscheins (letzte 3 Monate) beim Abschluss:** Der „Vorgang abgeschlossen"-Screen (`view-done`) des Schülerclients zeigt jetzt einen Button „Meinen Leihschein herunterladen", egal ob er nach dem Leihschein-unterschreiben-Modus oder (ohne aktivierte Klassenoption) direkt nach „Leihschein erhalten" erreicht wird. `IsServClient.get_loan_slip_pdf` bekam den optionalen Parameter `start_reporting_period` (IServ `startReportingPeriod=3months`); `sessions._send_own_slip_download` fetcht das PDF und pusht es base64-kodiert als `own_slip_download` über die Schüler-WS, **bevor** `invalidate_session` bei `new_state == "completed"` den `closed`-Frame schickt und den Session-Token hart entwertet — ein Nachfordern danach wäre nicht mehr möglich. Best-effort (try/except): ein IServ-Fehler darf den Abschluss nie verzögern/verhindern, der Button bleibt dann verborgen. Der Blob-Download (`downloadBase64Pdf`) wurde aus `host-ws.js` nach `common.js` verschoben und wird jetzt von `host-ws.js` und `student.js` gemeinsam genutzt. | `tests/test_print_queue.py::test_confirm_slip_received_pushes_own_slip_before_closed_when_no_signature` + `::test_confirm_slip_received_completion_survives_own_slip_fetch_failure` + `uv run pytest -q` + `uvx ruff check server/ tests/ automation/` + `node --check web/student.js web/host-ws.js web/common.js` | 2026-08-07 | **397 Tests grün**, Ruff clean, JavaScript-Syntaxprüfung grün. **Live-Check (echter Download am Schüler-Handy nach Abschluss, PDF-Inhalt/Zeitraum am echten IServ) noch offen** |
+
 ## Offen / zu testen
+
+### Offen 2026-08-07 (Schülerleihscheinmodus: Live-Check)
+
+Logik (Push-Reihenfolge vor `closed`, Best-effort bei IServ-Fehler,
+Token-Entwertung) ist per Unit-Tests abgesichert (V55). Am echten Gerät noch
+offen:
+
+- [ ] Schülerclient: nach Abschluss (mit UND ohne aktivierte „Leihschein
+      unterschreiben"-Klassenoption) erscheint der Button „Meinen Leihschein
+      herunterladen" und der Download klappt tatsächlich im Handy-Browser
+      (iOS Safari / Android Chrome).
+- [ ] Heruntergeladenes PDF enthält tatsächlich die Aktionen der letzten drei
+      Monate (`startReportingPeriod=3months` — bislang nur als durchgereichter
+      Parameter verifiziert, nicht der tatsächliche IServ-Report-Inhalt).
 
 ### Offen 2026-08-05 (Klassen-Lehreransicht `/teacher`: Live-Check)
 
