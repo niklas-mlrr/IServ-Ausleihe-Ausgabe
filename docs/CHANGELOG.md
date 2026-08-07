@@ -8,6 +8,37 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-07 — Betreuerauslöser-Druckbutton im Helferclient
+
+- Bei `slip_trigger == "helper"` konnte bisher nur der Host oder der Helfer
+  für seinen eigenen zugewiesenen Schüler drucken — kein direkter Weg, einen
+  beliebigen anderen aktiven Schüler aus der Klassenliste des Helferclients
+  (`scan.html`) heraus anzudrucken.
+- Neu: sobald ein Schüler bei „Betreuerauslöser" in den Druckmodus wechselt
+  (`QueueStudent.print_mode`, gesetzt via WS `print_mode`), zeigt die
+  Aktiv-Gruppe der Klassenliste vor dem „Aufrufen"-Pfeil einen Druckbutton.
+  Klick öffnet denselben Druck-Dialog wie der eigene Druckbutton
+  (`printTargetStudentId`), mit der Drucker-Vorauswahl der Klasse des
+  Zielschülers (`real_contexts_summary().print_default_ids`, nicht die der
+  eigenen Klasse des Helfers).
+- Neuer WS-Handler `print_for_student` (`server/routes/ws.py`) validiert
+  serverseitig `slip_trigger`, `print_mode` und „kein laufender Auftrag"
+  (Check-then-Enqueue ohne `await` dazwischen ist gegen gleichzeitige Klicks
+  zweier Helfer atomar). Der `PrintJob` läuft mit `role="student"` ohne
+  `helper_token` — das Drucker-Display zeigt dadurch keinen Helfernamen,
+  genau wie bei einem Auftrag, den der Schüler selbst gesendet hätte.
+  Rückmeldung über einen eigenen Nachrichtentyp `print_for_student_result`,
+  damit ein fremder Druckauftrag nicht die eigene Druck-Statuszeile des
+  Helfers überschreibt.
+- `PrintQueue._notify_all()` broadcastet Druck-Übergänge jetzt zusätzlich an
+  alle Helfer-Sessions (`hub.broadcast_queue_size`) — Grundlage dafür, dass
+  Button und offenes Druckmenü fleet-weit verschwinden/sich schließen,
+  sobald irgendein Helfer den Auftrag gesendet hat.
+- Volle Testsuite und `ruff check` grün; `test_state_contract.py` (eingefroren
+  Top-Level-Schlüssel von `state_snapshot()`) unverändert grün — die neuen
+  Felder betreffen nur `queue`-/Kontext-Einträge. Details:
+  `_logs/2026-08-07_sba_betreuerausloeser_druckbutton.md` (Wiki).
+
 ## 2026-08-06 — Host-Fortschrittsbaseline übersteht Seiten-Reload
 
 - Die „seit Aufrufen"-Baseline (`loaned_at_load`, Grundlage für X/Y in der
