@@ -781,6 +781,7 @@ async def _mark_slip_printed(state: AppState, student_id: int) -> None:
         if done_signed:
             session.loan_slip_mode = True
             session.loan_slip_recipient = "teacher" if done_collected else "helper"
+            student.slip_signing = True
             if session.ws is not None:
                 await get_hub().send_websocket(
                     session.ws,
@@ -789,6 +790,18 @@ async def _mark_slip_printed(state: AppState, student_id: int) -> None:
                         "recipient": session.loan_slip_recipient,
                     },
                 )
+            # Helfer-Client (scan.html) live nachziehen: der „Leihschein
+            # unterschreiben"-Button in der Klassenliste (s.
+            # real_contexts_summary) muss erscheinen, sobald der Schüler in
+            # den Unterschriften-Modus gewechselt ist. Ohne verbundene Helfer
+            # entfällt der Aufwand komplett.
+            if state.helper_sessions:
+                try:
+                    await get_hub().broadcast_queue_size(state)
+                except Exception:  # noqa: BLE001 — analog Host-Broadcast oben
+                    log.debug(
+                        "Helfer-Broadcast nach Leihschein-Druck fehlgeschlagen", exc_info=True
+                    )
             return
         # Ohne Unterschriftenmodus geht der Modus-B-Schüler nach dem Druck
         # automatisch auf „abgeschlossen" — unabhängig davon, wer den Druck

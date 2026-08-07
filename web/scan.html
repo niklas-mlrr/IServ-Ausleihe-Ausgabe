@@ -351,11 +351,11 @@
     .book-row.queue-row { grid-template-columns: var(--queue-class-w, 4.5rem) 1fr auto auto; gap: 7px; background: transparent; border-color: transparent; padding-top: 0; padding-bottom: 0; }
     .book-row.queue-row .b-title { margin-left: 7px; }  /* Klasse↔Name: 7px gap + 7px = 14px */
     .book-row.queue-row .b-call { display: flex; justify-content: flex-end; align-items: center; }
-    .call-btn, .helper-print-btn { display: inline-flex; align-items: center; justify-content: center;
+    .call-btn, .helper-print-btn, .helper-sign-btn { display: inline-flex; align-items: center; justify-content: center;
       padding: 7px 10px; font-size: 1.3rem; line-height: 1; border-radius: 8px;
       background: var(--surface-2); color: var(--fg); border: 1px solid var(--border); cursor: pointer; transition: background .2s; }
-    .call-btn:hover, .helper-print-btn:hover { background: var(--surface-3); }
-    .call-btn:active, .helper-print-btn:active { background: var(--surface-4); }
+    .call-btn:hover, .helper-print-btn:hover, .helper-sign-btn:hover { background: var(--surface-3); }
+    .call-btn:active, .helper-print-btn:active, .helper-sign-btn:active { background: var(--surface-4); }
     /* Info-Spalte links vom Aufrufen-Button: rechtsbündige Reihe kompakter
        Icons/Kurztexte (s. scan-render.js queueInfoIcons) — leer, wenn keine
        Infos vorliegen, nimmt dann keinen sichtbaren Platz ein. */

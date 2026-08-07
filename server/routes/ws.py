@@ -656,6 +656,44 @@ async def _handle_print_for_student(state, hub, helper, websocket, raw) -> None:
     )
 
 
+async def _handle_finish_signed(state, hub, helper, websocket, raw) -> None:
+    """„Leihschein unterschreiben"-Button in der Klassenliste des Helfer-
+    Clients (analog dem Betreuerauslöser-Druckbutton): der Helfer bestätigt
+    damit, dass der bereits gedruckte, physische Leihschein unterschrieben und
+    entgegengenommen wurde, und schließt den Schüler ab — identisch zum
+    Host-Button „Abschließen" (`/api/finish`). Nur erlaubt, wenn die Klasse
+    des Schülers „Leihschein unterschreiben" aktiv hat (`ClassContext.
+    done_signed`) UND der Schüler selbst im Unterschriften-Modus ist
+    (`QueueStudent.slip_signing`, gesetzt in `_mark_slip_printed`) — der
+    Helfer-Client blendet den Button serverseitig validiert genauso ein/aus
+    (Client-Gate ist nur UI, kein Vertrauen)."""
+    async def _reject(msg: str) -> None:
+        await hub.send_websocket(
+            websocket, {"type": "finish_signed_result", "ok": False, "msg": msg}
+        )
+
+    student_id = raw.get("student_id")
+    if not isinstance(student_id, int):
+        await _reject("Ungültiger Schüler")
+        return
+    found = state.find_student_with_ctx(student_id)
+    if found is None:
+        await _reject("Schüler nicht gefunden")
+        return
+    ctx, target = found
+    if not ctx.done_signed or target.status != "active" or not target.slip_signing:
+        await _reject("Schüler ist nicht im Unterschriften-Modus")
+        return
+    await end_student(
+        state, hub, student_id, queue_status="done", session_state="completed",
+    )
+    if state.helper_sessions:
+        await hub.broadcast_queue_size(state)
+    await hub.send_websocket(
+        websocket, {"type": "finish_signed_result", "ok": True, "detail": "abgeschlossen"}
+    )
+
+
 async def _handle_scan(state, hub, helper, websocket, raw) -> None:
     barcode = str(raw.get("value", "")).strip()
     if not barcode:
@@ -717,6 +755,7 @@ _SCANNER_HANDLERS = {
     "clear_book_alert": _handle_clear_book_alert,
     "print": _handle_print,
     "print_for_student": _handle_print_for_student,
+    "finish_signed": _handle_finish_signed,
     "scan": _handle_scan,
 }
 

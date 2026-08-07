@@ -8,6 +8,29 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-07 — „Leihschein unterschreiben"-Button im Helferclient
+
+- Bei aktivem „Leihschein unterschreiben" (`ClassContext.done_signed`, Live-
+  Klasse) blieb ein Modus-B-Schüler nach dem Druck im Unterschriften-Modus
+  offen — der Helferclient (`scan.html`) hatte bisher keinen eigenen Weg, ihn
+  nach der physischen Übergabe abzuschließen (nur der Host über
+  „Abschließen").
+- Neu: sobald der Schülerclient nach dem Druck in den Unterschriften-Modus
+  wechselt (`QueueStudent.slip_signing`, gesetzt in `_mark_slip_printed`),
+  zeigt die Aktiv-Gruppe der Klassenliste vor dem „Aufrufen"-Pfeil einen
+  Stift-Button (geometrischer Stiftkörper über einer geschwungenen Linie als
+  Unterschrifts-Andeutung) — an derselben Stelle wie der Betreuerauslöser-
+  Druckbutton, mit dem er sich die dritte Grid-Spalte teilt (beide schließen
+  sich gegenseitig aus). Klick sendet direkt, ohne Dialog; der Button
+  verschwindet danach fleet-weit, der Schüler gilt als fertig.
+- Neuer WS-Handler `finish_signed` (`server/routes/ws.py`) validiert
+  serverseitig `done_signed` und `slip_signing`, bevor er denselben
+  `end_student`-Abschluss wie `/api/finish` auslöst, und broadcastet per
+  `hub.broadcast_queue_size` an alle Helfer. `_mark_slip_printed`
+  (`server/sessions.py`) setzt `slip_signing` und broadcastet ebenso, sobald
+  Helfer verbunden sind.
+- Volle Testsuite und `ruff check` grün.
+
 ## 2026-08-07 — Betreuerauslöser-Druckbutton im Helferclient
 
 - Bei `slip_trigger == "helper"` konnte bisher nur der Host oder der Helfer

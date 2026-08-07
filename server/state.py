@@ -112,6 +112,15 @@ class QueueStudent:
     # (s. `real_contexts_summary`). Bleibt bei anderen `slip_trigger`-Werten
     # ungenutzt (dort läuft der Druck über den Schülerclient selbst).
     print_mode: bool = False
+    # Leihschein wurde gedruckt UND die Klasse hat „Leihschein unterschreiben"
+    # aktiv (`ClassContext.done_signed`) → der Schülerclient zeigt den
+    # Unterschriften-Modus (`_mark_slip_printed`, setzt zugleich
+    # `session.loan_slip_mode`). Steuert den „Leihschein unterschreiben"-
+    # Button vor dem „Aufrufen"-Button im Helfer-Client (s.
+    # `real_contexts_summary`) — Klick schließt den Schüler ab (analog dem
+    # Host-Button „Abschließen"), sobald der Helfer die Unterschrift auf dem
+    # physischen Leihschein entgegengenommen hat.
+    slip_signing: bool = False
 
     def as_dict(self, *, slip_printing: bool = False) -> dict:
         return {
@@ -131,6 +140,7 @@ class QueueStudent:
             # gemutet. Default False hält die Helfer-Client-Pfade unverändert.
             "slip_printing": slip_printing,
             "print_mode": self.print_mode,
+            "slip_signing": self.slip_signing,
             "slip_collected": self.slip_collected,
             "enrolled": self.enrolled,
             "paid": self.paid,
@@ -173,6 +183,7 @@ class QueueStudent:
         self.slip_collected = False
         self.auto_skipped = False
         self.print_mode = False
+        self.slip_signing = False
 
     @classmethod
     def from_iserv(cls, d: dict, *, form: str) -> QueueStudent:
@@ -737,7 +748,9 @@ class AppState:
         Host-Snapshot) — der Helfer-Client braucht beides für den
         Betreuerauslöser-Druckbutton in der Klassenliste (nur bei
         ``slip_trigger == "helper"`` und `print_mode`, ausgeblendet sobald ein
-        Auftrag bereits läuft). ``print_default_ids`` (analog
+        Auftrag bereits läuft). ``done_signed`` je Kontext + ``slip_signing``
+        je Schüler (analog) steuern den „Leihschein unterschreiben"-Button
+        (s. `QueueStudent.slip_signing`). ``print_default_ids`` (analog
         `own_print_defaults`, aber je Kontext statt nur für den eigenen
         Helfer-Kontext) — die Drucker-Allowlist DIESER Klasse, damit der
         Betreuerauslöser-Druck-Dialog immer die für die Klasse erlaubten
@@ -750,6 +763,7 @@ class AppState:
                 "id": c.id,
                 "form": c.form,
                 "slip_trigger": c.slip_trigger,
+                "done_signed": c.done_signed,
                 "print_default_ids": (
                     sorted(pool_ids) if c.allowed_printer_ids is None
                     else sorted(c.allowed_printer_ids & pool_ids)

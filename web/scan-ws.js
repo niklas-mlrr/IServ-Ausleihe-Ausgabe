@@ -232,6 +232,13 @@ function handleServerMessage(msg) {
     // Fehlschlag (z. B. Wettlauf zweier Helfer) bekommt einen kurzen,
     // transienten Hinweis in der neutralen 'trans'-Zeile.
     if (!msg.ok) setStatusText(msg.msg || 'Leihschein konnte nicht gesendet werden', null, 'trans', true);
+  } else if (msg.type === 'finish_signed_result') {
+    // „Leihschein unterschreiben"-Button (s. scan-render.js): Erfolg braucht
+    // keine eigene Meldung — der Schüler wandert fleet-weit in die
+    // Fertig-Gruppe, sobald der nächste contexts_update-Broadcast eintrifft.
+    // Nur ein Fehlschlag (z. B. Doppelklick zweier Helfer) bekommt einen
+    // kurzen, transienten Hinweis.
+    if (!msg.ok) setStatusText(msg.msg || 'Konnte nicht abgeschlossen werden', null, 'trans', true);
   } else if (msg.type === 'waiting') {
     studentActive = false;
     workerPending = false;

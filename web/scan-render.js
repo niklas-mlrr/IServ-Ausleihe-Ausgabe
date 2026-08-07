@@ -127,30 +127,43 @@ function renderBooks(books, animate = false) {
 // Aktive den Schüler freigibt (server: spectate_student / end_student).
 // Fertige lassen sich erneut aufrufen (z. B. um nachträglich ein Buch zu
 // erfassen) — Aufruf-Pfeil wie bei den Wartenden.
-// `printSlot`: nur in der Aktiv-Gruppe gesetzt (s. renderQueue) — `true`
-// zeigt den Betreuerauslöser-Druckbutton, `false` reserviert die dritte
-// Grid-Spalte trotzdem leer (`.queue-group-active .queue-group-item[data-
-// student-id]`, s. scan.html), damit alle Zeilen der Aktiv-Box exakt
-// ausgerichtet bleiben; `undefined` (Fertig-Gruppe) rendert die Spalte gar
-// nicht erst — dort gilt weiterhin die 2-Spalten-Grid-Regel. Der Druckbutton
-// steht bewusst VOR dem Aufrufen-Pfeil.
-function renderQueueGroupItem(s, withCallBtn, printSlot) {
+// Stift-Icon (geometrischer Körper + Spitze) über einer geschwungenen Linie
+// (Andeutung einer Unterschrift) — Button für „Leihschein unterschreiben"
+// (s. renderQueueGroupItem/ICON_SIGN unten).
+const ICON_SIGN = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+  + '<path d="M14.5 3.5a2.1 2.1 0 0 1 3 3L8 16 4 17l1-4Z"/><line x1="12.5" y1="5.5" x2="15.5" y2="8.5"/>'
+  + '<path d="M3 21c2-2.5 4-2.5 6 0s4 2.5 6 0 4-2.5 6 0"/></svg>';
+// `actionSlot`: nur in der Aktiv-Gruppe gesetzt (s. renderQueue) — `'print'`
+// zeigt den Betreuerauslöser-Druckbutton, `'sign'` den „Leihschein
+// unterschreiben"-Button, `null` reserviert die dritte Grid-Spalte trotzdem
+// leer (`.queue-group-active .queue-group-item[data-student-id]`, s.
+// scan.html), damit alle Zeilen der Aktiv-Box exakt ausgerichtet bleiben;
+// `undefined` (Fertig-Gruppe) rendert die Spalte gar nicht erst — dort gilt
+// weiterhin die 2-Spalten-Grid-Regel. Beide Buttons stehen bewusst VOR dem
+// Aufrufen-Pfeil; sie schließen sich gegenseitig aus (Druckmodus endet, bevor
+// der Unterschriften-Modus beginnt).
+function renderQueueGroupItem(s, withCallBtn, actionSlot) {
   const form = (s.form || '').replace(/^Klasse\s+/i, '');
   const name = `${s.lastname}, ${s.firstname}`;
   const sidAttr = withCallBtn ? ` data-student-id="${escapeHtml(String(s.student_id))}"` : '';
   const info = withCallBtn ? queueInfoIcons(s) : '';
-  const helperPrintBtn = printSlot !== undefined
-    ? `<div class="qg-print">${printSlot
-        ? '<button class="helper-print-btn" title="Leihschein drucken" aria-label="Leihschein drucken">'
-          + '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
-          + '<polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>'
-          + '<rect x="6" y="14" width="12" height="8"/></svg></button>'
-        : ''}</div>`
-    : '';
+  let actionBtn = '';
+  if (actionSlot !== undefined) {
+    if (actionSlot === 'print') {
+      actionBtn = '<div class="qg-print"><button class="helper-print-btn" title="Leihschein drucken" aria-label="Leihschein drucken">'
+        + '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+        + '<polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>'
+        + '<rect x="6" y="14" width="12" height="8"/></svg></button></div>';
+    } else if (actionSlot === 'sign') {
+      actionBtn = `<div class="qg-print"><button class="helper-sign-btn" title="Leihschein unterschrieben" aria-label="Leihschein unterschrieben">${ICON_SIGN}</button></div>`;
+    } else {
+      actionBtn = '<div class="qg-print"></div>';
+    }
+  }
   const callBtn = withCallBtn ? '<div class="qg-call"><button class="call-btn" title="Aufrufen" aria-label="Aufrufen"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></button></div>' : '';
   return `<div class="queue-group-item"${sidAttr}>`
     + `<div class="qg-fach">${escapeHtml(form)}</div>`
-    + `<div class="qg-name">${escapeHtml(name)}</div>${info}${helperPrintBtn}${callBtn}</div>`;
+    + `<div class="qg-name">${escapeHtml(name)}</div>${info}${actionBtn}${callBtn}</div>`;
 }
 
 // Info-Spalte links vom Aufrufen-Button: rein INFORMATIVE Hinweise zu einem
@@ -256,12 +269,20 @@ function renderQueue() {
   // slip_trigger "helper" und nur für Schüler, die selbst schon in den
   // Druckmodus gewechselt sind und noch keinen laufenden/erledigten
   // Druckauftrag haben (s. server real_contexts_summary).
+  // Unterschreiben-Button: nur bei aktivem `done_signed` (Klasseneinstellung
+  // „Leihschein unterschreiben") und nur für Schüler, deren Leihschein bereits
+  // gedruckt ist und die auf dem Schülerclient in den Unterschriften-Modus
+  // gewechselt sind (`slip_signing`, gesetzt in `_mark_slip_printed`).
   const ctx = currentCtx();
   const helperTriggerActive = !!(ctx && ctx.slip_trigger === 'helper');
+  const doneSignedActive = !!(ctx && ctx.done_signed);
   if (active.length) {
-    html += `<div class="queue-group queue-group-active">${active.map(s => renderQueueGroupItem(
-      s, true, helperTriggerActive && !!s.print_mode && !s.slip_printing && !s.slip_printed,
-    )).join('')}</div>`;
+    html += `<div class="queue-group queue-group-active">${active.map(s => {
+      let action = null;
+      if (helperTriggerActive && s.print_mode && !s.slip_printing && !s.slip_printed) action = 'print';
+      else if (doneSignedActive && s.slip_signing) action = 'sign';
+      return renderQueueGroupItem(s, true, action);
+    }).join('')}</div>`;
   }
   if (done.length) {
     html += `<div class="queue-group queue-group-done">${done.map(s => renderQueueGroupItem(s, true)).join('')}</div>`;
@@ -373,6 +394,20 @@ bookRowsEl.addEventListener('click', (e) => {
   openPrintDialog(Number(sid));
 });
 
+// „Leihschein unterschreiben"-Button (vor dem Aufrufen-Pfeil, s.
+// renderQueueGroupItem): sendet direkt ohne Dialog — der Helfer bestätigt
+// damit nur, dass der bereits gedruckte, physische Leihschein unterschrieben
+// und abgegeben wurde. Der Server validiert erneut (Klasse + Schüler-Status),
+// bevor der Schüler abgeschlossen wird (s. server routes/ws.py
+// _handle_finish_signed).
+bookRowsEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.helper-sign-btn');
+  if (!btn) return;
+  const row = btn.closest('[data-student-id]');
+  const sid = row ? row.dataset.studentId : null;
+  if (sid == null || !ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({ type: 'finish_signed', student_id: Number(sid) }));
+});
 
 
 // ---- Countdown „Nächster Schüler in Xs" nach „Drucken & nächster Schüler" ----
