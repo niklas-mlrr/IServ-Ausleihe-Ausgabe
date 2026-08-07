@@ -300,7 +300,7 @@ function enterLeihscheinmodus(recipient) {
   workerPending = true;
   show('slip');
   const destination = recipient === 'teacher' ? 'beim Lehrer' : 'bei einem Betreuer';
-  const text = document.getElementById('slip-instruction');
+  const text = document.getElementById('slip-text');
   if (text) text.textContent = `Bitte unterschreibe den Leihschein und gib ihn ${destination} ab.`;
 }
 
