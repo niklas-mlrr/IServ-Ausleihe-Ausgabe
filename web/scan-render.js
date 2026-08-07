@@ -132,7 +132,7 @@ function renderBooks(books, animate = false) {
 // (s. renderQueueGroupItem/ICON_SIGN unten).
 const ICON_SIGN = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
   + '<path d="M14.5 3.5a2.1 2.1 0 0 1 3 3L8 16 4 17l1-4Z"/><line x1="12.5" y1="5.5" x2="15.5" y2="8.5"/>'
-  + '<path d="M3 21c2-2.5 4-2.5 6 0s4 2.5 6 0 4-2.5 6 0"/></svg>';
+  + '<path d="M2 20.5c1.3-1.7 2.2-1.5 3-.3.7 1 .6 1.8 1.8 1.3 1.6-.6 1.8-2.2 3.5-1.7.9.3 1.1 1.1 2 1L20.5 17.2"/></svg>';
 // `actionSlot`: nur in der Aktiv-Gruppe gesetzt (s. renderQueue) — `'print'`
 // zeigt den Betreuerauslöser-Druckbutton, `'sign'` den „Leihschein
 // unterschreiben"-Button, `null` reserviert die dritte Grid-Spalte trotzdem
