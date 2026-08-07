@@ -30,6 +30,10 @@
   (`server/sessions.py`) setzt `slip_signing` und broadcastet ebenso, sobald
   Helfer verbunden sind.
 - Volle Testsuite und `ruff check` grün.
+- Nachbesserung (Nutzer-Feedback): das Signatur-Icon war eine zu tiefe, zu
+  regelmäßige Sinuswelle (tiefster Punkt fast am Rand der 24×24-viewBox) —
+  ersetzt durch eine unregelmäßige, flachere Schwunglinie mit aufsteigendem
+  Abschluss-Strich, die eher nach Unterschrift als nach Welle aussieht.
 
 ## 2026-08-07 — Betreuerauslöser-Druckbutton im Helferclient
 
