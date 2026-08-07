@@ -610,7 +610,15 @@ async function openPrintDialog(targetStudentId) {
     printPickerErrEl.textContent = '';
     printPickerErrEl.style.display = 'none';
     slipCheck.checked = slipSecondPageDefault;
-    printPicker = mountPrinterPicker(printPickerEl, printerPool, printDefaultIds);
+    // Vorauswahl = Drucker-Allowlist der Klasse DIESES Schülers (Betreuer-
+    // auslöser-Button erscheint nur im gerade gewählten Klassen-Tab, s.
+    // renderQueue), nicht `printDefaultIds` — das ist die Vorauswahl der
+    // eigenen (zugewiesenen) Klasse des Helfers und könnte von einer anderen
+    // Klasse stammen, wenn der Helfer gerade einen fremden Tab betrachtet.
+    const ctx = currentCtx();
+    const targetDefaults = (ctx && Array.isArray(ctx.print_default_ids))
+      ? ctx.print_default_ids : printDefaultIds;
+    printPicker = mountPrinterPicker(printPickerEl, printerPool, targetDefaults);
     printModal.classList.add('show');
     updateFocusBanner();
     return;

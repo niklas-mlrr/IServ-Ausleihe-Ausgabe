@@ -737,13 +737,23 @@ class AppState:
         Host-Snapshot) — der Helfer-Client braucht beides für den
         Betreuerauslöser-Druckbutton in der Klassenliste (nur bei
         ``slip_trigger == "helper"`` und `print_mode`, ausgeblendet sobald ein
-        Auftrag bereits läuft)."""
+        Auftrag bereits läuft). ``print_default_ids`` (analog
+        `own_print_defaults`, aber je Kontext statt nur für den eigenen
+        Helfer-Kontext) — die Drucker-Allowlist DIESER Klasse, damit der
+        Betreuerauslöser-Druck-Dialog immer die für die Klasse erlaubten
+        Drucker vorauswählt, auch wenn der Helfer gerade einem anderen
+        Klassen-Kontext zugeordnet ist."""
         printing_ids = self.print_queue.in_flight_student_ids()
+        pool_ids = {p.id for p in self.settings.printers}
         return [
             {
                 "id": c.id,
                 "form": c.form,
                 "slip_trigger": c.slip_trigger,
+                "print_default_ids": (
+                    sorted(pool_ids) if c.allowed_printer_ids is None
+                    else sorted(c.allowed_printer_ids & pool_ids)
+                ),
                 "queue": [
                     s.as_dict(slip_printing=(s.student_id in printing_ids))
                     for s in c.queue if s.status == "pending"
