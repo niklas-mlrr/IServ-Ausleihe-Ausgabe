@@ -1103,6 +1103,14 @@ class PrintQueue:
         # entfällt der Snapshot-Aufwand komplett.
         if state.host_ws_connections:
             await hub.send_all_hosts(state.state_snapshot())
+        # Helfer-Clients (scan.html) live nachziehen: `slip_printing` steckt in
+        # `real_contexts_summary()` (Betreuerauslöser-Druckbutton in der
+        # Klassenliste muss verschwinden, sobald irgendein Helfer den Auftrag
+        # bereits gesendet hat — sonst könnte ein zweiter Helfer denselben
+        # Leihschein doppelt drucken). Ohne verbundene Helfer entfällt der
+        # Aufwand komplett.
+        if state.helper_sessions:
+            await hub.broadcast_queue_size(state)
         # Drucker-Displays (`/drucker-display`) erhalten bei jedem Druck-
         # Übergang ihre gefilterte Queue-Sicht — analog dem Host-Broadcast,
         # aber pro Display (s. sessions.broadcast_printer_displays). Ohne

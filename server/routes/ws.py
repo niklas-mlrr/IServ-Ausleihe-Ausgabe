@@ -575,6 +575,87 @@ async def _handle_print(state, hub, helper, websocket, raw) -> None:
     await state.print_queue.enqueue(job)
 
 
+async def _handle_print_for_student(state, hub, helper, websocket, raw) -> None:
+    """Betreuerauslöser: ein Helfer druckt stellvertretend für einen ANDEREN
+    Schüler aus der Klassenliste — anders als `_handle_print` (immer der
+    eigene zugewiesene `helper.student_id`). Nur erlaubt, wenn die Klasse des
+    Schülers „Betreuerauslöser" gewählt hat UND der Schüler selbst bereits in
+    den Druckmodus gewechselt ist (`QueueStudent.print_mode`, gesetzt beim WS
+    `print_mode`) — der Helfer-Client blendet den Button serverseitig
+    validiert genauso ein/aus (Client-Gate ist nur UI, kein Vertrauen).
+
+    Der Auftrag wird bewusst wie ein Schüler-Auftrag angelegt (`role=
+    "student"`, kein `helper_token`) — Anforderung: der Leihschein soll auf
+    dem Drucker-Display OHNE Helfername erscheinen, genau wie beim
+    automatischen/Schülerauslöser-Druck. `student_token` (falls die Modus-B-
+    Session noch verbunden ist) sorgt zusätzlich dafür, dass der Schüler auf
+    seinem eigenen Bildschirm den Druckfortschritt sieht.
+
+    Der `in_flight_student_ids()`-Check unmittelbar vor dem Enqueue verhindert
+    einen doppelten Druck, wenn zwei Helfer gleichzeitig auf den Button
+    klicken: da zwischen der Prüfung und `enqueue()` kein `await` liegt, ist
+    der Check-then-enqueue-Schritt gegen andere WS-Handler-Tasks atomar
+    (kooperatives asyncio-Scheduling) — der zweite Klick sieht den Auftrag des
+    ersten bereits in `in_flight_student_ids()` und wird abgewiesen. Der
+    Broadcast an alle Helfer (`PrintQueue._notify_all` → `broadcast_queue_size`)
+    blendet den Button danach fleet-weit aus."""
+    async def _reject(msg: str) -> None:
+        await hub.send_websocket(
+            websocket, {"type": "print_for_student_result", "ok": False, "msg": msg}
+        )
+
+    student_id = raw.get("student_id")
+    if not isinstance(student_id, int):
+        await _reject("Ungültiger Schüler")
+        return
+    found = state.find_student_with_ctx(student_id)
+    if found is None:
+        await _reject("Schüler nicht gefunden")
+        return
+    ctx, target = found
+    if (
+        ctx.slip_trigger != "helper"
+        or target.status != "active"
+        or not target.print_mode
+        or target.slip_printed
+        or student_id in state.print_queue.in_flight_student_ids()
+    ):
+        await _reject("Leihschein bereits gesendet oder nicht bereit")
+        return
+    if not state.settings.printers:
+        await _reject("Kein Drucker konfiguriert")
+        return
+    pool_ids = {p.id for p in state.settings.printers}
+    selected = raw.get("printers")
+    if selected is not None:
+        selected_ids = {pid for pid in selected if pid in pool_ids}
+        if not selected_ids:
+            await _reject("Bitte mindestens einen Drucker auswählen")
+            return
+        allowed = selected_ids
+    else:
+        allowed = allowed_printers_for(state, student_id)
+        if allowed is not None and not (allowed & pool_ids):
+            await _reject("Kein erlaubter Drucker im Pool für diese Klasse")
+            return
+    second_page = bool(raw.get("second_page"))
+    pages = None if second_page else "1"
+    name = _slip_name(target.lastname, target.firstname, target.form)
+    session = state.find_session_by_student(student_id)
+    job = PrintJob.create(
+        role="student",
+        student_id=student_id,
+        pages=pages,
+        name=name,
+        student_token=session.session_token if session is not None else None,
+        allowed_printers=allowed,
+    )
+    await state.print_queue.enqueue(job)
+    await hub.send_websocket(
+        websocket, {"type": "print_for_student_result", "ok": True, "detail": "gesendet"}
+    )
+
+
 async def _handle_scan(state, hub, helper, websocket, raw) -> None:
     barcode = str(raw.get("value", "")).strip()
     if not barcode:
@@ -635,6 +716,7 @@ _SCANNER_HANDLERS = {
     "peek_close": _handle_peek_close,
     "clear_book_alert": _handle_clear_book_alert,
     "print": _handle_print,
+    "print_for_student": _handle_print_for_student,
     "scan": _handle_scan,
 }
 
@@ -1164,12 +1246,22 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
                 # Sobald alle Bücher erledigt sind, braucht der Schülerclient
                 # die Playwright-Kartei nicht mehr. Die Modus-B-Session und der
                 # WebSocket bleiben für den Druckstatus bewusst bestehen.
-                if (
-                    session.state == "paired"
-                    and session.student_id is not None
-                    and release_student_worker(state, session.student_id)
-                ):
-                    await hub.broadcast_host(state.state_snapshot())
+                if session.state == "paired" and session.student_id is not None:
+                    released = release_student_worker(state, session.student_id)
+                    qs = state.find_student(session.student_id)
+                    # Betreuerauslöser: der Helfer-Client (scan.html) zeigt ab
+                    # hier in der Klassenliste den Druckbutton für diesen
+                    # Schüler (s. real_contexts_summary). Nur beim ERSTEN
+                    # Eintritt broadcasten, damit ein doppelt gesendetes
+                    # `print_mode`-Frame (Reconnect) keinen unnötigen
+                    # Zusatz-Broadcast auslöst.
+                    entered_print_mode = qs is not None and not qs.print_mode
+                    if qs is not None:
+                        qs.print_mode = True
+                    if released:
+                        await hub.broadcast_host(state.state_snapshot())
+                    if entered_print_mode and state.helper_sessions:
+                        await hub.broadcast_queue_size(state)
 
             elif mtype == "print_request":
                 # Druckmodus am Schülerclient (Modus B): Schüler hat alle

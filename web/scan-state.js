@@ -134,6 +134,10 @@ let slipSecondPageDefault = false;  // Host-Default für „Schüler-Leihschein"
 let printerPool = [];
 let printDefaultIds = [];
 let printPicker = null;             // gemountete Druckerauswahl (mountPrinterPicker)
+// Betreuerauslöser: der Druck-Dialog wird gerade für einen ANDEREN Schüler aus
+// der Klassenliste geöffnet (Klick auf den Druckbutton in der Aktiv-Gruppe),
+// nicht für den eigenen zugewiesenen Schüler. `null` = normaler Eigen-Druck.
+let printTargetStudentId = null;
 let pendingScans = 0;               // noch nicht quittierte Scans (Sequenzierung)
 let scanInFlight = false;            // genau ein Scan bis zum terminalen Ergebnis
 const scanWaiters = [];             // Resolver, die auf pendingScans===0 warten
@@ -189,6 +193,12 @@ function currentFullQueue() {
 }
 function currentQueueSize() {
   return currentQueue().length;
+}
+// Kontext-Objekt (mit slip_trigger) des gewählten Klassen-Tabs — für den
+// Betreuerauslöser-Druckbutton in der Aktiv-Gruppe (s. renderQueueGroupItem).
+function currentCtx() {
+  if (!contextsData.length) return null;
+  return contextsData.find(x => x.id === selectedCtxId) || contextsData[0];
 }
 
 // Vorauswahl des aktiven Tabs sichern: eigene Klasse (ownContextId) falls offen,

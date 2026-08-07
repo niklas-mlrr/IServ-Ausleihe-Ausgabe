@@ -104,6 +104,14 @@ class QueueStudent:
     # bestehende `done`-/Info-Badge-Darstellung behält; die Lehreransicht kann
     # den Eintrag dadurch korrekt als übersprungen ausweisen.
     auto_skipped: bool = False
+    # Schülerclient (Modus B) hat alle vorgemerkten Bücher gescannt und ist in
+    # den Druckmodus gewechselt (WS `print_mode`, s. routes/ws.py). Bei
+    # `slip_trigger == "helper"` druckt hier ausschließlich ein Helfer/Host
+    # stellvertretend — dieses Flag steuert, ob der Helfer-Client (scan.html)
+    # in der Klassenliste vor dem „Aufrufen"-Button einen Druckbutton zeigt
+    # (s. `real_contexts_summary`). Bleibt bei anderen `slip_trigger`-Werten
+    # ungenutzt (dort läuft der Druck über den Schülerclient selbst).
+    print_mode: bool = False
 
     def as_dict(self, *, slip_printing: bool = False) -> dict:
         return {
@@ -122,6 +130,7 @@ class QueueStudent:
             # abgeleitet (s. `AppState.state_snapshot`), nicht auf dem Schüler
             # gemutet. Default False hält die Helfer-Client-Pfade unverändert.
             "slip_printing": slip_printing,
+            "print_mode": self.print_mode,
             "slip_collected": self.slip_collected,
             "enrolled": self.enrolled,
             "paid": self.paid,
@@ -163,6 +172,7 @@ class QueueStudent:
         self.slip_printed = False
         self.slip_collected = False
         self.auto_skipped = False
+        self.print_mode = False
 
     @classmethod
     def from_iserv(cls, d: dict, *, form: str) -> QueueStudent:
@@ -721,13 +731,27 @@ class AppState:
         analog ``pending_queue_as_list``. Zusätzlich ``queue_all`` mit ALLEN
         Schülern (inkl. active/done/skipped) für die Gruppen-Boxen unter der
         Warteschlange im Helfer-Client — ``queue_size``/Tab-Badge bleiben
-        bewusst auf ``queue`` (nur pending) gestützt."""
+        bewusst auf ``queue`` (nur pending) gestützt.
+
+        ``slip_trigger`` je Kontext + ``slip_printing`` je Schüler (analog dem
+        Host-Snapshot) — der Helfer-Client braucht beides für den
+        Betreuerauslöser-Druckbutton in der Klassenliste (nur bei
+        ``slip_trigger == "helper"`` und `print_mode`, ausgeblendet sobald ein
+        Auftrag bereits läuft)."""
+        printing_ids = self.print_queue.in_flight_student_ids()
         return [
             {
                 "id": c.id,
                 "form": c.form,
-                "queue": [s.as_dict() for s in c.queue if s.status == "pending"],
-                "queue_all": [s.as_dict() for s in c.queue],
+                "slip_trigger": c.slip_trigger,
+                "queue": [
+                    s.as_dict(slip_printing=(s.student_id in printing_ids))
+                    for s in c.queue if s.status == "pending"
+                ],
+                "queue_all": [
+                    s.as_dict(slip_printing=(s.student_id in printing_ids))
+                    for s in c.queue
+                ],
             }
             for c in self.contexts.values()
             if not c.loading

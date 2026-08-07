@@ -127,15 +127,30 @@ function renderBooks(books, animate = false) {
 // Aktive den Schüler freigibt (server: spectate_student / end_student).
 // Fertige lassen sich erneut aufrufen (z. B. um nachträglich ein Buch zu
 // erfassen) — Aufruf-Pfeil wie bei den Wartenden.
-function renderQueueGroupItem(s, withCallBtn) {
+// `printSlot`: nur in der Aktiv-Gruppe gesetzt (s. renderQueue) — `true`
+// zeigt den Betreuerauslöser-Druckbutton, `false` reserviert die dritte
+// Grid-Spalte trotzdem leer (`.queue-group-active .queue-group-item[data-
+// student-id]`, s. scan.html), damit alle Zeilen der Aktiv-Box exakt
+// ausgerichtet bleiben; `undefined` (Fertig-Gruppe) rendert die Spalte gar
+// nicht erst — dort gilt weiterhin die 2-Spalten-Grid-Regel. Der Druckbutton
+// steht bewusst VOR dem Aufrufen-Pfeil.
+function renderQueueGroupItem(s, withCallBtn, printSlot) {
   const form = (s.form || '').replace(/^Klasse\s+/i, '');
   const name = `${s.lastname}, ${s.firstname}`;
   const sidAttr = withCallBtn ? ` data-student-id="${escapeHtml(String(s.student_id))}"` : '';
   const info = withCallBtn ? queueInfoIcons(s) : '';
+  const helperPrintBtn = printSlot !== undefined
+    ? `<div class="qg-print">${printSlot
+        ? '<button class="helper-print-btn" title="Leihschein drucken" aria-label="Leihschein drucken">'
+          + '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+          + '<polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>'
+          + '<rect x="6" y="14" width="12" height="8"/></svg></button>'
+        : ''}</div>`
+    : '';
   const callBtn = withCallBtn ? '<div class="qg-call"><button class="call-btn" title="Aufrufen" aria-label="Aufrufen"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></button></div>' : '';
   return `<div class="queue-group-item"${sidAttr}>`
     + `<div class="qg-fach">${escapeHtml(form)}</div>`
-    + `<div class="qg-name">${escapeHtml(name)}</div>${info}${callBtn}</div>`;
+    + `<div class="qg-name">${escapeHtml(name)}</div>${info}${helperPrintBtn}${callBtn}</div>`;
 }
 
 // Info-Spalte links vom Aufrufen-Button: rein INFORMATIVE Hinweise zu einem
@@ -237,13 +252,33 @@ function renderQueue() {
   // bei den wartenden Schülern (list) oben, die weiterhin je einen eigenen
   // Aufruf-Pfeil brauchen. Aktiv: Pfeil (Aufruf → Zuschauer, warten bis
   // frei). Fertig: Pfeil (erneutes Aufrufen), analog zu den Wartenden.
+  // Betreuerauslöser-Druckbutton: nur in der Aktiv-Gruppe, nur bei
+  // slip_trigger "helper" und nur für Schüler, die selbst schon in den
+  // Druckmodus gewechselt sind und noch keinen laufenden/erledigten
+  // Druckauftrag haben (s. server real_contexts_summary).
+  const ctx = currentCtx();
+  const helperTriggerActive = !!(ctx && ctx.slip_trigger === 'helper');
   if (active.length) {
-    html += `<div class="queue-group queue-group-active">${active.map(s => renderQueueGroupItem(s, true)).join('')}</div>`;
+    html += `<div class="queue-group queue-group-active">${active.map(s => renderQueueGroupItem(
+      s, true, helperTriggerActive && !!s.print_mode && !s.slip_printing && !s.slip_printed,
+    )).join('')}</div>`;
   }
   if (done.length) {
     html += `<div class="queue-group queue-group-done">${done.map(s => renderQueueGroupItem(s, true)).join('')}</div>`;
   }
   bookRowsEl.innerHTML = html;
+  // Betreuerauslöser: läuft für den Schüler, dessen Druck-Dialog gerade offen
+  // ist, inzwischen bereits ein Auftrag (anderer Helfer war schneller) oder
+  // ist der Button aus einem anderen Grund verschwunden (Klasse geschlossen,
+  // Trigger geändert, Schüler nicht mehr aktiv) → Dialog automatisch
+  // schließen, damit der Auftrag nur genau einmal gesendet wird.
+  if (printTargetStudentId != null) {
+    const stillEligible = active.some(s => (
+      s.student_id === printTargetStudentId
+      && helperTriggerActive && s.print_mode && !s.slip_printing && !s.slip_printed
+    ));
+    if (!stillEligible) closePrintModal();
+  }
   // Klassen-Spalte auf die längste Klasse setzen (s. maxClassWidth);
   // einheitliche 7px wie zwischen den Steuer-Elementen oben.
   const allEntries = [...list, ...active, ...done];
@@ -323,6 +358,19 @@ bookRowsEl.addEventListener('click', (e) => {
   setStatusText('Schüler wird aufgerufen …');
   bookRowsEl.innerHTML = '<div class="book-empty">Schüler wird geladen …</div>';
   ws.send(JSON.stringify({ type: 'call', student_id: Number(sid) }));
+});
+
+// Betreuerauslöser-Druckbutton (vor dem Aufrufen-Pfeil, s. renderQueueGroupItem):
+// öffnet denselben Druck-Dialog wie der eigene #print-btn, aber für einen
+// FREMDEN aktiven Schüler aus der Klassenliste — der Dialog merkt sich dafür
+// `printTargetStudentId` (s. openPrintDialog/sendPrint).
+bookRowsEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.helper-print-btn');
+  if (!btn) return;
+  const row = btn.closest('[data-student-id]');
+  const sid = row ? row.dataset.studentId : null;
+  if (sid == null) return;
+  openPrintDialog(Number(sid));
 });
 
 
@@ -530,6 +578,8 @@ bookAlertModal.addEventListener('click', (e) => { if (e.target === bookAlertModa
 function closePrintModal() {
   printModal.classList.remove('show');
   printPicker = null;
+  printTargetStudentId = null;
+  modalPrintNextBtn.style.display = '';
   updateFocusBanner();
 }
 
@@ -543,8 +593,28 @@ function showPrintError(text) {
 
 // Dialog öffnen: erst auf Abschluss laufender Scans warten, dann Warnung
 // (vorgemerkte, noch nicht gescannte Bücher) berechnen und Default setzen.
-async function openPrintDialog() {
+//
+// `targetStudentId` gesetzt (Betreuerauslöser-Button in der Klassenliste,
+// s. renderQueueGroupItem) → derselbe Dialog druckt für einen FREMDEN aktiven
+// Schüler statt für den eigenen zugewiesenen: die Scan-/Bücher-Warnung bezieht
+// sich nur auf den eigenen geladenen Schüler und entfällt hier (der Server hat
+// vor dem Einblenden des Buttons bereits geprüft, dass der Zielschüler wirklich
+// im Druckmodus ist); „Drucken & nächster Schüler" bleibt dem eigenen
+// Workflow vorbehalten und wird ausgeblendet (s. sendPrint/closePrintModal).
+async function openPrintDialog(targetStudentId) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  if (targetStudentId != null) {
+    printTargetStudentId = targetStudentId;
+    modalPrintNextBtn.style.display = 'none';
+    printWarnEl.style.display = 'none';
+    printPickerErrEl.textContent = '';
+    printPickerErrEl.style.display = 'none';
+    slipCheck.checked = slipSecondPageDefault;
+    printPicker = mountPrinterPicker(printPickerEl, printerPool, printDefaultIds);
+    printModal.classList.add('show');
+    updateFocusBanner();
+    return;
+  }
   if (!studentActive) { setStatusText('Kein Schüler zugewiesen'); return; }
   setStatusText('Prüfe Scans …');
   await waitForScans();
@@ -587,6 +657,18 @@ function sendPrint(thenNext) {
     showPrintError('Bitte mindestens einen Drucker auswählen.');
     return;
   }
+  if (printTargetStudentId != null) {
+    // Betreuerauslöser: für einen fremden Schüler aus der Klassenliste, kein
+    // eigener Druckauftrag — eigener wait-Statuszeile bleibt unberührt (s.
+    // scan-ws.js print_for_student_result), Dialog optimistisch schließen
+    // (verschwindet ohnehin fleet-weit, sobald der Broadcast eintrifft).
+    ws.send(JSON.stringify({
+      type: 'print_for_student', student_id: printTargetStudentId,
+      second_page: slipCheck.checked, printers: ids,
+    }));
+    closePrintModal();
+    return;
+  }
   printThenNext = thenNext;
   printBtn.disabled = true;
   // Druck beginn: aktive `print`-Meldung (Drucker-Status bleibt stehen, bis
@@ -599,7 +681,7 @@ function sendPrint(thenNext) {
   closePrintModal();
 }
 
-printBtn.addEventListener('click', openPrintDialog);
+printBtn.addEventListener('click', () => openPrintDialog());
 modalPrintBtn.addEventListener('click', () => sendPrint(false));
 modalPrintNextBtn.addEventListener('click', () => sendPrint(true));
 modalCancelBtn.addEventListener('click', closePrintModal);

@@ -351,11 +351,11 @@
     .book-row.queue-row { grid-template-columns: var(--queue-class-w, 4.5rem) 1fr auto auto; gap: 7px; background: transparent; border-color: transparent; padding-top: 0; padding-bottom: 0; }
     .book-row.queue-row .b-title { margin-left: 7px; }  /* Klasse↔Name: 7px gap + 7px = 14px */
     .book-row.queue-row .b-call { display: flex; justify-content: flex-end; align-items: center; }
-    .call-btn { display: inline-flex; align-items: center; justify-content: center;
+    .call-btn, .helper-print-btn { display: inline-flex; align-items: center; justify-content: center;
       padding: 7px 10px; font-size: 1.3rem; line-height: 1; border-radius: 8px;
       background: var(--surface-2); color: var(--fg); border: 1px solid var(--border); cursor: pointer; transition: background .2s; }
-    .call-btn:hover { background: var(--surface-3); }
-    .call-btn:active { background: var(--surface-4); }
+    .call-btn:hover, .helper-print-btn:hover { background: var(--surface-3); }
+    .call-btn:active, .helper-print-btn:active { background: var(--surface-4); }
     /* Info-Spalte links vom Aufrufen-Button: rechtsbündige Reihe kompakter
        Icons/Kurztexte (s. scan-render.js queueInfoIcons) — leer, wenn keine
        Infos vorliegen, nimmt dann keinen sichtbaren Platz ein. */
@@ -388,9 +388,15 @@
        book-row.queue-row. */
     .queue-group-item { display: grid; grid-template-columns: var(--queue-class-w, 4.5rem) 1fr; gap: 7px; align-items: center; }
     .queue-group-item[data-student-id] { grid-template-columns: var(--queue-class-w, 4.5rem) 1fr auto auto; }
+    /* Aktiv-Gruppe im Betreuerauslöser: dritte Spalte für den Druckbutton vor
+       dem Aufrufen-Pfeil (nur dort möglich vergeben, s. renderQueueGroupItem)
+       — die Spalte wird immer reserviert (leerer .qg-print ohne Button), damit
+       alle Zeilen derselben Box (auch ohne Druckbutton, z. B. „Fertig") exakt
+       gleich ausgerichtet bleiben. */
+    .queue-group-active .queue-group-item[data-student-id] { grid-template-columns: var(--queue-class-w, 4.5rem) 1fr auto auto auto; }
     .queue-group-item .qg-fach { font-weight: 600; }
     .queue-group-item .qg-name { margin-left: 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }  /* Klasse↔Name: 7px gap + 7px = 14px */
-    .queue-group-item .qg-call { display: flex; justify-content: flex-end; align-items: center; }
+    .queue-group-item .qg-call, .queue-group-item .qg-print { display: flex; justify-content: flex-end; align-items: center; }
     /* Bewegungsreduktion respektieren: FLIP-Transition praktisch sofort. */
     @media (prefers-reduced-motion: reduce) {
       .book-row { transition: transform .01ms !important; }

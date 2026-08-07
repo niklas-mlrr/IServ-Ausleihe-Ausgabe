@@ -221,6 +221,17 @@ function handleServerMessage(msg) {
       // Druck endgültig gescheitert → terminal (End-Meldung).
       setStatusText(printResultStatusText(msg), null, 'print', true);
     }
+  } else if (msg.type === 'print_for_student_result') {
+    // Betreuerauslöser-Druck für einen FREMDEN Schüler aus der Klassenliste
+    // (s. scan-render.js openPrintDialog/sendPrint mit printTargetStudentId).
+    // Anders als 'print_result' NICHT die eigene `print`-Statuszeile
+    // überschreiben — das wäre der Druckstatus eines anderen Schülers, nicht
+    // des eigenen zugewiesenen. Ein Erfolg braucht keine eigene Meldung: der
+    // Druckbutton verschwindet ohnehin fleet-weit, sobald der nächste
+    // contexts_update-Broadcast (PrintQueue._notify_all) eintrifft. Nur ein
+    // Fehlschlag (z. B. Wettlauf zweier Helfer) bekommt einen kurzen,
+    // transienten Hinweis in der neutralen 'trans'-Zeile.
+    if (!msg.ok) setStatusText(msg.msg || 'Leihschein konnte nicht gesendet werden', null, 'trans', true);
   } else if (msg.type === 'waiting') {
     studentActive = false;
     workerPending = false;
