@@ -10,22 +10,39 @@
 
 ## 2026-08-07 — „Leihschein erhalten"-Bestätigung im Druckmodus (Schülerclient)
 
-- Der Druckmodus (`view-print`) des Schülerclients (`student.js`/
-  `student.html`) sprang nach erfolgreichem Druck sofort automatisch weiter
-  (Leihscheinmodus bzw. Abschluss). Neu: nach „Leihschein gedruckt." bleibt
-  die Ansicht stehen und zeigt darunter den Button „Leihschein erhalten"; erst
-  ein Tipp darauf löst den vom Server bereits angekündigten nächsten Schritt
-  aus (`slip_mode`/`closed`, client-seitig als `pendingContinuation`
-  gepuffert, s. `awaitingSlipReceipt`).
+- Der Druckmodus (`view-print`) des Schülerclients sprang nach erfolgreichem
+  Druck sofort automatisch weiter (Leihscheinmodus bzw. Abschluss). Neu: nach
+  „Leihschein gedruckt." bleibt die Ansicht stehen und zeigt darunter den
+  Button „Leihschein erhalten"; optisch identisch zum „Leihschein
+  drucken"-Button (gleiche Breite/Abstand), nur mit anderem Label.
+- Der eigentliche Wechsel in den Leihscheinmodus bzw. der Auto-Abschluss
+  passiert jetzt **serverseitig erst nach der Bestätigung**, nicht mehr
+  automatisch mit dem physischen Druckende: `sessions._mark_slip_printed`
+  markiert nur noch `student.slip_printed` (Host-Badge); der neue
+  `sessions.confirm_slip_received()` — ausgelöst durch den neuen WS-Handler
+  `slip_received` in `server/routes/ws.py` (Klick auf „Leihschein
+  erhalten") — setzt danach `session.loan_slip_mode`/schickt `slip_mode` bzw.
+  ruft `end_student` und schickt `closed`. Neues Feld
+  `StudentSessionB.slip_receipt_confirmed` macht das idempotent.
+  Grund: ohne diese Verschiebung ließ ein Reload des Schülerclients zwischen
+  Druckende und Bestätigung den Vorgang so aussehen, als wäre der Button
+  bereits gedrückt worden (Server hatte den nächsten Schritt schon
+  unwiderruflich ausgelöst).
+- Reload-sicher: `worker_ready` trägt jetzt zusätzlich `slip_printed` — ist
+  gedruckt, aber noch nicht bestätigt, zeigt der Client beim (Re-)Connect
+  direkt wieder den Druckmodus mit sichtbarem Button (`web/student.js`:
+  `enterDruckmodusAwaitingReceipt()`), statt erneut zu drucken oder den
+  nächsten Schritt zu überspringen.
 - Der Button sendet zusätzlich `{type: "slip_received"}` über die Schüler-WS.
-  Neuer Handler in `server/routes/ws.py` ruft
-  `PrintQueue.clear_last_printed_for_student()` auf — löscht den „Gedruckt"-
-  Marker im Drucker-Display für diesen Schüler, falls er dort noch angezeigt
-  wird, und broadcastet die Displays neu. Damit gibt es jetzt drei
-  gleichberechtigte Wege, wie ein Name im Drucker-Display aus der „Gedruckt"-
-  Anzeige verschwindet: nächster fertiger Auftrag am selben Drucker (überschreibt),
-  30s-TTL (`_PRINTED_TTL_S`), oder „Leihschein erhalten" im Livemodus. `_last_printed`
-  trägt dafür neu die `student_id` im Tupel (fünftes Feld).
+  Derselbe Handler ruft auch `PrintQueue.clear_last_printed_for_student()`
+  auf — löscht den „Gedruckt"-Marker im Drucker-Display für diesen Schüler,
+  falls er dort noch angezeigt wird, und broadcastet die Displays neu. Damit
+  gibt es jetzt drei gleichberechtigte Wege, wie ein Name im Drucker-Display
+  aus der „Gedruckt"-Anzeige verschwindet: nächster fertiger Auftrag am
+  selben Drucker (überschreibt), 30s-TTL (`_PRINTED_TTL_S`, rein
+  client-seitig im Drucker-Display), oder „Leihschein erhalten" im
+  Livemodus. `_last_printed` trägt dafür neu die `student_id` im Tupel
+  (fünftes Feld).
 
 ## 2026-08-07 — „Leihschein unterschreiben"-Button im Helferclient
 

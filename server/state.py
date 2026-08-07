@@ -114,7 +114,7 @@ class QueueStudent:
     print_mode: bool = False
     # Leihschein wurde gedruckt UND die Klasse hat „Leihschein unterschreiben"
     # aktiv (`ClassContext.done_signed`) → der Schülerclient zeigt den
-    # Unterschriften-Modus (`_mark_slip_printed`, setzt zugleich
+    # Unterschriften-Modus (`sessions.confirm_slip_received`, setzt zugleich
     # `session.loan_slip_mode`). Steuert den „Leihschein unterschreiben"-
     # Button vor dem „Aufrufen"-Button im Helfer-Client (s.
     # `real_contexts_summary`) — Klick schließt den Schüler ab (analog dem
@@ -327,6 +327,13 @@ class StudentSessionB:
     # oder Lehrkraftname.
     loan_slip_mode: bool = False
     loan_slip_recipient: str | None = None  # "helper" oder "teacher"
+    # Schülerclient hat „Leihschein erhalten" bestätigt (WS `slip_received`,
+    # s. `sessions.confirm_slip_received`). Erst dann wechselt die Session in
+    # den Unterschriften-Modus bzw. schließt automatisch ab — ein
+    # Reload/Reconnect zwischen physischem Druckende und dieser Bestätigung
+    # darf den Wechsel nicht vorwegnehmen. Idempotenz-Guard, falls der Client
+    # `slip_received` doppelt sendet.
+    slip_receipt_confirmed: bool = False
     created_at: datetime = field(default_factory=datetime.now)
     paired_at: datetime | None = None
     last_activity: datetime = field(default_factory=datetime.now)

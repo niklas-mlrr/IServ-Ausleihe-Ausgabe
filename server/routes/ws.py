@@ -19,6 +19,7 @@ from ..sessions import (
     assign_student_to_helper,
     broadcast_printer_displays,
     broadcast_student_info_to_spectators,
+    confirm_slip_received,
     end_student,
     gen_registration_code,
     hydrate_student_info,
@@ -665,7 +666,7 @@ async def _handle_finish_signed(state, hub, helper, websocket, raw) -> None:
     Host-Button „Abschließen" (`/api/finish`). Nur erlaubt, wenn die Klasse
     des Schülers „Leihschein unterschreiben" aktiv hat (`ClassContext.
     done_signed`) UND der Schüler selbst im Unterschriften-Modus ist
-    (`QueueStudent.slip_signing`, gesetzt in `_mark_slip_printed`) — der
+    (`QueueStudent.slip_signing`, gesetzt in `confirm_slip_received`) — der
     Helfer-Client blendet den Button serverseitig validiert genauso ein/aus
     (Client-Gate ist nur UI, kein Vertrauen)."""
     async def _reject(msg: str) -> None:
@@ -1204,6 +1205,11 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
                         "slip_trigger": slip_trigger_for(state, session.student_id),
                         "slip_mode": session.loan_slip_mode,
                         "slip_recipient": session.loan_slip_recipient,
+                        # Gedruckt, aber noch nicht bestätigt (Reload
+                        # zwischen Druckende und „Leihschein erhalten") — der
+                        # Client soll den Druckmodus mit sichtbarem Button
+                        # fortsetzen, nicht erneut drucken.
+                        "slip_printed": bool(qs and qs.slip_printed),
                     },
                 )
             # Blockierendes Ausgemustert-Hinweis-Modal überlebt einen Reconnect
@@ -1311,8 +1317,9 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
                 # Klassen-Druck-Allowlist; Progress/Result kommen via
                 # `print_progress`/`print_result` zurück (Routing via
                 # `student_token`). Read-only PDF-Abruf + lokaler Druck, kein
-                # IServ-Submit. Nach erfolgreichem Druck auto-fertig via
-                # `_mark_slip_printed` (sendet `closed`).
+                # IServ-Submit. Nach erfolgreichem Druck UND bestätigtem
+                # `slip_received` auto-fertig via `confirm_slip_received`
+                # (sendet `closed`).
                 if session.state != "paired" or session.student_id is None:
                     await hub.send_websocket(
                         websocket,
@@ -1390,16 +1397,22 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
 
             elif mtype == "slip_received":
                 # Schüler bestätigt „Leihschein erhalten" im Druckmodus (Modus
-                # B): löscht — falls noch vorhanden — den „Gedruckt"-Marker im
-                # Drucker-Display für diesen Schüler. Dritter Entfernungsweg
-                # neben „nächster Auftrag fertig" und 30s-TTL; idempotent,
-                # falls dort längst nichts mehr angezeigt wird.
+                # B). Zwei unabhängige Effekte: (1) löscht — falls noch
+                # vorhanden — den „Gedruckt"-Marker im Drucker-Display für
+                # diesen Schüler (dritter Entfernungsweg neben „nächster
+                # Auftrag fertig" und 30s-TTL; idempotent, falls dort längst
+                # nichts mehr angezeigt wird); (2) erst hier, nicht schon beim
+                # physischen Druckende, wechselt die Session in den
+                # Unterschriften-Modus bzw. schließt automatisch ab
+                # (`confirm_slip_received`) — ein Reload zwischen Druckende
+                # und Bestätigung darf den Wechsel nicht vorwegnehmen.
                 if session.student_id is not None:
                     cleared = await state.print_queue.clear_last_printed_for_student(
                         session.student_id
                     )
                     if cleared:
                         await broadcast_printer_displays(state)
+                    await confirm_slip_received(state, session.student_id)
 
             elif mtype == "finish":
                 # Schüler schließt selbst ab → harter Zugriffsentzug.

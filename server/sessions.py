@@ -760,7 +760,12 @@ async def _mark_slip_printed(state: AppState, student_id: int) -> None:
 
     Diese Funktion wird ausschließlich nach der Druckerwarteschlange aufgerufen,
     wenn der OS-Druckauftrag abgeschlossen ist. Das bloße Absenden an den
-    Drucker darf den Modus-B-Schüler noch nicht abschließen.
+    Drucker darf den Modus-B-Schüler noch nicht abschließen — der eigentliche
+    Wechsel (Unterschriften-Modus bzw. Auto-Fertig) passiert erst in
+    `confirm_slip_received`, sobald der Schülerclient „Leihschein erhalten"
+    bestätigt. So zeigt ein Reload des Schülerclients zwischen physischem
+    Druckende und dieser Bestätigung weiterhin den Druckmodus (mit dem
+    Button) statt fälschlich schon den nächsten Schritt.
     """
     student = state.find_student(student_id)
     if student is None or student.slip_printed:
@@ -770,50 +775,63 @@ async def _mark_slip_printed(state: AppState, student_id: int) -> None:
         await get_hub().broadcast_host(state.state_snapshot())
     except Exception:  # noqa: BLE001 — Druck darf an einem Broadcast nicht scheitern
         log.debug("Host-Broadcast nach Leihschein-Druck fehlgeschlagen", exc_info=True)
-    # Ist das Unterschreiben für die Klasse aktiv, bleibt der Modus-B-Schüler
-    # nach dem Druck offen. Der Client zeigt den Leihscheinmodus; der Host kann
-    # ihn nach der physischen Übergabe wie bisher über „Abschließen" beenden.
-    # `done_collected` wählt dabei nur den angezeigten Empfänger (Betreuer oder
-    # Lehrer) und wird nicht als Schüler-/Lehrkraftname an den Client gegeben.
+
+
+async def confirm_slip_received(state: AppState, student_id: int) -> None:
+    """Schülerclient bestätigt „Leihschein erhalten" (WS `slip_received`,
+    nach `_mark_slip_printed`). Erst hier — nicht schon beim physischen
+    Druckende — wechselt der Modus-B-Schüler in den Unterschriften-Modus
+    (Klasse mit `done_signed`) bzw. schließt automatisch ab. Kein Effekt, wenn
+    noch nicht gedruckt, keine passende Session (mehr) existiert, oder bereits
+    bestätigt wurde (Idempotenz, s. `loan_slip_received`/`slip_receipt_confirmed`).
+
+    `done_collected` wählt dabei nur den angezeigten Empfänger (Betreuer oder
+    Lehrer) und wird nicht als Schüler-/Lehrkraftname an den Client gegeben.
+    """
+    student = state.find_student(student_id)
+    if student is None or not student.slip_printed:
+        return
     session = state.find_session_by_student(student_id)
-    if session is not None and session.state == "paired":
-        done_signed, done_collected = slip_signature_options_for(state, student_id)
-        if done_signed:
-            session.loan_slip_mode = True
-            session.loan_slip_recipient = "teacher" if done_collected else "helper"
-            student.slip_signing = True
-            if session.ws is not None:
-                await get_hub().send_websocket(
-                    session.ws,
-                    {
-                        "type": "slip_mode",
-                        "recipient": session.loan_slip_recipient,
-                    },
-                )
-            # Helfer-Client (scan.html) live nachziehen: der „Leihschein
-            # unterschreiben"-Button in der Klassenliste (s.
-            # real_contexts_summary) muss erscheinen, sobald der Schüler in
-            # den Unterschriften-Modus gewechselt ist. Ohne verbundene Helfer
-            # entfällt der Aufwand komplett.
-            if state.helper_sessions:
-                try:
-                    await get_hub().broadcast_queue_size(state)
-                except Exception:  # noqa: BLE001 — analog Host-Broadcast oben
-                    log.debug(
-                        "Helfer-Broadcast nach Leihschein-Druck fehlgeschlagen", exc_info=True
-                    )
-            return
-        # Ohne Unterschriftenmodus geht der Modus-B-Schüler nach dem Druck
-        # automatisch auf „abgeschlossen" — unabhängig davon, wer den Druck
-        # ausgelöst hat. Modus-A-Schüler haben keine Modus-B-Session und
-        # bleiben unberührt (Host beendet sie wie bisher).
-        try:
-            await end_student(
-                state, get_hub(), student_id,
-                queue_status="done", session_state="completed",
+    if session is None or session.state != "paired" or session.slip_receipt_confirmed:
+        return
+    session.slip_receipt_confirmed = True
+    done_signed, done_collected = slip_signature_options_for(state, student_id)
+    if done_signed:
+        session.loan_slip_mode = True
+        session.loan_slip_recipient = "teacher" if done_collected else "helper"
+        student.slip_signing = True
+        if session.ws is not None:
+            await get_hub().send_websocket(
+                session.ws,
+                {
+                    "type": "slip_mode",
+                    "recipient": session.loan_slip_recipient,
+                },
             )
-        except Exception:  # noqa: BLE001 — Auto-Fertig darf den Druckerfolg nicht widerrufen
-            log.debug("Auto-Fertig (Modus B) nach Leihschein-Druck fehlgeschlagen", exc_info=True)
+        # Helfer-Client (scan.html) live nachziehen: der „Leihschein
+        # unterschreiben"-Button in der Klassenliste (s.
+        # real_contexts_summary) muss erscheinen, sobald der Schüler in
+        # den Unterschriften-Modus gewechselt ist. Ohne verbundene Helfer
+        # entfällt der Aufwand komplett.
+        if state.helper_sessions:
+            try:
+                await get_hub().broadcast_queue_size(state)
+            except Exception:  # noqa: BLE001 — analog Host-Broadcast oben
+                log.debug(
+                    "Helfer-Broadcast nach Leihschein-Bestätigung fehlgeschlagen", exc_info=True
+                )
+        return
+    # Ohne Unterschriftenmodus geht der Modus-B-Schüler nach der Bestätigung
+    # automatisch auf „abgeschlossen" — unabhängig davon, wer den Druck
+    # ausgelöst hat. Modus-A-Schüler haben keine Modus-B-Session und
+    # bleiben unberührt (Host beendet sie wie bisher).
+    try:
+        await end_student(
+            state, get_hub(), student_id,
+            queue_status="done", session_state="completed",
+        )
+    except Exception:  # noqa: BLE001 — Auto-Fertig darf die Bestätigung nicht widerrufen
+        log.debug("Auto-Fertig (Modus B) nach Leihschein-Bestätigung fehlgeschlagen", exc_info=True)
 
 
 async def _download_slip_to_host(
@@ -1523,6 +1541,7 @@ async def load_and_push_paired_student(
                 "slip_trigger": slip_trigger_for(state, student.student_id),
                 "slip_mode": session.loan_slip_mode,
                 "slip_recipient": session.loan_slip_recipient,
+                "slip_printed": student.slip_printed,
             },
         )
 

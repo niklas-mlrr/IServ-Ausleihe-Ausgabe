@@ -45,12 +45,13 @@ let slipTrigger = 'auto';
 let druckmodusEntered = false;       // Druckmodus bereits betreten (nur 1× pro Session)
 let printSent = false;               // Druckauftrag bereits gesendet
 let slipModeEntered = false;         // Leihschein nach dem Druck bereits angezeigt
-// Nach dem Druck wartet die Ansicht auf „Leihschein erhalten", bevor es
-// weitergeht (Leihscheinmodus bzw. Abschluss). `pendingContinuation` puffert
-// die vom Server bereits angekündigte Folgeaktion (slip_mode/closed), die erst
-// beim Antippen des Buttons ausgeführt wird.
-let awaitingSlipReceipt = false;
-let pendingContinuation = null;
+// Nach dem Druck wartet die Ansicht auf „Leihschein erhalten" (Button), bevor
+// es weitergeht. Der eigentliche Wechsel (Leihscheinmodus/Abschluss) läuft
+// serverseitig (`confirm_slip_received`) erst NACH dieser Bestätigung — nicht
+// schon beim Druckende — damit ein Reload zwischen Druckende und Bestätigung
+// weiterhin den Druckmodus mit sichtbarem Button zeigt statt den nächsten
+// Schritt vorwegzunehmen. `slipReceiptSent` verhindert nur Doppel-Klicks.
+let slipReceiptSent = false;
 
 function showError(title, text) {
   if (title) document.getElementById('error-title').textContent = title;
@@ -141,6 +142,13 @@ function handleServerMessage(msg) {
       enterLeihscheinmodus(msg.slip_recipient);
       return;
     }
+    if (msg.slip_printed) {
+      // Bereits gedruckt, aber „Leihschein erhalten" server-seitig noch
+      // nicht bestätigt (z. B. Reload zwischen Druckende und Bestätigung) —
+      // Druckmodus mit sichtbarem Button fortsetzen, NICHT erneut drucken.
+      enterDruckmodusAwaitingReceipt();
+      return;
+    }
     setStatusText('Scanner bereit — Buch scannen');
     maybeEnterDruckmodus();   // Randfall: schon beim Laden alles erledigt
   } else if (msg.type === 'scan_result') {
@@ -203,16 +211,11 @@ function handleServerMessage(msg) {
   } else if (msg.type === 'print_result') {
     handlePrintResult(msg);
   } else if (msg.type === 'slip_mode') {
-    // Nach eigenem Druck wartet der Client auf „Leihschein erhalten" — der
-    // Wechsel in den Leihscheinmodus wird bis zum Tippen gepuffert (s.
-    // handlePrintResult/printReceivedBtn). Außerhalb des Druckmodus (z. B.
-    // Helferauslöser) sofort wechseln wie bisher.
-    if (awaitingSlipReceipt) pendingContinuation = () => enterLeihscheinmodus(msg.recipient);
-    else enterLeihscheinmodus(msg.recipient);
+    // Kommt serverseitig erst NACH der „Leihschein erhalten"-Bestätigung
+    // (`slip_received`) — hier also stets direkt anzeigen.
+    enterLeihscheinmodus(msg.recipient);
   } else if (msg.type === 'closed') {
-    const doClose = () => { finished = true; clearToken(); show('done'); };
-    if (awaitingSlipReceipt) pendingContinuation = doClose;
-    else doClose();
+    finished = true; clearToken(); show('done');
   } else if (msg.type === 'error') {
     setStatusText('Fehler: ' + (msg.msg || ''));
   }
@@ -268,6 +271,23 @@ function enterDruckmodus() {
       if (actions) actions.style.display = 'none';
       break;
   }
+}
+
+// Reload/Reconnect zwischen physischem Druckende und „Leihschein erhalten":
+// direkt im „gedruckt"-Zustand mit sichtbarem Button fortsetzen, ohne
+// erneut zu drucken (s. worker_ready-Feld `slip_printed`).
+function enterDruckmodusAwaitingReceipt() {
+  druckmodusEntered = true;
+  printSent = true;
+  show('print');
+  const title = document.getElementById('print-title');
+  const text = document.getElementById('print-text');
+  const actions = document.getElementById('print-actions');
+  const receivedActions = document.getElementById('print-received-actions');
+  if (title) title.textContent = 'Leihschein Drucken';
+  if (actions) actions.style.display = 'none';
+  if (text) text.textContent = 'Leihschein gedruckt.';
+  if (receivedActions) receivedActions.style.display = '';
 }
 
 function enterLeihscheinmodus(recipient) {
@@ -337,11 +357,10 @@ function handlePrintResult(msg) {
   if (!views.print.classList.contains('show')) return;   // z. B. schon auf done
   const text = document.getElementById('print-text');
   if (msg.ok) {
-    // Gedruckt — dieselbe Meldung wie im Helferclient anzeigen und mit dem
-    // Weitergehen (Leihscheinmodus/Abschluss) auf „Leihschein erhalten"
-    // warten, statt sofort umzuschalten.
+    // Gedruckt — dieselbe Meldung wie im Helferclient anzeigen; das
+    // Weitergehen (Leihscheinmodus/Abschluss) löst erst der Server nach dem
+    // Antippen von „Leihschein erhalten" aus (s. printReceivedBtn).
     if (text) text.textContent = studentPrintResultStatusText(msg);
-    awaitingSlipReceipt = true;
     const receivedActions = document.getElementById('print-received-actions');
     if (receivedActions) receivedActions.style.display = '';
   } else {
@@ -461,23 +480,19 @@ if (printTriggerBtn) {
   });
 }
 
-// „Leihschein erhalten": bestätigt den Empfang, räumt — falls noch nicht
-// durch nächsten Druck/30s-TTL geschehen — den „Gedruckt"-Marker im
-// Drucker-Display auf und führt die vom Server bereits angekündigte
-// Folgeaktion (Leihscheinmodus/Abschluss) aus.
+// „Leihschein erhalten": bestätigt den Empfang. Der Server räumt — falls
+// noch nicht durch nächsten Druck/30s-TTL geschehen — den „Gedruckt"-Marker
+// im Drucker-Display auf und löst danach erst die Folgeaktion
+// (Leihscheinmodus/Abschluss, `slip_mode`/`closed`) aus.
 const printReceivedBtn = document.getElementById('print-received-btn');
 if (printReceivedBtn) {
   printReceivedBtn.addEventListener('click', () => {
-    awaitingSlipReceipt = false;
+    if (slipReceiptSent) return;
+    slipReceiptSent = true;
     const receivedActions = document.getElementById('print-received-actions');
     if (receivedActions) receivedActions.style.display = 'none';
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'slip_received' }));
-    }
-    if (pendingContinuation) {
-      const fn = pendingContinuation;
-      pendingContinuation = null;
-      fn();
     }
   });
 }
@@ -534,8 +549,7 @@ function renderStudent(s, overridden) {
   druckmodusEntered = false;
   printSent = false;
   slipTrigger = 'auto';
-  awaitingSlipReceipt = false;
-  pendingContinuation = null;
+  slipReceiptSent = false;
   const receivedActions = document.getElementById('print-received-actions');
   if (receivedActions) receivedActions.style.display = 'none';
   document.getElementById('book-rows').innerHTML =

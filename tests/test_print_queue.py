@@ -163,12 +163,15 @@ def test_pipeline_completes_all_in_order(monkeypatch):
 
 
 def test_student_session_closes_only_after_print_completion(monkeypatch):
-    """Der Schülerclient bleibt während des OS-Druckauftrags offen.
+    """Der Schülerclient bleibt während des OS-Druckauftrags offen — und auch
+    danach, bis der Schülerclient „Leihschein erhalten" bestätigt hat.
 
     Der erfolgreiche Backend-Dispatch darf noch keinen `closed`-Push auslösen;
     erst wenn der Tracker den Auftrag als `absent` erkennt, wird der Leihschein
-    markiert und die Modus-B-Session abgeschlossen.
-    """
+    markiert. Der eigentliche Abschluss (`closed`) folgt erst auf
+    `confirm_slip_received` (WS `slip_received`) — nicht automatisch mit dem
+    Druckende, damit ein Reload zwischen Druckende und Bestätigung nicht wie
+    ein bereits abgeschlossener Vorgang wirkt."""
     st = AppState()
     _patch(monkeypatch, st)
     pq = st.print_queue
@@ -225,14 +228,26 @@ def test_student_session_closes_only_after_print_completion(monkeypatch):
         assert not any(m["type"] == "closed" for m in student_ws.sent)
 
         os_states[42] = "absent"
+        await asyncio.wait_for(job.done.wait(), timeout=5)
+        await asyncio.sleep(0.05)
+
+        # Physisch fertig, aber noch nicht bestätigt → Session bleibt offen,
+        # kein `closed` bisher.
+        assert job.status == "done"
+        assert "student-token" in st.student_sessions
+        assert student.slip_printed is True
+        assert student.status == "active"
+        assert not any(m["type"] == "closed" for m in student_ws.sent)
+
+        # „Leihschein erhalten" bestätigt (simuliert WS `slip_received`) →
+        # erst jetzt schließt die Session ab.
+        await sessions.confirm_slip_received(st, 42)
 
         async def session_is_closed():
             while "student-token" in st.student_sessions:
                 await asyncio.sleep(0.01)
 
         await asyncio.wait_for(session_is_closed(), timeout=5)
-        assert job.status == "done"
-        assert student.slip_printed is True
         assert student.status == "done"
         types = [m["type"] for m in student_ws.sent]
         assert types.index("print_result") < types.index("closed")
@@ -249,7 +264,9 @@ def test_student_session_enters_slip_mode_when_signature_required(
     monkeypatch, done_collected, recipient
 ):
     """Bei aktivierter Unterschrift bleibt Modus B nach dem Druck offen und
-    erhält das richtige Übergabeziel für den Schülerclient."""
+    erhält das richtige Übergabeziel für den Schülerclient — der Wechsel in
+    den Unterschriften-Modus passiert dabei erst nach `confirm_slip_received`
+    (WS `slip_received`), nicht schon automatisch mit dem Druckende."""
     st = AppState()
     _patch(monkeypatch, st)
     pq = st.print_queue
@@ -293,6 +310,13 @@ def test_student_session_enters_slip_mode_when_signature_required(
     assert student.slip_printed is True
     assert student.status == "active"
     assert session.state == "paired"
+    # Gedruckt, aber noch nicht bestätigt → kein Unterschriften-Modus, kein
+    # `slip_mode`-Push.
+    assert session.loan_slip_mode is False
+    assert not any(m["type"] == "slip_mode" for m in student_ws.sent)
+
+    asyncio.run(sessions.confirm_slip_received(st, 43))
+
     assert session.loan_slip_mode is True
     assert session.loan_slip_recipient == recipient
     slip_modes = [m for m in student_ws.sent if m["type"] == "slip_mode"]
@@ -1458,7 +1482,9 @@ def test_display_view_printed_carries_job_id_and_originator():
     st.helper_sessions["tok-h"] = HelperSession(token="tok-h", name="Anna")
     pq = st.print_queue
     job = _job("helper", 1, helper_token="tok-h", name="A (5a)")
-    pq._last_printed["p1"] = (job.name, pq._originator_info(st, job), job.id, time.time(), job.student_id)
+    pq._last_printed["p1"] = (
+        job.name, pq._originator_info(st, job), job.id, time.time(), job.student_id,
+    )
     v = pq.display_view(st, ["p1"])
     p1 = v["printers"][0]
     assert p1["printed_name"] == "A (5a)"
