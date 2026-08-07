@@ -1458,7 +1458,7 @@ def test_display_view_printed_carries_job_id_and_originator():
     st.helper_sessions["tok-h"] = HelperSession(token="tok-h", name="Anna")
     pq = st.print_queue
     job = _job("helper", 1, helper_token="tok-h", name="A (5a)")
-    pq._last_printed["p1"] = (job.name, pq._originator_info(st, job), job.id, time.time())
+    pq._last_printed["p1"] = (job.name, pq._originator_info(st, job), job.id, time.time(), job.student_id)
     v = pq.display_view(st, ["p1"])
     p1 = v["printers"][0]
     assert p1["printed_name"] == "A (5a)"
@@ -1466,7 +1466,7 @@ def test_display_view_printed_carries_job_id_and_originator():
     assert p1["printed_originator"] == {"type": "helper", "name": "Anna"}
     assert p1["printed_expires_in"] is not None
     # Abgelaufen → alles None.
-    pq._last_printed["p1"] = (job.name, pq._originator_info(st, job), job.id, 0.0)
+    pq._last_printed["p1"] = (job.name, pq._originator_info(st, job), job.id, 0.0, job.student_id)
     v2 = pq.display_view(st, ["p1"])
     assert v2["printers"][0]["printed_name"] is None
     assert v2["printers"][0]["printed_job_id"] is None

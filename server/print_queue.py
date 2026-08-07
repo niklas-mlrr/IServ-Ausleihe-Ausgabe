@@ -175,7 +175,7 @@ class PrintQueue:
         # Letzter gedruckter Auftrag pro Drucker: (Name, Auftraggeber, Zeit).
         # Auftraggeber = strukturierter Dict ({type, name}) fürs Drucker-Display
         # (Helfer-Symbol + Name bzw. Laptop-Symbol bei Host-Aufträgen).
-        self._last_printed: dict[str, tuple[str, dict, str, float]] = {}
+        self._last_printed: dict[str, tuple[str, dict, str, float, int]] = {}
 
     # ---- Lebenszyklus --------------------------------------------------
 
@@ -427,6 +427,7 @@ class PrintQueue:
                                         self._originator_info(get_state(), other),
                                         other.id,
                                         time.time(),
+                                        other.student_id,
                                     )
                                     other.done.set()
                                     finalized_preds.append(other)
@@ -465,7 +466,7 @@ class PrintQueue:
 
             self._last_printed[printer_id] = (
                 job.name, self._originator_info(get_state(), job),
-                job.id, time.time(),
+                job.id, time.time(), job.student_id,
             )
             job.done.set()
             finalized = job
@@ -488,6 +489,22 @@ class PrintQueue:
         from .state import get_state
 
         await _mark_slip_printed(get_state(), job.student_id)
+
+    async def clear_last_printed_for_student(self, student_id: int) -> bool:
+        """Löscht den „Gedruckt"-Marker im Drucker-Display für `student_id`,
+        falls dort noch der Auftrag dieses Schülers angezeigt wird (dritter
+        Entfernungsweg neben „nächster Auftrag fertig" und 30s-TTL, s.
+        `pool_summary`). Der Schülerclient ruft dies beim Antippen von
+        „Leihschein erhalten" auf. Kein Treffer (bereits überschrieben/
+        abgelaufen) → `False`, kein weiterer Effekt (idempotent)."""
+        async with self._lock:
+            for printer_id, rec in list(self._last_printed.items()):
+                _name, _originator, _job_id, finished_at, rec_student_id = rec
+                if rec_student_id != student_id:
+                    continue
+                del self._last_printed[printer_id]
+                return time.time() - finished_at < _PRINTED_TTL_S
+        return False
 
     def in_flight_student_ids(self) -> set[int]:
         """student_ids mit aktuell laufendem Druckauftrag (zentrale Warteschlange
@@ -957,7 +974,7 @@ class PrintQueue:
                 p["printed_job_id"] = None
                 p["printed_expires_in"] = None
                 continue
-            name, originator, job_id, finished_at = rec
+            name, originator, job_id, finished_at, _student_id = rec
             elapsed = now - finished_at
             if elapsed < _PRINTED_TTL_S:
                 p["printed_name"] = name

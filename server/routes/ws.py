@@ -17,6 +17,7 @@ from ..sessions import (
     advance_helper,
     allowed_printers_for,
     assign_student_to_helper,
+    broadcast_printer_displays,
     broadcast_student_info_to_spectators,
     end_student,
     gen_registration_code,
@@ -1386,6 +1387,19 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
                 )
                 await state.print_queue.enqueue(job)
                 await hub.broadcast_host(state.state_snapshot())
+
+            elif mtype == "slip_received":
+                # Schüler bestätigt „Leihschein erhalten" im Druckmodus (Modus
+                # B): löscht — falls noch vorhanden — den „Gedruckt"-Marker im
+                # Drucker-Display für diesen Schüler. Dritter Entfernungsweg
+                # neben „nächster Auftrag fertig" und 30s-TTL; idempotent,
+                # falls dort längst nichts mehr angezeigt wird.
+                if session.student_id is not None:
+                    cleared = await state.print_queue.clear_last_printed_for_student(
+                        session.student_id
+                    )
+                    if cleared:
+                        await broadcast_printer_displays(state)
 
             elif mtype == "finish":
                 # Schüler schließt selbst ab → harter Zugriffsentzug.

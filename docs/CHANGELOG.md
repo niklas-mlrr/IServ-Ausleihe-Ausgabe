@@ -8,6 +8,25 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-07 — „Leihschein erhalten"-Bestätigung im Druckmodus (Schülerclient)
+
+- Der Druckmodus (`view-print`) des Schülerclients (`student.js`/
+  `student.html`) sprang nach erfolgreichem Druck sofort automatisch weiter
+  (Leihscheinmodus bzw. Abschluss). Neu: nach „Leihschein gedruckt." bleibt
+  die Ansicht stehen und zeigt darunter den Button „Leihschein erhalten"; erst
+  ein Tipp darauf löst den vom Server bereits angekündigten nächsten Schritt
+  aus (`slip_mode`/`closed`, client-seitig als `pendingContinuation`
+  gepuffert, s. `awaitingSlipReceipt`).
+- Der Button sendet zusätzlich `{type: "slip_received"}` über die Schüler-WS.
+  Neuer Handler in `server/routes/ws.py` ruft
+  `PrintQueue.clear_last_printed_for_student()` auf — löscht den „Gedruckt"-
+  Marker im Drucker-Display für diesen Schüler, falls er dort noch angezeigt
+  wird, und broadcastet die Displays neu. Damit gibt es jetzt drei
+  gleichberechtigte Wege, wie ein Name im Drucker-Display aus der „Gedruckt"-
+  Anzeige verschwindet: nächster fertiger Auftrag am selben Drucker (überschreibt),
+  30s-TTL (`_PRINTED_TTL_S`), oder „Leihschein erhalten" im Livemodus. `_last_printed`
+  trägt dafür neu die `student_id` im Tupel (fünftes Feld).
+
 ## 2026-08-07 — „Leihschein unterschreiben"-Button im Helferclient
 
 - Bei aktivem „Leihschein unterschreiben" (`ClassContext.done_signed`, Live-
