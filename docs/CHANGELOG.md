@@ -8,6 +8,28 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-08 — Modus B: Schülerleihschein beim Leihschein-Druck vorladen
+
+- **Problem:** der Schülerleihschein (Eigenabruf, Aktionen der letzten 3
+  Monate) wurde erst in `invalidate_session` beim Übergang zu „abgeschlossen"
+  frisch von IServ geholt — das verzögerte den Wechsel in den
+  Schülerleihscheinmodus (Abschluss-Screen).
+- **Neu:** `StudentSessionB` trägt einen Cache (`own_slip_data_b64` +
+  `own_slip_filename`, `server/state.py`). `print_loan_slip_for` stößt nach
+  dem normalen Leihschein-Fetch einen Fire-and-forget-Prefetch an
+  (`sessions._prefetch_own_slip` / `_prefetch_own_slip_task`, starke
+  Referenz analog `_release_tasks`), der den Schülerleihschein
+  (`variant="student"`, `3months`) auf der Session cacht. Nur Modus B
+  relevant — Modus-A-Drucke ohne Session tun nichts.
+- **Abschluss:** `_send_own_slip_download` nutzt den Cache (verzögerungsfrei)
+  und fällt sonst auf den Frisch-Fetch zurück; Signatur nimmt jetzt die
+  `session` statt nur `student_id` (nötig, weil `find_session_by_student` nur
+  `pending_pairing`/`paired` findet, beim Abschluss ist die Session aber schon
+  `completed`). Fehler bleiben kosmetisch — der Abschluss wird nie blockiert.
+- **Tests** (`tests/test_print_queue.py` +1): Prefetch füllt den Cache,
+  Abschluss nutzt ihn ohne weiteren IServ-Fetch. **416** Offline-Tests grün;
+  `ruff` clean.
+
 ## 2026-08-08 — Modus B: „Abwesend" + Helfer-Scan in Host-Queue & Lehreransicht
 
 - **Problem:** ein abwesender Schüler, dessen Bücher per „Bücher als Helfer

@@ -346,6 +346,58 @@ def test_confirm_slip_received_completion_survives_own_slip_fetch_failure(monkey
     assert student.status == "done"
 
 
+def test_prefetch_own_slip_caches_and_send_uses_cache(monkeypatch):
+    """Der beim Leihschein-Druck angestoßene Prefetch (`_prefetch_own_slip`)
+    cacht den Schülerleihschein auf der Session; `_send_own_slip_download`
+    nutzt dann den Cache statt eines frischen IServ-Fetches — so ist der
+    Übergang zu „abgeschlossen" verzögerungsfrei."""
+    st = AppState()
+    _patch(monkeypatch, st)
+
+    calls = []
+
+    class _FakeIServSlip:
+        async def get_loan_slip_pdf(
+            self, student_id, variant="student", start_reporting_period=None
+        ):
+            calls.append((student_id, variant, start_reporting_period))
+            return b"%PDF-own-slip"
+
+        async def get_student_info(self, student_id, schoolyear=None):
+            raise AssertionError("Cache-Pfad darf keinen Frisch-Fetch machen")
+
+    st.iserv = _FakeIServSlip()
+
+    ctx = st.open_context("10a")
+    student = QueueStudent(
+        student_id=46, lastname="Test", firstname="Schüler", form="10a", status="active",
+    )
+    ctx.queue.append(student)
+    student_ws = _FakeWS()
+    session = StudentSessionB(
+        session_token="student-token",
+        pairing_code="4246",
+        student_id=46,
+        state="paired",
+        ws=student_ws,
+    )
+    st.student_sessions["student-token"] = session
+
+    # Prefetch füllt den Cache (ein IServ-Fetch, Variante student/3months).
+    asyncio.run(sessions._prefetch_own_slip(st, 46))
+    assert calls == [(46, "student", "3months")]
+    assert session.own_slip_data_b64 is not None
+    assert session.own_slip_filename == "Schülerleihschein Test, Schüler.pdf"
+
+    # Abschluss nutzt den Cache — kein weiterer IServ-Fetch (get_student_info
+    # würde sonst werfen), `own_slip_download` kommt an.
+    asyncio.run(sessions._send_own_slip_download(st, student_ws, session))
+    assert calls == [(46, "student", "3months")]  # unverändert
+    own_slip = next(m for m in student_ws.sent if m["type"] == "own_slip_download")
+    assert base64.b64decode(own_slip["data_b64"]) == b"%PDF-own-slip"
+    assert own_slip["filename"] == "Schülerleihschein Test, Schüler.pdf"
+
+
 @pytest.mark.parametrize(
     ("done_collected", "recipient"),
     [(False, "helper"), (True, "teacher")],

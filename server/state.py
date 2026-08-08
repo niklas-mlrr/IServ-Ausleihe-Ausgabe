@@ -354,6 +354,14 @@ class StudentSessionB:
     # darf den Wechsel nicht vorwegnehmen. Idempotenz-Guard, falls der Client
     # `slip_received` doppelt sendet.
     slip_receipt_confirmed: bool = False
+    # Vorab geladener Schülerleihschein (Eigenabruf, Aktionen der letzten 3
+    # Monate). Wird beim Leihschein-Druck im Hintergrund geholt
+    # (`sessions._prefetch_own_slip`) und beim Abschluss (Schülerleihschein-
+    # modus) aus dem Cache gesendet, damit der Übergang zu „abgeschlossen"
+    # nicht auf einen IServ-Fetch wartet. `None` = noch nicht geladen → der
+    # Abschluss fällt auf den Frisch-Fetch in `_send_own_slip_download` zurück.
+    own_slip_data_b64: str | None = None
+    own_slip_filename: str | None = None
     created_at: datetime = field(default_factory=datetime.now)
     paired_at: datetime | None = None
     last_activity: datetime = field(default_factory=datetime.now)

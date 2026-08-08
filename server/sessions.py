@@ -684,6 +684,12 @@ async def print_loan_slip_for(
 
     cfg = get_config()
     pdf = await state.iserv.get_loan_slip_pdf(student_id, variant=variant)
+    # Schülerleihschein (Eigenabruf) im Hintergrund vorladen, damit der
+    # Übergang zu „abgeschlossen" (Schülerleihscheinmodus) nicht auf einen
+    # IServ-Fetch wartet. Fire-and-forget; Fehler fallen auf den Frisch-Fetch
+    # in `_send_own_slip_download` zurück. Nur Modus B (Session vorhanden)
+    # relevant — Modus-A-Drucke haben keine Session und tun nichts.
+    _prefetch_own_slip_task(state, student_id)
     # Experimenteller Toggle „Klasse auf Leihschein korrigieren": den (teils
     # falschen) Klassen-Code auf dem IServ-PDF lokal durch die echte Klasse des
     # Schülers ersetzen. Rein lokale PDF-Bearbeitung, kein IServ-Write.
@@ -871,15 +877,67 @@ async def _download_slip_to_host(
     return await get_hub().send_all_hosts(msg, state)
 
 
-async def _send_own_slip_download(state: AppState, ws, student_id: int) -> None:
+async def _prefetch_own_slip(state: AppState, student_id: int) -> None:
+    """Schülerleihschein (Eigenabruf, Aktionen der letzten 3 Monate) im
+    Hintergrund holen und auf der Modus-B-Session cachen, damit der Übergang
+    zu „abgeschlossen" (Schülerleihscheinmodus) nicht auf einen IServ-Fetch
+    wartet. Rein lesend; Fehler sind kosmetisch — der Abschluss fällt dann
+    auf den Frisch-Fetch in `_send_own_slip_download` zurück."""
+    session = state.find_session_by_student(student_id)
+    if session is None or session.own_slip_data_b64 is not None or state.iserv is None:
+        return
+    try:
+        pdf = await state.iserv.get_loan_slip_pdf(
+            student_id, variant="student", start_reporting_period="3months"
+        )
+    except Exception:  # noqa: BLE001 — Prefetch ist Kosmetik, nie fatal
+        log.debug(
+            "Schülerleihschein-Prefetch fehlgeschlagen (student_id=%s)",
+            student_id,
+            exc_info=True,
+        )
+        return
+    student = state.find_student(student_id)
+    lastname = (student.lastname if student else "").strip()
+    firstname = (student.firstname if student else "").strip()
+    session.own_slip_data_b64 = base64.b64encode(pdf).decode("ascii")
+    session.own_slip_filename = f"Schülerleihschein {lastname}, {firstname}.pdf"
+
+
+def _prefetch_own_slip_task(state: AppState, student_id: int) -> None:
+    """Prefetch als Fire-and-forget-Task starten (starke Referenz halten —
+    asyncio hält Tasks nur schwach, ein unreferenzierter Task kann mid-Coroutine
+    GC't werden)."""
+    t = asyncio.create_task(_prefetch_own_slip(state, student_id))
+    _prefetch_tasks.add(t)
+    t.add_done_callback(_prefetch_tasks.discard)
+
+
+async def _send_own_slip_download(state: AppState, ws, session: StudentSessionB) -> None:
     """Eigenen Leihschein (Aktionen der letzten 3 Monate) einmalig an den
     Schülerclient pushen, kurz bevor dessen Modus-B-Session regulär endet
     (Schülerleihscheinmodus — der Abschluss-Screen mit Download-Button, s.
     `invalidate_session`). Rein lesend gegen IServ; Fehler (kein IServ-Client,
     Netzproblem) dürfen den Abschluss der Session nicht verzögern/verhindern
-    — der Client zeigt dann einfach keinen funktionierenden Button."""
+    — der Client zeigt dann einfach keinen funktionierenden Button.
+
+    Bevorzugt wird der beim Leihschein-Druck vorab geladene Cache
+    (`_prefetch_own_slip`) — so ist der Übergang zu „abgeschlossen"
+    verzögerungsfrei. Fehlt er (Prefetch noch nicht fertig / fehlgeschlagen),
+    wird frisch geholt."""
     if state.iserv is None:
         return
+    if session.own_slip_data_b64 is not None:
+        await get_hub().send_websocket(
+            ws,
+            {
+                "type": "own_slip_download",
+                "filename": session.own_slip_filename,
+                "data_b64": session.own_slip_data_b64,
+            },
+        )
+        return
+    student_id = session.student_id
     try:
         pdf = await state.iserv.get_loan_slip_pdf(
             student_id, variant="student", start_reporting_period="3months"
@@ -926,6 +984,8 @@ def release_worker(state: AppState, worker) -> None:
 
 # Starke Referenzen auf in-flight Release-Tasks (asyncio hält Tasks nur schwach).
 _release_tasks: set[asyncio.Task] = set()
+# Starke Referenzen auf in-flight Schülerleihschein-Prefetch-Tasks.
+_prefetch_tasks: set[asyncio.Task] = set()
 
 
 def release_student_worker(state: AppState, student_id: int) -> bool:
@@ -1005,7 +1065,7 @@ async def invalidate_session(
         # raus — direkt danach wird der Token unten hart entwertet, ein
         # Nachfordern über die (dann tote) Session ist nicht mehr möglich.
         if new_state == "completed" and session.student_id is not None:
-            await _send_own_slip_download(state, ws, session.student_id)
+            await _send_own_slip_download(state, ws, session)
         await get_hub().send_websocket(ws, {"type": "closed", "reason": new_state})
         try:
             await ws.close(code=4006)
