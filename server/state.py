@@ -60,7 +60,7 @@ class QueueStudent:
     lastname: str
     firstname: str
     form: str
-    status: Literal["pending", "active", "done", "skipped"] = "pending"
+    status: Literal["pending", "active", "done", "skipped", "absent"] = "pending"
     assigned_helper: str | None = None
     # Fortschritt „X/Y Bücher" für die Host-Queue: Y = angemeldete Bücher des
     # Schülers OHNE die ausgeblendeten Reihen (also exakt die Liste, die auch
@@ -745,13 +745,13 @@ class AppState:
         ctx = self.ctx_or_active(context_id)
         if ctx is None:
             return None
-        return next((s for s in ctx.queue if s.status == "pending"), None)
+        return next((s for s in ctx.queue if s.status in ("pending", "absent")), None)
 
     def pending_count(self, context_id: str | None = None) -> int:
         ctx = self.ctx_or_active(context_id)
         if ctx is None:
             return 0
-        return sum(1 for s in ctx.queue if s.status == "pending")
+        return sum(1 for s in ctx.queue if s.status in ("pending", "absent"))
 
     def pending_queue_as_list(self, context_id: str | None = None) -> list[dict]:
         """Nur die wartenden Schüler eines Kontexts — für die Warteschlangen-
@@ -759,7 +759,7 @@ class AppState:
         ctx = self.ctx_or_active(context_id)
         if ctx is None:
             return []
-        return [s.as_dict() for s in ctx.queue if s.status == "pending"]
+        return [s.as_dict() for s in ctx.queue if s.status in ("pending", "absent")]
 
     def queue_as_list(
         self, context_id: str | None = None, *, printing_ids: set[int] | None = None
@@ -811,7 +811,7 @@ class AppState:
                 ),
                 "queue": [
                     s.as_dict(slip_printing=(s.student_id in printing_ids))
-                    for s in c.queue if s.status == "pending"
+                    for s in c.queue if s.status in ("pending", "absent")
                 ],
                 "queue_all": [
                     s.as_dict(slip_printing=(s.student_id in printing_ids))
@@ -983,7 +983,7 @@ class AppState:
         übersprungene Schüler werden für diese Ansicht als `skipped` abgebildet,
         obwohl die Host-Queue ihren Ablaufstatus `done` behält."""
         ctx = self.contexts.get(context_id)
-        counts = {"pending": 0, "active": 0, "done": 0, "skipped": 0}
+        counts = {"pending": 0, "active": 0, "done": 0, "skipped": 0, "absent": 0}
         if ctx is None or ctx.loading:
             return {
                 "class_form": None,

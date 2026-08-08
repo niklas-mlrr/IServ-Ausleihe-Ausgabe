@@ -131,10 +131,12 @@ def _authorized_session(state, token: str) -> TeacherSession:
 @router.post("/api/teacher/skip")
 async def teacher_skip(body: TeacherStatusRequest) -> dict:
     """Einzige der Lehrkraft erlaubte Aktion: einen wartenden Schüler ihrer
-    Klasse als abwesend markieren (`pending -> skipped`). Rein lokaler
+    Klasse als abwesend markieren (`pending -> absent`). Rein lokaler
     Runtime-State-Wechsel — kein IServ-Write, keine Playwright-Aktion. `active`
     und `done` bleiben strikt hostgesteuert (nicht über diesen Endpunkt
-    erreichbar, s. PLAN „Lehrer-Ablauf und Rechte")."""
+    erreichbar, s. PLAN „Lehrer-Ablauf und Rechte"). Ein abwesender Schüler
+    bleibt wie ein wartender in der Queue (aufrufbar), nur die normale
+    Schülerclient-Zuordnung (`student_pair`) ist für ihn blockiert."""
     state = get_state()
     session = _authorized_session(state, body.token)
     if body.student_id is None:
@@ -144,15 +146,17 @@ async def teacher_skip(body: TeacherStatusRequest) -> dict:
         raise HTTPException(404, "Schüler nicht in dieser Klasse")
     student = found[1]
     if student.status != "pending":
-        raise HTTPException(409, f"Nur wartende Schüler überspringbar (Status: {student.status})")
-    student.status = "skipped"
+        raise HTTPException(
+            409, f"Nur wartende Schüler als abwesend markierbar (Status: {student.status})"
+        )
+    student.status = "absent"
     await get_hub().broadcast_host(state.state_snapshot())
     return {"ok": True}
 
 
 @router.post("/api/teacher/undo-skip")
 async def teacher_undo_skip(body: TeacherStatusRequest) -> dict:
-    """Rücknahme von `teacher_skip`: `skipped -> pending`, wieder wartend."""
+    """Rücknahme von `teacher_skip`: `absent -> pending`, wieder wartend."""
     state = get_state()
     session = _authorized_session(state, body.token)
     if body.student_id is None:
@@ -161,9 +165,9 @@ async def teacher_undo_skip(body: TeacherStatusRequest) -> dict:
     if found is None or found[0].id != session.context_id:
         raise HTTPException(404, "Schüler nicht in dieser Klasse")
     student = found[1]
-    if student.status != "skipped":
+    if student.status != "absent":
         raise HTTPException(
-            409, f"Nur übersprungene Schüler zurücksetzbar (Status: {student.status})"
+            409, f"Nur abwesende Schüler zurücksetzbar (Status: {student.status})"
         )
     student.status = "pending"
     await get_hub().broadcast_host(state.state_snapshot())

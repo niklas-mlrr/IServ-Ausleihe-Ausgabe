@@ -82,7 +82,7 @@ window.__host = window.__host || {};
     tabOrder = tabOrder.filter(id => ctxs[id]);
     list.innerHTML = tabOrder.map(id => {
       const c = ctxs[id] || { form: 'Klasse', queue: [] };
-      const pend = (c.queue || []).filter(s => s.status === 'pending').length;
+      const pend = (c.queue || []).filter(s => s.status === 'pending' || s.status === 'absent').length;
       const lbl = escapeHtml(c.form || 'Klasse');
       const badge = pend ? ` <span class="tab-count">${pend}</span>` : '';
       return `<button class="tab-class${activeTab === id ? ' active' : ''}" data-tab="${id}">${lbl}${badge} <span class="tab-close" data-close="${id}" title="Reiter schließen">×</span></button>`;
@@ -1284,7 +1284,7 @@ window.__host = window.__host || {};
     const ctx = (state.contexts || {})[id];
     const queue = (ctx && ctx.queue) || [];
     const active = queue.filter(s => s.status === 'active');
-    const next = queue.find(s => s.status === 'pending');
+    const next = queue.find(s => s.status === 'pending' || s.status === 'absent');
     const helpers = Object.values(state.helpers || {});
 
     // Alerts abgelaufener/nicht mehr aktiver Schüler wegräumen — sonst bliebe
@@ -1350,7 +1350,7 @@ window.__host = window.__host || {};
     for (const id of Object.keys(state.contexts || {})) {
       const q = (state.contexts[id].queue) || [];
       totalQ += q.length;
-      openQ += q.filter(s => s.status === 'pending').length;
+      openQ += q.filter(s => s.status === 'pending' || s.status === 'absent').length;
     }
     const codes = mb.pending_count || 0;
     document.getElementById('sb-modusb').innerHTML = mb.open
@@ -2019,7 +2019,7 @@ window.__host = window.__host || {};
     const queue = (ctx && ctx.queue) || [];
     const tbody = document.querySelector(`[data-ctx-queue="${id}"]`);
     const qc = document.querySelector(`[data-ctx-qc="${id}"]`);
-    if (qc) qc.textContent = `(${queue.filter(q => q.status === 'pending').length} offen / ${queue.length} gesamt)`;
+    if (qc) qc.textContent = `(${queue.filter(q => q.status === 'pending' || q.status === 'absent').length} offen / ${queue.length} gesamt)`;
     if (!tbody) return;
     if (!queue.length) {
       tbody.innerHTML = '<tr><td colspan="4" style="opacity:.4;text-align:center">Keine Schüler — Klasse hinzufügen</td></tr>';
@@ -2076,8 +2076,8 @@ window.__host = window.__host || {};
           statusBadge += `<span class="badge badge-done" title="Leihschein von der Lehrkraft entgegengenommen">Leihschein ✓</span>`;
         }
       } else {
-        const badgeClass = { pending: 'badge-pending', skipped: 'badge-skipped' }[s.status] || '';
-        const statusLabel = { pending: 'Wartend', skipped: 'Übersprungen' }[s.status] || s.status;
+        const badgeClass = { pending: 'badge-pending', skipped: 'badge-skipped', absent: 'badge-absent' }[s.status] || '';
+        const statusLabel = { pending: 'Wartend', skipped: 'Übersprungen', absent: 'Abwesend' }[s.status] || s.status;
         statusBadge = `<span class="badge ${badgeClass}">${statusLabel}</span>`;
       }
       // Hinweise ergänzend hinter den Status — außer bei „fertig", dort schon
@@ -2095,13 +2095,17 @@ window.__host = window.__host || {};
       const disconnectBtn = `<button class="secondary" data-action="disconnect" data-student-id="${s.student_id}">Trennen</button>`;
       const actions = s.status === 'pending'
         ? `${pairBtn}<button class="secondary" data-action="skip" data-student-id="${s.student_id}">Überspringen</button> ${disconnectBtn}`
-        : s.status === 'active'
-          ? `<button class="success" data-action="finish" data-student-id="${s.student_id}">Abschließen</button> <button class="secondary" data-action="skip" data-student-id="${s.student_id}">Abbrechen</button> ${disconnectBtn} ${printBtn}`
-          : s.status === 'skipped'
-            ? helperScanBtn
-            : s.status === 'done'
-              ? printBtn
-              : '';
+        : s.status === 'absent'
+          // Abwesend: kein Pairing (Schülerclient-Zuordnung blockiert), aber
+          // Helfer-Scan-QR + Überspringen + Trennen wie bei einem Wartenden.
+          ? `${helperScanBtn}<button class="secondary" data-action="skip" data-student-id="${s.student_id}">Überspringen</button> ${disconnectBtn}`
+          : s.status === 'active'
+            ? `<button class="success" data-action="finish" data-student-id="${s.student_id}">Abschließen</button> <button class="secondary" data-action="skip" data-student-id="${s.student_id}">Abbrechen</button> ${disconnectBtn} ${printBtn}`
+            : s.status === 'skipped'
+              ? helperScanBtn
+              : s.status === 'done'
+                ? printBtn
+                : '';
       return `<tr class="${s.status === 'active' ? 'row-active' : ''}">
         <td>${escapeHtml(s.lastname)}, ${escapeHtml(s.firstname)}</td>
         <td>${escapeHtml((s.form || '').replace(/^Klasse\s+/i, ''))}</td>
@@ -2626,8 +2630,8 @@ window.__host = window.__host || {};
         // Kontext mit wartendem Schüler.
         const ctx = h.context_id ? (state.contexts || {})[h.context_id] : null;
         const hasPending = ctx
-          ? (ctx.queue || []).some(s => s.status === 'pending')
-          : Object.values(state.contexts || {}).some(c => (c.queue || []).some(s => s.status === 'pending'));
+          ? (ctx.queue || []).some(s => s.status === 'pending' || s.status === 'absent')
+          : Object.values(state.contexts || {}).some(c => (c.queue || []).some(s => s.status === 'pending' || s.status === 'absent'));
         if (hasPending) { e.preventDefault(); nextStudent(h.token); }
       }
     }

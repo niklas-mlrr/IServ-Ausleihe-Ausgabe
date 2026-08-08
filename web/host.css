@@ -267,6 +267,7 @@
     .badge-active   { background: var(--info-bg); color: var(--info); }
     .badge-done     { background: var(--ok-tint); color: var(--ok); }
     .badge-skipped  { background: var(--danger-tint); color: var(--danger-text); }
+    .badge-absent   { background: var(--danger-tint); color: var(--danger-text); }
     /* Status-Spalte der Queue: Status-Badge (Wartend/Aktiv/X/Y/Leihschein/
        Fertig/Übersprungen) plus ergänzend rote Info-Hinweise (Nicht angemeldet,
        Bezahlung ausstehend, …) dahinter — die Info-Spalte ist entfallen. */

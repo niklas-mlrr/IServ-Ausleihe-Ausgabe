@@ -354,7 +354,7 @@ def test_teacher_snapshot_shape_and_privacy(ctx):
 
     snap = state.teacher_snapshot(c.id)
     assert snap["class_form"] == "10a"
-    assert snap["counts"] == {"pending": 1, "active": 0, "done": 0, "skipped": 0}
+    assert snap["counts"] == {"pending": 1, "active": 0, "done": 0, "skipped": 0, "absent": 0}
     assert snap["done_collected"] is False
     assert len(snap["students"]) == 1
     s = snap["students"][0]
@@ -378,12 +378,24 @@ def test_teacher_snapshot_maps_auto_skipped_done_to_skipped(ctx):
 
     snap = state.teacher_snapshot(c.id)
 
-    assert snap["counts"] == {"pending": 0, "active": 0, "done": 1, "skipped": 1}
+    assert snap["counts"] == {"pending": 0, "active": 0, "done": 1, "skipped": 1, "absent": 0}
     by_id = {student["student_id"]: student for student in snap["students"]}
     assert by_id[c.queue[0].student_id]["status"] == "skipped"
     assert by_id[c.queue[0].student_id]["auto_skipped"] is True
     assert by_id[c.queue[1].student_id]["status"] == "done"
     assert by_id[c.queue[1].student_id]["auto_skipped"] is False
+
+
+def test_teacher_snapshot_counts_absent(ctx):
+    """Ein von der Lehrkraft als abwesend markierter Schüler erscheint in der
+    Lehreransicht als eigener Status `absent` (nicht als `skipped`)."""
+    state, _, _ = ctx
+    c = _open_ctx(state, students=1)
+    c.queue[0].status = "absent"
+
+    snap = state.teacher_snapshot(c.id)
+    assert snap["counts"] == {"pending": 0, "active": 0, "done": 0, "skipped": 0, "absent": 1}
+    assert snap["students"][0]["status"] == "absent"
 
 
 def test_teacher_snapshot_propagates_helper_scanned(ctx):
@@ -408,7 +420,7 @@ def test_teacher_snapshot_unknown_context_is_empty(ctx):
     snap = state.teacher_snapshot("nope")
     assert snap == {
         "class_form": None,
-        "counts": {"pending": 0, "active": 0, "done": 0, "skipped": 0},
+        "counts": {"pending": 0, "active": 0, "done": 0, "skipped": 0, "absent": 0},
         "students": [],
         "done_collected": False,
         "slip_collected_count": 0,
@@ -448,7 +460,7 @@ def test_skip_unauthorized_session_403(client, ctx):
     assert r.status_code == 403
 
 
-def test_skip_pending_to_skipped(client, ctx):
+def test_skip_pending_to_absent(client, ctx):
     state, hub_inst_cfg, hub_inst = ctx
     c = _open_ctx(state)
     state.teacher_sessions["tok"] = TeacherSession(
@@ -456,7 +468,7 @@ def test_skip_pending_to_skipped(client, ctx):
     )
     r = client.post("/api/teacher/skip", json={"token": "tok", "student_id": 100})
     assert r.status_code == 200
-    assert c.queue[0].status == "skipped"
+    assert c.queue[0].status == "absent"
     assert len(hub_inst.broadcasts) == 1
 
 
@@ -498,7 +510,7 @@ def test_skip_student_of_other_class_404(client, ctx):
     assert b.queue[0].status == "pending"
 
 
-def test_undo_skip_only_from_skipped(client, ctx):
+def test_undo_skip_only_from_absent(client, ctx):
     state, _, _ = ctx
     c = _open_ctx(state, students=1)
     state.teacher_sessions["tok"] = TeacherSession(
@@ -508,10 +520,60 @@ def test_undo_skip_only_from_skipped(client, ctx):
     r = client.post("/api/teacher/undo-skip", json={"token": "tok", "student_id": 100})
     assert r.status_code == 409
 
-    c.queue[0].status = "skipped"
+    c.queue[0].status = "absent"
     r = client.post("/api/teacher/undo-skip", json={"token": "tok", "student_id": 100})
     assert r.status_code == 200
     assert c.queue[0].status == "pending"
+
+
+def test_absent_student_callable_like_pending(ctx):
+    """Ein abwesender Schüler bleibt in der Warteschlange und ist aufrufbar —
+    `next_pending`/`pending_queue_as_list` behandeln ihn wie einen wartenden."""
+    state, _, _ = ctx
+    c = _open_ctx(state, students=2)
+    c.queue[0].status = "absent"
+    c.queue[1].status = "pending"
+
+    assert state.next_pending(c.id).student_id == c.queue[0].student_id
+    assert state.pending_count(c.id) == 2
+    ids = [s["student_id"] for s in state.pending_queue_as_list(c.id)]
+    assert ids == [c.queue[0].student_id, c.queue[1].student_id]
+
+
+def test_absent_student_not_pairable(client, ctx):
+    """Ein abwesender Schüler kann NICHT mit einem Schülerclient gepaart werden
+    (`student_pair` blockt `absent` — die einzige Einschränkung gegenüber
+    `pending`)."""
+    state, _, _ = ctx
+    c = _open_ctx(state, students=1)
+    c.queue[0].status = "absent"
+    session = sessions.create_student_session(state)
+    session.pairing_code = "1234"
+
+    r = client.post(
+        "/api/student/pair",
+        json={"pairing_code": "1234", "student_id": c.queue[0].student_id},
+        cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 409
+    assert c.queue[0].status == "absent"
+
+
+def test_absent_student_helper_scan_available(client, ctx):
+    """Der Helfer-Scan-Einmal-QR bleibt für abwesende Schüler verfügbar."""
+    state, _, cfg = ctx
+    cfg.host_ip = "10.0.0.9"
+    c = _open_ctx(state, students=1)
+    c.queue[0].status = "absent"
+
+    r = client.post(
+        "/api/helper-scan/start",
+        json={"student_id": c.queue[0].student_id},
+        cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+    assert "h=" in r.json()["url"]
 
 
 # ---- Statuswechsel: slip-collected ("Leihschein entgegengenommen") --------

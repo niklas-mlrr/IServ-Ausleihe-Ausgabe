@@ -8,6 +8,27 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-08 — Modus B: eigener Status „abwesend" statt „übersprungen" für Lehrkraft-Aktion
+
+- **Problem:** die Lehrkraft-Aktion „Als abwesend markieren" (`/api/teacher/skip`)
+  setzte den Schüler-Status auf `skipped` (übersprungen) — das entfernte den
+  Schüler aus der Warteschlange und vermischte zwei Konzepte.
+- **Neu:** eigener Status `absent` (`QueueStudent.status`, `server/state.py`).
+  Die Lehrkraft-Aktion setzt jetzt `pending -> absent` (`server/routes/teacher.py`),
+  Rücknahme `absent -> pending`. Ein abwesender Schüler bleibt wie ein wartender
+  in der Queue (aufrufbar, `next_pending`/`pending_queue_as_list`/
+  `real_contexts_summary` zählen ihn mit), mit der einzigen Einschränkung, dass
+  die normale Schülerclient-Zuordnung (`student_pair`) für ihn blockiert ist.
+  Der Helfer-Scan-Einmal-QR bleibt verfügbar (`helper_scan_start`/
+  `student_helper_join` erlauben jetzt `skipped` und `absent`).
+- **UI:** Lehrkraft-Ansicht zeigt „Abwesend" (eigener Zähler + Punkt), Host-Queue
+  zeigt ein „Abwesend"-Badge ohne Pairing-Button (dafür Helfer-Scan +
+  Überspringen + Trennen). `skipped` bleibt für die Host-Aktion „Überspringen"
+  und das Auto-Skip beim Klassen-Laden bestehen.
+- **Tests:** `tests/test_teacher.py` angepasst (skip → absent, counts um
+  `absent` erweitert) + neu: abwesend aufrufbar, nicht paarbar, Helfer-Scan
+  verfügbar, `teacher_snapshot` zählt `absent`.
+
 ## 2026-08-08 — Modus B: Schülerleihschein beim Leihschein-Druck vorladen
 
 - **Problem:** der Schülerleihschein (Eigenabruf, Aktionen der letzten 3

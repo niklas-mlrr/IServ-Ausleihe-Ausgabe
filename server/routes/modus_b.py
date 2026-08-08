@@ -279,8 +279,9 @@ async def student_dismiss(body: StudentDismissRequest) -> dict:
 
 @host_router.post("/api/helper-scan/start")
 async def helper_scan_start(body: StudentRef, request: Request) -> dict:
-    """Host erzeugt für einen übersprungenen Schüler einen Einmal-QR, mit dem
-    ein Helfer die Bücher des Schülers stellvertretend einscannen kann.
+    """Host erzeugt für einen übersprungenen oder abwesenden Schüler einen
+    Einmal-QR, mit dem ein Helfer die Bücher des Schülers stellvertretend
+    einscannen kann.
 
     Der QR trägt ein einmaliges Helfer-Secret (`/student?h=<secret>`). Beim
     Scannen bindet `POST /api/student/helper-join` eine Modus-B-Session direkt
@@ -294,8 +295,8 @@ async def helper_scan_start(body: StudentRef, request: Request) -> dict:
     student = state.find_student(student_id)
     if not student:
         raise HTTPException(404, "Schüler nicht in der Queue")
-    if student.status != "skipped":
-        raise HTTPException(409, f"Schüler nicht übersprungen (Status: {student.status})")
+    if student.status not in ("skipped", "absent"):
+        raise HTTPException(409, f"Schüler nicht übersprungen/abwesend (Status: {student.status})")
 
     # Nur ein gültiger QR pro Schüler — ein neuer ersetzt den alten.
     for secret, (sid, _created) in list(state.helper_scan_secrets.items()):
@@ -311,7 +312,8 @@ async def helper_scan_start(body: StudentRef, request: Request) -> dict:
 @router.post("/api/student/helper-join")
 async def student_helper_join(body: HelperJoinRequest) -> dict:
     """Öffentlich (per Einmal-QR des Hosts erreichbar): bindet eine Modus-B-
-    Session direkt an den übersprungenen Schüler und liefert den session_token.
+    Session direkt an den übersprungenen/abwesenden Schüler und liefert den
+    session_token.
 
     Das Secret ist eine Einmal-Capability: es wird beim ersten Aufruf aus dem
     State gepoppt. Bewusst KEIN `modus_b_open`-Check — der Host hat den QR
@@ -329,8 +331,10 @@ async def student_helper_join(body: HelperJoinRequest) -> dict:
     student = state.find_student(student_id)
     if not student:
         raise HTTPException(404, "Schüler nicht in der Queue")
-    if student.status != "skipped":
-        raise HTTPException(409, f"Schüler nicht mehr übersprungen (Status: {student.status})")
+    if student.status not in ("skipped", "absent"):
+        raise HTTPException(
+            409, f"Schüler nicht mehr übersprungen/abwesend (Status: {student.status})"
+        )
     if state.find_session_by_student(student_id):
         raise HTTPException(409, "Schüler hat bereits eine Live-Session")
 

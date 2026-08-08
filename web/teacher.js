@@ -34,7 +34,7 @@
     return;
   }
 
-  const STATUS_LABEL = { pending: 'Noch nicht begonnen', active: 'In Ausgabe', done: 'Ausgabe abgeschlossen', skipped: 'Übersprungen / abwesend' };
+  const STATUS_LABEL = { pending: 'Noch nicht begonnen', active: 'In Ausgabe', done: 'Ausgabe abgeschlossen', skipped: 'Übersprungen', absent: 'Abwesend' };
 
   function statusText(s) {
     if (s.status === 'active') {
@@ -46,12 +46,12 @@
   }
 
   const COUNT_PILLS = [
-    ['done', 'abgeschlossen'], ['active', 'aktiv'], ['pending', 'offen'], ['skipped', 'übersprungen'],
+    ['done', 'abgeschlossen'], ['active', 'aktiv'], ['pending', 'offen'], ['skipped', 'übersprungen'], ['absent', 'abwesend'],
   ];
 
   function renderClass(data) {
     document.getElementById('class-form').textContent = data.class_form || 'Klasse';
-    const c = data.counts || { pending: 0, active: 0, done: 0, skipped: 0 };
+    const c = data.counts || { pending: 0, active: 0, done: 0, skipped: 0, absent: 0 };
     const pills = COUNT_PILLS.map(([k, l]) => `<div class="count-pill"><span class="n">${c[k] || 0}</span><span class="l">${l}</span></div>`);
     // Die Sammel-Funktion ist eine Klassenoption. Ohne sie weder den Counter
     // noch die Checkboxen anzeigen; `done_collected` kommt aus dem
@@ -70,7 +70,7 @@
     document.getElementById('stud-list').innerHTML = students.map(s => {
       const name = `${escapeHtml(s.lastname)}, ${escapeHtml(s.firstname)}`;
       let extra = '';
-      if (s.status === 'skipped' && !s.auto_skipped) {
+      if ((s.status === 'skipped' || s.status === 'absent') && !s.auto_skipped) {
         extra = `<button class="act" data-undo="${s.student_id}">Nicht abwesend</button>`;
       } else if (s.status === 'done' && data.done_collected === true && s.slip_printed) {
         // Abwesender, dessen Bücher ein Helfer eingescant hat: die Lehrkraft
