@@ -41,6 +41,11 @@
     #view-active.show { flex: 1 1 auto; min-height: 0; align-items: stretch; }
     /* Pending-View: volle verbleibende Höhe, Inhalt mittig */
     #view-pending.show { flex: 1 1 auto; justify-content: center; }
+    /* Druckmodus/Leihscheinmodus/Abschluss: Inhalt vertikal mittig, bei zu
+       viel Inhalt scrollt die View statt über den Bildschirmrand zu laufen. */
+    #view-print.show, #view-slip.show, #view-done.show {
+      flex: 1 1 auto; min-height: 0; justify-content: center; overflow-y: auto;
+    }
     /* Pairing */
     .pair-hint { opacity: .7; text-align: center; margin-bottom: 12px; }
     .pair-code {
@@ -175,11 +180,13 @@
     .ico { width: 1em; height: 1em; vertical-align: -0.125em; flex: none; }
     .big-msg .title { font-size: 1.4rem; font-weight: 600; margin-bottom: 8px; }
     .big-msg .text { opacity: .6; }
-    /* Druckmodus: Erklärung, Status und Druck-Button klar voneinander trennen. */
+    /* Druckmodus/Leihscheinmodus/Abschluss: vertikal mittig (s. #view-print.show
+       etc. oben) statt fixem Abstand von oben — margin-top hier daher 0. */
     #view-print .print-name-row { margin-top: 12px; }
-    #view-print .big-msg { margin-top: 90px; }
+    #view-print .big-msg { margin-top: 0; }
     #view-slip .print-name-row { margin-top: 12px; }
-    #view-slip .big-msg { margin-top: 90px; }
+    #view-slip .big-msg { margin-top: 0; }
+    #view-done .big-msg { margin-top: 0; }
     #print-intro {
       max-width: 520px; margin: 0 auto 18px; line-height: 1.45;
     }
