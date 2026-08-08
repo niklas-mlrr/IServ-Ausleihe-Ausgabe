@@ -191,8 +191,8 @@
     #print-text, #slip-text {
       font-size: 1rem; font-weight: 600; line-height: 1.4; white-space: normal;
     }
-    #print-actions, #print-received-actions { max-width: 320px; width: 100%; margin: 16px auto 0; }
-    #print-actions button, #print-received-actions button { padding: 14px; font-size: 1rem; }
+    #print-actions, #print-received-actions, #own-slip-actions { max-width: 320px; width: 100%; margin: 16px auto 0; }
+    #print-actions button, #print-received-actions button, #own-slip-actions button { padding: 14px; font-size: 1rem; }
     #slip-intro {
       max-width: 520px; margin: 0 auto 18px; line-height: 1.45;
     }
@@ -337,7 +337,7 @@
       <div class="title">Vorgang abgeschlossen</div>
       <div class="text">Du kannst dieses Fenster schließen.</div>
       <div class="modal-actions" id="own-slip-actions" style="display:none">
-        <button id="own-slip-btn">Meinen Leihschein herunterladen</button>
+        <button id="own-slip-btn">Schülerleihschein herunterladen</button>
       </div>
       <div class="text" id="own-slip-unavailable" hidden>
         Download deines Leihscheins gerade nicht verfügbar.
