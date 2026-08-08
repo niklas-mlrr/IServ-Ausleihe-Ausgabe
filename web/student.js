@@ -275,7 +275,7 @@ function enterDruckmodus() {
       sendPrintRequest();
       break;
     case 'student':
-      if (text) text.textContent = 'Tippe auf „Leihschein drucken", um deinen Leihschein zu drucken.';
+      if (text) text.textContent = 'Drücke „Leihschein drucken", um deinen Leihschein zu drucken.';
       if (actions) actions.style.display = '';
       break;
     case 'helper':
