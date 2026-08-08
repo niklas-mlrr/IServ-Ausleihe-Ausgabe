@@ -144,6 +144,7 @@ class QueueStudent:
             "firstname": self.firstname,
             "form": self.form,
             "status": self.status,
+            "auto_skipped": self.auto_skipped,
             "assigned_helper": self.assigned_helper,
             "books_total": self.books_total,
             "books_done": len(self.done_isbns),

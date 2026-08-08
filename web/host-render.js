@@ -915,7 +915,12 @@ window.__host = window.__host || {};
   function teacherSlipStat(ctx) {
     if (ctx.done_collected !== true) return '';
     const queue = ctx.queue || [];
-    const done = queue.filter(s => s.status === 'done');
+    // Auto-fertig (nicht angemeldet / nicht bezahlt / …) zählt NICHT als
+    // abgeschlossen: solche Schüler wurden nie aufgerufen, es wurden keine
+    // Bücher gescannt und kein Leihschein gedruckt (`status` ist nur wegen
+    // des Auto-Fertig-Filters beim Klassen-Öffnen 'done', s. classes.py).
+    // Der Zähler spiegelt nur echte Abschlüsse mit Buchausgabe.
+    const done = queue.filter(s => s.status === 'done' && !s.auto_skipped);
     if (!done.length) return '';
     const collected = done.filter(s => s.slip_collected).length;
     return `<p class="hint" style="margin-top:8px">Leihschein entgegengenommen: <b>${collected} / ${done.length}</b> abgeschlossen</p>`;
