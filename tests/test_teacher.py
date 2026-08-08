@@ -360,7 +360,7 @@ def test_teacher_snapshot_shape_and_privacy(ctx):
     s = snap["students"][0]
     assert set(s.keys()) == {
         "student_id", "lastname", "firstname", "status",
-        "auto_skipped",
+        "auto_skipped", "helper_scanned",
         "books_total", "books_done", "slip_printing", "slip_printed", "slip_collected",
     }
     assert s["books_done"] == 2
