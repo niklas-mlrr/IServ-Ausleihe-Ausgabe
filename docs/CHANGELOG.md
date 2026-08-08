@@ -8,6 +8,37 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-08 — Schülerleihscheinmodus: Erklär-Box, Abschluss-Text, Layout, Dateiname
+
+- `view-done` („Vorgang abgeschlossen", jetzt umbenannt zu **„Ausleihvorgang
+  abgeschlossen"**) bekommt eine Erklär-Box (`.info-box`, gleiches Muster wie
+  in `view-print`/`view-slip`) mit Überschrift „Schülerleihschein": erklärt,
+  dass der Schülerleihschein neben den aktuell ausgeliehenen Büchern auch
+  kürzliche Rückgaben und aktuelle Ersatzansprüche auflistet, und verweist auf
+  die jederzeitige Einsicht via IServ (Modul „Schulbücher" → „Meine Bücher",
+  `iserv-trg-oha.de/iserv/ausleihe/myprofile`).
+- Abschluss-Text umformuliert: fett hervorgehobener Hinweis „Bitte trage nun
+  noch Name, Klasse und Ausgabedatum in die Bücher ein." plus Mängel-Hinweis
+  (Mängel-Anzeige innerhalb einer Woche, sonst Zurechnung an den Schüler),
+  jeweils mit Zeilenumbruch pro Satz; unterhalb der Info-Box zusätzlich „Du
+  kannst das Fenster dann schließen." (20px Abstand zur Box).
+- Download-Button umbenannt zu „Schülerleihschein herunterladen"; Größe/
+  Position (Padding, Font-Size, Container-`max-width`) an die
+  Druckmenü-Buttons (`#print-actions`/`#print-received-actions`) angeglichen
+  (`#own-slip-actions` in dieselben CSS-Selektoren aufgenommen).
+- Server: `sessions._send_own_slip_download` holt zusätzlich
+  `get_student_info` und benennt die heruntergeladene PDF-Datei jetzt
+  `Schülerleihschein: <Nachname>, <Vorname>.pdf` statt
+  `leihschein_<student_id>_<Zeitstempel>.pdf` (Test in
+  `tests/test_print_queue.py` entsprechend angepasst).
+- Layout: Druckmodus (`view-print`), Leihschein-unterschreiben-Modus
+  (`view-slip`) und Schülerleihscheinmodus (`view-done`) sind jetzt vertikal
+  mittig positioniert (`flex:1 1 auto; justify-content:center`, analog
+  `view-pending`) statt über feste `margin-top`-Werte (90px/60px) grob nach
+  unten geschoben; bei zu viel Inhalt scrollt die jeweilige View intern
+  (`overflow-y:auto`) statt über den Bildschirmrand zu laufen — mit
+  Playwright-Screenshots bei knapper Viewport-Höhe verifiziert.
+
 ## 2026-08-07 — Schülerleihscheinmodus: Eigenabruf des Leihscheins (letzte 3 Monate) beim Abschluss
 
 - Der bisherige, generisch benannte „Leihscheinmodus" (Unterschriften-Screen
