@@ -894,7 +894,7 @@ async def _send_own_slip_download(state: AppState, ws, student_id: int) -> None:
         return
     lastname = (info.get("lastname") or "").strip()
     firstname = (info.get("firstname") or "").strip()
-    filename = f"Schülerleihschein: {lastname}, {firstname}.pdf"
+    filename = f"Schülerleihschein {lastname}, {firstname}.pdf"
     await get_hub().send_websocket(
         ws,
         {

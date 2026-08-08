@@ -41,10 +41,17 @@
     #view-active.show { flex: 1 1 auto; min-height: 0; align-items: stretch; }
     /* Pending-View: volle verbleibende Höhe, Inhalt mittig */
     #view-pending.show { flex: 1 1 auto; justify-content: center; }
-    /* Druckmodus/Leihscheinmodus/Abschluss: Inhalt vertikal mittig, bei zu
-       viel Inhalt scrollt die View statt über den Bildschirmrand zu laufen. */
-    #view-print.show, #view-slip.show, #view-done.show {
-      flex: 1 1 auto; min-height: 0; justify-content: center; overflow-y: auto;
+    /* Druckmodus/Leihscheinmodus/Abschluss: volle verbleibende Höhe. Name
+       (print-name-row) bleibt oben fix (kein eigener flex/overflow, also
+       nie Teil des Scroll-Bereichs); der restliche Inhalt sitzt in
+       .scroll-center darunter — vertikal mittig, bei zu viel Inhalt
+       scrollt NUR dieser Bereich statt über den Bildschirmrand zu laufen. */
+    #view-print.show, #view-slip.show { flex: 1 1 auto; min-height: 0; }
+    #view-done.show { flex: 1 1 auto; min-height: 0; justify-content: center; overflow-y: auto; }
+    .scroll-center {
+      flex: 1 1 auto; min-height: 0; width: 100%;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      overflow-y: auto;
     }
     /* Pairing */
     .pair-hint { opacity: .7; text-align: center; margin-bottom: 12px; }
@@ -266,22 +273,24 @@
         <div class="s-form" id="print-form"></div>
       </div>
     </div>
-    <div class="big-msg">
-      <div class="icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg></div>
-      <div class="title" id="print-title">Leihschein Drucken</div>
-      <div id="print-intro">Du hast alle Bücher ausgeliehen. Als nächstes muss der Leihschein gedruckt werden.</div>
-      <div id="print-status" role="status" aria-live="polite">
-        <div id="print-text"></div>
-      </div>
-      <div class="modal-actions" id="print-actions" style="display:none">
-        <button id="print-trigger-btn">Leihschein drucken</button>
-      </div>
-      <div class="modal-actions" id="print-received-actions" style="display:none">
-        <button id="print-received-btn">Leihschein erhalten</button>
-      </div>
-      <div class="info-box">
-        <h4>Leihschein</h4>
-        <p>Mit der Unterschrift auf dem Leihschein bestätigst du der Schule den Erhalt der aufgeführten Bücher.</p>
+    <div class="scroll-center">
+      <div class="big-msg">
+        <div class="icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg></div>
+        <div class="title" id="print-title">Leihschein Drucken</div>
+        <div id="print-intro">Du hast alle Bücher ausgeliehen. Als nächstes muss der Leihschein gedruckt werden.</div>
+        <div id="print-status" role="status" aria-live="polite">
+          <div id="print-text"></div>
+        </div>
+        <div class="modal-actions" id="print-actions" style="display:none">
+          <button id="print-trigger-btn">Leihschein drucken</button>
+        </div>
+        <div class="modal-actions" id="print-received-actions" style="display:none">
+          <button id="print-received-btn">Leihschein erhalten</button>
+        </div>
+        <div class="info-box">
+          <h4>Leihschein</h4>
+          <p>Mit der Unterschrift auf dem Leihschein bestätigst du der Schule den Erhalt der aufgeführten Bücher.</p>
+        </div>
       </div>
     </div>
   </div>
@@ -298,16 +307,18 @@
         <div class="s-form" id="slip-form"></div>
       </div>
     </div>
-    <div class="big-msg">
-      <div class="icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 3.5a2.1 2.1 0 0 1 3 3L8 16 4 17l1-4Z"/><line x1="12.5" y1="5.5" x2="15.5" y2="8.5"/><path d="M2 20.5c1.3-1.7 2.2-1.5 3-.3.7 1 .6 1.8 1.8 1.3 1.6-.6 1.8-2.2 3.5-1.7.9.3 1.1 1.1 2 1L20.5 17.2"/></svg></div>
-      <div class="title">Leihschein unterschreiben</div>
-      <div id="slip-intro">Der Leihschein wurde gedruckt.</div>
-      <div id="slip-status" role="status" aria-live="polite">
-        <div id="slip-text">Bitte unterschreibe den Leihschein und gib ihn bei einem Betreuer ab.</div>
-      </div>
-      <div class="info-box">
-        <h4>Leihschein</h4>
-        <p>Mit der Unterschrift auf dem Leihschein bestätigst du der Schule den Erhalt der aufgeführten Bücher.</p>
+    <div class="scroll-center">
+      <div class="big-msg">
+        <div class="icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 3.5a2.1 2.1 0 0 1 3 3L8 16 4 17l1-4Z"/><line x1="12.5" y1="5.5" x2="15.5" y2="8.5"/><path d="M2 20.5c1.3-1.7 2.2-1.5 3-.3.7 1 .6 1.8 1.8 1.3 1.6-.6 1.8-2.2 3.5-1.7.9.3 1.1 1.1 2 1L20.5 17.2"/></svg></div>
+        <div class="title">Leihschein unterschreiben</div>
+        <div id="slip-intro">Der Leihschein wurde gedruckt.</div>
+        <div id="slip-status" role="status" aria-live="polite">
+          <div id="slip-text">Bitte unterschreibe den Leihschein und gib ihn bei einem Betreuer ab.</div>
+        </div>
+        <div class="info-box">
+          <h4>Leihschein</h4>
+          <p>Mit der Unterschrift auf dem Leihschein bestätigst du der Schule den Erhalt der aufgeführten Bücher.</p>
+        </div>
       </div>
     </div>
   </div>

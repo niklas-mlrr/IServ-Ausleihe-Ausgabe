@@ -305,7 +305,7 @@ def test_confirm_slip_received_pushes_own_slip_before_closed_when_no_signature(
     assert types.index("own_slip_download") < types.index("closed")
     own_slip = next(m for m in student_ws.sent if m["type"] == "own_slip_download")
     assert base64.b64decode(own_slip["data_b64"]) == b"%PDF-own-slip"
-    assert own_slip["filename"] == "Schülerleihschein: Test, Schüler.pdf"
+    assert own_slip["filename"] == "Schülerleihschein Test, Schüler.pdf"
 
 
 def test_confirm_slip_received_completion_survives_own_slip_fetch_failure(monkeypatch):
