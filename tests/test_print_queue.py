@@ -278,6 +278,9 @@ def test_confirm_slip_received_pushes_own_slip_before_closed_when_no_signature(
             calls.append((student_id, variant, start_reporting_period))
             return b"%PDF-own-slip"
 
+        async def get_student_info(self, student_id, schoolyear=None):
+            return {"lastname": "Test", "firstname": "Schüler"}
+
     st.iserv = _FakeIServSlip()
 
     ctx = st.open_context("10a")
@@ -302,7 +305,7 @@ def test_confirm_slip_received_pushes_own_slip_before_closed_when_no_signature(
     assert types.index("own_slip_download") < types.index("closed")
     own_slip = next(m for m in student_ws.sent if m["type"] == "own_slip_download")
     assert base64.b64decode(own_slip["data_b64"]) == b"%PDF-own-slip"
-    assert own_slip["filename"].startswith("leihschein_44_")
+    assert own_slip["filename"] == "Schülerleihschein: Test, Schüler.pdf"
 
 
 def test_confirm_slip_received_completion_survives_own_slip_fetch_failure(monkeypatch):

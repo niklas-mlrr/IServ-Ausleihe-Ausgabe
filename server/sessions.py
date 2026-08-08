@@ -884,6 +884,7 @@ async def _send_own_slip_download(state: AppState, ws, student_id: int) -> None:
         pdf = await state.iserv.get_loan_slip_pdf(
             student_id, variant="student", start_reporting_period="3months"
         )
+        info = await state.iserv.get_student_info(student_id, state.selected_schoolyear)
     except Exception:  # noqa: BLE001 — Download ist Kosmetik, Abschluss nie blockieren
         log.debug(
             "Eigener-Leihschein-Download vor Session-Ende fehlgeschlagen (student_id=%s)",
@@ -891,12 +892,14 @@ async def _send_own_slip_download(state: AppState, ws, student_id: int) -> None:
             exc_info=True,
         )
         return
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    lastname = (info.get("lastname") or "").strip()
+    firstname = (info.get("firstname") or "").strip()
+    filename = f"Schülerleihschein: {lastname}, {firstname}.pdf"
     await get_hub().send_websocket(
         ws,
         {
             "type": "own_slip_download",
-            "filename": f"leihschein_{student_id}_{ts}.pdf",
+            "filename": filename,
             "data_b64": base64.b64encode(pdf).decode("ascii"),
         },
     )
