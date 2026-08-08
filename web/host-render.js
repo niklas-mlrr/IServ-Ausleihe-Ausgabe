@@ -479,6 +479,15 @@ window.__host = window.__host || {};
     await fetch('/api/skip', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ student_id: studentId }) });
   }
 
+  // Übersprungener Schüler: Einmal-QR erzeugen, mit dem ein Helfer die Bücher
+  // des Schülers stellvertretend einscannt (QR-Modal wie beim Pairing).
+  async function helperScan(studentId) {
+    const r = await fetch('/api/helper-scan/start', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ student_id: studentId }) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { showMsg(d.detail || 'QR-Erzeugung fehlgeschlagen'); return; }
+    showQr(d.qr, d.url);
+  }
+
   // Einzelnen Schüler trennen: Helfer-/Schüler-Verbindung lösen, zurück auf "Wartend".
   async function disconnectStudent(studentId) {
     const r = await fetch('/api/disconnect', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ student_id: studentId }) });
@@ -2047,11 +2056,17 @@ window.__host = window.__host || {};
         }
       } else if (s.status === 'done') {
         // Fertig: statt „Fertig" der rote Hinweis, falls einer bekannt ist;
-        // ohne Hinweis bleibt es beim grünen „Fertig". Zusätzlich, sobald die
-        // Lehrkraft den Leihschein entgegengenommen hat (read-only Anzeige,
-        // s. renderCtxTeacher/teacherSlipStat — der Host setzt das Flag nicht
-        // selbst), ein kleines grünes Häkchen mit Titel-Tooltip.
-        statusBadge = hints.length ? hints.join('') : `<span class="badge badge-done">Fertig</span>`;
+        // ohne Hinweis bleibt es beim grünen „Fertig". Ein abwesender Schüler,
+        // dessen Bücher ein Helfer eingescant hat (`helper_scanned`), wird als
+        // „Fertig (abwesend)" ausgewiesen — der physische Stapel muss separat
+        // übergeben werden. Zusätzlich, sobald die Lehrkraft den Leihschein
+        // entgegengenommen hat (read-only Anzeige, s. renderCtxTeacher/
+        // teacherSlipStat — der Host setzt das Flag nicht selbst), ein kleines
+        // grünes Häkchen mit Titel-Tooltip.
+        const doneBadge = s.helper_scanned
+          ? '<span class="badge badge-done">Fertig (abwesend)</span>'
+          : '<span class="badge badge-done">Fertig</span>';
+        statusBadge = hints.length ? hints.join('') : doneBadge;
         if (ctx.done_collected === true && s.slip_collected) {
           statusBadge += `<span class="badge badge-done" title="Leihschein von der Lehrkraft entgegengenommen">Leihschein ✓</span>`;
         }
@@ -2066,6 +2081,10 @@ window.__host = window.__host || {};
       const statusCell = `<div class="q-status">${statusBadge}${trailingHints}</div>`;
       const pairBtn = (state.modus_b && state.modus_b.open && ctx.live_ausgabe !== false)
         ? `<button class="success" data-action="pair-student" data-student-id="${s.student_id}">Pairing</button> ` : '';
+      // Übersprungener Schüler: Helfer scannt die Bücher stellvertretend über
+      // einen Einmal-QR (POST /api/helper-scan/start → QR-Modal).
+      const helperScanBtn = (state.modus_b && state.modus_b.open)
+        ? `<button class="secondary" data-action="helper-scan" data-student-id="${s.student_id}">Bücher als Helfer einscannen</button> ` : '';
       const printBtn = `<button class="secondary" data-action="print" data-student-id="${s.student_id}" title="Leihschein drucken" aria-label="Leihschein drucken">${ICON_PRINTER}</button>`;
       // Trennen: löst Helfer-/Schüler-Verbindung und setzt den Schüler zurück auf "Wartend".
       const disconnectBtn = `<button class="secondary" data-action="disconnect" data-student-id="${s.student_id}">Trennen</button>`;
@@ -2073,9 +2092,11 @@ window.__host = window.__host || {};
         ? `${pairBtn}<button class="secondary" data-action="skip" data-student-id="${s.student_id}">Überspringen</button> ${disconnectBtn}`
         : s.status === 'active'
           ? `<button class="success" data-action="finish" data-student-id="${s.student_id}">Abschließen</button> <button class="secondary" data-action="skip" data-student-id="${s.student_id}">Abbrechen</button> ${disconnectBtn} ${printBtn}`
-          : s.status === 'done'
-            ? printBtn
-            : '';
+          : s.status === 'skipped'
+            ? helperScanBtn
+            : s.status === 'done'
+              ? printBtn
+              : '';
       return `<tr class="${s.status === 'active' ? 'row-active' : ''}">
         <td>${escapeHtml(s.lastname)}, ${escapeHtml(s.firstname)}</td>
         <td>${escapeHtml((s.form || '').replace(/^Klasse\s+/i, ''))}</td>
@@ -2800,6 +2821,7 @@ window.__host = window.__host || {};
       case 'next-student': nextStudent(el.dataset.token); break;
       case 'remove-helper': removeHelper(el.dataset.token); break;
       case 'pair-student': pairStudent(parseInt(el.dataset.studentId)); break;
+      case 'helper-scan': helperScan(parseInt(el.dataset.studentId)); break;
       case 'skip': skipStudent(parseInt(el.dataset.studentId)); break;
       case 'disconnect': disconnectStudent(parseInt(el.dataset.studentId)); break;
       case 'clear-book-alert': clearBookAlert(parseInt(el.dataset.studentId)); break;

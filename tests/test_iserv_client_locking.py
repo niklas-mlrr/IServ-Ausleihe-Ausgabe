@@ -40,7 +40,7 @@ class _FakeSeriesEndpoint:
 class _FakeAusleiheClient:
     """Stellt sicher, dass kein echter Netzwerk-Login stattfindet."""
 
-    def __init__(self, domain, username, password, allow_writes=False):
+    def __init__(self, domain, username, password, allow_writes=False, timeout=None):
         self.domain = domain
         self.username = username
         self.password = password

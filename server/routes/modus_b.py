@@ -24,9 +24,11 @@ from ..sessions import (
 from ..state import get_state
 from ._deps import (
     DisplayAuthorizeRequest,
+    HelperJoinRequest,
     StudentDismissRequest,
     StudentJoinRequest,
     StudentPairRequest,
+    StudentRef,
     _base_url,
     host_router,
     router,
@@ -273,6 +275,89 @@ async def student_dismiss(body: StudentDismissRequest) -> dict:
     await invalidate_session(state, session, "revoked", reason="host-dismissed")
     await get_hub().broadcast_host(state.state_snapshot())
     return {"ok": True}
+
+
+@host_router.post("/api/helper-scan/start")
+async def helper_scan_start(body: StudentRef, request: Request) -> dict:
+    """Host erzeugt für einen übersprungenen Schüler einen Einmal-QR, mit dem
+    ein Helfer die Bücher des Schülers stellvertretend einscannen kann.
+
+    Der QR trägt ein einmaliges Helfer-Secret (`/student?h=<secret>`). Beim
+    Scannen bindet `POST /api/student/helper-join` eine Modus-B-Session direkt
+    an den Schüler (ohne den sonst nötigen Pairing-Schritt). Pro Schüler ist
+    nur ein gültiger QR erlaubt — ein neuer Aufruf ersetzt den alten.
+    """
+    if body.student_id is None:
+        raise HTTPException(400, "student_id fehlt")
+    student_id = body.student_id
+    state = get_state()
+    student = state.find_student(student_id)
+    if not student:
+        raise HTTPException(404, "Schüler nicht in der Queue")
+    if student.status != "skipped":
+        raise HTTPException(409, f"Schüler nicht übersprungen (Status: {student.status})")
+
+    # Nur ein gültiger QR pro Schüler — ein neuer ersetzt den alten.
+    for secret, (sid, _created) in list(state.helper_scan_secrets.items()):
+        if sid == student_id:
+            del state.helper_scan_secrets[secret]
+
+    secret = gen_join_secret()
+    state.helper_scan_secrets[secret] = (student_id, datetime.now())
+    url = f"{_base_url(request)}/student?h={secret}"
+    return {"ok": True, "url": url, "qr": make_qr_data_url(url)}
+
+
+@router.post("/api/student/helper-join")
+async def student_helper_join(body: HelperJoinRequest) -> dict:
+    """Öffentlich (per Einmal-QR des Hosts erreichbar): bindet eine Modus-B-
+    Session direkt an den übersprungenen Schüler und liefert den session_token.
+
+    Das Secret ist eine Einmal-Capability: es wird beim ersten Aufruf aus dem
+    State gepoppt. Bewusst KEIN `modus_b_open`-Check — der Host hat den QR
+    gezielt erzeugt (der Button ist ohnehin nur bei offener Ausgabe sichtbar).
+    Kein Payment-Gate: der Host entscheidet bewusst, für den Schüler zu scannen.
+    """
+    secret = body.helper_secret.strip()
+    state = get_state()
+    hub = get_hub()
+    entry = state.helper_scan_secrets.pop(secret, None)
+    if entry is None:
+        raise HTTPException(403, "Ungültiger oder abgelaufener QR")
+    student_id, _created = entry
+
+    student = state.find_student(student_id)
+    if not student:
+        raise HTTPException(404, "Schüler nicht in der Queue")
+    if student.status != "skipped":
+        raise HTTPException(409, f"Schüler nicht mehr übersprungen (Status: {student.status})")
+    if state.find_session_by_student(student_id):
+        raise HTTPException(409, "Schüler hat bereits eine Live-Session")
+
+    try:
+        info = await state.iserv.get_student_info(student_id, state.selected_schoolyear)
+    except Exception as e:
+        log.exception("Schülerinfo (Helfer-Scan) für %d fehlgeschlagen", student_id)
+        raise HTTPException(502, f"IServ-Fehler: {e}") from e
+
+    # Binden — ab jetzt gilt der session_token als freigegeben (analog
+    # student_pair, ohne Payment-Override).
+    session = create_student_session(state)
+    session.student_id = student_id
+    session.state = "paired"
+    session.paired_at = datetime.now()
+    session.last_activity = datetime.now()
+    session.payment_overridden = False
+    # Abwesend + Bücher durch Helfer eingescant → Host „Fertig (abwesend)",
+    # Lehrkraft „Leihschein & Bücherstapel entgegengenommen" (s. state.py).
+    student.helper_scanned = True
+    student.status = "active"
+
+    await hub.broadcast_host(state.state_snapshot())
+    session.load_task = asyncio.create_task(
+        load_and_push_paired_student(state, hub, session, student, info)
+    )
+    return {"session_token": session.session_token}
 
 
 # Modus-A-Schülerladen liegt jetzt zentral in sessions.load_and_push_helper_student.

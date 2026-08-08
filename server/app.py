@@ -31,7 +31,12 @@ async def lifespan(app: FastAPI):
         cfg = get_config()
         state = get_state()
 
-        state.iserv = IsServClient(cfg.iserv_domain, cfg.iserv_username, cfg.iserv_password)
+        state.iserv = IsServClient(
+            cfg.iserv_domain,
+            cfg.iserv_username,
+            cfg.iserv_password,
+            read_timeout_s=cfg.iserv_read_timeout_s,
+        )
 
     # Bücher-Reihenfolge/Ausblendung aus letzter Sitzung laden (Persistenz):
     # reine Datei-IO, non-fatal — Fehler lässt den State leer wie ohne Persistenz.

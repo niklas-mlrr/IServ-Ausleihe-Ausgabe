@@ -104,6 +104,13 @@ class QueueStudent:
     # bestehende `done`-/Info-Badge-Darstellung behält; die Lehreransicht kann
     # den Eintrag dadurch korrekt als übersprungen ausweisen.
     auto_skipped: bool = False
+    # Abwesend (übersprungen) UND Bücher per Helfer-Scan („Bücher als Helfer
+    # einscannen", /api/student/helper-join) eingescant. Rein informativ: Host
+    # zeigt dann „Fertig (abwesend)", die Lehrkraft „Leihschein & Bücherstapel
+    # entgegengenommen" — der physische Stapel muss beim Abwesenden separat
+    # übergeben werden. Gesetzt in modus_b.student_helper_join, wenn der
+    # Schüler beim Helfer-Scan `skipped` war.
+    helper_scanned: bool = False
     # Schülerclient (Modus B) hat alle vorgemerkten Bücher gescannt und ist in
     # den Druckmodus gewechselt (WS `print_mode`, s. routes/ws.py). Bei
     # `slip_trigger == "helper"` druckt hier ausschließlich ein Helfer/Host
@@ -150,6 +157,7 @@ class QueueStudent:
             "print_mode": self.print_mode,
             "slip_signing": self.slip_signing,
             "slip_collected": self.slip_collected,
+            "helper_scanned": self.helper_scanned,
             "enrolled": self.enrolled,
             "paid": self.paid,
             "amount_open": self.amount_open,
@@ -190,6 +198,7 @@ class QueueStudent:
         self.slip_printed = False
         self.slip_collected = False
         self.auto_skipped = False
+        self.helper_scanned = False
         self.slip_printer = None
         self.slip_printer_label = None
         self.print_mode = False
@@ -599,6 +608,11 @@ class AppState:
         self.modus_b_join_qr: str | None = None  # PNG-Data-URL für iPad/Host
         self.student_sessions: dict[str, StudentSessionB] = {}  # session_token -> Session
         self.displays: dict[str, DisplaySession] = {}  # display_id -> Display
+        # Einmalige Helfer-Scan-Secrets: secret -> (student_id, created_at).
+        # Erzeugt vom Host-Button „Bücher als Helfer einscannen"
+        # (POST /api/helper-scan/start), konsumiert (einmalig) von
+        # POST /api/student/helper-join. Aufgeräumt im Sweeper.
+        self.helper_scan_secrets: dict[str, tuple[int, datetime]] = {}
         # Drucker-Displays (`/drucker-display`): eigene Rolle, Pairing + pro
         # Display zugewiesene Pool-Drucker-Teilmenge (s. PrinterDisplaySession).
         # Key ist der Token in der URL (= display_id); Sessions bleiben über WS-
@@ -989,6 +1003,7 @@ class AppState:
                     "slip_printing": s.student_id in printing_ids,
                     "slip_printed": s.slip_printed,
                     "slip_collected": s.slip_collected,
+                    "helper_scanned": s.helper_scanned,
                 }
             )
         return {

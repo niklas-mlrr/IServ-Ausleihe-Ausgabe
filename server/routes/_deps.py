@@ -391,6 +391,14 @@ class StudentDismissRequest(BaseModel):
     pairing_code: str = ""
 
 
+class HelperJoinRequest(BaseModel):
+    """Body für `POST /api/student/helper-join` — der Helfer scannt den
+    Einmal-QR („Bücher als Helfer einscannen") und bindet so eine Modus-B-
+    Session direkt an den übersprungenen Schüler (s. routes/modus_b.py)."""
+
+    helper_secret: str = ""
+
+
 # Erfolgreich erkannte LAN-IP cachen — ändert sich im Betrieb praktisch nicht
 # und spart pro QR-Request einen UDP-Socket. WICHTIG: Nur Treffer cachen, kein
 # None — sonst friert ein einmaliger Netzwerk-Hänger beim ersten Request (WLAN

@@ -69,6 +69,9 @@ function setStatusText(text, alertClass = null) {
 }
 
 const joinSecret = new URLSearchParams(location.search).get('j');
+// Einmaliges Helfer-Secret („Bücher als Helfer einscannen"): bindet die
+// Session direkt an den übersprungenen Schüler, ohne Pairing-Schritt.
+const helperSecret = new URLSearchParams(location.search).get('h');
 let token = sessionStorage.getItem('mb_token');
 let ws = null, finished = false, scannerStarted = false;
 let scanInFlight = false;              // genau ein Scan bis zur Serverantwort
@@ -134,6 +137,30 @@ async function join() {
     token = d.session_token;
     sessionStorage.setItem('mb_token', token);
     document.getElementById('pair-code').textContent = d.pairing_code;
+    return true;
+  } catch (_) {
+    showError('Verbindungsfehler', 'Bitte erneut versuchen.');
+    return false;
+  }
+}
+
+// Helfer-Scan („Bücher als Helfer einscannen"): der QR bindet die Session
+// direkt an den übersprungenen Schüler — kein Pairing-Code nötig, der Client
+// geht nach `student_info`/`worker_ready` direkt in die aktive Ansicht.
+async function helperJoin() {
+  if (!helperSecret) { showError('Kein QR-Code', 'Bitte scanne den QR-Code am Display.'); return false; }
+  try {
+    const r = await fetch('/api/student/helper-join', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ helper_secret: helperSecret }),
+    });
+    if (!r.ok) {
+      showError('Ausgabe geschlossen', 'Die Live-Ausgabe ist derzeit nicht geöffnet.');
+      return false;
+    }
+    const d = await r.json();
+    token = d.session_token;
+    sessionStorage.setItem('mb_token', token);
     return true;
   } catch (_) {
     showError('Verbindungsfehler', 'Bitte erneut versuchen.');
@@ -824,6 +851,6 @@ setInterval(() => {
 // ================= Bootstrap =================
 (async function boot() {
   if (token) { connect(); }            // bestehender Token → verbinden (Server prüft Gültigkeit)
-  else if (await join()) { connect(); } // sonst per QR-Secret neue Session
+  else if (helperSecret ? await helperJoin() : await join()) { connect(); } // sonst per QR-Secret neue Session
 })();
 })();

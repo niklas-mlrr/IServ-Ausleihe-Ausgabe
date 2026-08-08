@@ -15,6 +15,13 @@ class Config:
     iserv_username: str
     iserv_password: str
     host_password: str
+    # Read-Timeout für IServ-Requests (Sekunden). Default der ausleihe-api ist
+    # 30s — spürbar beim Leihschein-Druck: der PDF-Abruf läuft synchron VOR dem
+    # eigentlichen Druck, der Drucker-Slot ist dabei schon belegt (s. print_queue
+    # `_claim_fills`/`_dispatch`). Ein kürzerer Timeout lässt eine hängende
+    # IServ-Antwort schneller fehlschlagen, statt den Druckauftrag lange
+    # unsichtbar warten zu lassen. Der Connect-Timeout bleibt bei 5s.
+    iserv_read_timeout_s: float = 10.0
     port: int = 3443
     # Erzwingt die LAN-IP in QR-/Join-URLs. Nötig, wenn der Laptop mehrere
     # Interfaces hat (WLAN + VPN/Tailscale/Docker) und die Auto-Erkennung das
@@ -30,6 +37,8 @@ class Config:
     # Modus B: harte Zugriffsentzug-Schwellen (Sekunden).
     pending_pairing_ttl_s: int = 300  # QR gescannt, aber nicht gepairt → verfällt
     paired_idle_ttl_s: int = 900  # gepairt, aber inaktiv → verfällt
+    # Helfer-Scan-QR („Bücher als Helfer einscannen") ungenutzt → verfällt.
+    helper_scan_ttl_s: int = 600
     # Host-Login: gleitendes Timeout (verlängert sich bei jeder Anfrage).
     host_session_ttl_s: int = 43200  # 12 h — deckt einen Ausgabetag ab
     # Leihschein-Druck (siehe server/printing.py).
@@ -81,6 +90,16 @@ def load_config(env_file: Path | None = None) -> Config:
             raise SystemExit(f"Fehler: {name} muss mindestens {minimum} sein")
         return value
 
+    def positive_float(name: str, default: float, *, minimum: float = 0.1) -> float:
+        raw = os.environ.get(name, str(default))
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            raise SystemExit(f"Fehler: {name} muss eine Zahl sein (war '{raw}')") from None
+        if value < minimum:
+            raise SystemExit(f"Fehler: {name} muss mindestens {minimum} sein")
+        return value
+
     port = positive("PORT", 3443)
     if port > 65535:
         raise SystemExit("Fehler: PORT muss höchstens 65535 sein")
@@ -100,6 +119,7 @@ def load_config(env_file: Path | None = None) -> Config:
         iserv_username=req("ISERV_USERNAME"),
         iserv_password=req("ISERV_PASSWORD"),
         host_password=req("HOST_PASSWORD"),
+        iserv_read_timeout_s=positive_float("ISERV_READ_TIMEOUT_S", 10.0),
         port=port,
         host_ip=(os.environ.get("HOST_IP", "").strip() or None),
         worker_contexts=positive("WORKER_CONTEXTS", 2),
@@ -109,6 +129,7 @@ def load_config(env_file: Path | None = None) -> Config:
         tls_key=tls_key,
         pending_pairing_ttl_s=positive("PENDING_PAIRING_TTL_S", 300),
         paired_idle_ttl_s=positive("PAIRED_IDLE_TTL_S", 900),
+        helper_scan_ttl_s=positive("HELPER_SCAN_TTL_S", 600),
         host_session_ttl_s=positive("HOST_SESSION_TTL_S", 43200),
         print_backend=backend,
         printer_name=(os.environ.get("PRINTER_NAME", "").strip() or None),

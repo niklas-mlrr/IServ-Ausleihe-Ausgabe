@@ -50,10 +50,13 @@ def _sort_ts(s: object) -> float:
 class IsServClient:
     """Async wrapper around the synchronous AusleiheClient (read-only)."""
 
-    def __init__(self, domain: str, username: str, password: str) -> None:
+    def __init__(
+        self, domain: str, username: str, password: str, *, read_timeout_s: float = 30.0
+    ) -> None:
         self._domain = domain
         self._username = username
         self._password = password
+        self._read_timeout_s = read_timeout_s
         self._client: AusleiheClient | None = None
         # ISBN -> Series, einmalig (read-only GET /series) für Titel + Fach.
         self._series_map: dict | None = None
@@ -81,6 +84,7 @@ class IsServClient:
                         username=self._username,
                         password=self._password,
                         allow_writes=False,
+                        timeout=(5.0, self._read_timeout_s),
                     )
         return self._client
 

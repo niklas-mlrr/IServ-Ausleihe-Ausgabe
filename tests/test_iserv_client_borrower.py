@@ -96,7 +96,7 @@ class _FakeAusleiheClient:
 
 
 def _make_client(monkeypatch, book, students=None):
-    def factory(domain, username, password, allow_writes=False):
+    def factory(domain, username, password, allow_writes=False, timeout=None):
         return _FakeAusleiheClient(domain, username, password, allow_writes, book, students)
 
     monkeypatch.setattr(iserv_client_module, "AusleiheClient", factory)

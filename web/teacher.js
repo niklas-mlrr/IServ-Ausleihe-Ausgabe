@@ -73,9 +73,12 @@
       if (s.status === 'skipped' && !s.auto_skipped) {
         extra = `<button class="act" data-undo="${s.student_id}">Nicht abwesend</button>`;
       } else if (s.status === 'done' && data.done_collected === true && s.slip_printed) {
+        // Abwesender, dessen Bücher ein Helfer eingescant hat: die Lehrkraft
+        // nimmt neben dem Leihschein auch den physischen Bücherstapel entgegen.
+        const slipLabel = s.helper_scanned ? 'Leihschein & Bücherstapel entgegengenommen' : 'Leihschein entgegengenommen';
         extra = `<label class="slip-check">
           <input type="checkbox" data-slip="${s.student_id}"${s.slip_collected ? ' checked' : ''}>
-          Leihschein entgegengenommen
+          ${slipLabel}
         </label>`;
       }
       const swipeable = s.status === 'pending';

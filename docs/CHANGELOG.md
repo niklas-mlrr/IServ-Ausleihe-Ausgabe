@@ -8,6 +8,64 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-08 — IServ-Read-Timeout konfigurierbar, Default gesenkt (30s → 10s)
+
+- **Anlass:** Der Leihschein-Druck fühlte sich manchmal langsam an, obwohl der
+  Drucker selbst gerade nichts zu tun hatte. Ursache: `print_loan_slip_for()`
+  holt das PDF synchron per IServ-GET, *bevor* überhaupt etwas an `lp`/Sumatra
+  übergeben wird — der Drucker-Slot ist dabei laut interner Warteschlange
+  schon belegt (`print_queue._claim_fills`/`_dispatch`), aber am OS-Drucker
+  taucht noch nichts auf. Mit dem alten Default-Read-Timeout der `ausleihe-api`
+  (30s, plus bis zu 2 Retries) konnte eine hängende IServ-Antwort den Auftrag
+  entsprechend lange unsichtbar hängen lassen.
+- **Neu:** `server/config.py` — Feld `iserv_read_timeout_s` (Default **10s**),
+  per `ISERV_READ_TIMEOUT_S` in `.env` einstellbar (Connect-Timeout bleibt fest
+  bei 5s). `server/iserv_client.py` (`IsServClient.__init__`) reicht
+  `timeout=(5.0, read_timeout_s)` an `AusleiheClient` durch; `server/app.py`
+  übergibt `cfg.iserv_read_timeout_s` bei der Instanziierung. Betrifft alle
+  IServ-Reads (nicht nur den Leihschein-PDF-Abruf).
+- Test-Fakes in `tests/test_iserv_client_locking.py` und
+  `tests/test_iserv_client_borrower.py` mussten den neuen `timeout`-Kwarg in
+  ihrer `AusleiheClient`-Konstruktor-Signatur akzeptieren. Volle Suite grün,
+  `ruff` clean.
+
+## 2026-08-08 — Modus B: „Bücher als Helfer einscannen" für übersprungene Schüler
+
+- **Problem:** ein übersprungener Schüler (Status `skipped` — z. B. Gerät
+  defekt, Schüler anwesend aber nicht scannfähig) konnte seine Bücher bisher
+  nicht ausleihen: der normale Modus-B-Pfad verlangt, dass der Schüler selbst
+  über `student.html` scannt.
+- **Neu:** Host-Button **„Bücher als Helfer einscannen"** in der Queue für
+  `skipped`-Schüler (nur bei offener Ausgabe). Er öffnet ein QR-Modal mit
+  einem **einmaligen Helfer-Secret** (`/student?h=<secret>`). Ein Helfer/Admin
+  scannt den QR mit dem eigenen Handy → `student.html` bindet eine Modus-B-
+  Session **direkt** an den übersprungenen Schüler (ohne Pairing-Schritt) →
+  der Helfer scannt die Bücher, sie werden über den bestehenden
+  `process_scan`-Pfad für den Schüler verbucht.
+- **Server** (`server/routes/modus_b.py`):
+  - `POST /api/helper-scan/start` (Host-only, Body `StudentRef`): validiert
+    `skipped`, ersetzt ein evtl. altes Secret desselben Schülers (nur ein
+    gültiger QR), liefert `{url, qr}`.
+  - `POST /api/student/helper-join` (öffentlich, Body `HelperJoinRequest`):
+    poppt das Secret (einmalig), validiert Schüler noch `skipped` + ohne
+    bestehende Session, bindet die Session (analog `student_pair`, ohne
+    Payment-Gate — der Host entscheidet bewusst) und startet
+    `load_and_push_paired_student`. Bewusst **kein** `modus_b_open`-Check:
+    das Secret ist eine vom Host gezielt erzeugte Einmal-Capability.
+  - `state.helper_scan_secrets` (`server/state.py`), TTL
+    `helper_scan_ttl_s` (Default 600 s, `server/config.py`), Aufräumen im
+    Sweeper via `sweep_helper_scan_secrets` (`server/sessions.py`).
+- **Frontend** (`web/host-render.js`): `helperScanBtn` in `renderCtxQueue`
+  für `skipped`-Schüler, `helperScan(studentId)` → `showQr(d.qr, d.url)`,
+  Action-Switch `helper-scan`. (`web/student.js`): `?h=`-Param →
+  `helperJoin()` → `POST /api/student/helper-join`, Boot-Zweig
+  `helperSecret ? await helperJoin() : await join()`.
+- **Tests** (`tests/test_api_guards.py` +9, `tests/test_sessions.py` +1):
+  Start-Endpoint (403/400/404/409, `url`+`qr`, Secret-Ersetzung), Join-Endpoint
+  (403 unbekannt, einmalige Nutzung, Bindung → `active`+`paired`, 409 wenn
+  nicht mehr `skipped`), Sweeper-TTL. **413** Offline-Tests grün; `ruff`
+  clean.
+
 ## 2026-08-08 — Modus B: wartenden Pairing-Code verwerfen (X-Button neben „Zuordnen")
 
 - **Problem:** ein Schüler, der die Ausleihe abgeschlossen hat und die

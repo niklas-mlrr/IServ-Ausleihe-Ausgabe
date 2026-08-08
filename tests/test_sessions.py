@@ -142,3 +142,17 @@ def test_release_worker_falls_back_to_close_without_pool(monkeypatch):
         assert worker.closed is True
 
     asyncio.run(run())
+
+
+def test_sweep_helper_scan_secrets_removes_expired_keeps_fresh():
+    """Ungenutzte Helfer-Scan-Secrets verfallen nach der TTL; frische bleiben."""
+    from datetime import datetime, timedelta
+
+    st = AppState()
+    st.helper_scan_secrets["old"] = (1, datetime.now() - timedelta(seconds=601))
+    st.helper_scan_secrets["fresh"] = (2, datetime.now() - timedelta(seconds=10))
+
+    sessions.sweep_helper_scan_secrets(st, ttl_s=600)
+
+    assert "old" not in st.helper_scan_secrets
+    assert "fresh" in st.helper_scan_secrets

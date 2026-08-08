@@ -1746,6 +1746,16 @@ async def revoke_all_teacher_sessions(state: AppState, *, reason: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+def sweep_helper_scan_secrets(
+    state: AppState, ttl_s: int, now: datetime | None = None
+) -> None:
+    """Einmalige Helfer-Scan-Secrets aufräumen (ungenutzter QR verfällt)."""
+    now = now or datetime.now()
+    for secret, (_sid, created) in list(state.helper_scan_secrets.items()):
+        if (now - created).total_seconds() > ttl_s:
+            del state.helper_scan_secrets[secret]
+
+
 async def sweep_expired_sessions() -> None:
     """Hintergrund-Loop: pending/paired Sessions nach TTL hart entwerten."""
     cfg = get_config()
@@ -1762,6 +1772,7 @@ async def sweep_expired_sessions() -> None:
             for host_sid in expired_host_sids:
                 await hub.close_host_session(host_sid, state)
             now = datetime.now()
+            sweep_helper_scan_secrets(state, cfg.helper_scan_ttl_s, now)
             expired: list[StudentSessionB] = []
             for session in list(state.student_sessions.values()):
                 if session.state == "pending_pairing":

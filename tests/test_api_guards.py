@@ -959,3 +959,149 @@ def test_student_dismiss_requires_host_cookie(client, ctx):
     """Endpunkt hängt am host_router → require_host greift vor dem Body."""
     r = client.post("/api/student/dismiss", json={"pairing_code": "1234"})
     assert r.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# helper-scan — „Bücher als Helfer einscannen" für übersprungene Schüler.
+# Der Host erzeugt einen Einmal-QR (POST /api/helper-scan/start); der Helfer
+# bindet damit eine Modus-B-Session direkt an den Schüler
+# (POST /api/student/helper-join, einmalig).
+# ---------------------------------------------------------------------------
+
+
+def _skipped_setup(state, student_id=1):
+    """Übersprungener Schüler in einer offenen Klasse."""
+    from server.state import QueueStudent
+
+    class_ctx = state.open_context("10a")
+    student = QueueStudent(
+        student_id=student_id, lastname="A", firstname="a", form="10a", status="skipped"
+    )
+    class_ctx.queue.append(student)
+    return student
+
+
+class _FakeIServHelper:
+    async def get_student_info(self, student_id, schoolyear):
+        return {"student_id": student_id, "books": [], "enrolled": False}
+
+
+def test_helper_scan_start_requires_host_cookie(client, ctx):
+    r = client.post("/api/helper-scan/start", json={"student_id": 1})
+    assert r.status_code == 403
+
+
+def test_helper_scan_start_missing_student_id(client, ctx):
+    r = client.post("/api/helper-scan/start", json={}, cookies={"session_id": "sid"})
+    assert r.status_code == 400
+
+
+def test_helper_scan_start_unknown_student(client, ctx):
+    r = client.post(
+        "/api/helper-scan/start", json={"student_id": 999}, cookies={"session_id": "sid"}
+    )
+    assert r.status_code == 404
+
+
+def test_helper_scan_start_not_skipped_409(client, ctx):
+    from server.state import QueueStudent
+
+    state, _, _ = ctx
+    class_ctx = state.open_context("10a")
+    class_ctx.queue.append(
+        QueueStudent(student_id=1, lastname="A", firstname="a", form="10a", status="pending")
+    )
+    r = client.post(
+        "/api/helper-scan/start", json={"student_id": 1}, cookies={"session_id": "sid"}
+    )
+    assert r.status_code == 409
+
+
+def test_helper_scan_start_returns_url_and_qr(client, ctx):
+    state, _, cfg = ctx
+    cfg.host_ip = "10.0.0.9"  # deterministisch, kein LAN-IP-Socket
+    _skipped_setup(state)
+    r = client.post(
+        "/api/helper-scan/start", json={"student_id": 1}, cookies={"session_id": "sid"}
+    )
+    assert r.status_code == 200
+    d = r.json()
+    assert d["ok"] is True
+    assert "h=" in d["url"]
+    assert d["qr"].startswith("data:image/png;base64,")
+    assert len(state.helper_scan_secrets) == 1
+
+
+def test_helper_scan_start_replaces_old_secret(client, ctx):
+    state, _, cfg = ctx
+    cfg.host_ip = "10.0.0.9"
+    _skipped_setup(state)
+    r1 = client.post(
+        "/api/helper-scan/start", json={"student_id": 1}, cookies={"session_id": "sid"}
+    )
+    secret1 = r1.json()["url"].split("h=")[1]
+    r2 = client.post(
+        "/api/helper-scan/start", json={"student_id": 1}, cookies={"session_id": "sid"}
+    )
+    secret2 = r2.json()["url"].split("h=")[1]
+    assert secret1 != secret2
+    assert len(state.helper_scan_secrets) == 1
+    assert secret1 not in state.helper_scan_secrets
+    assert secret2 in state.helper_scan_secrets
+
+
+def test_helper_join_unknown_secret_403(client, ctx):
+    r = client.post("/api/student/helper-join", json={"helper_secret": "bogus"})
+    assert r.status_code == 403
+
+
+def test_helper_join_binds_session_to_skipped_student(client, ctx):
+    state, _, cfg = ctx
+    cfg.host_ip = "10.0.0.9"
+    _skipped_setup(state)
+    state.iserv = _FakeIServHelper()
+    r = client.post(
+        "/api/helper-scan/start", json={"student_id": 1}, cookies={"session_id": "sid"}
+    )
+    secret = r.json()["url"].split("h=")[1]
+    r2 = client.post("/api/student/helper-join", json={"helper_secret": secret})
+    assert r2.status_code == 200
+    token = r2.json()["session_token"]
+    session = state.student_sessions[token]
+    assert session.student_id == 1
+    assert session.state == "paired"
+    student = state.find_student(1)
+    assert student.status == "active"
+    # Abwesend + Bücher durch Helfer eingescant → Flag für Host/Lehrkraft.
+    assert student.helper_scanned is True
+    # Secret ist verbraucht (einmalig).
+    assert secret not in state.helper_scan_secrets
+
+
+def test_helper_join_secret_one_time_use(client, ctx):
+    state, _, cfg = ctx
+    cfg.host_ip = "10.0.0.9"
+    _skipped_setup(state)
+    state.iserv = _FakeIServHelper()
+    r = client.post(
+        "/api/helper-scan/start", json={"student_id": 1}, cookies={"session_id": "sid"}
+    )
+    secret = r.json()["url"].split("h=")[1]
+    r1 = client.post("/api/student/helper-join", json={"helper_secret": secret})
+    assert r1.status_code == 200
+    r2 = client.post("/api/student/helper-join", json={"helper_secret": secret})
+    assert r2.status_code == 403
+
+
+def test_helper_join_student_no_longer_skipped_409(client, ctx):
+    state, _, cfg = ctx
+    cfg.host_ip = "10.0.0.9"
+    student = _skipped_setup(state)
+    state.iserv = _FakeIServHelper()
+    r = client.post(
+        "/api/helper-scan/start", json={"student_id": 1}, cookies={"session_id": "sid"}
+    )
+    secret = r.json()["url"].split("h=")[1]
+    student.status = "pending"  # z. B. Lehrer hat den Skip zurückgenommen
+    r2 = client.post("/api/student/helper-join", json={"helper_secret": secret})
+    assert r2.status_code == 409
