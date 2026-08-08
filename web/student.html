@@ -196,6 +196,15 @@
     #slip-intro {
       max-width: 520px; margin: 0 auto 18px; line-height: 1.45;
     }
+    /* Erklär-Kasten unter dem Druck- bzw. Unterschreiben-Button: bewusst
+       eckig (kein border-radius) statt abgerundet wie #print-status/#slip-status
+       — optisch als Infozettel statt als Statusanzeige erkennbar. */
+    .info-box {
+      width: 100%; max-width: 520px; margin: 20px auto 0; padding: 14px 18px;
+      border: 2px solid var(--border); background: var(--surface); text-align: left;
+    }
+    .info-box h4 { font-size: .95rem; font-weight: 700; margin-bottom: 6px; }
+    .info-box p { font-size: .85rem; line-height: 1.45; opacity: .8; }
   </style>
 </head>
 <body>
@@ -262,6 +271,10 @@
       <div class="modal-actions" id="print-received-actions" style="display:none">
         <button id="print-received-btn">Leihschein erhalten</button>
       </div>
+      <div class="info-box">
+        <h4>Leihschein</h4>
+        <p>Der Leihschein ist deine Quittung über alle ausgeliehenen Bücher. Bewahre ihn auf, bis du die Bücher am Schuljahresende zurückgibst — er dient als Nachweis, welche Bücher du erhalten hast.</p>
+      </div>
     </div>
   </div>
 
@@ -283,6 +296,10 @@
       <div id="slip-intro">Der Leihschein wurde gedruckt.</div>
       <div id="slip-status" role="status" aria-live="polite">
         <div id="slip-text">Bitte unterschreibe den Leihschein und gib ihn bei einem Betreuer ab.</div>
+      </div>
+      <div class="info-box">
+        <h4>Leihschein</h4>
+        <p>Der Leihschein ist deine Quittung über alle ausgeliehenen Bücher. Mit deiner Unterschrift bestätigst du den Erhalt — bewahre ihn danach auf, bis du die Bücher am Schuljahresende zurückgibst.</p>
       </div>
     </div>
   </div>
