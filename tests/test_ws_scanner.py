@@ -249,6 +249,41 @@ def test_student_slip_mode_survives_reconnect(client, ws_env):
     assert ready["slip_recipient"] == "teacher"
 
 
+def test_student_dismiss_closes_connected_pending_ws_cleanly(client, ws_env):
+    """Dismiss einer verbundenen pending-Session: der Server schließt die
+    Schüler-WS von einer anderen Coroutine aus (invalidate_session →
+    ws.close(4006)). Verifiziert den Modus-B-Dismiss-Pfad: der Client bekommt
+    das `closed`-Frame (vor dem Close 4006 gesendet) und wird sauber getrennt,
+    die Session ist hart entwertet. (Der Handler-seitige RuntimeError bei einem
+    serverseitigen Close während receive_json() wird durch das Abfangen in
+    routes/ws.py::ws_student verhindert — dieser Fehler ist über den
+    TestClient nicht reproduzierbar, da das client-sichtbare Verhalten mit
+    und ohne Fix identisch ist und nur der serverseitige Traceback differiert.)"""
+    import server.sessions as sessions
+    state, _ = ws_env
+    session = sessions.create_student_session(state)  # state=pending_pairing
+    code = session.pairing_code
+    token = session.session_token
+
+    with client.websocket_connect(f"/ws/student/{token}") as ws:
+        # Begrüßung: pending + pairing_code
+        assert _recv_until(ws, "pending")["pairing_code"] == code
+
+        # Host-seitiges Dismiss vom Portal aus simulieren (läuft auf demselben
+        # Event-Loop neben dem in receive_json() wartenden WS-Handler).
+        async def _dismiss():
+            await sessions.invalidate_session(state, session, "revoked", reason="test-dismiss")
+        ws.portal.call(_dismiss)
+
+        # closed-Frame (vor dem Close 4006 gesendet) + saubere Trennung.
+        closed = _recv_until(ws, "closed")
+        assert closed["reason"] == "revoked"
+
+    # Session wurde hart entwertet.
+    assert token not in state.student_sessions
+    assert state.find_session_by_code(code) is None
+
+
 # ---------------------------------------------------------------------------
 # 2) Malformed JSON-Frame darf die Empfangsschleife NICHT töten.
 # ---------------------------------------------------------------------------

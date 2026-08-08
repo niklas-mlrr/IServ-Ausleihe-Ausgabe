@@ -1227,7 +1227,15 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
         while True:
             try:
                 raw = await websocket.receive_json()
-            except WebSocketDisconnect:
+            except (WebSocketDisconnect, RuntimeError):
+                # WebSocketDisconnect: Client hat die Verbindung getrennt.
+                # RuntimeError: der Server hat die Verbindung von einer anderen
+                # Coroutine aus geschlossen — invalidate_session → ws.close()
+                # setzt den ASGI-State auf DISCONNECTED, worauf receive_json()
+                # „WebSocket is not connected" (statt WebSocketDisconnect) wirft.
+                # Regulärer Pfad für Modus-B-Dismiss / Timeout-Sweeper /
+                # Modus-B-Close einer verbundenen pending-Session: sauber
+                # beenden statt eines ASGI-Tracebacks. s. sessions.invalidate_session.
                 break
             except json.JSONDecodeError:
                 # Malformedes Frame — loggen und weiterlauschen, statt die
