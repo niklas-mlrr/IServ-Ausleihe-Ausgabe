@@ -42,15 +42,19 @@
     /* Pending-View: volle verbleibende Höhe, Inhalt mittig */
     #view-pending.show { flex: 1 1 auto; justify-content: center; }
     /* Druckmodus/Leihscheinmodus/Abschluss: volle verbleibende Höhe. Name
-       (print-name-row) bleibt oben fix (kein eigener flex/overflow, also
-       nie Teil des Scroll-Bereichs); der restliche Inhalt sitzt in
-       .scroll-center darunter — vertikal mittig, bei zu viel Inhalt
-       scrollt NUR dieser Bereich statt über den Bildschirmrand zu laufen. */
-    #view-print.show, #view-slip.show { flex: 1 1 auto; min-height: 0; }
+       (print-name-row) bleibt oben fix im normalen Fluss stehen. Der
+       restliche Inhalt (.scroll-center) wird per JS (student.js::
+       positionScrollCenter, ResizeObserver-getrieben) absolut positioniert:
+       mittig bezogen auf die GESAMTE View-Höhe (nicht nur den Bereich unter
+       dem Namen) — außer das würde mit dem Namen kollidieren, dann direkt
+       darunter. Ist der Inhalt selbst dafür zu groß, scrollt nur dieser
+       Bereich (bis inkl. Rand, damit z. B. die Icons nie abgeschnitten sind)
+       statt über den Bildschirmrand zu laufen. */
+    #view-print.show, #view-slip.show { flex: 1 1 auto; min-height: 0; position: relative; }
     #view-done.show { flex: 1 1 auto; min-height: 0; justify-content: center; overflow-y: auto; }
     .scroll-center {
-      flex: 1 1 auto; min-height: 0; width: 100%;
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      position: absolute; left: 0; right: 0; width: 100%;
+      display: flex; flex-direction: column; align-items: center;
       overflow-y: auto;
     }
     /* Pairing */
