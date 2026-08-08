@@ -386,6 +386,23 @@ def test_teacher_snapshot_maps_auto_skipped_done_to_skipped(ctx):
     assert by_id[c.queue[1].student_id]["auto_skipped"] is False
 
 
+def test_teacher_snapshot_propagates_helper_scanned(ctx):
+    """Ein abwesender Schüler, dessen Bücher ein Helfer eingescant hat, ist in
+    der Lehreransicht `done` mit `helper_scanned=True` — Grundlage für die
+    „Leihschein & Bücherstapel entgegengenommen"-Checkbox."""
+    state, _, _ = ctx
+    c = _open_ctx(state, students=1)
+    student = c.queue[0]
+    student.status = "done"
+    student.slip_printed = True
+    student.helper_scanned = True
+
+    snap = state.teacher_snapshot(c.id)
+    s = snap["students"][0]
+    assert s["status"] == "done"
+    assert s["helper_scanned"] is True
+
+
 def test_teacher_snapshot_unknown_context_is_empty(ctx):
     state, _, _ = ctx
     snap = state.teacher_snapshot("nope")

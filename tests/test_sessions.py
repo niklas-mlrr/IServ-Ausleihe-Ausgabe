@@ -156,3 +156,18 @@ def test_sweep_helper_scan_secrets_removes_expired_keeps_fresh():
 
     assert "old" not in st.helper_scan_secrets
     assert "fresh" in st.helper_scan_secrets
+
+
+def test_helper_scanned_serialized_and_reset():
+    """helper_scanned (Abwesend + Helfer-Scan) ist im Draht-Format sichtbar und
+    wird beim Zurücksetzen auf „Wartend" wie die übrigen Leihschein-Marker gelöscht."""
+    from server.state import QueueStudent
+
+    s = QueueStudent(student_id=1, lastname="A", firstname="a", form="10a")
+    s.helper_scanned = True
+
+    d = s.as_dict()
+    assert d["helper_scanned"] is True
+
+    s.reset_progress()
+    assert s.helper_scanned is False

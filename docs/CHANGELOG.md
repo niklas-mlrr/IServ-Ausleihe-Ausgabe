@@ -8,6 +8,27 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-08 — Modus B: „Abwesend" + Helfer-Scan in Host-Queue & Lehreransicht
+
+- **Problem:** ein abwesender Schüler, dessen Bücher per „Bücher als Helfer
+  einscannen" eingescant wurden, war in Host-Queue und Lehreransicht nicht vom
+  normalen (anwesenden) Ablauf zu unterscheiden. Dabei ist der physische
+  Bücherstapel beim Abwesenden ein eigener Übergabe-Schritt.
+- **Neu:** `QueueStudent.helper_scanned` (`server/state.py`) — wird in
+  `student_helper_join` gesetzt, wenn der Schüler beim Helfer-Scan `skipped`
+  war. Im Draht-Format (`as_dict`, `teacher_snapshot`) mitgeführt; beim
+  Zurücksetzen auf „Wartend" (`reset_progress`) gelöscht.
+- **Host-Queue** (`web/host-render.js`): ein `done`-Schüler mit
+  `helper_scanned` zeigt **„Fertig (abwesend)"** statt „Fertig" (Hint-Badges
+  ersetzen ihn wie bisher, wenn einer vorliegt).
+- **Lehreransicht** (`web/teacher.js`): die Leihschein-Checkbox lautet bei
+  `helper_scanned` **„Leihschein & Bücherstapel entgegengenommen"** statt
+  „Leihschein entgegengenommen".
+- **Tests** (`tests/test_teacher.py` +1, `tests/test_sessions.py` +1): Snapshot
+  propagiert `helper_scanned` (done, Status unverändert), Seri-
+  alisierung + Reset. Bestehender Shape-Test um den neuen Key erweitert.
+  **415** Offline-Tests grün; `ruff` clean.
+
 ## 2026-08-08 — IServ-Read-Timeout konfigurierbar, Default gesenkt (30s → 10s)
 
 - **Anlass:** Der Leihschein-Druck fühlte sich manchmal langsam an, obwohl der
