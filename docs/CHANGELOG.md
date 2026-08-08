@@ -31,13 +31,40 @@
   `Schülerleihschein: <Nachname>, <Vorname>.pdf` statt
   `leihschein_<student_id>_<Zeitstempel>.pdf` (Test in
   `tests/test_print_queue.py` entsprechend angepasst).
-- Layout: Druckmodus (`view-print`), Leihschein-unterschreiben-Modus
-  (`view-slip`) und Schülerleihscheinmodus (`view-done`) sind jetzt vertikal
-  mittig positioniert (`flex:1 1 auto; justify-content:center`, analog
-  `view-pending`) statt über feste `margin-top`-Werte (90px/60px) grob nach
-  unten geschoben; bei zu viel Inhalt scrollt die jeweilige View intern
-  (`overflow-y:auto`) statt über den Bildschirmrand zu laufen — mit
-  Playwright-Screenshots bei knapper Viewport-Höhe verifiziert.
+- Layout (erster Schritt, s. Nachträge unten für den finalen Stand):
+  Druckmodus (`view-print`), Leihschein-unterschreiben-Modus (`view-slip`)
+  und Schülerleihscheinmodus (`view-done`) zunächst über
+  `flex:1 1 auto; justify-content:center` (analog `view-pending`) statt
+  fester `margin-top`-Werte (90px/60px) vertikal zentriert, mit
+  `overflow-y:auto` bei zu viel Inhalt.
+- **Nachtrag 1 — Name bleibt oben fix:** `view-print`/`view-slip` bekommen
+  `.scroll-center` als eigenen Wrapper um `.big-msg`, außerhalb der
+  Namenszeile (`print-name-row`) — beim Scrollen bleibt der Schülername
+  jetzt fix am oberen Rand stehen, nur der übrige Inhalt scrollt.
+  Schülerleihschein-Dateiname korrigiert: kein Doppelpunkt mehr, nur
+  Leerzeichen — `Schülerleihschein <Nachname>, <Vorname>.pdf`.
+- **Nachtrag 2 — Zentrierung bezogen auf die GESAMTE Bildschirmhöhe:** die
+  reine `justify-content:center`-Lösung zentrierte nur im Bereich UNTER der
+  Namenszeile. Jetzt übernimmt `student.js::positionScrollCenter`
+  (ResizeObserver-getrieben auf View + `.big-msg`) die Positionierung: der
+  Inhalt zentriert sich bezogen auf die volle View-Höhe (ignoriert den
+  Namen bei der Mittelpunkt-Berechnung), außer das würde mit der Namenszeile
+  kollidieren — dann sitzt er direkt darunter. Reicht der Platz selbst dafür
+  nicht, scrollt `.scroll-center` bis exakt zum unteren Rand (keine
+  abgeschnittenen Icons).
+- **Nachtrag 3 — Scroll-Bug in `view-done` behoben:** `view-done` hatte
+  (anders als `view-print`/`view-slip`) noch die reine CSS-Lösung
+  (`justify-content:center` + `overflow-y:auto` direkt auf der View). Bei
+  überlaufendem Inhalt ist der zum Zentrieren "oben" abgeschnittene Teil
+  darüber **unerreichbar**, weil `scrollTop` nicht negativ werden kann — das
+  Häkchen-Icon und die Überschrift blieben dauerhaft unsichtbar. Auf
+  dasselbe `.scroll-center` + `positionScrollCenter`-Muster umgestellt
+  (Funktion generalisiert: `nameRow` ist optional, `view-done` hat keine
+  Namenszeile). Alle drei Views jetzt per Playwright über einen lokalen
+  HTTP-Server verifiziert (⚠️ `file://` lädt die `/`-absoluten Skriptpfade
+  in `student.html` nicht — Tests dafür immer über `python3 -m http.server`
+  im `web/`-Verzeichnis laufen lassen, sonst läuft `student.js` gar nicht
+  und ein Layout-Test bestätigt nur Zufall).
 
 ## 2026-08-07 — Schülerleihscheinmodus: Eigenabruf des Leihscheins (letzte 3 Monate) beim Abschluss
 
