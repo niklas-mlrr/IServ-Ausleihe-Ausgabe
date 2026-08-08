@@ -24,6 +24,7 @@ from ..sessions import (
 from ..state import get_state
 from ._deps import (
     DisplayAuthorizeRequest,
+    StudentDismissRequest,
     StudentJoinRequest,
     StudentPairRequest,
     _base_url,
@@ -249,6 +250,29 @@ async def student_pair(body: StudentPairRequest) -> dict:
         load_and_push_paired_student(state, hub, session, student, info)
     )
     return {"ok": True, "student_id": student_id}
+
+
+@host_router.post("/api/student/dismiss")
+async def student_dismiss(body: StudentDismissRequest) -> dict:
+    """Host verwirft einen wartenden Pairing-Code ohne Zuordnung — die
+    pending-Session wird revokierte, der Code verschwindet aus der Modus-B-Liste.
+
+    Anwendungsfall: ein Schüler hat die Seite nach Abschluss neu geladen und
+    per Re-Join einen neuen Code ausgelöst. Statt ihn zuzuordnen, räumt der
+    Host ihn hier ab. `invalidate_session` sendet dem Schüler-Client ein
+    ``closed``-Frame VOR dem Close 4006 — der Client geht auf den Done-Screen
+    (``finished=true``) und verbindet sich NICHT neu (kein Re-Join-Loop).
+    """
+    code = body.pairing_code.strip()
+    if not code:
+        raise HTTPException(400, "pairing_code fehlt")
+    state = get_state()
+    session = state.find_session_by_code(code)
+    if not session:
+        raise HTTPException(404, "Code unbekannt oder abgelaufen")
+    await invalidate_session(state, session, "revoked", reason="host-dismissed")
+    await get_hub().broadcast_host(state.state_snapshot())
+    return {"ok": True}
 
 
 # Modus-A-Schülerladen liegt jetzt zentral in sessions.load_and_push_helper_student.

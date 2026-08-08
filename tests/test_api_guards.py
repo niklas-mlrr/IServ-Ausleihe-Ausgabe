@@ -908,3 +908,54 @@ def test_student_pair_happy_path_binds_when_nothing_changed(client, ctx):
     assert student.status == "active"
     assert session.student_id == 1
     assert session.state == "paired"
+
+
+# ---------------------------------------------------------------------------
+# student/dismiss — wartenden Pairing-Code verwerfen (ohne Zuordnung).
+# Anwendungsfall: Schüler hat nach Abschluss die Seite neu geladen → Re-Join
+# erzeugt neuen pending-Code, den der Host abräumen will, ohne zu paaren.
+# invalidate_session revokiert die Session; der Schüler-Client geht über das
+# „closed"-Frame auf den Done-Screen (kein Re-Join-Loop, s. modus_b.py).
+# ---------------------------------------------------------------------------
+
+
+def test_student_dismiss_revokes_pending_session(client, ctx):
+    state, _, _ = ctx
+    session, _ = _pair_setup(state)
+    token = session.session_token
+    assert state.find_session_by_code("1234") is session
+
+    r = client.post(
+        "/api/student/dismiss",
+        json={"pairing_code": "1234"},
+        cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 200
+    assert r.json() == {"ok": True}
+    # Session ist hart entwertet: aus dem RAM genommen, Code nicht mehr findbar.
+    assert token not in state.student_sessions
+    assert state.find_session_by_code("1234") is None
+
+
+def test_student_dismiss_unknown_code_404(client, ctx):
+    r = client.post(
+        "/api/student/dismiss",
+        json={"pairing_code": "9999"},
+        cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 404
+
+
+def test_student_dismiss_empty_code_400(client, ctx):
+    r = client.post(
+        "/api/student/dismiss",
+        json={"pairing_code": ""},
+        cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 400
+
+
+def test_student_dismiss_requires_host_cookie(client, ctx):
+    """Endpunkt hängt am host_router → require_host greift vor dem Body."""
+    r = client.post("/api/student/dismiss", json={"pairing_code": "1234"})
+    assert r.status_code == 403

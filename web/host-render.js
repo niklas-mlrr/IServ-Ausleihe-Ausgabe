@@ -24,6 +24,9 @@ window.__host = window.__host || {};
   // Druckersymbol für die Leihschein-Buttons — dasselbe SVG wie im Helfer-Client
   // (scan.html #print-btn), nur hier statt dem Wort „Leihschein".
   const ICON_PRINTER = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>';
+  // Schließen-X für den „Code verwerfen"-Button neben „Zuordnen" (Modus B).
+  // Dasselbe X-Pfad-SVG wie beim Helfer-Entfernen-Button (s. renderHelpers).
+  const ICON_CLOSE = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
   const THEME_LABEL = { '': 'Auto', 'light': ICON_SUN + ' Hell', 'dark': ICON_MOON + ' Dunkel' };
   function applyTheme(t) {
     if (t) document.documentElement.setAttribute('data-theme', t);
@@ -766,6 +769,21 @@ window.__host = window.__host || {};
     });
   }
 
+  // Code verwerfen (ohne Zuordnung): wartende pending-Session revokieren —
+  // z. B. Schüler hat nach Abschluss die Seite neu geladen und per Re-Join
+  // einen neuen Code ausgelöst. Der Schüler geht client-seitig auf den
+  // Done-Screen (s. invalidate_session → „closed"-Frame vor Close 4006),
+  // ein Re-Join-Loop entsteht nicht.
+  async function dismissCode(code, btn) {
+    if (!code) return;
+    if (!await confirmDialog(`Pairing-Code ${code} verwerfen? Der Schüler wird getrennt.`, 'Verwerfen')) return;
+    await busy(btn, async () => {
+      const r = await fetch('/api/student/dismiss', { method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ pairing_code: code }) });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Verwerfen fehlgeschlagen'); }
+    });
+  }
+
   // Schüler-zuerst: "Pairing"-Button stellt den Schüler scharf; danach Code in
   // der Liste klicken. Arming ist global, wirkt aber nur im Klassen-Tab des
   // bewaffneten Schülers (dessen Pairing-Card wird neu gerendert).
@@ -844,6 +862,7 @@ window.__host = window.__host || {};
         return `<div class="code-row">
           <button class="success code-chip" data-action="pair" data-student-id="${armed.student_id}" data-code="${p.pairing_code}">${p.pairing_code}</button>
           ${meta}
+          <button class="danger" data-action="dismiss-code" data-code="${p.pairing_code}" title="Code verwerfen" aria-label="Code ${p.pairing_code} verwerfen">${ICON_CLOSE}</button>
         </div>`;
       }
       // Code-zuerst: Schüler im Select wählen + Zuordnen.
@@ -853,6 +872,7 @@ window.__host = window.__host || {};
         ${meta}
         <select id="${selId}" style="flex:1;min-width:140px">${studentOpts}</select>
         <button class="success" data-action="pair-select" data-sel-id="${selId}" data-code="${p.pairing_code}" ${pendingStudents.length ? '' : 'disabled'}>Zuordnen</button>
+        <button class="danger" data-action="dismiss-code" data-code="${p.pairing_code}" title="Code verwerfen" aria-label="Code ${p.pairing_code} verwerfen">${ICON_CLOSE}</button>
       </div>`;
     }).join('');
   }
@@ -2774,6 +2794,7 @@ window.__host = window.__host || {};
       case 'cancel-arm': e.preventDefault(); cancelArm(); break;
       case 'pair': doPair(parseInt(el.dataset.studentId), el.dataset.code, el); break;
       case 'pair-select': doPair(parseInt(document.getElementById(el.dataset.selId).value), el.dataset.code, el); break;
+      case 'dismiss-code': dismissCode(el.dataset.code, el); break;
       case 'finish': finishStudent(parseInt(el.dataset.studentId)); break;
       case 'print': printLoanSlip(parseInt(el.dataset.studentId), el); break;
       case 'next-student': nextStudent(el.dataset.token); break;

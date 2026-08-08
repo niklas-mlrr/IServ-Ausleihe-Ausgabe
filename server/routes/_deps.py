@@ -382,6 +382,15 @@ class StudentPairRequest(BaseModel):
     override_payment: bool = False
 
 
+class StudentDismissRequest(BaseModel):
+    """Body für `POST /api/student/dismiss` — der Host verwirft einen wartenden
+    Pairing-Code (ohne Zuordnung), z. B. wenn ein Schüler nach Abschluss die
+    Seite neu geladen hat und so einen neuen Code ausgelöst hat. Die dahinter
+    liegende pending-Session wird revokierte (s. routes/modus_b.py)."""
+
+    pairing_code: str = ""
+
+
 # Erfolgreich erkannte LAN-IP cachen — ändert sich im Betrieb praktisch nicht
 # und spart pro QR-Request einen UDP-Socket. WICHTIG: Nur Treffer cachen, kein
 # None — sonst friert ein einmaliger Netzwerk-Hänger beim ersten Request (WLAN
