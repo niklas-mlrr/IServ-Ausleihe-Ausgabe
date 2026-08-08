@@ -12,28 +12,32 @@ function show(name) {
 }
 // escapeHtml, isBookDone, initAudio/playBeep (Beeper): siehe common.js.
 
-// Druckmodus/Leihscheinmodus (view-print/view-slip): der Inhalt unterhalb
-// des Namens (.scroll-center) soll mittig bezogen auf die GESAMTE View-Höhe
-// stehen, nicht nur mittig im Bereich unter dem Namen — außer das würde mit
-// dem Namen (.print-name-row) kollidieren, dann direkt darunter. Ist der
-// Inhalt selbst zu groß für den verbleibenden Platz, wird nur .scroll-center
-// scrollbar (statt über den Bildschirmrand zu laufen) — inklusive genug Platz
-// bis zum unteren Rand, damit z. B. die Icons nie abgeschnitten sind.
+// Druckmodus/Leihscheinmodus/Abschluss (view-print/view-slip/view-done): der
+// Inhalt (.scroll-center) soll mittig bezogen auf die GESAMTE View-Höhe
+// stehen, nicht nur mittig im Bereich unter einem evtl. Namen — außer das
+// würde mit dem Namen (.print-name-row, nur bei Druck-/Leihscheinmodus
+// vorhanden; view-done hat keinen) kollidieren, dann direkt darunter. Ist
+// der Inhalt selbst zu groß für den verbleibenden Platz, wird nur
+// .scroll-center scrollbar (statt über den Bildschirmrand zu laufen oder —
+// der ursprüngliche Bug bei view-done — mit CSS-`justify-content:center`
+// den Anfang hinter unerreichbarem negativem scrollTop zu verstecken) —
+// inklusive genug Platz bis zum unteren Rand, damit z. B. Icons nie
+// abgeschnitten sind.
 function positionScrollCenter(view) {
   const nameRow = view.querySelector('.print-name-row');
   const wrap = view.querySelector('.scroll-center');
   const inner = wrap && wrap.firstElementChild;
-  if (!nameRow || !wrap || !inner) return;
+  if (!wrap || !inner) return;
   const containerH = view.clientHeight;
   if (!containerH) return; // View gerade nicht sichtbar (display:none)
-  const minTop = nameRow.offsetTop + nameRow.offsetHeight;
+  const minTop = nameRow ? nameRow.offsetTop + nameRow.offsetHeight : 0;
   const desiredTop = (containerH - inner.scrollHeight) / 2;
   const top = Math.max(desiredTop, minTop);
   wrap.style.top = `${top}px`;
   wrap.style.maxHeight = `${Math.max(0, containerH - top)}px`;
 }
 
-const scrollCenterViews = [views.print, views.slip].filter(Boolean);
+const scrollCenterViews = [views.print, views.slip, views.done].filter(Boolean);
 if (typeof ResizeObserver !== 'undefined') {
   const scrollCenterObserver = new ResizeObserver((entries) => {
     for (const entry of entries) {
