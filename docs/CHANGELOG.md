@@ -8,6 +8,40 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-08 — Modus B: wartenden Pairing-Code verwerfen (X-Button neben „Zuordnen")
+
+- **Problem:** ein Schüler, der die Ausleihe abgeschlossen hat und die
+  Schüler-Seite neu lädt, re-joined über das in der URL verbleibende
+  Join-Secret → neue `pending_pairing`-Session → neuer 4-stelliger Code poppt
+  am Host auf. Bisher ließ sich so ein Code nur durch Zuordnung oder
+  Timeout-Ablauf loswerden.
+- **Neu:** `POST /api/student/dismiss` (`server/routes/modus_b.py`, Body
+  `StudentDismissRequest { pairing_code }` in `_deps.py`) revokiert die
+  passende pending-Session via `invalidate_session(... "revoked",
+  reason="host-dismissed")` + `broadcast_host` (Host-only, wie `student_pair`).
+- **Kein Re-Join-Loop:** `invalidate_session` sendet dem Schüler-WS ein
+  `{"type":"closed"}`-Frame **vor** `ws.close(code=4006)` → Schüler-Client
+  (`student.js`) setzt `finished=true; show('done')`, der 4006-Close trifft
+  auf `if (finished) return;` → kein Reconnect, kein neuer Code. Schüler
+  landet auf dem bestehenden „Ausleihvorgang abgeschlossen"-Screen — richtige
+  Botschaft für jemanden, der fertig ist. Kein neuer Client-Zustand nötig.
+- **Frontend** (`web/host-render.js`): `ICON_CLOSE` (X-Pfad-SVG wie
+  `remove-helper`); in `renderCtxPairing` ein `.danger` X-Button in **beiden**
+  Code-Row-Varianten (code-first neben „Zuordnen" + armed neben dem Code-Chip),
+  `data-action="dismiss-code"`. `dismissCode(code, btn)` mit
+  `confirmDialog` (bewusst mit Bestätigung — Verwerfen trennt ggf. einen
+  echten wartenden Schüler). Wired im Action-Switch als `dismiss-code`.
+- **Tests** (`tests/test_api_guards.py`, +4):
+  `test_student_dismiss_revokes_pending_session` (Session verschwindet,
+  `find_session_by_code` → None), `_unknown_code_404`, `_empty_code_400`,
+  `_requires_host_cookie` (403). 397 → **401** Offline-Tests grün; `ruff`
+  clean.
+- **Deployed:** Commit `2dd9e46` auf `main`; Server-Restart durch Niklas
+  (12:38); `host-render.js` vom Server mit neuem Inhalt verifiziert. Hinweis:
+  der X-Button erscheint nur auf einer pending Code-Row — bei leerer
+  Modus-B-Liste ist nichts zu sehen (Host hart neu laden + Code erzeugen zum
+  Sehen). Details: `_logs/2026-08-08_sba_modus_b_dismiss_button.md`.
+
 ## 2026-08-08 — Schülerleihscheinmodus: Erklär-Box, Abschluss-Text, Layout, Dateiname
 
 - `view-done` („Vorgang abgeschlossen", jetzt umbenannt zu **„Ausleihvorgang
