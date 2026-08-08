@@ -8,6 +8,31 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-08 — Modus B: granulare Leihschein-Status in Host-Queue + Helfer-Client
+
+- **Problem:** die Host-Queue zeigte für einen Modus-B-Schüler (Schülerclient)
+  die aktive Phase nur grob (`X/Y` → `Leihschein` während Druck → `Aktiv` →
+  `Fertig`). Der Leihschein-Workflow ließ sich so nicht live verfolgen.
+- **Neu:** granulare Status in der Host-Queue, nacheinander: `Wartend` →
+  `X/Y ohne Mjb X/Y gesamt` → `Leihschein wartet` (Druckauftrag gesendet) →
+  `Leihschein druckt` (OS druckt aktiv) → `Leihschein gedruckt` →
+  `Unterschrift` (Schüler im Unterschreiben-Modus) → `Fertig` (erst bei echtem
+  Abschluss, Session geschlossen).
+- **Server:** `PrintQueue.print_job_states()` (`server/print_queue.py`) liefert
+  je Schüler `"waiting"` (queued/dispatching/spooled) oder `"printing"`.
+  `QueueStudent.as_dict` (`server/state.py`) bekommt `slip_status` statt des
+  reinen Bools; `slip_printing` bleibt als abgeleitetes Bool im Payload
+  (Helfer-Client nutzt es weiter). `queue_as_list`/`real_contexts_summary`/
+  `state_snapshot` stellen auf `print_job_states()` um; `teacher_snapshot`
+  bleibt unverändert.
+- **UI:** Host-Queue (`web/host-render.js`) zeigt die neuen Badges
+  `Leihschein wartet`/`druckt`/`gedruckt`/`Unterschrift`. Helfer-Client
+  (`web/scan-render.js`) zeigt das Druckersymbol für wartet/druckt/gedruckt
+  und keine Symbole mehr bei `Fertig` (Info-Badges wie nicht angemeldet /
+  Antrag / offener Betrag bleiben).
+- **Tests:** `tests/test_print_queue.py` neu: `print_job_states()` liefert
+  `waiting` bei Enqueue und `printing` bei OS-Druck, danach leer.
+
 ## 2026-08-08 — Modus B: eigener Status „abwesend" statt „übersprungen" für Lehrkraft-Aktion
 
 - **Problem:** die Lehrkraft-Aktion „Als abwesend markieren" (`/api/teacher/skip`)

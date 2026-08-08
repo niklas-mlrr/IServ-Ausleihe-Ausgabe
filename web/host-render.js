@@ -2027,8 +2027,8 @@ window.__host = window.__host || {};
     }
     tbody.innerHTML = queue.map(s => {
       // Status-Spalte eines aktiven Schülers zeigt den Fortschritt statt starr
-      // „Aktiv": X/Y (ausgegebene/angemeldete Bücher) → „Leihschein" während
-      // der Druck läuft → „Aktiv" nach fertigen Druck.
+      // „Aktiv": X/Y (ausgegebene/angemeldete Bücher) → „Leihschein wartet" →
+      // „Leihschein druckt" → „Leihschein gedruckt" → ggf. „Unterschrift".
       //
       // X/Y ist zweizeilig, wenn beim Aufrufen schon Bücher ausgeliehen waren
       // (`loaned_at_load > 0`): oben die session-basierten Zahlen (seit Aufrufen
@@ -2043,10 +2043,19 @@ window.__host = window.__host || {};
       const hints = hintBadges(s);
       let statusBadge;
       if (s.status === 'active') {
-        if (s.slip_printing) {
-          statusBadge = `<span class="badge badge-active">Leihschein</span>`;
+        // Granulare Leihschein-Status statt starr „Aktiv": sobald der
+        // Druckauftrag gesendet ist „Leihschein wartet", beim aktiven Druck
+        // „Leihschein druckt", nach dem Druck „Leihschein gedruckt" und im
+        // Leihschein-unterschreiben-Modus (Klasse mit `done_signed`)
+        // „Unterschrift". Erst danach (bzw. ohne Druck) X/Y bzw. „Aktiv".
+        if (s.slip_signing) {
+          statusBadge = `<span class="badge badge-active">Unterschrift</span>`;
         } else if (s.slip_printed) {
-          statusBadge = `<span class="badge badge-active">Aktiv</span>`;
+          statusBadge = `<span class="badge badge-active">Leihschein gedruckt</span>`;
+        } else if (s.slip_status === 'printing') {
+          statusBadge = `<span class="badge badge-active">Leihschein druckt</span>`;
+        } else if (s.slip_status === 'waiting') {
+          statusBadge = `<span class="badge badge-active">Leihschein wartet</span>`;
         } else if (s.books_total) {
           const loaned = s.loaned_at_load || 0;
           const sessionX = s.books_done - loaned;

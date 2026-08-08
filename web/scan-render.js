@@ -190,11 +190,14 @@ function docLetterIcon(letter) {
 }
 function queueInfoIcons(s) {
   const out = [];
-  // Leihschein gedruckt verdrängt X/Y — sobald gedruckt ist, ist der
-  // Bücher-Fortschritt für den Helfer nicht mehr die relevante Info.
-  if (s.slip_printed) {
-    out.push(`<span class="q-info-item" title="Leihschein wurde gedruckt">${ICON_PRINTER_SM}</span>`);
-  } else if (s.books_total) {
+  // Leihschein wartet/druckt/gedruckt → Druckersymbol (verdrängt X/Y — sobald
+  // der Druck läuft/fertig ist, ist der Bücher-Fortschritt für den Helfer
+  // nicht mehr die relevante Info). Bei „Fertig" (done) keine X/Y- oder
+  // Drucker-Symbole — nur die Info-Badges unten (nicht angemeldet / Antrag /
+  // offener Betrag) bleiben.
+  if (s.status !== 'done' && (s.slip_status || s.slip_printed)) {
+    out.push(`<span class="q-info-item" title="Leihschein wird gedruckt">${ICON_PRINTER_SM}</span>`);
+  } else if (s.status !== 'done' && s.books_total) {
     out.push(`<span class="q-info-item q-info-amount" title="ausgegebene / angemeldete Bücher">${s.books_done}/${s.books_total}</span>`);
   }
   if (s.enrolled === false) {

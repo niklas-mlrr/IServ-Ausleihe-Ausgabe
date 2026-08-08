@@ -531,6 +531,25 @@ class PrintQueue:
                     ids.add(j.student_id)
         return ids
 
+    def print_job_states(self) -> dict[int, str]:
+        """student_id -> aktueller Druck-Job-Status für laufende Aufträge.
+
+        ``"waiting"`` = Auftrag gesendet/zentral wartend (queued/dispatching/
+        spooled), ``"printing"`` = OS druckt aktiv. Für die Host-Status-Spalte
+        („Leihschein wartet"/„Leihschein druckt"). Read-only ohne Lock, analog
+        `in_flight_student_ids` — ein Schüler hat höchstens einen laufenden
+        Auftrag, `printing` gewinnt defensiv über `waiting`."""
+        states: dict[int, str] = {}
+        for j in self.waiting:
+            states[j.student_id] = "waiting"
+        for s in self.slots.values():
+            for j in s.jobs:
+                if j.status == "printing":
+                    states[j.student_id] = "printing"
+                elif j.status in ("dispatching", "spooled"):
+                    states.setdefault(j.student_id, "waiting")
+        return states
+
     def _remove_from_slot(self, printer_id: str, job: PrintJob) -> None:
         """Job aus der Kapazitäts-Liste seines Druckers nehmen (falls noch
         vorhanden). Idempotent — mehrfacher Aufruf schadet nicht."""

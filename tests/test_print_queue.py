@@ -1686,3 +1686,46 @@ def test_in_flight_student_ids_tracks_enqueue_and_done(monkeypatch):
     # Nach Fertigstellung: nicht mehr in-flight, slip_printing False.
     assert 42 not in pq.in_flight_student_ids()
     assert slip_printing_flag() is False
+
+
+def test_print_job_states_waiting_then_printing(monkeypatch):
+    """`print_job_states` unterscheidet „Leihschein wartet" (Auftrag gesendet/
+    zentral wartend) von „Leihschein druckt" (OS druckt aktiv) — der Host-
+    Snapshot spiegelt das als `slip_status` in der Kontext-Queue. Nach
+    Fertigstellung ist der Schüler nicht mehr in `slip_status`."""
+    from server.state import QueueStudent
+
+    st = AppState()
+    _patch(monkeypatch, st)
+    ctx = st.open_context("Klasse 5a")
+    s = QueueStudent(
+        student_id=43, lastname="Müller", firstname="Max",
+        form="Klasse 5a", status="active",
+    )
+    ctx.queue.append(s)
+    pq = st.print_queue
+
+    def slip_status_flag() -> str | None:
+        snap = st.state_snapshot()
+        entry = next(q for q in snap["contexts"][ctx.id]["queue"] if q["student_id"] == 43)
+        return entry["slip_status"]
+
+    # Vor dem Druck: kein laufender Auftrag → slip_status None.
+    assert pq.print_job_states() == {}
+    assert slip_status_flag() is None
+
+    async def run():
+        pq.start()
+        job = _job("host", 43, host_sid="s1", name="Müller, Max (Klasse 5a)")
+        await pq.enqueue(job)
+        # Enqueue → zentral wartend → „Leihschein wartet".
+        assert pq.print_job_states().get(43) == "waiting"
+        assert slip_status_flag() == "waiting"
+        # Auftrag fertig abarbeiten (file-Backend-Mock → sofort done).
+        await asyncio.wait_for(job.done.wait(), timeout=5)
+        await pq.stop()
+
+    asyncio.run(run())
+    # Nach Fertigstellung: nicht mehr in-flight, slip_status None.
+    assert pq.print_job_states() == {}
+    assert slip_status_flag() is None

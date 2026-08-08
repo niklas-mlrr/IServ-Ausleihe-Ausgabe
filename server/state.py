@@ -137,7 +137,7 @@ class QueueStudent:
     slip_printer: str | None = None
     slip_printer_label: str | None = None
 
-    def as_dict(self, *, slip_printing: bool = False) -> dict:
+    def as_dict(self, *, slip_status: str | None = None) -> dict:
         return {
             "student_id": self.student_id,
             "lastname": self.lastname,
@@ -153,8 +153,13 @@ class QueueStudent:
             # Leihschein-Druck läuft gerade (Auftrag in der Print-Queue, noch
             # nicht finalisiert) — dynamisch aus der Print-Queue im Snapshot
             # abgeleitet (s. `AppState.state_snapshot`), nicht auf dem Schüler
-            # gemutet. Default False hält die Helfer-Client-Pfade unverändert.
-            "slip_printing": slip_printing,
+            # gemutet. `slip_status` unterscheidet für die Host-Status-Spalte
+            # „Leihschein wartet" (`"waiting"`) von „Leihschein druckt"
+            # (`"printing"`); `slip_printing` bleibt als abgeleitetes Bool für
+            # die Helfer-Client-Pfade erhalten. Default None hält die
+            # Helfer-Client-Pfade unverändert.
+            "slip_printing": slip_status is not None,
+            "slip_status": slip_status,
             "print_mode": self.print_mode,
             "slip_signing": self.slip_signing,
             "slip_collected": self.slip_collected,
@@ -762,14 +767,14 @@ class AppState:
         return [s.as_dict() for s in ctx.queue if s.status in ("pending", "absent")]
 
     def queue_as_list(
-        self, context_id: str | None = None, *, printing_ids: set[int] | None = None
+        self, context_id: str | None = None, *, slip_states: dict[int, str] | None = None
     ) -> list[dict]:
         ctx = self.ctx_or_active(context_id)
         if ctx is None:
             return []
         return [
-            s.as_dict(slip_printing=(s.student_id in printing_ids))
-            if printing_ids is not None
+            s.as_dict(slip_status=slip_states.get(s.student_id))
+            if slip_states is not None
             else s.as_dict()
             for s in ctx.queue
         ]
@@ -797,7 +802,7 @@ class AppState:
         Betreuerauslöser-Druck-Dialog immer die für die Klasse erlaubten
         Drucker vorauswählt, auch wenn der Helfer gerade einem anderen
         Klassen-Kontext zugeordnet ist."""
-        printing_ids = self.print_queue.in_flight_student_ids()
+        slip_states = self.print_queue.print_job_states()
         pool_ids = {p.id for p in self.settings.printers}
         return [
             {
@@ -810,11 +815,11 @@ class AppState:
                     else sorted(c.allowed_printer_ids & pool_ids)
                 ),
                 "queue": [
-                    s.as_dict(slip_printing=(s.student_id in printing_ids))
+                    s.as_dict(slip_status=slip_states.get(s.student_id))
                     for s in c.queue if s.status in ("pending", "absent")
                 ],
                 "queue_all": [
-                    s.as_dict(slip_printing=(s.student_id in printing_ids))
+                    s.as_dict(slip_status=slip_states.get(s.student_id))
                     for s in c.queue
                 ],
             }
@@ -836,17 +841,18 @@ class AppState:
         )
         ctx = self.active_context
         # student_ids mit aktuell laufendem Leihschein-Druck — für die
-        # `slip_printing`-Marker in der Host-Status-Spalte („Leihschein" statt
-        # X/Y, solange der Auftrag in der Print-Queue läuft). Einmal pro Snapshot
-        # berechnet; `_notify_all` der Print-Queue broadcastet den Snapshot bei
-        # jedem Druck-Übergang, sodass der Host live folgt.
-        printing_ids = self.print_queue.in_flight_student_ids()
+        # `slip_status`-Marker in der Host-Status-Spalte („Leihschein wartet"/
+        # „Leihschein druckt" statt X/Y, solange der Auftrag in der Print-Queue
+        # läuft). Einmal pro Snapshot berechnet; `_notify_all` der Print-Queue
+        # broadcastet den Snapshot bei jedem Druck-Übergang, sodass der Host
+        # live folgt.
+        slip_states = self.print_queue.print_job_states()
         contexts = {
             c.id: {
                 "id": c.id,
                 "form": c.form,
                 "queue": [
-                    s.as_dict(slip_printing=(s.student_id in printing_ids))
+                    s.as_dict(slip_status=slip_states.get(s.student_id))
                     for s in c.queue
                 ],
                 # Drucker-Allowlist dieser Klasse — `None` = alle Pool-Drucker
@@ -882,7 +888,7 @@ class AppState:
             "active_context_id": self.active_context_id,
             "contexts": contexts,
             "selected_schoolyear": self.selected_schoolyear,
-            "queue": self.queue_as_list(printing_ids=printing_ids),
+            "queue": self.queue_as_list(slip_states=slip_states),
             "helpers": self.helpers_as_dict(),
             "modus_b": self.modus_b_snapshot(),
             "allow_booking": get_config().allow_booking,
