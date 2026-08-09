@@ -397,9 +397,11 @@
     .queue-group-item .qg-name { margin-left: 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }  /* Klasse↔Name: 7px gap + 7px = 14px */
     .queue-group-item .qg-call, .queue-group-item .qg-print { display: flex; justify-content: flex-end; align-items: center; }
     .q-helper-name {
-      display: inline-flex; align-items: center; justify-content: flex-end;
-      padding: 2px 8px; border-radius: 12px; background: var(--surface-2);
-      color: var(--fg); font-size: .78rem; font-weight: 600;
+      display: inline-flex; align-items: center; justify-content: center;
+      height: var(--q-info-h); box-sizing: border-box; padding: 0 8px;
+      border: 1px solid var(--border); border-radius: 6px;
+      background: var(--surface-2); color: var(--fg);
+      font-size: .9rem; font-weight: 400;
       white-space: nowrap; max-width: 10rem; overflow: hidden;
       text-overflow: ellipsis;
     }
