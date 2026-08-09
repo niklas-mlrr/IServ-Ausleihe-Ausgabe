@@ -7,11 +7,15 @@
 window.__host = window.__host || {};
 
   let ws = null;
-  let state = { active_context_id: null, contexts: {}, queue: [], active_form: null, helpers: {}, modus_b: { open: false, pending: [], pending_count: 0, displays: [], join_url: null }, selected_schoolyear: null };
+  let state = { active_context_id: null, contexts: {}, queue: [], active_form: null, helpers: {}, modus_b: { open: false, paused: false, pending: [], pending_count: 0, displays: [], join_url: null }, selected_schoolyear: null };
   let mbQrDataUrl = null;
   // QR-Modal-Beobachter: schließt das Popup automatisch, sobald der gezeigte QR gescannt wurde.
   // { kind: 'student'|'display', baseline: <Zählerstand beim Öffnen> }
   let qrWatch = null;
+  // iPad-Registrierungscodes, die dieser Host vorübergehend ausblendet. Das
+  // Display bleibt dabei verbunden und kann durch einen Reload der Host-Seite
+  // wieder eingeblendet werden; „Ignorieren" ist bewusst keine Trennung.
+  let ignoredDisplayIds = new Set();
   let armedStudentId = null;  // Schüler, der per "Pairing"-Button scharfgestellt ist (Code-Klick ordnet zu)
   let studentAlerts = {};  // student_id -> {text} — ausgemustert/verliehen-Meldung fürs Now-Serving-Kästchen
   let prevPendingCount = null;  // letzter mb.pending_count — Anstieg => neuer Code (Beep+Blink)

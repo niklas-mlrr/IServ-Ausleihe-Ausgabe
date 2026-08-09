@@ -24,6 +24,7 @@ from ..sessions import (
 from ..state import get_state
 from ._deps import (
     DisplayAuthorizeRequest,
+    DisplayDisconnectRequest,
     HelperJoinRequest,
     StudentDismissRequest,
     StudentJoinRequest,
@@ -48,6 +49,7 @@ async def modus_b_open(request: Request) -> dict:
         if session.state == "pending_pairing":
             await invalidate_session(state, session, "revoked", reason="ausgabe-neu-geoeffnet")
     state.modus_b_open = True
+    state.modus_b_paused = False
     # Frisches Join-Secret bei jedem Öffnen → alte Screenshots/QRs aus einer
     # früheren Ausgabe werden ungültig. Innerhalb einer Ausgabe bleibt es konstant
     # über alle Zuordnungen hinweg.
@@ -70,6 +72,7 @@ async def modus_b_close() -> dict:
     state = get_state()
     hub = get_hub()
     state.modus_b_open = False
+    state.modus_b_paused = False
     state.modus_b_join_secret = None
     state.modus_b_join_url = None
     state.modus_b_join_qr = None
@@ -81,6 +84,20 @@ async def modus_b_close() -> dict:
     await broadcast_displays(state)
     await hub.broadcast_host(state.state_snapshot())
     return {"ok": True}
+
+
+@host_router.post("/api/modus-b/pause")
+async def modus_b_pause() -> dict:
+    """QR-Anzeige auf den autorisierten iPad-Displays pausieren bzw.
+    fortsetzen. Schüler-Sessions und der allgemeine Join-Secret bleiben dabei
+    unverändert bestehen."""
+    state = get_state()
+    if not state.modus_b_open:
+        raise HTTPException(409, "Live-Ausgabe ist geschlossen")
+    state.modus_b_paused = not state.modus_b_paused
+    await broadcast_displays(state)
+    await get_hub().broadcast_host(state.state_snapshot())
+    return {"ok": True, "paused": state.modus_b_paused}
 
 
 @host_router.get("/api/modus-b/qr")
@@ -123,6 +140,38 @@ async def display_authorize(body: DisplayAuthorizeRequest) -> dict:
     await send_display_update(state, display)
     await get_hub().broadcast_host(state.state_snapshot())
     return {"ok": True, "display_id": display.display_id}
+
+
+@host_router.post("/api/display/disconnect")
+async def display_disconnect(body: DisplayDisconnectRequest) -> dict:
+    """Ein verbundenes iPad-Display auf Host-Anforderung trennen.
+
+    Die Session wird vor dem WebSocket-Close aus dem State entfernt. Das
+    verhindert, dass ein parallel laufender Cleanup-Pfad sie erneut als
+    verbunden meldet. Das Display bekommt zuerst ein explizites Frame, damit
+    die öffentliche QR-Seite ihren automatischen Reconnect für diesen
+    absichtlichen Close abschaltet; ein Reload kann anschließend bewusst eine
+    neue Registrierung starten.
+    """
+    display_id = body.display_id.strip()
+    if not display_id:
+        raise HTTPException(400, "display_id fehlt")
+    state = get_state()
+    display = state.displays.pop(display_id, None)
+    if not display:
+        raise HTTPException(404, "Kein Display mit dieser ID")
+
+    websocket = display.ws
+    display.ws = None
+    if websocket is not None:
+        await get_hub().send_websocket(websocket, {"type": "disconnected"})
+        try:
+            await websocket.close(code=4009, reason="Vom Host getrennt")
+        except Exception:  # noqa: BLE001 — Cleanup darf den Host-Request nicht crashen
+            log.debug("iPad-Display %s konnte nicht geschlossen werden", display_id)
+
+    await get_hub().broadcast_host(state.state_snapshot())
+    return {"ok": True, "display_id": display_id}
 
 
 @router.post("/api/student/join")

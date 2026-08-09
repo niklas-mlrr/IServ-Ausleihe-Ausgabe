@@ -48,8 +48,14 @@ window.__host = window.__host || {};
   // ---- State rendering ----
   function applyState(s) {
     state = s;
-    if (!state.modus_b) state.modus_b = { open: false, pending: [], pending_count: 0, displays: [] };
+    if (!state.modus_b) state.modus_b = { open: false, paused: false, pending: [], pending_count: 0, displays: [] };
     if (!state.contexts) state.contexts = {};
+    // Nicht mehr vorhandene Display-Sessions brauchen keinen lokalen
+    // Ignore-Eintrag mehr. Neue Sessions erhalten ohnehin eine neue ID.
+    const currentDisplayIds = new Set((state.modus_b.displays || []).map(d => d.display_id));
+    for (const id of ignoredDisplayIds) {
+      if (!currentDisplayIds.has(id)) ignoredDisplayIds.delete(id);
+    }
     // Neuer Pairing-Code? -> Beep + Blink, damit der Host es ohne Hinschauen merkt.
     const pc = state.modus_b.pending_count || 0;
     if (state.modus_b.open && prevPendingCount !== null && pc > prevPendingCount) {

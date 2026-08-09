@@ -626,6 +626,10 @@ class AppState:
         self.caches = IservCaches()
         # --- Modus B (Live-Ausgabe) ---
         self.modus_b_open: bool = False
+        # Pause blendet den allgemeinen Join-QR auf allen autorisierten
+        # iPad-Displays aus, ohne die Live-Ausgabe oder bestehende Schüler-
+        # Sessions zu schließen.
+        self.modus_b_paused: bool = False
         # Neu bei jedem Öffnen der Ausgabe erzeugt; bleibt über alle
         # Zuordnungen innerhalb der Ausgabe konstant (PLAN §3).
         self.modus_b_join_secret: str | None = None
@@ -956,6 +960,7 @@ class AppState:
         ]
         return {
             "open": self.modus_b_open,
+            "paused": self.modus_b_paused,
             "join_url": self.modus_b_join_url,
             "pending": pending,
             "pending_count": len(pending),

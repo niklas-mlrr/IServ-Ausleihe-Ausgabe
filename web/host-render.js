@@ -581,6 +581,26 @@ window.__host = window.__host || {};
     await fetch('/api/modus-b/close', { method: 'POST' });
     mbQrDataUrl = null;
   }
+  async function toggleModusBPause(btn) {
+    if (!state.modus_b || !state.modus_b.open || !btn) return;
+    btn.disabled = true;
+    btn.textContent = '…';
+    try {
+      const r = await fetch('/api/modus-b/pause', { method: 'POST' });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        showMsg(d.detail || 'QR-Pause konnte nicht geändert werden');
+        return;
+      }
+      const d = await r.json();
+      // Das WS-Snapshot folgt ebenfalls; die direkte Aktualisierung sorgt
+      // trotzdem für eine sofortige Button-Rückmeldung.
+      state.modus_b.paused = !!d.paused;
+    } finally {
+      btn.disabled = false;
+      renderModusBControl();
+    }
+  }
   async function showMbQr() {
     // Immer frisch holen — der Join-QR rotiert nach jeder Zuordnung.
     const r = await fetch('/api/modus-b/qr');
@@ -604,6 +624,19 @@ window.__host = window.__host || {};
       else { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Freischalten fehlgeschlagen'); }
     };
     if (btn) await busy(btn, call); else await call();
+  }
+  // iPad-Display bewusst trennen. Der Server entfernt die flüchtige Session
+  // und weist die QR-Seite an, nicht sofort mit einem neuen Code zu reconnecten.
+  async function disconnectDisplay(displayId, btn) {
+    if (!displayId) return;
+    if (!await confirmDialog('iPad-Display wirklich trennen?', 'Trennen')) return;
+    await busy(btn, async () => {
+      const r = await fetch('/api/display/disconnect', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ display_id: displayId }),
+      });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Trennen fehlgeschlagen'); }
+    });
   }
   // QR, mit dem ein iPad die Display-Seite (/qr-display) öffnet.
   async function showDisplayQr() {
@@ -809,25 +842,55 @@ window.__host = window.__host || {};
   // Modus-B-Kontrolle im Host-Tab (global): öffnen/schließen, iPad-Freischalt,
   // QR-Buttons. Pairing-Codes selbst leben im jeweiligen Klassen-Tab.
   function renderModusBControl() {
-    const mb = state.modus_b || { open: false, pending: [], displays: [] };
+    const mb = state.modus_b || { open: false, paused: false, pending: [], displays: [] };
     document.getElementById('mb-open-btn').style.display = mb.open ? 'none' : '';
+    const pauseBtn = document.getElementById('mb-pause-btn');
+    pauseBtn.style.display = mb.open ? '' : 'none';
+    pauseBtn.textContent = mb.paused ? 'QR fortsetzen' : 'QR pausieren';
+    pauseBtn.title = mb.paused
+      ? 'QR-Anzeige auf den iPads fortsetzen'
+      : 'QR-Anzeige auf den iPads pausieren';
     document.getElementById('mb-close-btn').style.display = mb.open ? '' : 'none';
     document.getElementById('mb-status').textContent = mb.open ? 'geöffnet' : 'geschlossen';
     document.getElementById('mb-info').style.display = mb.open ? '' : 'none';
-    // Freischalt-Liste: alle verbundenen, aber noch nicht autorisierten iPads —
-    // Klick statt Tippen (wie beim Drucker-Display); der Code dient nur dem
-    // visuellen Abgleich mit dem iPad-Bildschirm.
+    // Alle verbundenen iPads bleiben sichtbar. Bei unautorisierten Displays
+    // dient der Code nur dem visuellen Abgleich mit dem iPad-Bildschirm;
+    // autorisierte Displays zeigen zusätzlich ihren Status.
     const pendingHost = document.getElementById('mb-display-pending');
-    const pendingDisplays = (mb.displays || []).filter(d => d.connected && !d.authorized);
-    pendingHost.style.display = pendingDisplays.length ? 'flex' : 'none';
-    pendingHost.innerHTML = pendingDisplays.map(d => {
+    const connectedDisplays = (mb.displays || []).filter(d =>
+      d.connected && (d.authorized || !ignoredDisplayIds.has(d.display_id))
+    );
+    pendingHost.style.display = connectedDisplays.length ? 'flex' : 'none';
+    pendingHost.innerHTML = connectedDisplays.map(d => {
       const did = escapeHtml(d.display_id);
       const code = escapeHtml(d.registration_code || d.display_id.slice(0, 6));
-      return `<div class="row" style="align-items:center;gap:8px">
-        <span style="opacity:.7">iPad verbunden — Code <b>${code}</b>:</span>
-        <button class="success" data-action="authorize-display" data-display-id="${did}">Freischalten</button>
+      const status = d.authorized
+        ? '<span class="badge badge-active mb-display-status">freigeschaltet</span>'
+        : '<span class="badge badge-pending mb-display-status">wartet</span>';
+      const authorize = d.authorized ? ''
+        : `<button class="success" data-action="authorize-display" data-display-id="${did}">Freischalten</button>`;
+      const ignore = d.authorized ? ''
+        : `<button class="danger" data-action="ignore-display" data-display-id="${did}" title="Code ignorieren" aria-label="iPad-Code ${code} ignorieren">${ICON_CLOSE}</button>`;
+      const disconnectClass = d.authorized ? ' mb-display-disconnect-primary' : '';
+      return `<div class="code-row mb-display-row">
+        <span class="code-meta mb-display-label"><span class="ws-dot ok" aria-hidden="true"></span>iPad verbunden</span>
+        <span class="code-val" aria-label="Registrierungscode">${code}</span>
+        ${status}
+        ${authorize}
+        <button class="secondary${disconnectClass}" data-action="disconnect-display" data-display-id="${did}">Trennen</button>
+        ${ignore}
       </div>`;
     }).join('');
+  }
+
+  // iPad-Registrierungscode nur in dieser Host-Ansicht ausblenden. Die
+  // Display-Session bleibt absichtlich bestehen; ein Reload des Hosts zeigt
+  // den Eintrag wieder, ohne das iPad durch einen Reconnect mit einem neuen
+  // Code zu überraschen.
+  function ignoreDisplay(displayId) {
+    if (!displayId) return;
+    ignoredDisplayIds.add(displayId);
+    renderModusBControl();
   }
 
   // Pairing-Card eines Klassen-Tabs: Arm-Banner + wartende Codes, zugeordnet
@@ -2752,6 +2815,7 @@ window.__host = window.__host || {};
     saveClassDoneCollected(e.target.checked);
   });
   document.getElementById('mb-open-btn').addEventListener('click', openModusB);
+  document.getElementById('mb-pause-btn').addEventListener('click', (e) => toggleModusBPause(e.currentTarget));
   document.getElementById('mb-close-btn').addEventListener('click', closeModusB);
   // Delegiert (innerHTML wird bei jedem Snapshot neu aufgebaut, s.
   // renderModusBControl): Klick auf „Freischalten" eines gelisteten,
@@ -2759,6 +2823,10 @@ window.__host = window.__host || {};
   document.getElementById('mb-display-pending').addEventListener('click', (e) => {
     const btn = e.target.closest('[data-action="authorize-display"]');
     if (btn) authorizeDisplay(btn.dataset.displayId, btn);
+    const ignoreBtn = e.target.closest('[data-action="ignore-display"]');
+    if (ignoreBtn) ignoreDisplay(ignoreBtn.dataset.displayId);
+    const disconnectBtn = e.target.closest('[data-action="disconnect-display"]');
+    if (disconnectBtn) disconnectDisplay(disconnectBtn.dataset.displayId, disconnectBtn);
   });
   document.getElementById('show-mb-qr-btn').addEventListener('click', showMbQr);
   document.getElementById('show-display-qr-btn').addEventListener('click', showDisplayQr);
@@ -2950,9 +3018,12 @@ window.__host.openPrintDialog = openPrintDialog;
 window.__host.printLoanSlip = printLoanSlip;
 window.__host.openModusB = openModusB;
 window.__host.closeModusB = closeModusB;
+window.__host.toggleModusBPause = toggleModusBPause;
 window.__host.showMbQr = showMbQr;
 window.__host.authorizeDisplay = authorizeDisplay;
+window.__host.disconnectDisplay = disconnectDisplay;
 window.__host.showDisplayQr = showDisplayQr;
+window.__host.ignoreDisplay = ignoreDisplay;
 window.__host.doPair = doPair;
 window.__host.pairStudent = pairStudent;
 window.__host.cancelArm = cancelArm;

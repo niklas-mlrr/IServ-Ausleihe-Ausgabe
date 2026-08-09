@@ -8,6 +8,21 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-09 — Modus B: iPad-Registrierungscode im Host aufgeräumt
+
+- **Host-UI:** Der iPad-Eintrag nutzt jetzt dieselbe `code-row`-/`code-val`-
+  Darstellung wie die übrigen Pairing-Codes statt einer Inline-Textzeile.
+- **Ignore:** Ein X blendet einen nicht autorisierten iPad-Code lokal in dieser
+  Host-Ansicht aus. Das iPad bleibt verbunden; ein Host-Reload zeigt den Code
+  wieder und erzeugt keinen unerwarteten Reconnect mit neuem Code.
+- **Verbundene iPads:** Freigeschaltete und wartende, verbundene iPads bleiben
+  in der Liste sichtbar. Über „Trennen“ wird die Display-Session beendet; die
+  QR-Seite reconnectet dabei nicht automatisch, sondern muss bewusst neu
+  geladen werden.
+- **Pause:** Neben „Ausgabe schließen“ pausiert „QR pausieren“ die QR-Anzeige
+  auf allen autorisierten iPads. QR-Code und URL werden durch einen Hinweis
+  ersetzt; der Button wird zu „QR fortsetzen“.
+
 ## 2026-08-09 — Security review of Modus B and public routes
 
 - Read-only source review found no cross-student data-access path: a Modus-B

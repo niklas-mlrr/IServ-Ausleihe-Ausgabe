@@ -31,6 +31,7 @@
       word-break: break-all; max-width: 80vw;
     }
     .sub { font-size: 1.3rem; opacity: .6; margin-top: 16px; }
+    .paused-message { max-width: 760px; font-size: 1.35rem; line-height: 1.5; }
     .reg-code {
       font-size: 4rem; font-weight: 700; letter-spacing: .3em;
       font-family: ui-monospace, "SF Mono", Menlo, monospace;
@@ -64,17 +65,31 @@
     <div class="sub">Scanne den Code mit deinem Handy</div>
   </div>
 
+  <!-- Host pausiert die QR-Anzeige vorübergehend. -->
+  <div class="view" id="view-paused">
+    <p class="paused-message"><b>Bitte warte einen Moment.</b><br>
+      In Kürze wirst du mit deiner Ausleihe beginnen. Bitte halte schonmal dein Handy bereit. Es muss mit dem Schul-WLAN verbunden sein.</p>
+  </div>
+
   <!-- Ausgabe geschlossen -->
   <div class="view" id="view-closed">
     <div class="headline">Ausgabe geschlossen</div>
     <p class="muted">Der Host hat die Live-Ausgabe noch nicht geöffnet.</p>
   </div>
 
+  <!-- Bewusste Trennung durch den Host: nicht automatisch neu verbinden. -->
+  <div class="view" id="view-disconnected">
+    <div class="headline">Display getrennt</div>
+    <p class="muted">Der Host hat dieses iPad getrennt. Seite neu laden, um es erneut zu verbinden.</p>
+  </div>
+
   <script>
     const views = {
       register: document.getElementById('view-register'),
       qr: document.getElementById('view-qr'),
+      paused: document.getElementById('view-paused'),
       closed: document.getElementById('view-closed'),
+      disconnected: document.getElementById('view-disconnected'),
     };
     function show(name) {
       for (const k in views) views[k].classList.toggle('show', k === name);
@@ -83,6 +98,7 @@
 
     const connDot = document.getElementById('conn-dot');
     const connText = document.getElementById('conn-text');
+    let disconnectedByHost = false;
     let ws;
 
     function handleServerMessage(msg) {
@@ -95,8 +111,17 @@
         else _qrImg.src = '';
         document.getElementById('qr-url').textContent = msg.url || '';
         show('qr');
+      } else if (msg.type === 'paused') {
+        document.getElementById('qr-img').src = '';
+        document.getElementById('qr-url').textContent = '';
+        show('paused');
       } else if (msg.type === 'closed') {
         show('closed');
+      } else if (msg.type === 'disconnected') {
+        disconnectedByHost = true;
+        connDot.className = 'dot err';
+        connText.textContent = 'vom Host getrennt';
+        show('disconnected');
       }
     }
 
@@ -104,6 +129,13 @@
       onSocket: (s) => { ws = s; },
       onOpen: () => { connDot.className = 'dot ok'; connText.textContent = 'verbunden'; },
       onClose: (e, reconnect) => {
+        if (disconnectedByHost || e.code === 4009) {
+          disconnectedByHost = true;
+          connDot.className = 'dot err';
+          connText.textContent = 'vom Host getrennt';
+          show('disconnected');
+          return;
+        }
         connDot.className = 'dot err'; connText.textContent = 'getrennt — neu verbinden…';
         reconnect();
       },

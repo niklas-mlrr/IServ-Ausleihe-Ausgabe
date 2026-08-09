@@ -292,6 +292,14 @@
     .code-val { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1.25rem; font-weight: 700; letter-spacing: .12em; color: var(--info); }
     .code-meta { color: var(--text-muted); font-size: .78rem; }
     .code-chip { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1.1rem; font-weight: 700; letter-spacing: .1em; padding: 6px 12px; }
+    .mb-display-row { gap: 10px; }
+    .mb-display-label { display: inline-flex; align-items: center; gap: 2px; }
+    .mb-display-row .code-val { min-width: 4.2rem; }
+    .mb-display-status { white-space: nowrap; }
+    .mb-display-row [data-action="authorize-display"],
+    .mb-display-disconnect-primary { margin-left: auto; }
+    .mb-display-row [data-action="disconnect-display"] + [data-action="ignore-display"] { margin-left: 0; }
+    .mb-display-row [data-action="ignore-display"] { padding: 8px 12px; }
     .ws-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; background: var(--text-muted); }
     .ws-dot.ok { background: var(--ok); }
     .ws-dot.err { background: var(--danger); }

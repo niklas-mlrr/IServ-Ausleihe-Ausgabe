@@ -1714,6 +1714,8 @@ async def send_display_update(state: AppState, display: DisplaySession) -> None:
             "code": display.registration_code,
             "display_id": display.display_id,
         }
+    elif state.modus_b_open and state.modus_b_join_qr and state.modus_b_paused:
+        msg = {"type": "paused"}
     elif state.modus_b_open and state.modus_b_join_qr:
         msg = {"type": "qr", "qr": state.modus_b_join_qr, "url": state.modus_b_join_url}
     else:

@@ -53,11 +53,12 @@
           <h2>Live-Ausgabe (Modus B)</h2>
           <div class="row" style="margin-bottom:12px">
             <button id="mb-open-btn" class="success">Ausgabe öffnen</button>
+            <button id="mb-pause-btn" class="secondary" style="display:none">QR pausieren</button>
             <button id="mb-close-btn" class="danger" style="display:none">Ausgabe schließen</button>
             <span id="mb-status" class="mb-status">geschlossen</span>
           </div>
+          <div id="mb-display-pending" style="margin-top:8px;display:none;flex-direction:column;gap:6px"></div>
           <div id="mb-info" style="display:none;font-size:.85rem">
-            <div id="mb-display-pending" style="margin-top:8px;display:none;flex-direction:column;gap:6px"></div>
             <div class="row" style="margin-top:8px">
               <button class="secondary" id="show-mb-qr-btn">QR für Schüler anzeigen</button>
               <button class="secondary" id="show-display-qr-btn">QR für iPad anzeigen</button>

@@ -294,6 +294,13 @@ class DisplayAuthorizeRequest(BaseModel):
     display_id: str = ""
 
 
+class DisplayDisconnectRequest(BaseModel):
+    """Body für `POST /api/display/disconnect` — ein iPad-Display
+    trennen und seine flüchtige Display-Session entfernen."""
+
+    display_id: str = ""
+
+
 class PrinterDisplayEnableRequest(BaseModel):
     """Body für `POST /api/drucker-display/enable` — Drucker-Display durch
     Eingabe eines Namens freischalten (autorisierten). Der Registrierungs-Code

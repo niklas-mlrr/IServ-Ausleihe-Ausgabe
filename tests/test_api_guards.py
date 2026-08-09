@@ -60,6 +60,24 @@ class _FakeHub:
     async def send_scanner(self, token, msg) -> None:
         pass
 
+    async def send_websocket(self, websocket, msg) -> bool:
+        await websocket.send_json(msg)
+        return True
+
+
+class _FakeWS:
+    def __init__(self) -> None:
+        self.sent = []
+        self.closed = False
+
+    async def send_json(self, msg) -> None:
+        self.sent.append(msg)
+
+    async def close(self, code: int = 1000, reason: str = "") -> None:
+        self.closed = True
+        self.close_code = code
+        self.close_reason = reason
+
 
 def _make_config(**over) -> Config:
     base = dict(
@@ -707,6 +725,54 @@ def test_display_authorize_by_id_not_code(client, ctx):
     # Fehlende ID -> 400.
     r = client.post("/api/display/authorize", json={}, cookies={"session_id": "sid"})
     assert r.status_code == 400
+
+
+def test_display_disconnect_removes_session_and_stops_display(client, ctx):
+    """Host-Trennen sendet ein Stop-Frame, schließt die WS und entfernt die
+    flüchtige Display-Session, sodass der QR-Client nicht sofort einen neuen
+    Registrierungscode erzeugt."""
+    from server.state import DisplaySession
+
+    state, _, _ = ctx
+    ws = _FakeWS()
+    d = DisplaySession(display_id="disp1", registration_code="ABCD", authorized=True, ws=ws)
+    state.displays[d.display_id] = d
+
+    r = client.post(
+        "/api/display/disconnect", json={"display_id": "disp1"}, cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "display_id": "disp1"}
+    assert "disp1" not in state.displays
+    assert ws.sent == [{"type": "disconnected"}]
+    assert ws.closed is True
+    assert ws.close_code == 4009
+
+    # Unknown/removed display is no longer disconnectable.
+    r = client.post(
+        "/api/display/disconnect", json={"display_id": "disp1"}, cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 404
+
+
+def test_modus_b_pause_toggles_and_requires_open_output(client, ctx):
+    state, _, _ = ctx
+    state.modus_b_open = True
+    state.modus_b_join_qr = "data:image/png;base64,test"
+
+    r = client.post("/api/modus-b/pause", cookies={"session_id": "sid"})
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "paused": True}
+    assert state.modus_b_paused is True
+
+    r = client.post("/api/modus-b/pause", cookies={"session_id": "sid"})
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "paused": False}
+    assert state.modus_b_paused is False
+
+    state.modus_b_open = False
+    r = client.post("/api/modus-b/pause", cookies={"session_id": "sid"})
+    assert r.status_code == 409
 
 
 def test_close_class_ends_students_and_releases_helper_bindings(client, ctx):

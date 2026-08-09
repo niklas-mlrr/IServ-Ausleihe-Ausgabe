@@ -8,7 +8,37 @@ from __future__ import annotations
 import asyncio
 
 import server.sessions as sessions
-from server.state import AppState
+from server.state import AppState, DisplaySession
+
+
+class _FakeDisplayWS:
+    def __init__(self) -> None:
+        self.sent = []
+
+    async def send_json(self, msg) -> None:
+        self.sent.append(msg)
+
+
+class _FakeDisplayHub:
+    async def send_websocket(self, websocket, msg) -> bool:
+        await websocket.send_json(msg)
+        return True
+
+
+def test_send_display_update_sends_paused_frame(monkeypatch):
+    st = AppState()
+    st.modus_b_open = True
+    st.modus_b_paused = True
+    st.modus_b_join_qr = "data:image/png;base64,test"
+    ws = _FakeDisplayWS()
+    display = DisplaySession(
+        display_id="display-1", registration_code="ABCD", authorized=True, ws=ws
+    )
+    monkeypatch.setattr(sessions, "get_hub", lambda: _FakeDisplayHub())
+
+    asyncio.run(sessions.send_display_update(st, display))
+
+    assert ws.sent == [{"type": "paused"}]
 
 
 def test_create_and_lookup():

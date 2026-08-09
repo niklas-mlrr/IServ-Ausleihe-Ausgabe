@@ -44,7 +44,7 @@ EXPECTED_SNAPSHOT_KEYS = {
     "book_order",
 }
 
-EXPECTED_MODUS_B_KEYS = {"open", "join_url", "pending", "pending_count", "displays"}
+EXPECTED_MODUS_B_KEYS = {"open", "paused", "join_url", "pending", "pending_count", "displays"}
 
 EXPECTED_WORKER_POOL_KEYS = {"total", "available", "in_use"}
 
@@ -61,6 +61,7 @@ def test_state_snapshot_key_set_is_stable():
 def test_modus_b_snapshot_key_set_is_stable():
     snap = AppState().state_snapshot()["modus_b"]
     assert set(snap) == EXPECTED_MODUS_B_KEYS
+    assert snap["paused"] is False
 
 
 def test_worker_pool_stats_key_set_is_stable():
