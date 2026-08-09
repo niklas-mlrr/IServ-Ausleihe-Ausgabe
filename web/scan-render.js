@@ -195,7 +195,10 @@ function queueInfoIcons(s) {
   // nicht mehr die relevante Info). Bei „Fertig" (done) keine X/Y- oder
   // Drucker-Symbole — nur die Info-Badges unten (nicht angemeldet / Antrag /
   // offener Betrag) bleiben.
-  if (s.status !== 'done' && (s.slip_status || s.slip_printed)) {
+  // Druckersymbol nur, solange kein Unterschreiben-Button erscheint: sobald
+  // der Schüler im Unterschriften-Modus ist (`slip_signing`), verdrängt der
+  // Sign-Button das Druckersymbol (s. renderQueue, actionSlot 'sign').
+  if (s.status !== 'done' && !s.slip_signing && (s.slip_status || s.slip_printed)) {
     out.push(`<span class="q-info-item" title="Leihschein wird gedruckt">${ICON_PRINTER_SM}</span>`);
   } else if (s.status !== 'done' && s.books_total) {
     out.push(`<span class="q-info-item q-info-amount" title="ausgegebene / angemeldete Bücher">${s.books_done}/${s.books_total}</span>`);

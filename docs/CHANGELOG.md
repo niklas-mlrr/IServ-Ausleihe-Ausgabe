@@ -8,6 +8,28 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-09 — Modus B: Leihschein-Status-Feinschliff (Unterschrift live + Helfer-Druckersymbol)
+
+- **Problem (Host):** der Status „Unterschrift" erschien in der Host-Queue erst
+  nach einem Seiten-Reload statt live wie die übrigen Leihschein-Status.
+  `confirm_slip_received` (`server/sessions.py`) setzte `slip_signing` und
+  broadcastete nur an den Helfer-Client (`broadcast_queue_size`), nicht an den
+  Host — der Host-Snapshot blieb bis zum nächsten Reload auf „Leihschein
+  gedruckt".
+- **Fix (Host):** `confirm_slip_received` broadcastet jetzt zusätzlich
+  `state_snapshot()` an den Host (analog `_mark_slip_printed`), sodass der
+  Wechsel auf „Unterschrift" live passiert.
+- **Problem (Helfer):** im Helfer-Client blieb das Druckersymbol sichtbar, wenn
+  bereits der „Leihschein unterschreiben"-Button erschien.
+- **Fix (Helfer):** `queueInfoIcons` (`web/scan-render.js`) unterdrückt das
+  Druckersymbol, sobald `slip_signing` gesetzt ist (der Sign-Button verdrängt
+  es). Info-Badges (nicht angemeldet / Antrag / offener Betrag) bleiben
+  unverändert.
+- **Tests:** `test_student_session_enters_slip_mode_when_signature_required`
+  (`tests/test_print_queue.py`) prüft jetzt zusätzlich, dass nach
+  `confirm_slip_received` ein Host-Snapshot-Push geht, der den Schüler mit
+  `slip_signing: True` enthält (Regression für den Reload-Bug).
+
 ## 2026-08-08 — Modus B: granulare Leihschein-Status in Host-Queue + Helfer-Client
 
 - **Problem:** die Host-Queue zeigte für einen Modus-B-Schüler (Schülerclient)

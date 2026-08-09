@@ -413,6 +413,14 @@ def test_student_session_enters_slip_mode_when_signature_required(
     _patch(monkeypatch, st)
     pq = st.print_queue
 
+    # Host-Broadcast einfangen: der Statuswechsel auf „Unterschrift" muss live
+    # an die Host-Queue gehen (s. sessions.confirm_slip_received), nicht erst
+    # beim nächsten Seiten-Reload.
+    host_broadcasts: list[dict] = []
+    async def fake_broadcast_host(msg, state=None):
+        host_broadcasts.append(msg)
+    monkeypatch.setattr(hub._fallback_hub, "broadcast_host", fake_broadcast_host)
+
     ctx = st.open_context("10a")
     ctx.done_signed = True
     ctx.done_collected = done_collected
@@ -464,6 +472,13 @@ def test_student_session_enters_slip_mode_when_signature_required(
     slip_modes = [m for m in student_ws.sent if m["type"] == "slip_mode"]
     assert slip_modes == [{"type": "slip_mode", "recipient": recipient}]
     assert not any(m["type"] == "closed" for m in student_ws.sent)
+    # Host-Queue live nachgezogen: der Snapshot-Push enthält den Schüler mit
+    # `slip_signing` gesetzt (→ Host zeigt „Unterschrift" ohne Reload).
+    assert host_broadcasts, "Host-Snapshot nach Unterschriften-Modus fehlt"
+    snap = host_broadcasts[-1]
+    queue = snap["queue"]
+    entry = next(q for q in queue if q["student_id"] == 43)
+    assert entry["slip_signing"] is True
 
 
 def test_pipeline_2_in_flight_positions(monkeypatch):

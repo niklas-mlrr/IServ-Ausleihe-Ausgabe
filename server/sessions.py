@@ -828,6 +828,10 @@ async def confirm_slip_received(state: AppState, student_id: int) -> None:
                     "recipient": session.loan_slip_recipient,
                 },
             )
+        # Host-Queue live nachziehen: der Status wechselt erst hier auf
+        # „Unterschrift" (s. host-render.js) — ohne Broadcast bliebe er bis
+        # zum nächsten Seiten-Reload auf „Leihschein gedruckt".
+        await get_hub().broadcast_host(state.state_snapshot())
         # Helfer-Client (scan.html) live nachziehen: der „Leihschein
         # unterschreiben"-Button in der Klassenliste (s.
         # real_contexts_summary) muss erscheinen, sobald der Schüler in
