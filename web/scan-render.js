@@ -135,17 +135,16 @@ const ICON_SIGN = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="curr
   + '<path d="M2 20.5c1.3-1.7 2.2-1.5 3-.3.7 1 .6 1.8 1.8 1.3 1.6-.6 1.8-2.2 3.5-1.7.9.3 1.1 1.1 2 1L20.5 17.2"/></svg>';
 // `actionSlot`: nur in der Aktiv-Gruppe gesetzt (s. renderQueue) — `'print'`
 // zeigt den Betreuerauslöser-Druckbutton, `'sign'` den „Leihschein
-// unterschreiben"-Button, `null` reserviert die dritte Grid-Spalte trotzdem
-// leer (`.queue-group-active .queue-group-item[data-student-id]`, s.
-// scan.html), damit alle Zeilen der Aktiv-Box exakt ausgerichtet bleiben;
-// `undefined` (Fertig-Gruppe) rendert die Spalte gar nicht erst — dort gilt
-// weiterhin die 2-Spalten-Grid-Regel. Beide Buttons stehen bewusst VOR dem
-// Aufrufen-Pfeil; sie schließen sich gegenseitig aus (Druckmodus endet, bevor
-// der Unterschriften-Modus beginnt).
+// unterschreiben"-Button. Ohne Aktionsbutton wird keine leere Spalte gerendert,
+// damit Info-Symbole direkt neben dem Aufrufen-Pfeil stehen; mit Button bleibt
+// die zusätzliche Spalte für die Aktion erhalten. Beide Buttons stehen
+// bewusst VOR dem Aufrufen-Pfeil; sie schließen sich gegenseitig aus
+// (Druckmodus endet, bevor der Unterschriften-Modus beginnt).
 function renderQueueGroupItem(s, withCallBtn, actionSlot) {
   const form = (s.form || '').replace(/^Klasse\s+/i, '');
   const name = `${s.lastname}, ${s.firstname}`;
   const sidAttr = withCallBtn ? ` data-student-id="${escapeHtml(String(s.student_id))}"` : '';
+  const hasAction = actionSlot === 'print' || actionSlot === 'sign';
   const info = withCallBtn ? queueInfoIcons(s) : '';
   let actionBtn = '';
   if (actionSlot !== undefined) {
@@ -156,12 +155,10 @@ function renderQueueGroupItem(s, withCallBtn, actionSlot) {
         + '<rect x="6" y="14" width="12" height="8"/></svg></button></div>';
     } else if (actionSlot === 'sign') {
       actionBtn = `<div class="qg-print"><button class="helper-sign-btn" title="Leihschein unterschrieben" aria-label="Leihschein unterschrieben">${ICON_SIGN}</button></div>`;
-    } else {
-      actionBtn = '<div class="qg-print"></div>';
     }
   }
   const callBtn = withCallBtn ? '<div class="qg-call"><button class="call-btn" title="Aufrufen" aria-label="Aufrufen"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></button></div>' : '';
-  return `<div class="queue-group-item"${sidAttr}>`
+  return `<div class="queue-group-item${hasAction ? ' has-action' : ''}"${sidAttr}>`
     + `<div class="qg-fach">${escapeHtml(form)}</div>`
     + `<div class="qg-name">${escapeHtml(name)}</div>${info}${actionBtn}${callBtn}</div>`;
 }
@@ -195,12 +192,13 @@ function queueInfoIcons(s) {
   // nicht mehr die relevante Info). Bei „Fertig" (done) keine X/Y- oder
   // Drucker-Symbole — nur die Info-Badges unten (nicht angemeldet / Antrag /
   // offener Betrag) bleiben.
-  // Druckersymbol nur, solange kein Unterschreiben-Button erscheint: sobald
-  // der Schüler im Unterschriften-Modus ist (`slip_signing`), verdrängt der
-  // Sign-Button das Druckersymbol (s. renderQueue, actionSlot 'sign').
+  // Druckersymbol und X/Y nur, solange kein Unterschreiben-Button erscheint:
+  // sobald der Schüler im Unterschriften-Modus ist (`slip_signing`), verdrängt
+  // der Sign-Button beide Fortschrittsanzeigen (s. renderQueue, actionSlot
+  // 'sign').
   if (s.status !== 'done' && !s.slip_signing && (s.slip_status || s.slip_printed)) {
     out.push(`<span class="q-info-item" title="Leihschein wird gedruckt">${ICON_PRINTER_SM}</span>`);
-  } else if (s.status !== 'done' && s.books_total) {
+  } else if (s.status !== 'done' && !s.slip_signing && s.books_total) {
     out.push(`<span class="q-info-item q-info-amount" title="ausgegebene / angemeldete Bücher">${s.books_done}/${s.books_total}</span>`);
   }
   if (s.enrolled === false) {

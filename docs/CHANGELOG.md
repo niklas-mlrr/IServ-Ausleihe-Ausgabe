@@ -8,6 +8,15 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-09 — Helfer-Queue: Aktionsabstände und Unterschriftenstatus
+
+- **UI:** In der Aktiv-Gruppe entfällt die leere Aktionsspalte ohne Druck- oder
+  Unterschriftbutton. Das Druckersymbol steht dadurch mit normalem Abstand vor
+  dem „Aufrufen“-Button.
+- **UI:** Während des Unterschriftenstatus wird die X/Y-Fortschrittsanzeige
+  ausgeblendet; der Unterschriftbutton bleibt als Aktion sichtbar.
+- **Tests:** `uv run pytest -q` erfolgreich.
+
 ## 2026-08-09 — Modus B: Leihschein-Status-Feinschliff (Unterschrift live + Helfer-Druckersymbol)
 
 - **Problem (Host):** der Status „Unterschrift" erschien in der Host-Queue erst
