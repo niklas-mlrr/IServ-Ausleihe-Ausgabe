@@ -495,7 +495,8 @@
     }
     .ns-name { font-size: 1.35rem; font-weight: 700; line-height: 1.15; }
     .ns-meta { font-size: .85rem; color: var(--text-muted); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-    .ns-helper { color: var(--info); }
+    .ns-class { margin-right: auto; }
+    .ns-status, .ns-helper { color: var(--info); }
     /* Klasse in Klammern hinter dem Schülernamen in der Helferliste — nur bei
        Lupe-Zuweisung (cross-class), etwas dezenter als der Name. */
     .helper-student-class { color: var(--text-muted); font-weight: 400; }

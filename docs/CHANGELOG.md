@@ -8,6 +8,13 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-09 — Status in „Aktuell in Ausgabe“
+
+- **Host:** Die Kachel „Aktuell in Ausgabe“ zeigt neben der Klasse linksbündig
+  den Schülerstatus und — sofern ein Helfer zugeordnet ist — den Helfernamen
+  rechtsbündig in einer gemeinsamen Zeile. Status und Helfer verwenden dabei
+  dieselben Schrifteigenschaften.
+
 ## 2026-08-09 — Aktiver Helfer in Queue-Status + Druckstatus nach neuem Scan
 
 - **Host:** Aktive Schüler zeigen in der Statusbox die Reihenfolge Status →
@@ -21,7 +28,7 @@
   Druck läuft gegebenenfalls weiter, treibt aber weder `Leihschein ...` noch
   `slip_printed` weiter. Erst ein neuer Druckauftrag aktiviert den Statuszyklus
   erneut; alte Druckergebnisse können einen neuen Auftrag nicht überschreiben.
-- **Tests:** `uv run pytest -q` (395 Tests), Ruff und `node --check` grün.
++ **Tests:** `uv run pytest --no-cov -ra` (424 Tests), Ruff und `node --check` grün.
 
 ## 2026-08-09 — Helfer-Queue: Aktionsabstände und Unterschriftenstatus
 

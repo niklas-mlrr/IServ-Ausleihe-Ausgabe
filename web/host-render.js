@@ -1306,6 +1306,7 @@ window.__host = window.__host || {};
       body = '<div class="ns-grid">' + active.map(s => {
         const helper = helpers.find(h => h.student_id === s.student_id);
         const helperLbl = helper ? `<span class="ns-helper">${ICO_HELPER} ${escapeHtml(helper.name)}</span>` : '';
+        const statusLbl = `<span class="ns-status">${escapeHtml({ active: 'Aktiv' }[s.status] || s.status)}</span>`;
         const alert = studentAlerts[s.student_id];
         // Schließen-Button nur am Schüler-Client-Modal (Modus B): dort hat der
         // Client bewusst keinen eigenen, also muss der Host freigeben. Am Helfer
@@ -1322,7 +1323,7 @@ window.__host = window.__host || {};
         // Verliehen-Alert normal — „verliehen an …" ist das einzige Rot im Text.
         return `<div class="ns-tile${alert ? ' ns-tile-alert' : ''}">
           <div class="ns-name">${escapeHtml(s.lastname)}, ${escapeHtml(s.firstname)}</div>
-          <div class="ns-meta"><span>${escapeHtml(s.form)}</span>${helperLbl}</div>
+          <div class="ns-meta"><span class="ns-class">${escapeHtml(s.form)}</span>${statusLbl}${helperLbl}</div>
           ${alertLbl}
           <div class="ns-actions">
             <button class="success" data-action="finish" data-student-id="${s.student_id}">Abschließen</button>

@@ -7,7 +7,7 @@
 >
 > Stand: 2026-08-09 (granulare Leihschein-Status in Host-Queue + Helfer-Client
 > + Feinschliff: „Unterschrift" live im Host, Helfer-Druckersymbol verdrängt
-> durch Sign-Button, 421 Tests grün).
+> durch Sign-Button, 424 Tests grün).
 > Alle bisherigen Tests sind **read-only** gegen IServ
 > (kein Submit, keine Buchung — PLAN §6).
 >
@@ -84,7 +84,7 @@
 
 | V56 | **Eigener Status „abwesend" statt „übersprungen" für die Lehrkraft-Aktion:** Die Lehrkraft-Aktion „Als abwesend markieren" (`/api/teacher/skip`) setzt jetzt `pending -> absent` statt `skipped` (`server/routes/teacher.py`), Rücknahme `absent -> pending`. Ein abwesender Schüler bleibt wie ein wartender in der Queue (aufrufbar — `next_pending`/`pending_count`/`pending_queue_as_list`/`real_contexts_summary` zählen ihn mit), mit der einzigen Einschränkung, dass die normale Schülerclient-Zuordnung (`student_pair`) für ihn blockiert ist. Der Helfer-Scan-Einmal-QR bleibt verfügbar (`helper_scan_start`/`student_helper_join` erlauben jetzt `skipped` und `absent`). `skipped` bleibt für die Host-Aktion „Überspringen" und das Auto-Skip beim Klassen-Laden bestehen. UI: Lehrkraft-Ansicht zeigt „Abwesend" (eigener Zähler + Punkt), Host-Queue zeigt ein „Abwesend"-Badge ohne Pairing-Button (dafür Helfer-Scan + Überspringen + Trennen). | `tests/test_teacher.py` (skip → absent, counts um `absent` erweitert; neu: abwesend aufrufbar, nicht paarbar, Helfer-Scan verfügbar, `teacher_snapshot` zählt `absent`) + `uv run pytest -q` + `uvx ruff check server/ tests/` + `node --check web/teacher.js web/host-render.js` | 2026-08-08 | **420 Tests grün**, Ruff clean, JavaScript-Syntaxprüfung grün. **Live-Check (Wisch-Geste → „Abwesend"-Badge im Host, Pairing blockiert, Helfer-Scan-QR am echten Gerät) noch offen** |
 
-| V57 | **Aktiver Helfer + Druckstatus nach neuem Scan:** Host- und Helfer-Queue zeigen den Helfernamen in der gewünschten Reihenfolge; der Schülerclient stellt die Identitätsbox vor die Statusbox. Ein neuer erfolgreicher Scan invalidiert laufende/alte Leihschein-Jobs logisch, verhindert ein verspätetes `slip_printed` und lässt erst einen neuen Druckauftrag wieder den Druckstatus setzen. | `tests/test_queue_progress.py` (Invalidierung, Generation-Race, Helfername) + `uv run pytest -q` + `uvx ruff check server/ automation/ tests/` + `node --check web/*.js` | 2026-08-09 | **395 Tests grün**, Ruff und JavaScript-Syntaxprüfung grün; echter Browser-/Drucker-Livecheck weiterhin offen |
+| V57 | **Aktiver Helfer + Druckstatus nach neuem Scan:** Host- und Helfer-Queue zeigen den Helfernamen in der gewünschten Reihenfolge; der Schülerclient stellt die Identitätsbox vor die Statusbox. Ein neuer erfolgreicher Scan invalidiert laufende/alte Leihschein-Jobs logisch, verhindert ein verspätetes `slip_printed` und lässt erst einen neuen Druckauftrag wieder den Druckstatus setzen. | `tests/test_queue_progress.py` (Invalidierung, Generation-Race, Helfername) + `uv run pytest --no-cov -ra` + `uvx ruff check server/ automation/ tests/` + `node --check web/*.js` | 2026-08-09 | **424 Tests grün**, Ruff und JavaScript-Syntaxprüfung grün; echter Browser-/Drucker-Livecheck weiterhin offen |
 
 ## Offen / zu testen
 
