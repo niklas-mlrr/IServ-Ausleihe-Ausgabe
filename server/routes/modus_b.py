@@ -36,6 +36,7 @@ from ._deps import (
 )
 
 log = logging.getLogger(__name__)
+_TEMPORARY_SCAN_UNLOCK_COUNT = 3
 
 
 @host_router.post("/api/modus-b/open")
@@ -50,6 +51,7 @@ async def modus_b_open(request: Request) -> dict:
             await invalidate_session(state, session, "revoked", reason="ausgabe-neu-geoeffnet")
     state.modus_b_open = True
     state.modus_b_paused = False
+    state.modus_b_scan_allowance = 0
     # Frisches Join-Secret bei jedem Öffnen → alte Screenshots/QRs aus einer
     # früheren Ausgabe werden ungültig. Innerhalb einer Ausgabe bleibt es konstant
     # über alle Zuordnungen hinweg.
@@ -73,6 +75,7 @@ async def modus_b_close() -> dict:
     hub = get_hub()
     state.modus_b_open = False
     state.modus_b_paused = False
+    state.modus_b_scan_allowance = 0
     state.modus_b_join_secret = None
     state.modus_b_join_url = None
     state.modus_b_join_qr = None
@@ -94,10 +97,34 @@ async def modus_b_pause() -> dict:
     state = get_state()
     if not state.modus_b_open:
         raise HTTPException(409, "Live-Ausgabe ist geschlossen")
+    state.modus_b_scan_allowance = 0
     state.modus_b_paused = not state.modus_b_paused
     await broadcast_displays(state)
     await get_hub().broadcast_host(state.state_snapshot())
     return {"ok": True, "paused": state.modus_b_paused}
+
+
+@host_router.post("/api/modus-b/allow-scans")
+async def modus_b_allow_scans() -> dict:
+    """Die pausierte QR-Anzeige für genau drei neue Schüler-Scans öffnen.
+
+    Die Ausgabe pausiert nach dem dritten Join automatisch wieder; bestehende
+    Schüler-Sessions werden nicht beeinflusst.
+    """
+    state = get_state()
+    if not state.modus_b_open:
+        raise HTTPException(409, "Live-Ausgabe ist geschlossen")
+    if not state.modus_b_paused:
+        raise HTTPException(409, "QR-Anzeige ist nicht pausiert")
+    state.modus_b_scan_allowance = _TEMPORARY_SCAN_UNLOCK_COUNT
+    state.modus_b_paused = False
+    await broadcast_displays(state)
+    await get_hub().broadcast_host(state.state_snapshot())
+    return {
+        "ok": True,
+        "paused": state.modus_b_paused,
+        "scan_allowance": state.modus_b_scan_allowance,
+    }
 
 
 @host_router.get("/api/modus-b/qr")
@@ -197,6 +224,8 @@ async def student_join(body: StudentJoinRequest, request: Request) -> dict:
     # Konstantzeit-Vergleich — kein Short-Circuit-Timing-Leak wie bei `!=`.
     if not secrets.compare_digest(secret, str(state.modus_b_join_secret or "")):
         raise HTTPException(403, "Ungültiger oder abgelaufener QR")
+    if state.modus_b_paused:
+        raise HTTPException(403, "QR-Anzeige ist pausiert")
 
     try:
         session = create_student_session(state)
@@ -205,6 +234,11 @@ async def student_join(body: StudentJoinRequest, request: Request) -> dict:
         raise HTTPException(
             503, "Zu viele gleichzeitige Wartende — bitte gleich erneut scannen"
         ) from None
+    if state.modus_b_scan_allowance:
+        state.modus_b_scan_allowance -= 1
+        if state.modus_b_scan_allowance == 0:
+            state.modus_b_paused = True
+        await broadcast_displays(state)
     await get_hub().broadcast_host(state.state_snapshot())
     return {"session_token": session.session_token, "pairing_code": session.pairing_code}
 

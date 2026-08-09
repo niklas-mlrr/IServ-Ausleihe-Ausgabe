@@ -8,6 +8,16 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-09 — Modus-B-QR-Steuerung verfeinert
+
+- Der Host nennt den Verbindungs-QR jetzt „QR für QR-Display anzeigen“.
+- Verbundene, autorisierte QR-Displays und Lehrkraft-Ansichten verwenden zum
+  Trennen ein einheitliches X-Symbol.
+- Die Pause-/Fortsetzen-Aktion steht rechts getrennt von „Ausgabe schließen“
+  und verwendet Pause-/Play-Symbole.
+- Bei pausierter Anzeige kann der Host die QR-Anzeige für genau drei neue
+  Schüler-Scans freischalten; danach pausiert sie automatisch wieder.
+
 ## 2026-08-09 — Modus B: iPad-Registrierungscode im Host aufgeräumt
 
 - **Host-UI:** Der iPad-Eintrag nutzt jetzt dieselbe `code-row`-/`code-val`-

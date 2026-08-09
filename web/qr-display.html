@@ -31,7 +31,12 @@
       word-break: break-all; max-width: 80vw;
     }
     .sub { font-size: 1.3rem; opacity: .6; margin-top: 16px; }
-    .paused-message { max-width: 760px; font-size: 1.35rem; line-height: 1.5; }
+    .paused-message {
+      max-width: 900px;
+      font-size: clamp(1.75rem, 3.5vw, 2.75rem);
+      line-height: 1.65;
+    }
+    .paused-message b { display: block; margin-bottom: .8em; }
     .reg-code {
       font-size: 4rem; font-weight: 700; letter-spacing: .3em;
       font-family: ui-monospace, "SF Mono", Menlo, monospace;
@@ -67,8 +72,12 @@
 
   <!-- Host pausiert die QR-Anzeige vorübergehend. -->
   <div class="view" id="view-paused">
-    <p class="paused-message"><b>Bitte warte einen Moment.</b><br>
-      In Kürze wirst du mit deiner Ausleihe beginnen. Bitte halte schonmal dein Handy bereit. Es muss mit dem Schul-WLAN verbunden sein.</p>
+    <p class="paused-message">
+      <b>Bitte warte einen Moment.</b>
+      In Kürze wirst du mit deiner Ausleihe beginnen.<br><br>
+      Bitte halte schonmal dein Handy bereit.<br><br>
+      Es muss mit dem Schul-WLAN verbunden sein.
+    </p>
   </div>
 
   <!-- Ausgabe geschlossen -->

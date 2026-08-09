@@ -627,9 +627,14 @@ class AppState:
         # --- Modus B (Live-Ausgabe) ---
         self.modus_b_open: bool = False
         # Pause blendet den allgemeinen Join-QR auf allen autorisierten
-        # iPad-Displays aus, ohne die Live-Ausgabe oder bestehende Schüler-
-        # Sessions zu schließen.
+        # iPad-Displays aus und blockiert neue Schüler-Joins, ohne die Live-
+        # Ausgabe oder bestehende Schüler-Sessions zu schließen. Ein begrenzter
+        # Freischaltvorgang darf diesen Wert vorübergehend auf False setzen.
         self.modus_b_paused: bool = False
+        # Temporäre Freischaltung für genau drei neue Schüler-Joins. Nicht Teil
+        # des Host-Snapshots: `paused` bleibt die einzige UI-Quelle für den
+        # sichtbaren Pause-/Play-Zustand.
+        self.modus_b_scan_allowance: int = 0
         # Neu bei jedem Öffnen der Ausgabe erzeugt; bleibt über alle
         # Zuordnungen innerhalb der Ausgabe konstant (PLAN §3).
         self.modus_b_join_secret: str | None = None

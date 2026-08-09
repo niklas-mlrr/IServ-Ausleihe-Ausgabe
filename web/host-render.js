@@ -584,7 +584,7 @@ window.__host = window.__host || {};
   async function toggleModusBPause(btn) {
     if (!state.modus_b || !state.modus_b.open || !btn) return;
     btn.disabled = true;
-    btn.textContent = '…';
+    btn.innerHTML = '…';
     try {
       const r = await fetch('/api/modus-b/pause', { method: 'POST' });
       if (!r.ok) {
@@ -600,6 +600,20 @@ window.__host = window.__host || {};
       btn.disabled = false;
       renderModusBControl();
     }
+  }
+  async function allowThreeModusBScans(btn) {
+    if (!state.modus_b || !state.modus_b.open || !state.modus_b.paused || !btn) return;
+    await busy(btn, async () => {
+      const r = await fetch('/api/modus-b/allow-scans', { method: 'POST' });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        showMsg(d.detail || 'Scans konnten nicht freigeschaltet werden');
+        return;
+      }
+      const d = await r.json();
+      state.modus_b.paused = !!d.paused;
+    });
+    renderModusBControl();
   }
   async function showMbQr() {
     // Immer frisch holen — der Join-QR rotiert nach jeder Zuordnung.
@@ -641,7 +655,7 @@ window.__host = window.__host || {};
   // QR, mit dem ein iPad die Display-Seite (/qr-display) öffnet.
   async function showDisplayQr() {
     const r = await fetch('/api/display/qr');
-    if (!r.ok) { showMsg('QR für iPad konnte nicht geladen werden'); return; }
+    if (!r.ok) { showMsg('QR für QR-Display konnte nicht geladen werden'); return; }
     const d = await r.json();
     // Scannt das iPad den QR, verbindet sich ein neues Display -> displays-Liste wächst.
     qrWatch = { kind: 'display', baseline: ((state.modus_b && state.modus_b.displays) || []).length };
@@ -843,14 +857,18 @@ window.__host = window.__host || {};
   // QR-Buttons. Pairing-Codes selbst leben im jeweiligen Klassen-Tab.
   function renderModusBControl() {
     const mb = state.modus_b || { open: false, paused: false, pending: [], displays: [] };
+    const hasConnectedDisplay = (mb.displays || []).some(d => d.connected && d.authorized);
     document.getElementById('mb-open-btn').style.display = mb.open ? 'none' : '';
     const pauseBtn = document.getElementById('mb-pause-btn');
-    pauseBtn.style.display = mb.open ? '' : 'none';
-    pauseBtn.textContent = mb.paused ? 'QR fortsetzen' : 'QR pausieren';
+    pauseBtn.style.display = mb.open && hasConnectedDisplay ? '' : 'none';
+    pauseBtn.innerHTML = mb.paused ? ICO_PLAY : ICO_PAUSE;
+    pauseBtn.setAttribute('aria-label', mb.paused ? 'QR-Anzeige fortsetzen' : 'QR-Anzeige pausieren');
     pauseBtn.title = mb.paused
       ? 'QR-Anzeige auf den iPads fortsetzen'
       : 'QR-Anzeige auf den iPads pausieren';
     document.getElementById('mb-close-btn').style.display = mb.open ? '' : 'none';
+    const allowScansBtn = document.getElementById('mb-allow-scans-btn');
+    allowScansBtn.style.display = mb.open && mb.paused && hasConnectedDisplay ? '' : 'none';
     document.getElementById('mb-status').textContent = mb.open ? 'geöffnet' : 'geschlossen';
     document.getElementById('mb-info').style.display = mb.open ? '' : 'none';
     // Alle verbundenen iPads bleiben sichtbar. Bei unautorisierten Displays
@@ -872,12 +890,15 @@ window.__host = window.__host || {};
       const ignore = d.authorized ? ''
         : `<button class="danger" data-action="ignore-display" data-display-id="${did}" title="Code ignorieren" aria-label="iPad-Code ${code} ignorieren">${ICON_CLOSE}</button>`;
       const disconnectClass = d.authorized ? ' mb-display-disconnect-primary' : '';
+      const disconnect = d.authorized
+        ? `<button class="ghost warn icon-only${disconnectClass}" data-action="disconnect-display" data-display-id="${did}" title="QR-Display trennen" aria-label="QR-Display trennen">${ICON_CLOSE}</button>`
+        : `<button class="secondary" data-action="disconnect-display" data-display-id="${did}">Trennen</button>`;
       return `<div class="code-row mb-display-row">
-        <span class="code-meta mb-display-label"><span class="ws-dot ok" aria-hidden="true"></span>iPad verbunden</span>
+        <span class="code-meta mb-display-label"><span class="ws-dot ok" aria-hidden="true"></span>QR-Display verbunden</span>
         <span class="code-val" aria-label="Registrierungscode">${code}</span>
         ${status}
         ${authorize}
-        <button class="secondary${disconnectClass}" data-action="disconnect-display" data-display-id="${did}">Trennen</button>
+        ${disconnect}
         ${ignore}
       </div>`;
     }).join('');
@@ -1016,7 +1037,7 @@ window.__host = window.__host || {};
     const dot = t.connected ? '<span style="color:#30d158">●</span>' : '<span style="color:#888">○</span>';
     host.innerHTML = `<div class="row" style="align-items:center;gap:10px">
         <span>${dot} ${t.connected ? 'verbunden' : 'getrennt (Reconnect möglich)'}</span>
-        <button class="ghost warn" data-action="teacher-disconnect" data-ctx-id="${id}">Lehrkraft trennen</button>
+        <button class="ghost warn icon-only" data-action="teacher-disconnect" data-ctx-id="${id}" title="Lehrkraft trennen" aria-label="Lehrkraft trennen">${ICON_CLOSE}</button>
       </div>
       ${slipStat}`;
   }
@@ -2816,6 +2837,7 @@ window.__host = window.__host || {};
   });
   document.getElementById('mb-open-btn').addEventListener('click', openModusB);
   document.getElementById('mb-pause-btn').addEventListener('click', (e) => toggleModusBPause(e.currentTarget));
+  document.getElementById('mb-allow-scans-btn').addEventListener('click', (e) => allowThreeModusBScans(e.currentTarget));
   document.getElementById('mb-close-btn').addEventListener('click', closeModusB);
   // Delegiert (innerHTML wird bei jedem Snapshot neu aufgebaut, s.
   // renderModusBControl): Klick auf „Freischalten" eines gelisteten,
@@ -3019,6 +3041,7 @@ window.__host.printLoanSlip = printLoanSlip;
 window.__host.openModusB = openModusB;
 window.__host.closeModusB = closeModusB;
 window.__host.toggleModusBPause = toggleModusBPause;
+window.__host.allowThreeModusBScans = allowThreeModusBScans;
 window.__host.showMbQr = showMbQr;
 window.__host.authorizeDisplay = authorizeDisplay;
 window.__host.disconnectDisplay = disconnectDisplay;

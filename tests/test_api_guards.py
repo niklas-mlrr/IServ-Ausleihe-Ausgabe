@@ -775,6 +775,27 @@ def test_modus_b_pause_toggles_and_requires_open_output(client, ctx):
     assert r.status_code == 409
 
 
+def test_modus_b_allows_exactly_three_scans_while_paused(client, ctx):
+    state, _, _ = ctx
+    state.modus_b_open = True
+    state.modus_b_paused = True
+    state.modus_b_join_secret = "join-secret"
+
+    r = client.post("/api/modus-b/allow-scans", cookies={"session_id": "sid"})
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "paused": False, "scan_allowance": 3}
+    assert state.modus_b_scan_allowance == 3
+
+    for expected_remaining in (2, 1, 0):
+        r = client.post("/api/student/join", json={"join_secret": "join-secret"})
+        assert r.status_code == 200
+        assert state.modus_b_scan_allowance == expected_remaining
+
+    assert state.modus_b_paused is True
+    r = client.post("/api/student/join", json={"join_secret": "join-secret"})
+    assert r.status_code == 403
+
+
 def test_close_class_ends_students_and_releases_helper_bindings(client, ctx):
     from server.state import HelperSession, QueueStudent
 
