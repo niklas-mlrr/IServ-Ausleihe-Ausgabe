@@ -5,9 +5,8 @@
 > Risiko hier unter „Offen / zu testen" eintragen; nach erfolgreichem Test in
 > „Verifiziert" verschieben (mit Datum + Skript/Befund). Bezug: `docs/PLAN.md`.
 >
-> Stand: 2026-08-09 (granulare Leihschein-Status in Host-Queue + Helfer-Client
-> + Feinschliff: „Unterschrift" live im Host, Helfer-Druckersymbol verdrängt
-> durch Sign-Button, 424 Tests grün).
+> Stand: 2026-08-09 (Modus-B-QR-Display-Steuerung mit Pause/Fortsetzen,
+> Drei-Scan-Freigabe und lesbarerem Pausenhinweis, 428 Tests grün).
 > Alle bisherigen Tests sind **read-only** gegen IServ
 > (kein Submit, keine Buchung — PLAN §6).
 >
@@ -86,6 +85,7 @@
 
 | V57 | **Aktiver Helfer + Druckstatus nach neuem Scan:** Host- und Helfer-Queue zeigen den Helfernamen in der gewünschten Reihenfolge; der Schülerclient stellt die Identitätsbox vor die Statusbox. Ein neuer erfolgreicher Scan invalidiert laufende/alte Leihschein-Jobs logisch, verhindert ein verspätetes `slip_printed` und lässt erst einen neuen Druckauftrag wieder den Druckstatus setzen. | `tests/test_queue_progress.py` (Invalidierung, Generation-Race, Helfername) + `uv run pytest --no-cov -ra` + `uvx ruff check server/ automation/ tests/` + `node --check web/*.js` | 2026-08-09 | **424 Tests grün**, Ruff und JavaScript-Syntaxprüfung grün; echter Browser-/Drucker-Livecheck weiterhin offen |
 | V58 | **Modus-B-Zugriffs- und Routenreview:** Kein Cross-Student-Datenzugriff im geprüften Session-Lifecycle: Pairing-Code ohne Datenrecht, Daten erst nach Host-Pairing, hard revoke bei Abschluss/Abbruch/Timeout. Öffentliche Seiten, Capability-Routen, Displays und FastAPI-Dokumentation katalogisiert; Host-Routen/Cookie-WS bleiben geschützt. | Read-only source review + `uv run pytest -q tests/test_api_guards.py tests/test_queue_flow.py tests/test_print_queue.py` | 2026-08-09 | Geprüfte fokussierte Suite grün; Detailbefund: `docs/security_review_2026-08-09.md`. Workflow-Integritäts-Follow-up (manuelles `print_request`/`finish` ohne serverseitigen Vollständigkeits-Gate) bleibt offen. |
+| V59 | **Modus-B-QR-Display-Steuerung:** Einheitliche X-Trennbuttons, Pause-/Play-Symbole nur bei verbundenem autorisiertem Display, serverseitige Pause-Sperre und genau drei temporäre Scan-Freigaben; nach dem dritten Join automatische Pause. Pausenhinweis auf dem QR-Display für ein 11"-iPad responsiv vergrößert und durch zusätzliche Zeilenumbrüche aufgelockert. | tests/test_api_guards.py + uv run pytest + uvx ruff check server/ automation/ tests/ + node --check web/*.js | 2026-08-09 | 428 Tests grün, Ruff, JavaScript-Syntaxprüfung und git diff --check grün; echter QR-Display-/iPad-Livecheck weiterhin offen. |
 
 ## Offen / zu testen
 

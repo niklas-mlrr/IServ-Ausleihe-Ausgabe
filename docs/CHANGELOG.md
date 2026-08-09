@@ -17,6 +17,9 @@
   und verwendet Pause-/Play-Symbole.
 - Bei pausierter Anzeige kann der Host die QR-Anzeige für genau drei neue
   Schüler-Scans freischalten; danach pausiert sie automatisch wieder.
+- Die Pause-/Play-Steuerung erscheint nur, wenn mindestens ein autorisiertes
+  QR-Display verbunden ist; der Pausenhinweis ist für 11"-iPads größer und
+  durch zusätzliche Zeilenumbrüche aufgelockert.
 
 ## 2026-08-09 — Modus B: iPad-Registrierungscode im Host aufgeräumt
 
