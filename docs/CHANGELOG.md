@@ -8,6 +8,13 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-09 — Ladezustand von Host und Client synchronisiert
+
+- **Host:** Aktive Schüler zeigen während des Bücher- und Worker-Ladevorgangs
+  den Status „Lädt“ statt „Aktiv“ oder eines vorzeitigen X/Y-Fortschritts.
+- **Helferclient:** Der Schüler erscheint direkt als aktiv mit Helfernamen;
+  der X/Y-Fortschritt wird nach abgeschlossenem Ladevorgang ergänzt.
+
 ## 2026-08-09 — Status in „Aktuell in Ausgabe“ synchronisiert
 
 - **Host:** Die Statusanzeige in der Kachel „Aktuell in Ausgabe“ verwendet

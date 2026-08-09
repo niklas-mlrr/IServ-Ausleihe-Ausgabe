@@ -2022,6 +2022,7 @@ window.__host = window.__host || {};
     if (s.slip_printed) return { content: 'Leihschein gedruckt' };
     if (s.slip_status === 'printing') return { content: 'Leihschein druckt' };
     if (s.slip_status === 'waiting') return { content: 'Leihschein wartet' };
+    if (s.books_total == null) return { content: 'Lädt' };
     if (s.books_total) {
       const loaned = s.loaned_at_load || 0;
       const sessionX = s.books_done - loaned;
@@ -2038,7 +2039,7 @@ window.__host = window.__host || {};
         content: `${s.books_done}/${s.books_total} gesamt`,
       };
     }
-    return { content: 'Aktiv' }; // noch nicht geladen
+    return { content: 'Aktiv' }; // geladen, aber ohne Bücher
   }
 
   function renderActiveStatusBadge(s) {

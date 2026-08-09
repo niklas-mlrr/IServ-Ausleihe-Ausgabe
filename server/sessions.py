@@ -1314,9 +1314,10 @@ async def load_and_push_helper_student(state: AppState, hub, student, helper) ->
     info = await hydrate_student_info(state, info, getattr(student, "form", ""), helper)
     # Modus A: Bücherliste sofort sichtbar. `worker_ready` (ohne Bücher) folgt,
     # sobald der Worker buchungsbereit ist — bis dahin zeigt der Helferclient
-    # „Warten…" und ignoriert Scans (clientseitig).
+    # „Warten…" und ignoriert Scans (clientseitig). Der Host bleibt bis zum
+    # fertigen Worker-Laden auf „Lädt"; der erste Broadcast bei der Zuweisung
+    # hat den aktiven Schüler samt Helfer bereits an die übrigen Clients gesendet.
     await hub.send_scanner(helper.token, {"type": "student_info", "student": info})
-    await hub.broadcast_host(state.state_snapshot())
 
     if state.worker_pool:
         try:
@@ -1353,6 +1354,7 @@ async def load_and_push_helper_student(state: AppState, hub, student, helper) ->
     # Worker bereit (oder Degraded-Modus ohne worker_pool): Helferclient flippt
     # von „Warten…" auf „Scanner bereit" und gibt Scans frei.
     await hub.send_scanner(helper.token, {"type": "worker_ready"})
+    await hub.broadcast_host(state.state_snapshot())
 
 
 async def repush_booklist(
