@@ -8,6 +8,14 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-09 — Betreuerauslöser-Hinweis im Schülerclient
+
+- Im Schülerclient zeigt der Betreuerauslöser jetzt den Hinweis „Bitte wende
+  dich an einen Betreuer, damit dein Leihschein gedruckt werden kann.“
+- Der Schülerclient bietet in diesem Modus keinen eigenen Druckbutton mehr;
+  der Druck wird über den Betreuer/Host ausgelöst. Die Bestätigung „Leihschein
+  erhalten“ nach einem erfolgreichen Druck bleibt davon unberührt.
+
 ## 2026-08-09 — Aktionssymbole und Modus-B-Leihscheinaktionen
 
 - **Host:** Die Aktionen in „Aktuell in Ausgabe“ verwenden jetzt Haken-,

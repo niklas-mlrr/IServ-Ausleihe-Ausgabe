@@ -356,8 +356,8 @@ function enterDruckmodus() {
       if (actions) actions.style.display = '';
       break;
     case 'helper':
-      if (text) text.textContent = 'Drücke „Leihschein drucken", um deinen Leihschein zu drucken.';
-      if (actions) actions.style.display = '';
+      if (text) text.textContent = 'Bitte wende dich an einen Betreuer, damit dein Leihschein gedruckt werden kann.';
+      if (actions) actions.style.display = 'none';
       break;
     default:  // 'barcode' — Platzhalter, kein Verhalten (folgt später)
       if (text) text.textContent = 'Druckmodus (Barcode) — folgt.';
