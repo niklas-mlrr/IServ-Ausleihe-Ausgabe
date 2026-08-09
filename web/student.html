@@ -220,6 +220,19 @@
       border: 2px solid var(--border); border-radius: 12px;
       background: var(--surface); text-align: center;
     }
+    /* Eine erfolgreiche Druckbestätigung ist nur ergänzende Information —
+       ohne Rahmen und Fläche bleibt der eigentliche Folgebutton visuell
+       eindeutig die wichtigste Aktion. */
+    #print-status.is-complete {
+      padding: 0;
+      border: 0;
+      background: transparent;
+    }
+    #print-status.is-complete #print-text {
+      font-size: .9rem;
+      font-weight: 400;
+      opacity: .6;
+    }
     #print-text, #slip-text {
       font-size: 1rem; font-weight: 600; line-height: 1.4; white-space: normal;
     }
@@ -232,12 +245,22 @@
        eckig (kein border-radius) statt abgerundet wie #print-status/#slip-status
        — optisch als Infozettel statt als Statusanzeige erkennbar. */
     .info-box {
-      width: 100%; max-width: 520px; margin: 20px auto 0; padding: 14px 18px;
+      width: 100%; max-width: 520px; margin: 32px auto 0; padding: 14px 18px;
       border: 2px solid var(--border); background: var(--surface); text-align: left;
     }
     .info-box h4 { font-size: .95rem; font-weight: 700; margin-bottom: 6px; }
     .info-box p { font-size: .85rem; line-height: 1.45; opacity: .8; }
     .info-box p + p { margin-top: 10px; }
+    /* Im Schüler-Druck-/Unterschreiben-Modus bleibt der Hinweis am unteren
+       Rand der sichtbaren Ansicht — auch wenn der übrige Inhalt mittig sitzt. */
+    #view-print .info-box, #view-slip .info-box {
+      position: fixed;
+      left: 50%;
+      bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+      width: min(520px, calc(100vw - 28px));
+      margin: 0;
+      transform: translateX(-50%);
+    }
   </style>
 </head>
 <body>
@@ -295,8 +318,8 @@
     <div class="scroll-center">
       <div class="big-msg">
         <div class="icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg></div>
-        <div class="title" id="print-title">Leihschein Drucken</div>
-        <div id="print-intro">Du hast alle Bücher ausgeliehen. Als nächstes muss der Leihschein gedruckt werden.</div>
+        <div class="title" id="print-title">Leihschein drucken</div>
+        <div id="print-intro">Du hast alle Bücher ausgeliehen.<br>Als nächstes muss der Leihschein gedruckt werden.</div>
         <div id="print-status" role="status" aria-live="polite">
           <div id="print-text"></div>
         </div>
@@ -304,7 +327,7 @@
           <button id="print-trigger-btn">Leihschein drucken</button>
         </div>
         <div class="modal-actions" id="print-received-actions" style="display:none">
-          <button id="print-received-btn">Leihschein erhalten</button>
+          <button id="print-received-btn">Leihschein drucken</button>
         </div>
         <div class="info-box">
           <h4>Leihschein</h4>

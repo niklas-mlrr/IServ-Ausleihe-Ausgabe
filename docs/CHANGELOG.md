@@ -8,6 +8,20 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-09 — Security review of Modus B and public routes
+
+- Read-only source review found no cross-student data-access path: a Modus-B
+  session receives data only after host pairing; completion, abort and timeout
+  hard-revoke its token, worker and WebSocket.
+- Deliberately public static/capability routes were catalogued. FastAPI's
+  default `/docs`, `/redoc` and `/openapi.json` disclose the API contract but
+  bypass no authorization; disabling them remains an optional deployment
+  hardening measure.
+- **Follow-up:** server-side checks do not yet require completed books before
+  a student manually sends the WebSocket `print_request` or `finish` frame.
+  This is workflow integrity, not cross-student data disclosure.
+- Details: `docs/security_review_2026-08-09.md`.
+
 ## 2026-08-09 — Ladezustand von Host und Client synchronisiert
 
 - **Host:** Aktive Schüler zeigen während des Bücher- und Worker-Ladevorgangs

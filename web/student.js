@@ -90,7 +90,7 @@ let slipTrigger = 'auto';
 let druckmodusEntered = false;       // Druckmodus bereits betreten (nur 1× pro Session)
 let printSent = false;               // Druckauftrag bereits gesendet
 let slipModeEntered = false;         // Leihschein nach dem Druck bereits angezeigt
-// Nach dem Druck wartet die Ansicht auf „Leihschein erhalten" (Button), bevor
+// Nach dem Druck wartet die Ansicht auf die Bestätigung, bevor
 // es weitergeht. Der eigentliche Wechsel (Leihschein-unterschreiben-Modus
 // bzw. Abschluss/Schülerleihscheinmodus) läuft serverseitig
 // (`confirm_slip_received`) erst NACH dieser Bestätigung — nicht schon beim
@@ -221,8 +221,8 @@ function handleServerMessage(msg) {
       return;
     }
     if (msg.slip_printed) {
-      // Bereits gedruckt, aber „Leihschein erhalten" server-seitig noch
-      // nicht bestätigt (z. B. Reload zwischen Druckende und Bestätigung) —
+      // Bereits gedruckt, aber server-seitig noch nicht bestätigt (z. B.
+      // Reload zwischen Druckende und Bestätigung) —
       // Druckmodus mit sichtbarem Button fortsetzen, NICHT erneut drucken.
       enterDruckmodusAwaitingReceipt(msg.slip_printer, msg.slip_printer_label);
       return;
@@ -295,7 +295,7 @@ function handleServerMessage(msg) {
     }
     handlePrintResult(msg);
   } else if (msg.type === 'slip_mode') {
-    // Kommt serverseitig erst NACH der „Leihschein erhalten"-Bestätigung
+    // Kommt serverseitig erst NACH der Bestätigung
     // (`slip_received`) — hier also stets direkt anzeigen.
     enterLeihscheinmodus(msg.recipient);
   } else if (msg.type === 'own_slip_download') {
@@ -342,7 +342,9 @@ function enterDruckmodus() {
   const title = document.getElementById('print-title');
   const text = document.getElementById('print-text');
   const actions = document.getElementById('print-actions');
-  if (title) title.textContent = 'Leihschein Drucken';
+  if (title) title.textContent = 'Leihschein drucken';
+  const status = document.getElementById('print-status');
+  if (status) status.classList.remove('is-complete');
   switch (slipTrigger) {
     case 'auto':
       if (text) text.textContent = 'Leihschein wird gedruckt…';
@@ -364,7 +366,7 @@ function enterDruckmodus() {
   }
 }
 
-// Reload/Reconnect zwischen physischem Druckende und „Leihschein erhalten":
+// Reload/Reconnect zwischen physischem Druckende und der Bestätigung:
 // direkt im „gedruckt"-Zustand mit sichtbarem Button fortsetzen, ohne
 // erneut zu drucken (s. worker_ready-Feld `slip_printed`).
 function enterDruckmodusAwaitingReceipt(printer, printerLabel) {
@@ -375,7 +377,9 @@ function enterDruckmodusAwaitingReceipt(printer, printerLabel) {
   const text = document.getElementById('print-text');
   const actions = document.getElementById('print-actions');
   const receivedActions = document.getElementById('print-received-actions');
-  if (title) title.textContent = 'Leihschein Drucken';
+  if (title) title.textContent = 'Leihschein drucken';
+  const status = document.getElementById('print-status');
+  if (status) status.classList.add('is-complete');
   if (actions) actions.style.display = 'none';
   // Dieselbe „Leihschein von X gedruckt."-Meldung wie direkt nach dem Druck
   // (handlePrintResult) — überlebt dank `slip_printer(_label)` im
@@ -453,14 +457,18 @@ function handlePrintResult(msg) {
   if (msg.ok) {
     // Gedruckt — dieselbe Meldung wie im Helferclient anzeigen; das
     // Weitergehen (Leihschein-unterschreiben-Modus bzw. Abschluss/
-    // Schülerleihscheinmodus) löst erst der Server nach dem Antippen von
-    // „Leihschein erhalten" aus (s. printReceivedBtn).
+    // Schülerleihscheinmodus) löst erst der Server nach der Bestätigung
+    // aus (s. printReceivedBtn).
     if (text) text.textContent = studentPrintResultStatusText(msg);
+    const status = document.getElementById('print-status');
+    if (status) status.classList.add('is-complete');
     const receivedActions = document.getElementById('print-received-actions');
     if (receivedActions) receivedActions.style.display = '';
   } else {
     // Druck fehlgeschlagen → kein weiterer Selbstversuch. Der Button bleibt
     // verborgen; der Schüler soll sich an einen Betreuer wenden.
+    const status = document.getElementById('print-status');
+    if (status) status.classList.remove('is-complete');
     if (text) text.textContent = studentPrintResultStatusText(msg) + ' — bitte melde dich bei einem Betreuer.';
   }
 }
@@ -575,7 +583,7 @@ if (printTriggerBtn) {
   });
 }
 
-// „Leihschein erhalten": bestätigt den Empfang. Der Server räumt — falls
+// Die Druckbestätigung: Der Server räumt — falls
 // noch nicht durch nächsten Druck/30s-TTL geschehen — den „Gedruckt"-Marker
 // im Drucker-Display auf und löst danach erst die Folgeaktion aus
 // (Leihschein-unterschreiben-Modus `slip_mode` bzw. direkt Abschluss/
