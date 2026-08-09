@@ -497,6 +497,11 @@
     .ns-meta { font-size: .85rem; color: var(--text-muted); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
     .ns-class { margin-right: auto; }
     .ns-status, .ns-helper { color: var(--info); }
+    .ns-status-progress {
+      display: inline-flex; flex-direction: column; align-items: flex-end;
+      line-height: 1.15;
+    }
+    .ns-status .q-progress-sub { font-size: inherit; font-weight: inherit; opacity: 1; }
     /* Klasse in Klammern hinter dem Schülernamen in der Helferliste — nur bei
        Lupe-Zuweisung (cross-class), etwas dezenter als der Name. */
     .helper-student-class { color: var(--text-muted); font-weight: 400; }

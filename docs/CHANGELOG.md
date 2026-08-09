@@ -8,6 +8,15 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-09 — Status in „Aktuell in Ausgabe“ synchronisiert
+
+- **Host:** Die Statusanzeige in der Kachel „Aktuell in Ausgabe“ verwendet
+  jetzt dieselben dynamischen Werte wie die Klassenliste: Fortschritt mit
+  „ohne Mjb“/„gesamt“ sowie die Leihschein-Status „wartet“, „druckt“,
+  „gedruckt“ und „Unterschrift“.
+- **Wartbarkeit:** Die gemeinsame Statuslogik liegt nur noch an einer Stelle,
+  damit beide Ansichten synchron bleiben.
+
 ## 2026-08-09 — Status in „Aktuell in Ausgabe“
 
 - **Host:** Die Kachel „Aktuell in Ausgabe“ zeigt neben der Klasse linksbündig

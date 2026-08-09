@@ -1306,7 +1306,7 @@ window.__host = window.__host || {};
       body = '<div class="ns-grid">' + active.map(s => {
         const helper = helpers.find(h => h.student_id === s.student_id);
         const helperLbl = helper ? `<span class="ns-helper">${ICO_HELPER} ${escapeHtml(helper.name)}</span>` : '';
-        const statusLbl = `<span class="ns-status">${escapeHtml({ active: 'Aktiv' }[s.status] || s.status)}</span>`;
+        const statusLbl = renderActiveStatusText(s);
         const alert = studentAlerts[s.student_id];
         // Schließen-Button nur am Schüler-Client-Modal (Modus B): dort hat der
         // Client bewusst keinen eigenen, also muss der Host freigeben. Am Helfer
@@ -2014,6 +2014,45 @@ window.__host = window.__host || {};
     return out;
   }
 
+  // Gemeinsame Statusdarstellung für die Klassenliste und „Aktuell in Ausgabe“.
+  // Die Now-Serving-Kachel übernimmt denselben Inhalt, verwendet aber bewusst
+  // ihre kompakte Textgestaltung statt der Tabellen-Badges.
+  function activeStatusDetails(s) {
+    if (s.slip_signing) return { content: 'Unterschrift' };
+    if (s.slip_printed) return { content: 'Leihschein gedruckt' };
+    if (s.slip_status === 'printing') return { content: 'Leihschein druckt' };
+    if (s.slip_status === 'waiting') return { content: 'Leihschein wartet' };
+    if (s.books_total) {
+      const loaned = s.loaned_at_load || 0;
+      const sessionX = s.books_done - loaned;
+      const sessionY = s.books_total - loaned;
+      if (loaned > 0 && sessionY > 0) {
+        return {
+          progress: true,
+          title: `seit Aufrufen ${sessionX}/${sessionY} (offene vorgemerkte) · insgesamt ${s.books_done}/${s.books_total} (ausgeliehene/angemeldete)`,
+          content: `<span class="q-progress-main">${sessionX}/${sessionY} ohne Mjb</span><span class="q-progress-sub">${s.books_done}/${s.books_total} gesamt</span>`,
+        };
+      }
+      return {
+        title: 'ausgegebene / angemeldete Bücher',
+        content: `${s.books_done}/${s.books_total} gesamt`,
+      };
+    }
+    return { content: 'Aktiv' }; // noch nicht geladen
+  }
+
+  function renderActiveStatusBadge(s) {
+    const details = activeStatusDetails(s);
+    const progress = details.progress ? ' q-progress' : '';
+    const title = details.title ? ` title="${escapeHtml(details.title)}"` : '';
+    return `<span class="badge badge-active${progress}"${title}>${details.content}</span>`;
+  }
+
+  function renderActiveStatusText(s) {
+    const details = activeStatusDetails(s);
+    return `<span class="ns-status${details.progress ? ' ns-status-progress' : ''}">${details.content}</span>`;
+  }
+
   // Queue-Tabelle eines Klassen-Tabs.
   function renderCtxQueue(id) {
     const ctx = (state.contexts || {})[id];
@@ -2044,31 +2083,7 @@ window.__host = window.__host || {};
       const hints = hintBadges(s);
       let statusBadge;
       if (s.status === 'active') {
-        // Granulare Leihschein-Status statt starr „Aktiv": sobald der
-        // Druckauftrag gesendet ist „Leihschein wartet", beim aktiven Druck
-        // „Leihschein druckt", nach dem Druck „Leihschein gedruckt" und im
-        // Leihschein-unterschreiben-Modus (Klasse mit `done_signed`)
-        // „Unterschrift". Erst danach (bzw. ohne Druck) X/Y bzw. „Aktiv".
-        if (s.slip_signing) {
-          statusBadge = `<span class="badge badge-active">Unterschrift</span>`;
-        } else if (s.slip_printed) {
-          statusBadge = `<span class="badge badge-active">Leihschein gedruckt</span>`;
-        } else if (s.slip_status === 'printing') {
-          statusBadge = `<span class="badge badge-active">Leihschein druckt</span>`;
-        } else if (s.slip_status === 'waiting') {
-          statusBadge = `<span class="badge badge-active">Leihschein wartet</span>`;
-        } else if (s.books_total) {
-          const loaned = s.loaned_at_load || 0;
-          const sessionX = s.books_done - loaned;
-          const sessionY = s.books_total - loaned;
-          if (loaned > 0 && sessionY > 0) {
-            statusBadge = `<span class="badge badge-active q-progress" title="seit Aufrufen ${sessionX}/${sessionY} (offene vorgemerkte) · insgesamt ${s.books_done}/${s.books_total} (ausgeliehene/angemeldete)"><span class="q-progress-main">${sessionX}/${sessionY} ohne Mjb</span><span class="q-progress-sub">${s.books_done}/${s.books_total} gesamt</span></span>`;
-          } else {
-            statusBadge = `<span class="badge badge-active" title="ausgegebene / angemeldete Bücher">${s.books_done}/${s.books_total} gesamt</span>`;
-          }
-        } else {
-          statusBadge = `<span class="badge badge-active">Aktiv</span>`; // noch nicht geladen
-        }
+        statusBadge = renderActiveStatusBadge(s);
       } else if (s.status === 'done') {
         // Fertig: statt „Fertig" der rote Hinweis, falls einer bekannt ist;
         // ohne Hinweis bleibt es beim grünen „Fertig". Ein abwesender Schüler,
