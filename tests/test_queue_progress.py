@@ -10,7 +10,8 @@ from __future__ import annotations
 import asyncio
 
 import server.sessions as sessions
-from server.state import AppState, QueueStudent
+from server.print_queue import PrintJob
+from server.state import AppState, HelperSession, QueueStudent
 
 
 class _Target:
@@ -147,6 +148,49 @@ def test_reset_to_pending_clears_progress_and_slip():
     assert s.as_dict()["slip_printed"] is False
     assert s.as_dict()["loaned_at_load"] == 0
     assert s.as_dict()["slip_collected"] is False
+
+
+def test_new_scan_invalidates_current_slip_and_print_queue_state():
+    """Ein Scan während/nach dem Druck setzt den Leihscheinstatus zurück.
+
+    Der alte Auftrag darf physisch weiterlaufen, aber ein neuer Auftrag ist
+    nötig, bevor der Schüler wieder als gedruckt gilt.
+    """
+    st, s = _state_with_student()
+    s.slip_printed = True
+    old = PrintJob.create(role="helper", student_id=7, pages="1", name="N, V")
+    asyncio.run(st.print_queue.enqueue(old))
+    assert st.print_queue.print_job_states() == {7: "waiting"}
+
+    sessions.invalidate_slip_after_scan(st, 7)
+
+    assert old.invalidated is True
+    assert st.print_queue.print_job_states() == {}
+    assert s.slip_printed is False
+    assert s.slip_generation == 1
+
+
+def test_stale_completed_job_cannot_mark_new_slip():
+    """Auch das enge Fenster zwischen Job-Ende und Slip-Marker bleibt sicher."""
+    st, s = _state_with_student()
+    old = PrintJob.create(
+        role="helper", student_id=7, pages="1", name="N, V", generation=s.slip_generation
+    )
+    old.status = "done"
+    old.result = {"ok": True}
+    sessions.invalidate_slip_after_scan(st, 7)
+    asyncio.run(st.print_queue._mark_slip_printed_after_completion(old))
+    assert s.slip_printed is False
+
+
+def test_queue_snapshot_resolves_active_helper_name():
+    st, s = _state_with_student()
+    helper = HelperSession(token="helper-token", name="Anna", student_id=s.student_id)
+    st.helper_sessions[helper.token] = helper
+    s.assigned_helper = helper.token
+
+    entry = st.state_snapshot()["contexts"][st.active_context.id]["queue"][0]
+    assert entry["assigned_helper_name"] == "Anna"
 
 
 def test_info_flags_from_student_info():

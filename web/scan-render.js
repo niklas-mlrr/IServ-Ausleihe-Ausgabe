@@ -146,6 +146,11 @@ function renderQueueGroupItem(s, withCallBtn, actionSlot) {
   const sidAttr = withCallBtn ? ` data-student-id="${escapeHtml(String(s.student_id))}"` : '';
   const hasAction = actionSlot === 'print' || actionSlot === 'sign';
   const info = withCallBtn ? queueInfoIcons(s) : '';
+  // Aktiv: Helfername steht vor dem Fortschritt/Druckersymbol. Im Helferclient
+  // bewusst ohne Personensymbol; das Symbol ist dem Host vorbehalten.
+  const helper = s.status === 'active' && s.assigned_helper_name
+    ? `<span class="q-helper-name">${escapeHtml(s.assigned_helper_name)}</span>`
+    : '';
   let actionBtn = '';
   if (actionSlot !== undefined) {
     if (actionSlot === 'print') {
@@ -160,7 +165,7 @@ function renderQueueGroupItem(s, withCallBtn, actionSlot) {
   const callBtn = withCallBtn ? '<div class="qg-call"><button class="call-btn" title="Aufrufen" aria-label="Aufrufen"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></button></div>' : '';
   return `<div class="queue-group-item${hasAction ? ' has-action' : ''}"${sidAttr}>`
     + `<div class="qg-fach">${escapeHtml(form)}</div>`
-    + `<div class="qg-name">${escapeHtml(name)}</div>${info}${actionBtn}${callBtn}</div>`;
+    + `<div class="qg-name">${escapeHtml(name)}</div>${helper}${info}${actionBtn}${callBtn}</div>`;
 }
 
 // Info-Spalte links vom Aufrufen-Button: rein INFORMATIVE Hinweise zu einem
@@ -717,6 +722,11 @@ function sendPrint(thenNext) {
     return;
   }
   printThenNext = thenNext;
+  // Die ID trennt ein veraltetes Ergebnis eines Drucks vor einem neuen Scan
+  // von dem danach gestarteten Druckauftrag.
+  printRequestId = (globalThis.crypto && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random()}`;
   printBtn.disabled = true;
   // Druck beginn: aktive `print`-Meldung (Drucker-Status bleibt stehen, bis
   // das Ergebnis/ein neuer Druck ihn ersetzt). Ein aktives wait („Warten …")
@@ -724,7 +734,10 @@ function sendPrint(thenNext) {
   // als End-Meldung von dieser neuen Meldung verdrängt. trans leeren.
   setStatusText('Leihschein in Druckerwarteschlange …', null, 'print');
   clearStatus('trans');
-  ws.send(JSON.stringify({ type: 'print', second_page: slipCheck.checked, printers: ids }));
+  ws.send(JSON.stringify({
+    type: 'print', second_page: slipCheck.checked, printers: ids,
+    request_id: printRequestId,
+  }));
   closePrintModal();
 }
 

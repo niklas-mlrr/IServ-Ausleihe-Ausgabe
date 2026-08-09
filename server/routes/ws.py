@@ -572,6 +572,7 @@ async def _handle_print(state, hub, helper, websocket, raw) -> None:
         pages=pages,
         name=name,
         helper_token=helper.token,
+        request_id=str(raw.get("request_id") or "") or None,
         allowed_printers=allowed,
     )
     await state.print_queue.enqueue(job)

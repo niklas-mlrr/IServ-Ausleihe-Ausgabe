@@ -142,6 +142,7 @@ let pendingScans = 0;               // noch nicht quittierte Scans (Sequenzierun
 let scanInFlight = false;            // genau ein Scan bis zum terminalen Ergebnis
 const scanWaiters = [];             // Resolver, die auf pendingScans===0 warten
 let printThenNext = false;          // „Drucken & nächster Schüler" angeklickt?
+let printRequestId = null;          // Korrelation des aktuell eigenen Druckauftrags
 
 // ---- Ausleih-Freigabe bei Unstimmigkeit (Nachweis fehlt / Rechnung offen) ----
 // Rein client-seitig: pupil-Flags kommen mit `student_info` (GET, s. server/

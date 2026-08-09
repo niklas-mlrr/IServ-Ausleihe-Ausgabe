@@ -119,6 +119,8 @@ async def hydrate_student_info(
     Aufrufer (Seiten-Reload derselben Verbindung) übergeben False, damit die
     „seit Aufrufen"-Baseline über den Reload hinweg stehen bleibt."""
     info["form"] = form
+    helper = state.find_helper_for_student(getattr(target, "student_id", None))
+    info["helper_name"] = helper.name if helper is not None else None
     info["book_order"] = await get_book_order_for_form(state, form)
     apply_hidden_books(info, await get_hidden_isbns_for_form(state, form))
     target.expected_isbns = expected_isbns_from_info(info)
@@ -178,6 +180,32 @@ def mark_book_done(state: AppState, student_id: int, isbn: str | None) -> None:
     student = state.find_student(student_id)
     if student is not None:
         student.done_isbns.add(isbn)
+
+
+def invalidate_slip_after_scan(state: AppState, student_id: int) -> None:
+    """Make an already started/finished slip stale after a new book scan.
+
+    The old print job is not cancelled because it may already be in the OS
+    queue. It is marked stale in ``PrintQueue`` and therefore no longer drives
+    queue/status UI or the ``slip_printed`` marker. The next print request is a
+    fresh job for the now-current book set.
+    """
+    print_queue = getattr(state, "print_queue", None)
+    if print_queue is not None:
+        print_queue.invalidate_student(student_id)
+    student = state.find_student(student_id)
+    if student is None:
+        return
+    student.slip_printed = False
+    student.slip_printer = None
+    student.slip_printer_label = None
+    student.slip_signing = False
+    student.slip_generation += 1
+    session = state.find_session_by_student(student_id)
+    if session is not None:
+        session.loan_slip_mode = False
+        session.loan_slip_recipient = None
+        session.slip_receipt_confirmed = False
 
 
 def all_books_already_loaned(books: list[dict]) -> bool:
@@ -506,6 +534,7 @@ async def _process_scan_locked(
     # sonst stünde im read-only Regelbetrieb (ALLOW_BOOKING=false) dauerhaft
     # X=0, während die Client-Bücherliste die Reihen längst als erledigt zeigt.
     if result.get("status") in ("booked", "staged"):
+        invalidate_slip_after_scan(state, student_id)
         mark_book_done(state, student_id, result.get("isbn"))
     return result
 

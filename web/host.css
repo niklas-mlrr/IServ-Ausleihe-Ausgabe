@@ -272,6 +272,10 @@
        Fertig/Übersprungen) plus ergänzend rote Info-Hinweise (Nicht angemeldet,
        Bezahlung ausstehend, …) dahinter — die Info-Spalte ist entfallen. */
     .q-status { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+    .badge-helper {
+      display: inline-flex; align-items: center; gap: 4px;
+      background: var(--info-tint); color: var(--info);
+    }
     .badge-slip         { background: var(--slip-tint); color: var(--slip-text); }
     .badge-info-neutral { background: var(--surface-2); color: var(--text-muted); font-variant-numeric: tabular-nums; }
     /* Zweizeiliger Fortschritts-Badge in der Status-Spalte: oben session-

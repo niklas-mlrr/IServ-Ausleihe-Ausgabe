@@ -2092,7 +2092,13 @@ window.__host = window.__host || {};
       // Hinweise ergänzend hinter den Status — außer bei „fertig", dort schon
       // als Ersatz für „Fertig" gesetzt.
       const trailingHints = s.status === 'done' ? '' : hints.join('');
-      const statusCell = `<div class="q-status">${statusBadge}${trailingHints}</div>`;
+      // Bei aktiver Bearbeitung die Status-Reihenfolge im selben Badge-Kasten
+      // beibehalten: Status → Helfer → Hinweis. Der Name kommt aus dem
+      // serverseitig aufgelösten Queue-Feld, nicht aus dem Bearer-Token.
+      const helperBadge = s.status === 'active' && s.assigned_helper_name
+        ? `<span class="badge badge-helper">${ICO_HELPER} ${escapeHtml(s.assigned_helper_name)}</span>`
+        : '';
+      const statusCell = `<div class="q-status">${statusBadge}${helperBadge}${trailingHints}</div>`;
       const pairBtn = (state.modus_b && state.modus_b.open && ctx.live_ausgabe !== false)
         ? `<button class="success" data-action="pair-student" data-student-id="${s.student_id}">Pairing</button> ` : '';
       // Übersprungener Schüler: Helfer scannt die Bücher stellvertretend über

@@ -387,15 +387,22 @@
        gesetzt), daher dieselbe 3-Spalten-Aufteilung wie bei den wartenden
        book-row.queue-row. */
     .queue-group-item { display: grid; grid-template-columns: var(--queue-class-w, 4.5rem) 1fr; gap: 7px; align-items: center; }
-    .queue-group-item[data-student-id] { grid-template-columns: var(--queue-class-w, 4.5rem) 1fr auto auto; }
+    .queue-group-item[data-student-id] { grid-template-columns: var(--queue-class-w, 4.5rem) 1fr auto auto auto; }
     /* Aktiv-Gruppe im Betreuerauslöser: zusätzliche Spalte für den Druck- oder
        Unterschriftenbutton vor dem Aufrufen-Pfeil. Ohne Aktion entfällt die
        leere Spalte, damit ein Info-Symbol nicht mit doppeltem Abstand vor dem
        Aufrufen-Pfeil steht. */
-    .queue-group-active .queue-group-item[data-student-id].has-action { grid-template-columns: var(--queue-class-w, 4.5rem) 1fr auto auto auto; }
+    .queue-group-active .queue-group-item[data-student-id].has-action { grid-template-columns: var(--queue-class-w, 4.5rem) 1fr auto auto auto auto; }
     .queue-group-item .qg-fach { font-weight: 600; }
     .queue-group-item .qg-name { margin-left: 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }  /* Klasse↔Name: 7px gap + 7px = 14px */
     .queue-group-item .qg-call, .queue-group-item .qg-print { display: flex; justify-content: flex-end; align-items: center; }
+    .q-helper-name {
+      display: inline-flex; align-items: center; justify-content: flex-end;
+      padding: 2px 8px; border-radius: 12px; background: var(--surface-2);
+      color: var(--fg); font-size: .78rem; font-weight: 600;
+      white-space: nowrap; max-width: 10rem; overflow: hidden;
+      text-overflow: ellipsis;
+    }
     /* Bewegungsreduktion respektieren: FLIP-Transition praktisch sofort. */
     @media (prefers-reduced-motion: reduce) {
       .book-row { transition: transform .01ms !important; }

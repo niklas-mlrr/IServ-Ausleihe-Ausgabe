@@ -281,12 +281,18 @@ function handleServerMessage(msg) {
     // erledigt → Druckmodus prüfen (auf dem aktualisierten Stand).
     maybeEnterDruckmodus();
   } else if (msg.type === 'print_progress') {
+    if (msg.stale) return;
     // Druck läuft in der Warteschlange/am Drucker — Druckmodus-Text live halten.
     if (views.print.classList.contains('show')) {
       const t = document.getElementById('print-text');
       if (t && msg.status !== 'done') t.textContent = studentPrintProgressStatusText(msg);
     }
   } else if (msg.type === 'print_result') {
+    if (msg.stale) {
+      const staleActions = document.getElementById('print-received-actions');
+      if (staleActions) staleActions.style.display = 'none';
+      return;
+    }
     handlePrintResult(msg);
   } else if (msg.type === 'slip_mode') {
     // Kommt serverseitig erst NACH der „Leihschein erhalten"-Bestätigung
@@ -614,6 +620,11 @@ function renderStudent(s, overridden) {
   const studentForm = (s.form || '').replace(/^Klasse\s+/i, '');
   document.getElementById('s-name').textContent = studentName;
   document.getElementById('s-form').textContent = studentForm;
+  const helperNameEl = document.getElementById('s-helper-name');
+  if (helperNameEl) {
+    helperNameEl.textContent = s.helper_name || '';
+    helperNameEl.hidden = !s.helper_name;
+  }
   // Die aktive Ansicht wird im Druckmodus ausgeblendet. Name und Klasse daher
   // zusätzlich dort pflegen, damit ein Betreuer bei einem Druckfehler direkt
   // erkennt, zu welchem Schüler der Vorgang gehört.

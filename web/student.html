@@ -135,8 +135,12 @@
        mehr steht (die stattdessen unauffällig wäre). */
     #book-alert-note.book-alert-dim { opacity:.6; font-size:.85rem; }
 
-    /* ---- Name (groß, ohne Box) + Klasse/Bezahlstatus rechtsbündig ---- */
-    .name-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin: 12px 2px 8px; width: 100%; }
+    /* ---- Identität vor der Statuszeile ---- */
+    .name-row {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 10px; margin: 12px 2px 8px; width: 100%;
+      padding: 8px 10px; border-radius: 8px; background: var(--surface);
+    }
     .s-name { font-size: 1.5rem; font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.2; }
     .s-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; flex-shrink: 0; }
     .s-form { font-size: 1rem; font-weight: 700; line-height: 1.2; }
@@ -146,6 +150,11 @@
     .pay-badge.unpaid { color: #e69500; }
     .pay-badge.override { color: #0a84ff; }
     .pay-badge.wait { color: #888; }
+    .student-helper-name {
+      flex-shrink: 0; max-width: 12rem; overflow: hidden; text-overflow: ellipsis;
+      white-space: nowrap; padding: 2px 8px; border-radius: 12px;
+      background: var(--surface-2); font-size: .85rem; font-weight: 600;
+    }
 
     /* ---- Bücher-Tabelle (einziger Scroll-Bereich) ---- */
     .book-table-wrap { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; width: 100%; }
@@ -257,14 +266,15 @@
         <button id="sound-btn" title="Scan-Ton"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg></button>
       </div>
     </div>
-    <div id="status"><span class="dot" id="dot"></span><span id="status-text">Verbinde…</span></div>
     <div class="name-row">
       <div class="s-name" id="s-name">–</div>
       <div class="s-meta">
         <div class="s-form" id="s-form"></div>
         <div class="s-pay" id="s-pay"></div>
       </div>
+      <div class="student-helper-name" id="s-helper-name" hidden></div>
     </div>
+    <div id="status"><span class="dot" id="dot"></span><span id="status-text">Verbinde…</span></div>
     <div class="book-table-wrap">
       <div id="book-rows"></div>
     </div>

@@ -118,6 +118,18 @@ class PrintJob:
     # `sessions.confirm_slip_received` (sendet `closed`); die Progress-/
     # Result-Nachrichten hier sind rein informativ für die Druckmodus-Anzeige.
     student_token: str | None = None
+    # Client-seitige Korrelation für Helfer-WS-Aufträge. Damit kann ein
+    # veraltetes Ergebnis nach einem neuen Scan nicht den neuen Druckstatus
+    # überschreiben.
+    request_id: str | None = None
+    # Snapshot der Queue-Generation beim Enqueue. Nach einem neuen Scan darf
+    # ein alter Job auch dann keinen Leihschein markieren, wenn er gerade
+    # zwischen `done` und der Nachbearbeitung steht.
+    generation: int | None = None
+    # Ein neuer erfolgreicher Scan macht den gestarteten Leihschein fachlich
+    # veraltet. Der physische Druck darf weiterlaufen, zählt aber logisch nicht
+    # mehr als aktueller Auftrag.
+    invalidated: bool = False
     status: JobStatus = "queued"
     result: dict | None = None  # Druck-Result (mit job_handle); Finalresult für HTTP
     job_handle: dict | None = None  # OS-Job-Handle für Status-Polling
@@ -209,6 +221,12 @@ class PrintQueue:
     async def enqueue(self, job: PrintJob) -> int:
         """Auftrag rollen-gerecht in die zentrale Warteschlange einreihen;
         0-basierte Position in `waiting` zurückgeben."""
+        if job.generation is None:
+            from .state import get_state
+
+            student = get_state().find_student(job.student_id)
+            if student is not None:
+                job.generation = student.slip_generation
         async with self._lock:
             idx = len(self.waiting)
             for i, j in enumerate(self.waiting):
@@ -225,6 +243,32 @@ class PrintQueue:
         """Scheduler wecken — aufrufen, wenn ein Drucker hinzugefügt wurde
         (wartende Aufträge können jetzt verteilt werden)."""
         self._wake.set()
+
+    def invalidate_student(self, student_id: int) -> bool:
+        """Mark non-final print jobs for a student as stale after a new scan.
+
+        Jobs are not cancelled because they may already have reached the OS.
+        They are removed only from the logical current-slip state; a later
+        print request creates a fresh current job.
+        """
+        jobs = [
+            *self.waiting,
+            *(job for slot in self.slots.values() for job in slot.jobs),
+        ]
+        changed = False
+        for job in jobs:
+            if job.student_id == student_id and job.status not in (
+                "done", "failed", "stalled", "peer_error"
+            ):
+                job.invalidated = True
+                changed = True
+        # A completed old job can still be shown briefly on the printer
+        # display. It is no longer the current slip after a new scan.
+        for printer_id, record in list(self._last_printed.items()):
+            if record[4] == student_id:
+                del self._last_printed[printer_id]
+                changed = True
+        return changed
 
     # ---- Worker --------------------------------------------------------
 
@@ -423,13 +467,14 @@ class PrintQueue:
                                 if other.status == "printing":
                                     other.status = "done"
                                     s.jobs.remove(other)
-                                    self._last_printed[printer_id] = (
-                                        other.name,
-                                        self._originator_info(get_state(), other),
-                                        other.id,
-                                        time.time(),
-                                        other.student_id,
-                                    )
+                                    if not other.invalidated:
+                                        self._last_printed[printer_id] = (
+                                            other.name,
+                                            self._originator_info(get_state(), other),
+                                            other.id,
+                                            time.time(),
+                                            other.student_id,
+                                        )
                                     other.done.set()
                                     finalized_preds.append(other)
                                     t = self._job_tasks.pop(other.id, None)
@@ -465,10 +510,11 @@ class PrintQueue:
             # das Helfer-/Host-Symbol zeigen kann.
             from .state import get_state
 
-            self._last_printed[printer_id] = (
-                job.name, self._originator_info(get_state(), job),
-                job.id, time.time(), job.student_id,
-            )
+            if not job.invalidated:
+                self._last_printed[printer_id] = (
+                    job.name, self._originator_info(get_state(), job),
+                    job.id, time.time(), job.student_id,
+                )
             job.done.set()
             finalized = job
         await self._notify_result(finalized)
@@ -484,10 +530,17 @@ class PrintQueue:
         Ende (`absent`) und darf deshalb den Leihschein-Marker setzen bzw. die
         Schüler-Session schließen.
         """
-        if not (job.result or {}).get("ok"):
+        from .state import get_state
+
+        student = get_state().find_student(job.student_id)
+        if (
+            job.invalidated
+            or not (job.result or {}).get("ok")
+            or student is None
+            or (job.generation is not None and student.slip_generation != job.generation)
+        ):
             return
         from .sessions import _mark_slip_printed
-        from .state import get_state
 
         await _mark_slip_printed(
             get_state(),
@@ -524,10 +577,12 @@ class PrintQueue:
         `waiting` (done/failed/pop) bzw. über die Status-Whitelist aus den Slots
         ausgeschlossen (stalled/peer_error bleiben zwar im Slot, zählen aber
         nicht als laufend)."""
-        ids: set[int] = {j.student_id for j in self.waiting}
+        ids: set[int] = {
+            j.student_id for j in self.waiting if not j.invalidated
+        }
         for s in self.slots.values():
             for j in s.jobs:
-                if j.status in ("dispatching", "spooled", "printing"):
+                if not j.invalidated and j.status in ("dispatching", "spooled", "printing"):
                     ids.add(j.student_id)
         return ids
 
@@ -541,9 +596,13 @@ class PrintQueue:
         Auftrag, `printing` gewinnt defensiv über `waiting`."""
         states: dict[int, str] = {}
         for j in self.waiting:
+            if j.invalidated:
+                continue
             states[j.student_id] = "waiting"
         for s in self.slots.values():
             for j in s.jobs:
+                if j.invalidated:
+                    continue
                 if j.status == "printing":
                     states[j.student_id] = "printing"
                 elif j.status in ("dispatching", "spooled"):
@@ -1103,6 +1162,8 @@ class PrintQueue:
             )
             snapshot: list[tuple[PrintJob, int, JobStatus, str | None, bool, str | None]] = []
             for j in self.waiting:
+                if j.invalidated:
+                    continue
                 job_positions = student_positions if j.role == "student" else positions
                 pname = self._printer_name(j.assigned_printer_id)
                 peer = self._is_peer_error(j, printers, in_slot=False)
@@ -1121,7 +1182,7 @@ class PrintQueue:
                     # pushen — sie haben ihr print_result bereits und bleiben
                     # nur zum Mitzählen im Slot (werden bei Reaktivierung
                     # geräumt).
-                    if j.status in ("stalled", "peer_error", "failed"):
+                    if j.invalidated or j.status in ("stalled", "peer_error", "failed"):
                         continue
                     job_positions = student_positions if j.role == "student" else positions
                     pname = self._printer_name(j.assigned_printer_id)
@@ -1213,6 +1274,8 @@ class PrintQueue:
         msg = {
             "type": "print_progress",
             "job_id": job.id,
+            "request_id": job.request_id,
+            "stale": job.invalidated,
             "status": status,
             "position": position,
             "name": job.name,
@@ -1249,6 +1312,8 @@ class PrintQueue:
         base = {
             "type": "print_result",
             "job_id": job.id,
+            "request_id": job.request_id,
+            "stale": job.invalidated,
             "ok": bool(res.get("ok")),
             "name": job.name,
             # Druckername (wenn zugewiesen) — damit der Auftraggeber im

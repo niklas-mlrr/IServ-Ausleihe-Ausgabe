@@ -8,6 +8,21 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-09 — Aktiver Helfer in Queue-Status + Druckstatus nach neuem Scan
+
+- **Host:** Aktive Schüler zeigen in der Statusbox die Reihenfolge Status →
+  Personensymbol/Helfername → Hinweis.
+- **Helferclient:** Aktive Schüler zeigen Helfername → X/Y bzw. Druckersymbol →
+  Hinweis. Der Helfername wird serverseitig aus der Zuordnung aufgelöst.
+- **Schülerclient:** Die Identitätsbox steht vor der Statusbox; ein vorhandener
+  Helfername wird ohne Personensymbol angezeigt.
+- **Druckstatus:** Ein neuer erfolgreicher Buchscan macht einen laufenden oder
+  bereits abgeschlossenen Leihschein logisch veraltet. Der alte physische
+  Druck läuft gegebenenfalls weiter, treibt aber weder `Leihschein ...` noch
+  `slip_printed` weiter. Erst ein neuer Druckauftrag aktiviert den Statuszyklus
+  erneut; alte Druckergebnisse können einen neuen Auftrag nicht überschreiben.
+- **Tests:** `uv run pytest -q` (395 Tests), Ruff und `node --check` grün.
+
 ## 2026-08-09 — Helfer-Queue: Aktionsabstände und Unterschriftenstatus
 
 - **UI:** In der Aktiv-Gruppe entfällt die leere Aktionsspalte ohne Druck- oder

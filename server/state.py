@@ -136,8 +136,17 @@ class QueueStudent:
     # (s. `sessions._mark_slip_printed`, `worker_ready`-Feld `slip_printer*`).
     slip_printer: str | None = None
     slip_printer_label: str | None = None
+    # Erhöht sich bei einem neuen Durchlauf bzw. nach einem neuen Scan. Ein
+    # noch ausstehender alter Druck darf danach keinen aktuellen Leihschein
+    # mehr markieren.
+    slip_generation: int = 0
 
-    def as_dict(self, *, slip_status: str | None = None) -> dict:
+    def as_dict(
+        self,
+        *,
+        slip_status: str | None = None,
+        assigned_helper_name: str | None = None,
+    ) -> dict:
         return {
             "student_id": self.student_id,
             "lastname": self.lastname,
@@ -146,6 +155,7 @@ class QueueStudent:
             "status": self.status,
             "auto_skipped": self.auto_skipped,
             "assigned_helper": self.assigned_helper,
+            "assigned_helper_name": assigned_helper_name,
             "books_total": self.books_total,
             "books_done": len(self.done_isbns),
             "loaned_at_load": self.loaned_at_load,
@@ -207,6 +217,7 @@ class QueueStudent:
         self.helper_scanned = False
         self.slip_printer = None
         self.slip_printer_label = None
+        self.slip_generation += 1
         self.print_mode = False
         self.slip_signing = False
 
@@ -764,7 +775,26 @@ class AppState:
         ctx = self.ctx_or_active(context_id)
         if ctx is None:
             return []
-        return [s.as_dict() for s in ctx.queue if s.status in ("pending", "absent")]
+        return [
+            self._queue_student_as_dict(s)
+            for s in ctx.queue
+            if s.status in ("pending", "absent")
+        ]
+
+    def _queue_student_as_dict(
+        self, student: QueueStudent, *, slip_status: str | None = None
+    ) -> dict:
+        """Serialize a queue student with the current helper display name.
+
+        Queue rows need the human-readable helper name, while the token remains
+        an internal routing value. Resolving it at snapshot time keeps the UI
+        correct when a helper reconnects or is removed.
+        """
+        helper = self.helper_sessions.get(student.assigned_helper or "")
+        return student.as_dict(
+            slip_status=slip_status,
+            assigned_helper_name=helper.name if helper is not None else None,
+        )
 
     def queue_as_list(
         self, context_id: str | None = None, *, slip_states: dict[int, str] | None = None
@@ -773,9 +803,9 @@ class AppState:
         if ctx is None:
             return []
         return [
-            s.as_dict(slip_status=slip_states.get(s.student_id))
+            self._queue_student_as_dict(s, slip_status=slip_states.get(s.student_id))
             if slip_states is not None
-            else s.as_dict()
+            else self._queue_student_as_dict(s)
             for s in ctx.queue
         ]
 
@@ -815,11 +845,11 @@ class AppState:
                     else sorted(c.allowed_printer_ids & pool_ids)
                 ),
                 "queue": [
-                    s.as_dict(slip_status=slip_states.get(s.student_id))
+                    self._queue_student_as_dict(s, slip_status=slip_states.get(s.student_id))
                     for s in c.queue if s.status in ("pending", "absent")
                 ],
                 "queue_all": [
-                    s.as_dict(slip_status=slip_states.get(s.student_id))
+                    self._queue_student_as_dict(s, slip_status=slip_states.get(s.student_id))
                     for s in c.queue
                 ],
             }
@@ -852,7 +882,7 @@ class AppState:
                 "id": c.id,
                 "form": c.form,
                 "queue": [
-                    s.as_dict(slip_status=slip_states.get(s.student_id))
+                    self._queue_student_as_dict(s, slip_status=slip_states.get(s.student_id))
                     for s in c.queue
                 ],
                 # Drucker-Allowlist dieser Klasse — `None` = alle Pool-Drucker

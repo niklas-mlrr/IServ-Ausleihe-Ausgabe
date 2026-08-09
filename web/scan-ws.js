@@ -46,6 +46,9 @@ function handleServerMessage(msg) {
     currentBooks = s.books || [];
     resetScannedState();
     scanInFlight = false;
+    printRequestId = null;
+    printThenNext = false;
+    printBtn.disabled = false;
     renderBooks(currentBooks);
     closeBookAlertModal();
     // Bücher sofort sichtbar; Scans+„Scanner bereit"-Status aber erst, sobald
@@ -123,6 +126,10 @@ function handleServerMessage(msg) {
       scannedIsbns.add(msg.isbn);
       scanOrder.set(msg.isbn, ++scanSeq);   // zuletzt gescanntes zuoberst in „erledigt"
       renderBooks(currentBooks, true);     // FLIP: Zeilen an neue Position fahren
+      // Ein neuer Scan macht einen bereits gestarteten Leihschein fachlich
+      // veraltet. Der alte Druck darf physisch fertig werden, aber die
+      // Anzeige kehrt sofort zum Buchfortschritt zurück.
+      clearStatus('print');
     }
     drainScanWaiters();
     // Jeder nicht-verbuchbare Scan (alles außer staged/booked) → Statuszeile
@@ -167,6 +174,8 @@ function handleServerMessage(msg) {
     if (Array.isArray(msg.books)) currentBooks = msg.books;
     if (studentActive) renderBooks(currentBooks);
   } else if (msg.type === 'print_progress') {
+    if (msg.request_id && printRequestId && msg.request_id !== printRequestId) return;
+    if (msg.stale) return;
     // Live-Status aus der internen Druckerwarteschlange (OS-getrieben):
     //   peer_error                  → „Es dauert ungewöhnlich lange … - <Label>"
     //                                (Auftrag am hängenden Drucker / kein
@@ -197,9 +206,17 @@ function handleServerMessage(msg) {
       setStatusText(text, null, 'print');
     }
   } else if (msg.type === 'print_result') {
+    if (msg.request_id && printRequestId && msg.request_id !== printRequestId) return;
     printBtn.disabled = false;
     const wasPrintThenNext = printThenNext;
     printThenNext = false;
+    printRequestId = null;
+    if (msg.stale) {
+      // Ergebnis des alten, durch einen Scan entwerteten Jobs: keine
+      // Drucker-/Fehlermeldung zurück in die Statuszeile schreiben.
+      clearStatus('print');
+      return;
+    }
     if (msg.stalled) {
       // Noch andauerndes Problem (Drucker hängt) → aktiv, persistiert.
       setStatusText(msg.msg || 'Druck dauert ungewöhnlich lange', null, 'print');
@@ -255,6 +272,9 @@ function handleServerMessage(msg) {
     resetScannedState();
     pendingScans = 0;
     scanInFlight = false;
+    printRequestId = null;
+    printThenNext = false;
+    printBtn.disabled = false;
     drainScanWaiters();
     closeBookAlertModal();
     currentStudent = null;
