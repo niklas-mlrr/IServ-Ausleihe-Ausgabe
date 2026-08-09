@@ -176,6 +176,36 @@ async def finish_student(body: StudentRef) -> dict:
     return {"ok": True}
 
 
+@host_router.post("/api/finish-signed")
+async def finish_signed_student(body: StudentRef) -> dict:
+    """Bestätigung des unterschriebenen Leihscheins für einen Modus-B-Schüler.
+
+    Wie der Helfer-Button darf dieser Pfad nur den explizit aktivierten
+    Unterschriftenmodus abschließen; der normale Host-Abschluss bleibt davon
+    unabhängig verfügbar.
+    """
+    if body.student_id is None:
+        raise HTTPException(400, "student_id fehlt")
+    student_id = body.student_id
+    state = get_state()
+    hub = get_hub()
+    found = state.find_student_with_ctx(student_id)
+    session = state.find_session_by_student(student_id)
+    if (
+        found is None
+        or not found[0].done_signed
+        or found[1].status != "active"
+        or not found[1].slip_signing
+        or session is None
+        or not session.loan_slip_mode
+    ):
+        raise HTTPException(409, "Schüler ist nicht im Unterschriften-Modus")
+    await end_student(state, hub, student_id, queue_status="done", session_state="completed")
+    if state.helper_sessions:
+        await hub.broadcast_queue_size(state)
+    return {"ok": True}
+
+
 @host_router.post("/api/clear-book-alert")
 async def clear_book_alert(body: StudentRef) -> dict:
     """Blockierendes Ausgemustert-Hinweis-Modal am Schüler-Client (Modus B)

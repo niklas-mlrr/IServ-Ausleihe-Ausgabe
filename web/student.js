@@ -356,8 +356,8 @@ function enterDruckmodus() {
       if (actions) actions.style.display = '';
       break;
     case 'helper':
-      if (text) text.textContent = 'Bitte melde dich bei einem Betreuer, um deinen Leihschein drucken zu lassen.';
-      if (actions) actions.style.display = 'none';
+      if (text) text.textContent = 'Drücke „Leihschein drucken", um deinen Leihschein zu drucken.';
+      if (actions) actions.style.display = '';
       break;
     default:  // 'barcode' — Platzhalter, kein Verhalten (folgt später)
       if (text) text.textContent = 'Druckmodus (Barcode) — folgt.';
@@ -397,6 +397,8 @@ function enterLeihscheinmodus(recipient) {
   const destination = recipient === 'teacher' ? 'beim Lehrer' : 'bei einem Betreuer';
   const text = document.getElementById('slip-text');
   if (text) text.textContent = `Bitte unterschreibe den Leihschein und gib ihn ${destination} ab.`;
+  const actions = document.getElementById('slip-actions');
+  if (actions) actions.style.display = '';
 }
 
 function notifyDruckmodus() {
@@ -601,6 +603,19 @@ if (printReceivedBtn) {
   });
 }
 
+// Der Schülerclient darf den bereits aktivierten Unterschriftenmodus selbst
+// bestätigen. Der Server prüft dabei erneut Klassenoption, Sessionzustand und
+// `slip_signing`; ein manipuliertes WS-Frame kann keinen beliebigen Schüler
+// abschließen.
+const slipSignedBtn = document.getElementById('slip-signed-btn');
+if (slipSignedBtn) {
+  slipSignedBtn.addEventListener('click', () => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    slipSignedBtn.disabled = true;
+    ws.send(JSON.stringify({ type: 'finish_signed' }));
+  });
+}
+
 // Zeigt den Download-Button nur, wenn tatsächlich Daten angekommen sind
 // (IServ nicht erreichbar/Fehler beim Abruf → Button bleibt verborgen, dafür
 // ein knapper Hinweistext statt eines Buttons, der beim Klick ohnehin nichts
@@ -683,6 +698,8 @@ function renderStudent(s, overridden) {
   ownSlipDataB64 = null;
   const receivedActions = document.getElementById('print-received-actions');
   if (receivedActions) receivedActions.style.display = 'none';
+  const slipActions = document.getElementById('slip-actions');
+  if (slipActions) slipActions.style.display = 'none';
   document.getElementById('book-rows').innerHTML =
     '<div class="book-empty">Bücher werden geladen…</div>';
   setStatusText('Wird geladen…');

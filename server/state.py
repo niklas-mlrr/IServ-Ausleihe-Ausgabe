@@ -113,10 +113,10 @@ class QueueStudent:
     helper_scanned: bool = False
     # Schülerclient (Modus B) hat alle vorgemerkten Bücher gescannt und ist in
     # den Druckmodus gewechselt (WS `print_mode`, s. routes/ws.py). Bei
-    # `slip_trigger == "helper"` druckt hier ausschließlich ein Helfer/Host
-    # stellvertretend — dieses Flag steuert, ob der Helfer-Client (scan.html)
-    # in der Klassenliste vor dem „Aufrufen"-Button einen Druckbutton zeigt
-    # (s. `real_contexts_summary`). Bleibt bei anderen `slip_trigger`-Werten
+    # `slip_trigger == "helper"` druckt hier ein Helfer/Host oder der
+    # Schülerclient stellvertretend — dieses Flag steuert, ob die Druckaktion
+    # für diesen Schüler in den Helfer-/Host-Ansichten angeboten wird (s.
+    # `real_contexts_summary`). Bleibt bei anderen `slip_trigger`-Werten
     # ungenutzt (dort läuft der Druck über den Schülerclient selbst).
     print_mode: bool = False
     # Leihschein wurde gedruckt UND die Klasse hat „Leihschein unterschreiben"

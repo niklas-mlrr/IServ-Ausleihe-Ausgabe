@@ -55,11 +55,27 @@ async def print_loan_slip(body: PrintLoanSlipRequest, sid: str = Depends(require
     if body.student_id is None:
         raise HTTPException(400, "student_id fehlt")
     student_id = body.student_id
+    student_client = bool(body.student_client)
     # Leerer Drucker-Pool → Druck verweigern (Auftrag würde sonst endlos in der
     # Warteschlange hängen, da der Scheduler nichts verteilt).
     state = get_state()
     if not state.settings.printers:
         raise HTTPException(400, "Kein Drucker konfiguriert")
+    session = None
+    if student_client:
+        found = state.find_student_with_ctx(student_id)
+        session = state.find_session_by_student(student_id)
+        if (
+            found is None
+            or found[0].slip_trigger != "helper"
+            or found[1].status != "active"
+            or not found[1].print_mode
+            or found[1].slip_printed
+            or session is None
+            or session.state != "paired"
+            or student_id in state.print_queue.in_flight_student_ids()
+        ):
+            raise HTTPException(409, "Leihschein bereits gesendet oder nicht bereit")
     # Vom Host im Druck-Dialog gewählte Drucker. `printers` als Schlüsser
     # vorhanden → ausschließlich diese nutzen (leer = blockieren); Schlüsser
     # fehlt (alt/Tests) → Fallback auf die Klassen-Allowlist.
@@ -88,11 +104,12 @@ async def print_loan_slip(body: PrintLoanSlipRequest, sid: str = Depends(require
         student.form if student else None,
     )
     job = PrintJob.create(
-        role="host",
+        role="student" if student_client else "host",
         student_id=student_id,
         pages=pages,
         name=name,
-        host_sid=sid,
+        host_sid=None if student_client else sid,
+        student_token=session.session_token if student_client and session else None,
         allowed_printers=allowed,
     )
     await state.print_queue.enqueue(job)

@@ -138,18 +138,12 @@ def test_scan_without_student_yields_error(client, ws_env):
 
 
 # ---------------------------------------------------------------------------
-# 2b) Der Schülerclient darf die Klassenregel nicht per print_request umgehen:
-#     Betreuerauslöser läuft über Helfer/Host, Barcode ist noch ohne Funktion.
+# 2b) Der Schülerclient respektiert die Klassenregel; beim Betreuerauslöser
+#     darf er den Auftrag inzwischen selbst als `student` auslösen.
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    ("trigger", "expected_message"),
-    [
-        ("helper", "Betreuer"),
-        ("barcode", "noch nicht verfügbar"),
-    ],
-)
+@pytest.mark.parametrize(("trigger", "expected_message"), [("barcode", "noch nicht verfügbar")])
 def test_student_print_request_respects_class_trigger(client, ws_env, trigger, expected_message):
     state, _ = ws_env
     ctx = state.open_context("10a")
@@ -180,7 +174,8 @@ def test_student_print_request_respects_class_trigger(client, ws_env, trigger, e
 
 
 def test_student_print_mode_releases_worker_but_keeps_session(client, ws_env):
-    """Der Druckmodus beendet nur die Playwright-Kartei, nicht die Druck-WS."""
+    """Der Druckmodus beendet nur die Playwright-Kartei, nicht die Druck-WS;
+    beim Betreuerauslöser wird ein eigener `student`-Druckauftrag eingereiht."""
     state, _ = ws_env
     ctx = state.open_context("10a")
     ctx.slip_trigger = "helper"
@@ -209,13 +204,50 @@ def test_student_print_mode_releases_worker_but_keeps_session(client, ws_env):
         # Ein Folge-Frame erzwingt die Verarbeitung des vorherigen Signals und
         # bestätigt zugleich, dass die Schüler-Session weiterlebt.
         ws.send_json({"type": "print_request"})
-        msg = _recv_until(ws, "print_result")
+        # `PrintQueue._notify_all` verwendet in dieser Test-Fixture bewusst
+        # keinen synchronisierten globalen Hub; der eigentliche Enqueue ist
+        # trotzdem vor dem nächsten Assert abgeschlossen.
 
-    assert msg["ok"] is False
-    assert "Betreuer" in msg["msg"]
+    assert state.print_queue.waiting
+    assert state.print_queue.waiting[0].role == "student"
+    assert state.print_queue.waiting[0].student_token == "student-token"
     assert 42 not in state.student_worker_sessions
     assert worker.closed is True
     assert session.state == "paired"
+
+
+def test_student_finishes_signed_loan_slip(client, ws_env):
+    """Der Unterschrift-Button am Schülerclient beendet nur den expliziten
+    Leihscheinmodus und entwertet danach die Modus-B-Session."""
+    state, _ = ws_env
+    ctx = state.open_context("10a")
+    ctx.done_signed = True
+    student = QueueStudent(
+        student_id=42,
+        lastname="Test",
+        firstname="Schüler",
+        form="10a",
+        status="active",
+        slip_signing=True,
+    )
+    ctx.queue.append(student)
+    session = StudentSessionB(
+        session_token="student-token",
+        pairing_code="4242",
+        student_id=42,
+        state="paired",
+        loan_slip_mode=True,
+        loan_slip_recipient="helper",
+    )
+    state.student_sessions[session.session_token] = session
+
+    with client.websocket_connect("/ws/student/student-token") as ws:
+        _recv_until(ws, "worker_ready")
+        ws.send_json({"type": "finish_signed"})
+        _recv_until(ws, "closed")
+
+    assert student.status == "done"
+    assert "student-token" not in state.student_sessions
 
 
 def test_student_slip_mode_survives_reconnect(client, ws_env):

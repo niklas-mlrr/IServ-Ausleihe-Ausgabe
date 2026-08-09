@@ -8,6 +8,19 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-09 — Aktionssymbole und Modus-B-Leihscheinaktionen
+
+- **Host:** Die Aktionen in „Aktuell in Ausgabe“ verwenden jetzt Haken-,
+  Drucker- und geometrisches Link-trennen-Symbol; die Beschriftungen bleiben
+  über Tooltip und `aria-label` erreichbar. Im Unterschriftenmodus erscheint
+  zusätzlich das Signatur-Symbol.
+- **Betreuerauslöser:** Ein Schülerclient kann den Druckbutton im Druckmodus
+  anzeigen und den Auftrag als `student` statt als Host-/Helferauftrag einreihen.
+  Der Host-Pfad für diese Aktion verwendet dieselbe Rollen-/Statuslogik.
+- **Unterschriftenmodus:** Der Schülerclient erhält wie der Helferclient einen
+  „Leihschein unterschrieben“-Button. Der Abschluss ist serverseitig auf die
+  aktivierte Klassenoption und den echten Unterschriftenmodus begrenzt.
+
 ## 2026-08-09 — Modus-B-QR-Steuerung verfeinert
 
 - Der Host nennt den Verbindungs-QR jetzt „QR für QR-Display anzeigen“.

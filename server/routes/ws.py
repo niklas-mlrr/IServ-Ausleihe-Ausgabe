@@ -1343,14 +1343,12 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
                 # nicht weiter belegen.
                 if release_student_worker(state, session.student_id):
                     await hub.broadcast_host(state.state_snapshot())
-                # Der Betreuerauslöser wird ausschließlich über das bestehende
-                # Helfer-/Host-Druckmenü bedient. Der Guard verhindert, dass ein
-                # Schülerclient die Klasseneinstellung durch ein manuelles WS-
-                # Frame umgeht.
+                # Auch beim Betreuerauslöser darf der Schülerclient den Auftrag
+                # selbst auslösen. Er wird wie ein Helfer-Betreuerauslöser als
+                # `student`-Job eingeordnet (kein Host-/Helfername), nicht als
+                # automatischer oder eigener Host-Druck.
                 student_trigger = slip_trigger_for(state, session.student_id)
-                if student_trigger == "helper":
-                    msg = "Bitte den Leihschein über den Betreuer drucken lassen"
-                elif student_trigger not in ("auto", "student"):
+                if student_trigger not in ("auto", "student", "helper"):
                     msg = "Dieser Druckmodus ist noch nicht verfügbar"
                 else:
                     msg = None
@@ -1405,6 +1403,40 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
                 )
                 await state.print_queue.enqueue(job)
                 await hub.broadcast_host(state.state_snapshot())
+
+            elif mtype == "finish_signed":
+                # Der Schülerclient darf den eigenen Leihschein nach der
+                # Unterschrift ebenfalls abschließen. Das ist derselbe Gate
+                # wie beim Helfer-Button, nur ohne fremde student_id.
+                found = (
+                    state.find_student_with_ctx(session.student_id)
+                    if session.student_id is not None else None
+                )
+                if (
+                    session.state != "paired"
+                    or session.student_id is None
+                    or not session.loan_slip_mode
+                    or found is None
+                    or not found[0].done_signed
+                    or found[1].status != "active"
+                    or not found[1].slip_signing
+                ):
+                    await hub.send_websocket(
+                        websocket,
+                        {"type": "finish_signed_result", "ok": False,
+                         "msg": "Nicht im Unterschriften-Modus"},
+                    )
+                    continue
+                await end_student(
+                    state,
+                    hub,
+                    session.student_id,
+                    queue_status="done",
+                    session_state="completed",
+                )
+                if state.helper_sessions:
+                    await hub.broadcast_queue_size(state)
+                break
 
             elif mtype == "slip_received":
                 # Schüler bestätigt „Leihschein erhalten" im Druckmodus (Modus

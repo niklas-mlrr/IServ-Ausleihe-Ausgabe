@@ -24,6 +24,12 @@ window.__host = window.__host || {};
   // Druckersymbol für die Leihschein-Buttons — dasselbe SVG wie im Helfer-Client
   // (scan.html #print-btn), nur hier statt dem Wort „Leihschein".
   const ICON_PRINTER = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>';
+  const ICON_ACTION_CHECK = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4.5 4.5L19 7"/></svg>';
+  // Getrenntes Kettensymbol aus geometrischen Formen, angelehnt an
+  // `Trennen.PNG`: zwei abgerundete Kettenglieder, diagonale Sperrlinie und
+  // kleine Strahlen für die unterbrochene Verbindung.
+  const ICON_DISCONNECT = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 7H7a5 5 0 0 0 0 10h2"/><path d="M15 7h2a5 5 0 0 1 0 10h-2"/><path d="m4 4 16 16"/><path d="m4 4 2 2M20 4l-2 2M4 20l2-2M20 20l-2-2"/></svg>';
+  const ICON_SIGN = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 3.5a2.1 2.1 0 0 1 3 3L8 16 4 17l1-4Z"/><line x1="12.5" y1="5.5" x2="15.5" y2="8.5"/><path d="M2 20.5c1.3-1.7 2.2-1.5 3-.3.7 1 .6 1.8 1.8 1.3 1.6-.6 1.8-2.2 3.5-1.7.9.3 1.1 1.1 2 1L20.5 17.2"/></svg>';
   // Schließen-X für den „Code verwerfen"-Button neben „Zuordnen" (Modus B).
   // Dasselbe X-Pfad-SVG wie beim Helfer-Entfernen-Button (s. renderHelpers).
   const ICON_CLOSE = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
@@ -498,6 +504,18 @@ window.__host = window.__host || {};
     await fetch('/api/finish', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ student_id: studentId }) });
   }
 
+  async function finishSignedStudent(studentId) {
+    const r = await fetch('/api/finish-signed', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ student_id: studentId }),
+    });
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      showMsg(d.detail || 'Unterschrift konnte nicht bestätigt werden');
+    }
+  }
+
   // Öffnet den Druck-Dialog und gibt die gewählte „second_page"-Option + die
   // ausgewählten Drucker-IDs zurück, oder null wenn Abbrechen gedrückt wurde.
   // Vorauswahl = erlaubte Drucker der Klasse des Schülers (`None` = alle
@@ -556,13 +574,14 @@ window.__host = window.__host || {};
   async function printLoanSlip(studentId, btn) {
     const choice = await openPrintDialog(studentId);
     if (choice === null) return;
+    const studentClient = btn?.dataset.studentClient === 'true';
     await busy(btn, async () => {
       // Der Druck geht durch die server-interne Druckerwarteschlange; der
       // Endpoint blockiert bis „gedruckt"/Fehler. Live-Popup (Position /
       // „wird gedruckt" / „gedruckt") kommt via WS (showPrintProgress/
       // showPrintResult) — nur hier am startenden Host. Die HTTP-Antwort ist
       // Rückversicherung für den Fall, dass der WS gerade nicht live ist.
-      const r = await fetch('/api/print-loan-slip', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ student_id: studentId, second_page: choice.second_page, printers: choice.printers }) });
+      const r = await fetch('/api/print-loan-slip', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ student_id: studentId, second_page: choice.second_page, printers: choice.printers, student_client: studentClient }) });
       if (!r.ok) {
         const d = await r.json().catch(() => ({}));
         showMsg(d.detail || 'Druck fehlgeschlagen', 'warn');
@@ -1389,6 +1408,22 @@ window.__host = window.__host || {};
     } else {
       body = '<div class="ns-grid">' + active.map(s => {
         const helper = helpers.find(h => h.student_id === s.student_id);
+        // Ein aktiver Schüler ohne Helfer-Zuordnung ist ein Schülerclient.
+        // Erst im Druckmodus ist der Betreuerauslöser bereit; der Auftrag muss
+        // dann als `student` laufen, damit Druckeranzeige und Status nicht als
+        // Host-Auftrag erscheinen.
+        const studentClientPrint = !helper
+          && s.print_mode
+          && ctx.slip_trigger === 'helper'
+          && !s.slip_printing
+          && !s.slip_printed;
+        const studentClient = !helper && s.print_mode;
+        const studentSignature = studentClient && ctx.done_signed === true && s.slip_signing;
+        const printAction = studentClient
+          ? (studentClientPrint
+            ? `<button class="secondary icon-only" data-action="print" data-student-id="${s.student_id}" data-student-client="true" title="Leihschein drucken" aria-label="Leihschein drucken">${ICON_PRINTER}</button>`
+            : '')
+          : `<button class="secondary icon-only" data-action="print" data-student-id="${s.student_id}" title="Leihschein drucken" aria-label="Leihschein drucken">${ICON_PRINTER}</button>`;
         const helperLbl = helper ? `<span class="ns-helper">${ICO_HELPER} ${escapeHtml(helper.name)}</span>` : '';
         const statusLbl = renderActiveStatusText(s);
         const alert = studentAlerts[s.student_id];
@@ -1410,9 +1445,10 @@ window.__host = window.__host || {};
           <div class="ns-meta"><span class="ns-class">${escapeHtml(s.form)}</span>${statusLbl}${helperLbl}</div>
           ${alertLbl}
           <div class="ns-actions">
-            <button class="success" data-action="finish" data-student-id="${s.student_id}">Abschließen</button>
-            <button class="secondary" data-action="print" data-student-id="${s.student_id}" title="Leihschein drucken" aria-label="Leihschein drucken">${ICON_PRINTER}</button>
-            <button class="secondary" data-action="disconnect" data-student-id="${s.student_id}">Trennen</button>
+            <button class="success icon-only" data-action="finish" data-student-id="${s.student_id}" title="Abschließen" aria-label="Abschließen">${ICON_ACTION_CHECK}</button>
+            ${printAction}
+            ${studentSignature ? `<button class="secondary icon-only" data-action="finish-signed" data-student-id="${s.student_id}" title="Leihschein unterschrieben" aria-label="Leihschein unterschrieben">${ICON_SIGN}</button>` : ''}
+            <button class="secondary icon-only" data-action="disconnect" data-student-id="${s.student_id}" title="Trennen" aria-label="Trennen">${ICON_DISCONNECT}</button>
           </div>
         </div>`;
       }).join('') + '</div>';
@@ -2948,6 +2984,7 @@ window.__host = window.__host || {};
       case 'pair-select': doPair(parseInt(document.getElementById(el.dataset.selId).value), el.dataset.code, el); break;
       case 'dismiss-code': dismissCode(el.dataset.code, el); break;
       case 'finish': finishStudent(parseInt(el.dataset.studentId)); break;
+      case 'finish-signed': finishSignedStudent(parseInt(el.dataset.studentId)); break;
       case 'print': printLoanSlip(parseInt(el.dataset.studentId), el); break;
       case 'next-student': nextStudent(el.dataset.token); break;
       case 'remove-helper': removeHelper(el.dataset.token); break;
@@ -3036,6 +3073,7 @@ window.__host.nextStudent = nextStudent;
 window.__host.skipStudent = skipStudent;
 window.__host.disconnectStudent = disconnectStudent;
 window.__host.finishStudent = finishStudent;
+window.__host.finishSignedStudent = finishSignedStudent;
 window.__host.openPrintDialog = openPrintDialog;
 window.__host.printLoanSlip = printLoanSlip;
 window.__host.openModusB = openModusB;
