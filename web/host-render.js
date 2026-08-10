@@ -574,14 +574,17 @@ window.__host = window.__host || {};
   async function printLoanSlip(studentId, btn) {
     const choice = await openPrintDialog(studentId);
     if (choice === null) return;
-    const studentClient = btn?.dataset.studentClient === 'true';
     await busy(btn, async () => {
       // Der Druck geht durch die server-interne Druckerwarteschlange; der
       // Endpoint blockiert bis „gedruckt"/Fehler. Live-Popup (Position /
       // „wird gedruckt" / „gedruckt") kommt via WS (showPrintProgress/
       // showPrintResult) — nur hier am startenden Host. Die HTTP-Antwort ist
       // Rückversicherung für den Fall, dass der WS gerade nicht live ist.
-      const r = await fetch('/api/print-loan-slip', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ student_id: studentId, second_page: choice.second_page, printers: choice.printers, student_client: studentClient }) });
+      // Ob der Auftrag als Betreuerauslöser-Schüler-Auftrag zählt (kein
+      // eigener host_sid, dafür student_token → Status/Originator wie beim
+      // Schüler selbst), entscheidet ausschließlich der Server aus dem
+      // State (s. `print_loan_slip`) — kein Client-Flag mehr nötig.
+      const r = await fetch('/api/print-loan-slip', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ student_id: studentId, second_page: choice.second_page, printers: choice.printers }) });
       if (!r.ok) {
         const d = await r.json().catch(() => ({}));
         showMsg(d.detail || 'Druck fehlgeschlagen', 'warn');
@@ -1409,9 +1412,9 @@ window.__host = window.__host || {};
       body = '<div class="ns-grid">' + active.map(s => {
         const helper = helpers.find(h => h.student_id === s.student_id);
         // Ein aktiver Schüler ohne Helfer-Zuordnung ist ein Schülerclient.
-        // Erst im Druckmodus ist der Betreuerauslöser bereit; der Auftrag muss
-        // dann als `student` laufen, damit Druckeranzeige und Status nicht als
-        // Host-Auftrag erscheinen.
+        // Erst im Druckmodus ist der Betreuerauslöser bereit; der Server
+        // behandelt den Auftrag dann automatisch wie einen Schüler-Auftrag
+        // (s. `print_loan_slip` in routes/slips.py — kein Client-Flag mehr).
         const studentClientPrint = !helper
           && s.print_mode
           && ctx.slip_trigger === 'helper'
@@ -1421,7 +1424,7 @@ window.__host = window.__host || {};
         const studentSignature = studentClient && ctx.done_signed === true && s.slip_signing;
         const printAction = studentClient
           ? (studentClientPrint
-            ? `<button class="secondary icon-only" data-action="print" data-student-id="${s.student_id}" data-student-client="true" title="Leihschein drucken" aria-label="Leihschein drucken">${ICON_PRINTER}</button>`
+            ? `<button class="secondary icon-only" data-action="print" data-student-id="${s.student_id}" title="Leihschein drucken" aria-label="Leihschein drucken">${ICON_PRINTER}</button>`
             : '')
           : `<button class="secondary icon-only" data-action="print" data-student-id="${s.student_id}" title="Leihschein drucken" aria-label="Leihschein drucken">${ICON_PRINTER}</button>`;
         const helperLbl = helper ? `<span class="ns-helper">${ICO_HELPER} ${escapeHtml(helper.name)}</span>` : '';

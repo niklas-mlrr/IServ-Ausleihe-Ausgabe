@@ -273,10 +273,6 @@ class NextStudentRequest(BaseModel):
 class PrintLoanSlipRequest(BaseModel):
     student_id: int | None = None
     second_page: bool = False
-    # Der Host kann einen aktiven Modus-B-Schüler beim Betreuerauslöser
-    # stellvertretend drucken. Der Auftrag wird dann als `student` eingeordnet
-    # und an den Schülerclient gespiegelt, nicht als Host-Auftrag.
-    student_client: bool = False
     # Vom Host im Druck-Dialog gewählte Drucker-IDs. `None` = Schlüsser fehlt
     # (alt/Tests) → Fallback auf Klassen-Allowlist; `[]` = explizit leer →
     # Druck verweigern („mindestens einen Drucker auswählen").

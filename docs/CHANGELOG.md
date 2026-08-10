@@ -8,19 +8,28 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
-## 2026-08-10 — Leihschein-Druckauslöser auf zwei Stellen begrenzt
+## 2026-08-10 — Betreuerauslöser-Druck: Server statt Client entscheidet, ob ein Auftrag als Schüler-Auftrag zählt
 
-- Der Druckerbutton in der Klassen-Tabelle (`renderCtxQueue`, sowohl bei
-  „aktiv" als auch bei „fertig") ist entfernt. Er sendete Druckaufträge ohne
-  `student_client`/`student_token`, wodurch ein per Betreuerauslöser vom Host
-  aus dieser Tabelle gedruckter Leihschein dem Schülerclient keinen
-  Druckerstatus lieferte (`print_progress`/`print_result` gingen nur an
-  `host_sid`).
-- Statt den Bug dort zu fixen, wurde der Auslöser entfernt: Drucken ist jetzt
-  nur noch über den Druckerbutton in „Aktuell in Ausgabe" (Host-Board,
-  `printLoanSlip` mit korrektem `data-student-client`) und über den
-  Warteschlangen-Druckbutton im Helferclient (`helper-print-btn` →
-  `print_for_student`, setzt `student_token` bereits korrekt) möglich.
+- `POST /api/print-loan-slip` (Host-Button „Aktuell in Ausgabe") verließ sich
+  bisher auf ein vom Client mitgesendetes `student_client`-Flag, um einen
+  Betreuerauslöser-Druck als Schüler-Auftrag (kein `host_sid`, dafür
+  `student_token`) anzulegen. In der Praxis kam trotz korrekt gerendertem
+  `data-student-client="true"`-Button ein Host-Auftrag an: Druckerwarteschlange
+  zeigte „Host" statt „Schüler" als Auftraggeber, und der Schülerclient bekam
+  keinen `print_progress`/`print_result`.
+- Fix: `student_client` wird jetzt ausschließlich serverseitig aus dem State
+  abgeleitet (`found[1].assigned_helper is None and found[0].slip_trigger ==
+  "helper"`) — das Client-Feld ist entfallen (`PrintLoanSlipRequest.student_client`
+  gestrichen, `host-render.js` sendet es nicht mehr). Damit kann der Host-Client
+  diese Zuordnung nicht mehr falsch treffen; der Auftrag wird für einen live
+  Schülerclient (Modus B, kein Helfer, `slip_trigger == "helper"`) ausnahmslos
+  wie ein Auftrag vom Schüler selbst behandelt — identisch zum
+  Betreuerauslöser-Pfad im Helferclient (`print_for_student` in
+  `routes/ws.py`, war bereits korrekt).
+- Neue Regressionstests: `tests/test_print_loan_slip_route.py`.
+- Vorheriger Zwischenschritt derselben Session (Druckerbutton in der
+  Klassen-Tabelle `renderCtxQueue` entfernt, nur noch „Aktuell in Ausgabe" +
+  Helferclient-Warteschlange als Auslöser) bleibt bestehen.
 
 ## 2026-08-10 — Host-Aktionssymbole „Aktuell in Ausgabe“ überarbeitet
 

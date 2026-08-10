@@ -55,27 +55,35 @@ async def print_loan_slip(body: PrintLoanSlipRequest, sid: str = Depends(require
     if body.student_id is None:
         raise HTTPException(400, "student_id fehlt")
     student_id = body.student_id
-    student_client = bool(body.student_client)
     # Leerer Drucker-Pool → Druck verweigern (Auftrag würde sonst endlos in der
     # Warteschlange hängen, da der Scheduler nichts verteilt).
     state = get_state()
     if not state.settings.printers:
         raise HTTPException(400, "Kein Drucker konfiguriert")
-    session = None
-    if student_client:
-        found = state.find_student_with_ctx(student_id)
-        session = state.find_session_by_student(student_id)
-        if (
-            found is None
-            or found[0].slip_trigger != "helper"
-            or found[1].status != "active"
-            or not found[1].print_mode
-            or found[1].slip_printed
-            or session is None
-            or session.state != "paired"
-            or student_id in state.print_queue.in_flight_student_ids()
-        ):
-            raise HTTPException(409, "Leihschein bereits gesendet oder nicht bereit")
+    # Betreuerauslöser: ist der Ziel-Schüler ein live Schülerclient (Modus B,
+    # kein Helfer zugewiesen) einer Klasse mit slip_trigger "helper", wird der
+    # Auftrag IMMER wie ein Schüler-Auftrag behandelt — serverseitig aus dem
+    # State abgeleitet, nicht aus einem Client-Flag übernommen (der Host-Client
+    # sendet hierfür kein eigenes Feld mehr; so kann ein clientseitiger Fehler
+    # den Auftrag nie fälschlich als Host-Auftrag ohne `student_token`
+    # anlegen). Sonst identisches Verhalten zum Betreuerauslöser-Pfad im
+    # Helferclient (`_handle_print_for_student` in routes/ws.py).
+    found = state.find_student_with_ctx(student_id)
+    session = state.find_session_by_student(student_id)
+    student_client = bool(
+        found is not None
+        and found[1].assigned_helper is None
+        and found[0].slip_trigger == "helper"
+    )
+    if student_client and (
+        found[1].status != "active"
+        or not found[1].print_mode
+        or found[1].slip_printed
+        or session is None
+        or session.state != "paired"
+        or student_id in state.print_queue.in_flight_student_ids()
+    ):
+        raise HTTPException(409, "Leihschein bereits gesendet oder nicht bereit")
     # Vom Host im Druck-Dialog gewählte Drucker. `printers` als Schlüsser
     # vorhanden → ausschließlich diese nutzen (leer = blockieren); Schlüsser
     # fehlt (alt/Tests) → Fallback auf die Klassen-Allowlist.
