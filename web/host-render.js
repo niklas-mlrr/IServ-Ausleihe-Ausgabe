@@ -800,9 +800,14 @@ window.__host = window.__host || {};
       pop.remove();
     });
     document.body.appendChild(pop);
+    // Immer oberhalb der „+"-Box öffnen, damit das Popover nicht aus dem
+    // Fenster ragt; Breite/Höhe erst nach dem Anhängen bekannt, daher hier
+    // messen statt fest zu verdrahten. Horizontal an den rechten Rand geklemmt.
     const rect = plusBox.getBoundingClientRect();
-    pop.style.top = `${rect.bottom + 4}px`;
-    pop.style.left = `${rect.left}px`;
+    const popRect = pop.getBoundingClientRect();
+    const margin = 4;
+    pop.style.top = `${Math.max(margin, rect.top - popRect.height - margin)}px`;
+    pop.style.left = `${Math.max(margin, Math.min(rect.left, window.innerWidth - popRect.width - margin))}px`;
     const close = () => pop.remove();
     setTimeout(() => {  // nächster Tick, damit der öffnende Klick nicht schließt
       document.addEventListener('click', close, { once: true });
