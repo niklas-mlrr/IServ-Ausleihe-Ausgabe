@@ -343,8 +343,6 @@ function enterDruckmodus() {
   const text = document.getElementById('print-text');
   const actions = document.getElementById('print-actions');
   if (title) title.textContent = 'Leihschein drucken';
-  const status = document.getElementById('print-status');
-  if (status) status.classList.remove('is-complete');
   switch (slipTrigger) {
     case 'auto':
       if (text) text.textContent = 'Leihschein wird gedruckt…';
@@ -378,8 +376,6 @@ function enterDruckmodusAwaitingReceipt(printer, printerLabel) {
   const actions = document.getElementById('print-actions');
   const receivedActions = document.getElementById('print-received-actions');
   if (title) title.textContent = 'Leihschein drucken';
-  const status = document.getElementById('print-status');
-  if (status) status.classList.add('is-complete');
   if (actions) actions.style.display = 'none';
   // Dieselbe „Leihschein von X gedruckt."-Meldung wie direkt nach dem Druck
   // (handlePrintResult) — überlebt dank `slip_printer(_label)` im
@@ -397,8 +393,6 @@ function enterLeihscheinmodus(recipient) {
   const destination = recipient === 'teacher' ? 'beim Lehrer' : 'bei einem Betreuer';
   const text = document.getElementById('slip-text');
   if (text) text.textContent = `Bitte unterschreibe den Leihschein und gib ihn ${destination} ab.`;
-  const actions = document.getElementById('slip-actions');
-  if (actions) actions.style.display = '';
 }
 
 function notifyDruckmodus() {
@@ -462,15 +456,11 @@ function handlePrintResult(msg) {
     // Schülerleihscheinmodus) löst erst der Server nach der Bestätigung
     // aus (s. printReceivedBtn).
     if (text) text.textContent = studentPrintResultStatusText(msg);
-    const status = document.getElementById('print-status');
-    if (status) status.classList.add('is-complete');
     const receivedActions = document.getElementById('print-received-actions');
     if (receivedActions) receivedActions.style.display = '';
   } else {
     // Druck fehlgeschlagen → kein weiterer Selbstversuch. Der Button bleibt
     // verborgen; der Schüler soll sich an einen Betreuer wenden.
-    const status = document.getElementById('print-status');
-    if (status) status.classList.remove('is-complete');
     if (text) text.textContent = studentPrintResultStatusText(msg) + ' — bitte melde dich bei einem Betreuer.';
   }
 }
@@ -603,19 +593,6 @@ if (printReceivedBtn) {
   });
 }
 
-// Der Schülerclient darf den bereits aktivierten Unterschriftenmodus selbst
-// bestätigen. Der Server prüft dabei erneut Klassenoption, Sessionzustand und
-// `slip_signing`; ein manipuliertes WS-Frame kann keinen beliebigen Schüler
-// abschließen.
-const slipSignedBtn = document.getElementById('slip-signed-btn');
-if (slipSignedBtn) {
-  slipSignedBtn.addEventListener('click', () => {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    slipSignedBtn.disabled = true;
-    ws.send(JSON.stringify({ type: 'finish_signed' }));
-  });
-}
-
 // Zeigt den Download-Button nur, wenn tatsächlich Daten angekommen sind
 // (IServ nicht erreichbar/Fehler beim Abruf → Button bleibt verborgen, dafür
 // ein knapper Hinweistext statt eines Buttons, der beim Klick ohnehin nichts
@@ -698,8 +675,6 @@ function renderStudent(s, overridden) {
   ownSlipDataB64 = null;
   const receivedActions = document.getElementById('print-received-actions');
   if (receivedActions) receivedActions.style.display = 'none';
-  const slipActions = document.getElementById('slip-actions');
-  if (slipActions) slipActions.style.display = 'none';
   document.getElementById('book-rows').innerHTML =
     '<div class="book-empty">Bücher werden geladen…</div>';
   setStatusText('Wird geladen…');
@@ -825,6 +800,7 @@ function onScanSuccess(value) {
   scanCooldownTimer = setTimeout(() => {
     cooldown = false; lastValue = ''; scanCooldownTimer = null;
   }, 2000);
+  setStatusText(`${value} wird geprüft`);
   ws.send(JSON.stringify({ type: 'scan', value }));
   if (navigator.vibrate) navigator.vibrate(80);
   readerEl.classList.add('scan-success');
