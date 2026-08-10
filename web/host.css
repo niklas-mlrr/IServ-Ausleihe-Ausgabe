@@ -122,10 +122,14 @@
     button.ghost .ghost-ico { opacity: .8; }
     /* minimalistische Inline-Icons (Lucide-Stil) — skalieren mit der Schriftgröße */
     .ico { width: 1em; height: 1em; vertical-align: -0.125em; flex: none; }
+    /* Größere, detailreichere Symbole (Abschließen-Flagge, Trennen-Kette) —
+       füllen den Button stärker aus als die schlichten 1em-Linien-Icons. */
+    .ico-lg { width: 1.55em; height: 1.55em; }
     button.icon-only {
       width: 38px; min-width: 38px; height: 38px; padding: 8px;
       display: inline-flex; align-items: center; justify-content: center;
     }
+    button.icon-only:has(.ico-lg) { padding: 6px; }
     .mb-control-spacer { flex: 1; }
     /* härteste Aktion (alle trennen) rechts absetzen — kein Fehlklick neben Reset */
     button.ghost.apart { margin-left: auto; }
