@@ -719,6 +719,37 @@ def slip_signature_options_for(state: AppState, student_id: int) -> tuple[bool, 
     return ctx.done_signed, ctx.done_collected if ctx.done_signed else False
 
 
+async def _missing_stock_subjects_for(state: AppState, student_id: int) -> list[str]:
+    """Fächer der Buchreihen, die für diesen Schüler vorgemerkt, aber noch
+    NICHT ausgeliehen sind UND als „Bestand leer" markiert sind — für den
+    Fehlt-Hinweis auf Seite 1 des Leihscheins (s. loan_slip.overlay_missing_stock_note).
+    Reihenfolge wie in `info["books"]`, Dubletten entfernt. Rein lesend gegen
+    IServ; Fehler liefern eine leere Liste (Druck darf nie daran scheitern)."""
+    caches = getattr(state, "caches", None)
+    if caches is None or not caches.empty_isbns or state.iserv is None:
+        return []
+    try:
+        info = await state.iserv.get_student_info(student_id, state.selected_schoolyear)
+    except Exception:  # noqa: BLE001 — Hinweis ist Kosmetik, Druck nie blockieren
+        log.debug(
+            "Bestand-leer-Fächer für Leihschein: Schülerinfo fehlgeschlagen (student_id=%s)",
+            student_id,
+            exc_info=True,
+        )
+        return []
+    subjects: list[str] = []
+    seen: set[str] = set()
+    for b in info.get("books", []):
+        isbn = b.get("isbn")
+        if not isbn or isbn not in state.caches.empty_isbns or b.get("status") == "ausgeliehen":
+            continue
+        subject = (b.get("subject") or "").strip()
+        if subject and subject not in seen:
+            seen.add(subject)
+            subjects.append(subject)
+    return subjects
+
+
 async def print_loan_slip_for(
     state: AppState,
     student_id: int,
@@ -775,6 +806,15 @@ async def print_loan_slip_for(
                 "ermittelbar — Leihschein wird unverändert gedruckt",
                 student_id,
             )
+
+    # „Bestand leer": Fächer vorgemerkter, noch nicht ausgeliehener Reihen mit
+    # leerem Bestand — Hinweiszeile auf Seite 1 (Schul-Kopie), s.
+    # loan_slip.overlay_missing_stock_note. Rein lokale PDF-Bearbeitung.
+    missing_subjects = await _missing_stock_subjects_for(state, student_id)
+    if missing_subjects:
+        from .loan_slip import overlay_missing_stock_note
+
+        pdf = await asyncio.to_thread(overlay_missing_stock_note, pdf, missing_subjects)
 
     # Entwickler-Toggle „PDF lokal speichern": nicht drucken, sondern das PDF in
     # den Browser des Host-Rechners herunterladen (Download-Prompt) — die

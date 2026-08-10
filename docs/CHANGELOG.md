@@ -8,6 +8,21 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-10 — „Bestand leer": roter Strich ohne Kasten + Fehlt-Hinweis auf dem Leihschein
+
+- **Helfer-Client:** das rote „−"-Icon für Bestand-leer-Zeilen zeigt jetzt nur
+  den roten Strich, ohne umgebenden Kasten/Hintergrund (`web/scan.html`,
+  `.empty-stock-badge`).
+- **Leihschein (Seite 1, Schul-Kopie):** hat ein Schüler eine vorgemerkte,
+  noch nicht ausgeliehene Reihe, die als „Bestand leer" markiert ist, wird
+  mit etwas Abstand unter der Klassen-Zeile eine Hinweiszeile mit den
+  betroffenen Fächern (kommagetrennt) + „fehlt"/„fehlen" eingefügt
+  (`server/loan_slip.py::overlay_missing_stock_note`, aufgerufen aus
+  `server/sessions.py::print_loan_slip_for` über die neue Hilfsfunktion
+  `_missing_stock_subjects_for`). Rein lokale PDF-Bearbeitung wie die
+  bestehende Klassen-Korrektur, betrifft nur Seite 1 (Seite 2/
+  Schüler-Leihschein bleibt unberührt).
+
 ## 2026-08-10 — Dritter Buchreihen-Status „Bestand leer"
 
 - Neben „da"/„ausgeblendet" gibt es jetzt einen dritten Status für Buchreihen:

@@ -129,6 +129,65 @@ def override_class_on_slip(pdf_bytes: bytes, form: str) -> bytes:
         return pdf_bytes
 
 
+def overlay_missing_stock_note(pdf_bytes: bytes, subjects: list[str]) -> bytes:
+    """Hinweiszeile auf Seite 1 (Schul-Kopie) einfügen: die Fächer der Reihen,
+    die vorgemerkt, aber noch nicht ausgeliehen sind UND als „Bestand leer"
+    markiert sind, kommagetrennt + „fehlt"/„fehlen" (Singular bei genau einem
+    Fach). Sitzt mit etwas Abstand UNTER der „Klasse <code>"-Wertzeile (selber
+    x-Ursprung, damit sie optisch zur Klassen-Zeile gehört), auf derselben
+    Seite wie `override_class_on_slip` sucht (dort aber alle Seiten — hier
+    NUR Seite 1, da die Schul-Kopie gemeint ist, nicht der Schüler-Leihschein
+    auf Seite 2).
+
+    Rein lokale PDF-Bearbeitung, kein IServ-Write. Bei Fehlern oder wenn keine
+    Klassen-Wertzeile gefunden wird: unveränderte Original-Bytes zurück — ein
+    Druck darf nie an diesem Hinweis scheitern."""
+    if not subjects:
+        return pdf_bytes
+    note = ", ".join(subjects) + (" fehlt" if len(subjects) == 1 else " fehlen")
+    try:
+        import fitz  # PyMuPDF — lazy, siehe Modul-Docstring
+
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        if doc.page_count < 1:
+            return pdf_bytes
+        page = doc[0]  # Seite 1 = Schul-Kopie
+        anchor = None
+        for block in page.get_text("dict")["blocks"]:
+            for line in block.get("lines", []):
+                spans = line["spans"]
+                if len(spans) != 1:
+                    continue
+                span = spans[0]
+                text = span["text"]
+                if "Bold" not in span["font"] or "Jahrgang" in text:
+                    continue
+                if text.startswith(_PREFIX) or _LEFT_SCHOOL.search(text):
+                    anchor = span
+                    break
+            if anchor:
+                break
+        if anchor is None:
+            log.warning("Bestand-leer-Hinweis: keine Klassen-Wertzeile gefunden - unveraendert")
+            return pdf_bytes
+        x0, baseline = anchor["origin"]
+        size = anchor["size"] * 0.85
+        gap = anchor["size"] * 1.5  # „mit etwas Abstand" unter der Klassen-Zeile
+        page.insert_text(
+            (x0, baseline + gap),
+            note,
+            fontname="helv",
+            fontsize=size,
+            color=0,
+        )
+        out = doc.tobytes()
+        log.info("Bestand-leer-Hinweis auf Leihschein gesetzt: %r", note)
+        return out
+    except Exception:  # noqa: BLE001 — Druck darf hieran nie scheitern
+        log.exception("Bestand-leer-Hinweis konnte nicht gesetzt werden — Original wird gedruckt")
+        return pdf_bytes
+
+
 def select_pages(pdf_bytes: bytes, pages: str | None) -> bytes:
     """PDF auf einen 1-basierten, inklusiven Seitenbereich beschränken.
 

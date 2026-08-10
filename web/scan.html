@@ -341,14 +341,14 @@
     /* Transparenter Hintergrund, Farbe nur dezent (faint tint + Rand) — in beiden Themes lesbar. */
     .row-vorgemerkt  { background: rgba(230,126,34,.14); border-color: rgba(230,126,34,.55); }
     .row-ausgeliehen { background: rgba(46,125,50,.16);  border-color: rgba(46,125,50,.55); }
-    /* „Bestand leer": rotes Kästchen mit „−" statt des normalen Status-Icons,
-       Zeile bleibt sonst wie eine normale vorgemerkte Zeile (weiterhin
-       buchbar, s. server/sessions.py::apply_empty_stock_flag). */
+    /* „Bestand leer": roter „−" statt des normalen Status-Icons (kein Kasten/
+       Hintergrund um das Zeichen), Zeile bleibt sonst wie eine normale
+       vorgemerkte Zeile (weiterhin buchbar, s.
+       server/sessions.py::apply_empty_stock_flag). */
     .book-row.row-bestand-leer { border-color: #c0392b; }
     .empty-stock-badge {
       display: inline-flex; align-items: center; justify-content: center;
-      width: 1.3em; height: 1.3em; border-radius: 4px; margin: 0 auto;
-      background: #c0392b; color: #fff; font-weight: 900; line-height: 1; font-size: 1.1em;
+      color: #c0392b; font-weight: 900; line-height: 1; font-size: 1.6em;
     }
     .book-empty { opacity: .4; padding: 14px 4px; font-size: .9rem; }
     /* Warteschlangen-Anzeige (kein Schüler zugewiesen): gleiche Zeilenform

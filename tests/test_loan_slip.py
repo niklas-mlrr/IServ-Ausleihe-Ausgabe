@@ -4,7 +4,7 @@ import asyncio
 
 import fitz  # PyMuPDF
 
-from server.loan_slip import override_class_on_slip
+from server.loan_slip import overlay_missing_stock_note, override_class_on_slip
 
 
 def _make_slip(class_code: str = "12Slw") -> bytes:
@@ -90,6 +90,52 @@ def test_override_no_match_returns_original():
     assert override_class_on_slip(pdf, "11b") == pdf
 
 
+def test_overlay_missing_stock_note_lists_subjects_below_class():
+    out = overlay_missing_stock_note(_make_slip("12Slw"), ["Mathematik", "Biologie"])
+    text = fitz.open(stream=out, filetype="pdf")[0].get_text().replace("\n", " ")
+    assert "Klasse 12Slw" in text
+    assert "Mathematik, Biologie fehlen" in text
+
+
+def test_overlay_missing_stock_note_singular_for_one_subject():
+    out = overlay_missing_stock_note(_make_slip("12Slw"), ["Mathematik"])
+    text = fitz.open(stream=out, filetype="pdf")[0].get_text().replace("\n", " ")
+    assert "Mathematik fehlt" in text
+    assert "fehlen" not in text
+
+
+def test_overlay_missing_stock_note_below_left_school_placeholder():
+    out = overlay_missing_stock_note(_make_left_school_slip(), ["Mathematik"])
+    text = fitz.open(stream=out, filetype="pdf")[0].get_text().replace("\n", " ")
+    assert "Mathematik fehlt" in text
+
+
+def test_overlay_missing_stock_note_empty_list_is_noop():
+    original = _make_slip("12Slw")
+    assert overlay_missing_stock_note(original, []) == original
+
+
+def test_overlay_missing_stock_note_only_touches_first_page():
+    doc = fitz.open()
+    p1 = doc.new_page()
+    p1.insert_text((72, 45.7), "Jahrgang / Klasse", fontname="helv", fontsize=8)
+    p1.insert_text((72, 56), "Klasse 12Slw", fontname="hebo", fontsize=12)
+    p2 = doc.new_page()
+    p2.insert_text((72, 45.7), "Jahrgang / Klasse", fontname="helv", fontsize=8)
+    p2.insert_text((72, 56), "Klasse 12Slw", fontname="hebo", fontsize=12)
+    out = overlay_missing_stock_note(doc.tobytes(), ["Mathematik"])
+    out_doc = fitz.open(stream=out, filetype="pdf")
+    assert "Mathematik" in out_doc[0].get_text()
+    assert "Mathematik" not in out_doc[1].get_text()  # Seite 2 unberührt
+
+
+def test_overlay_missing_stock_note_no_match_returns_original():
+    doc = fitz.open()
+    doc.new_page().insert_text((72, 56), "Kein Klassenfeld hier", fontname="helv", fontsize=12)
+    pdf = doc.tobytes()
+    assert overlay_missing_stock_note(pdf, ["Mathematik"]) == pdf
+
+
 def _two_page_pdf() -> bytes:
     doc = fitz.open()
     doc.new_page().insert_text((72, 100), "Seite 1", fontname="helv", fontsize=12)
@@ -166,3 +212,72 @@ def test_print_loan_slip_applies_class_override(tmp_path, monkeypatch):
 
     words = _words(Path(res["path"]).read_bytes())
     assert "11b" in words  # echte Klasse des Schülers, nicht der Default „12Slw"
+
+
+def test_print_loan_slip_adds_missing_stock_note(tmp_path, monkeypatch):
+    """print_loan_slip_for setzt den Bestand-leer-Hinweis, wenn eine vorgemerkte,
+    noch nicht ausgeliehene Reihe als Bestand leer markiert ist."""
+    from server import sessions
+    from server.config import Config
+    from server.state import IservCaches
+
+    class FakeIServ:
+        async def get_loan_slip_pdf(self, student_id, variant="student"):
+            return _make_slip("12Slw")
+
+        async def get_student_info(self, student_id, schoolyear):
+            return {
+                "books": [
+                    {"isbn": "EMPTY-A", "subject": "Mathematik", "status": "vorgemerkt"},
+                    {"isbn": "EMPTY-B", "subject": "Biologie", "status": "ausgeliehen"},
+                    {"isbn": "NORMAL", "subject": "Deutsch", "status": "vorgemerkt"},
+                ]
+            }
+
+    class FakeQS:
+        student_id = 2159
+        form = "11b"
+        slip_printed = False
+
+    class FakeSettings:
+        printer_name_override = None
+        save_pdf_locally = False
+        fix_class_on_slip = False
+
+    class FakeState:
+        iserv = FakeIServ()
+        settings = FakeSettings()
+        queue = [FakeQS()]
+        active_form = "99z"
+        caches = IservCaches(empty_isbns={"EMPTY-A", "EMPTY-B"})
+        selected_schoolyear = "2025/2026"
+
+        def find_student(self, student_id):
+            for qs in self.queue:
+                if qs.student_id == student_id:
+                    return qs
+            return None
+
+        def find_session_by_student(self, student_id):
+            return None
+
+    cfg = Config(
+        iserv_domain="example.org",
+        iserv_username="u",
+        iserv_password="p",
+        host_password="secret",
+        print_backend="file",
+        print_output_dir=tmp_path,
+    )
+    monkeypatch.setattr(sessions, "get_config", lambda: cfg)
+    res = asyncio.run(sessions.print_loan_slip_for(FakeState(), 2159))
+
+    from pathlib import Path
+
+    words = _words(Path(res["path"]).read_bytes())
+    text = " ".join(words)
+    # EMPTY-A (noch offen) erscheint, EMPTY-B (bereits ausgeliehen) und
+    # NORMAL (nicht Bestand leer) nicht.
+    assert "Mathematik" in text and "fehlt" in text
+    assert "Biologie" not in text
+    assert "Deutsch" not in text
