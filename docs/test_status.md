@@ -5,8 +5,8 @@
 > Risiko hier unter „Offen / zu testen" eintragen; nach erfolgreichem Test in
 > „Verifiziert" verschieben (mit Datum + Skript/Befund). Bezug: `docs/PLAN.md`.
 >
-> Stand: 2026-08-09 (Modus-B-QR-Display-Steuerung mit Pause/Fortsetzen,
-> Drei-Scan-Freigabe und lesbarerem Pausenhinweis, 428 Tests grün).
+> Stand: 2026-08-10 (Betreuerauslöser-Druck ausschließlich serverseitig als
+> Schüler-Auftrag erkannt, statt aus einem Client-Flag — 432 Tests grün).
 > Alle bisherigen Tests sind **read-only** gegen IServ
 > (kein Submit, keine Buchung — PLAN §6).
 >
@@ -88,6 +88,7 @@
 | V59 | **Modus-B-QR-Display-Steuerung:** Einheitliche X-Trennbuttons, Pause-/Play-Symbole nur bei verbundenem autorisiertem Display, serverseitige Pause-Sperre und genau drei temporäre Scan-Freigaben; nach dem dritten Join automatische Pause. Pausenhinweis auf dem QR-Display für ein 11"-iPad responsiv vergrößert und durch zusätzliche Zeilenumbrüche aufgelockert. | tests/test_api_guards.py + uv run pytest + uvx ruff check server/ automation/ tests/ + node --check web/*.js | 2026-08-09 | 428 Tests grün, Ruff, JavaScript-Syntaxprüfung und git diff --check grün; echter QR-Display-/iPad-Livecheck weiterhin offen. |
 | V60 | **Aktionssymbole und Modus-B-Leihscheinaktionen:** „Aktuell in Ausgabe“ verwendet Haken-, Drucker-, Trennen- und Signatur-SVGs mit Tooltip; Schülerclients können beim Betreuerauslöser einen `student`-Druckauftrag verarbeiten; der Unterschriftenmodus bietet die Abschlussaktion auch am Schülerclient und im Host. | `tests/test_ws_scanner.py` (Betreuerauslöser als Schülerauftrag + Schülerabschluss im Unterschriftenmodus) + `uv run pytest -q` + `uvx ruff check server/ automation/ tests/` + `node --check web/*.js` | 2026-08-09 | **428 Tests grün**, Ruff, JavaScript-Syntaxprüfung und `git diff --check` grün; echter Browser-/Touchscreen-/Drucker-Livecheck weiterhin offen. |
 | V61 | **Betreuerauslöser-Hinweis im Schülerclient:** Der Schülerclient zeigt beim Betreuerauslöser den Hinweis, sich zum Drucken an einen Betreuer zu wenden, und blendet den eigenen Druckbutton aus; der Host-Druckbutton bleibt verfügbar. | `node --check web/student.js` + `git diff --check` | 2026-08-09 | JavaScript-Syntax und Diff-Prüfung grün; echter Browser-/Touchscreen-Livecheck weiterhin offen. |
+| V62 | **Betreuerauslöser-Druck ausschließlich serverseitig als Schüler-Auftrag erkannt:** `POST /api/print-loan-slip` leitet „ist dies ein Betreuerauslöser-Druck für einen live Schülerclient" nicht mehr aus einem Client-Flag ab, sondern aus dem State (`assigned_helper is None and slip_trigger == "helper"`); der redundante dritte Druckerbutton in der Klassen-Tabelle ist entfernt — Drucken nur noch über „Aktuell in Ausgabe" (Host) und die Warteschlange im Helferclient. | `tests/test_print_loan_slip_route.py` (4 Fälle: Betreuerauslöser→Schüler-Auftrag, Helfer-zugewiesen→Host-Auftrag, Auto-Trigger→Host-Auftrag, bereits gedruckt→409) + `uv run pytest` (432 Tests) + `uvx ruff check server/ automation/ tests/` | 2026-08-10 | **432 Tests grün**, Ruff grün; per direktem Endpoint-Repro-Skript verifiziert, dass Job-Felder (`role`/`host_sid`/`student_token`) korrekt gesetzt werden; echter Browser-/Drucker-Livecheck weiterhin offen. |
 
 ## Offen / zu testen
 
