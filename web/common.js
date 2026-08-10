@@ -281,12 +281,26 @@ function mountPrinterPicker(mountEl, pool, selectedIds) {
     labelEl.classList.toggle('pp-placeholder', !chosen.length);
   }
 
+  // Öffnet das Panel wahlweise nach oben statt unten, wenn unterhalb des
+  // Triggers nicht genug Platz im Viewport ist (sonst ragt es aus dem Screen).
+  function positionPanel() {
+    const margin = 8;
+    const preferredMax = 220;
+    const rect = trigger.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom - margin;
+    const spaceAbove = rect.top - margin;
+    const openUp = spaceBelow < Math.min(preferredMax, 120) && spaceAbove > spaceBelow;
+    panel.classList.toggle('pp-panel-up', openUp);
+    panel.style.maxHeight = Math.max(120, Math.min(preferredMax, openUp ? spaceAbove : spaceBelow)) + 'px';
+  }
+
   let open = false;
   function setOpen(v) {
     open = v;
     panel.hidden = !v;
     trigger.setAttribute('aria-expanded', v ? 'true' : 'false');
     if (v) {
+      positionPanel();
       // Schließen bei Klick außerhalb (ein Doc-Listener pro Öffnung; wird beim
       // Schließen wieder entfernt, sodass geschlossene Picker keine Listener
       // akkumulieren).
