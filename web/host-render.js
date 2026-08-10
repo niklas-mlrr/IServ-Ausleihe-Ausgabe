@@ -24,9 +24,8 @@ window.__host = window.__host || {};
   // Druckersymbol für die Leihschein-Buttons — dasselbe SVG wie im Helfer-Client
   // (scan.html #print-btn), nur hier statt dem Wort „Leihschein".
   const ICON_PRINTER = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>';
-  // Einfache Zielflagge für „Abschließen": Fahnenmast, rechteckige Fläche
-  // mit 4x4-Karomuster.
-  const ICON_ACTION_CHECK = '<svg class="ico ico-lg" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="2" width="1.6" height="20" rx="0.8"/><rect x="5" y="3" width="14" height="8" fill="none" stroke="currentColor" stroke-width="0.9"/><rect x="5" y="3" width="3.5" height="2"/><rect x="12" y="3" width="3.5" height="2"/><rect x="8.5" y="5" width="3.5" height="2"/><rect x="15.5" y="5" width="3.5" height="2"/><rect x="5" y="7" width="3.5" height="2"/><rect x="12" y="7" width="3.5" height="2"/><rect x="8.5" y="9" width="3.5" height="2"/><rect x="15.5" y="9" width="3.5" height="2"/></svg>';
+  // Zielflagge für „Abschließen": nur das große 4x4-Karomuster, ohne Mast.
+  const ICON_ACTION_CHECK = '<svg class="ico ico-lg" viewBox="0 0 24 24" fill="currentColor"><rect x="2" y="2" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1"/><rect x="2" y="2" width="5" height="5"/><rect x="12" y="2" width="5" height="5"/><rect x="7" y="7" width="5" height="5"/><rect x="17" y="7" width="5" height="5"/><rect x="2" y="12" width="5" height="5"/><rect x="12" y="12" width="5" height="5"/><rect x="7" y="17" width="5" height="5"/><rect x="17" y="17" width="5" height="5"/></svg>';
   // WLAN-Symbol für „Trennen", durchgestrichen mit einer Diagonale von
   // links unten nach rechts oben.
   const ICON_DISCONNECT = '<svg class="ico ico-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/><line x1="3" y1="21" x2="21" y2="3" stroke-width="2.4"/></svg>';
