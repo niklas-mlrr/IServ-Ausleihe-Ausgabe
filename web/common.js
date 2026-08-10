@@ -281,17 +281,16 @@ function mountPrinterPicker(mountEl, pool, selectedIds) {
     labelEl.classList.toggle('pp-placeholder', !chosen.length);
   }
 
-  // Öffnet das Panel wahlweise nach oben statt unten, wenn unterhalb des
-  // Triggers nicht genug Platz im Viewport ist (sonst ragt es aus dem Screen).
+  // Öffnet das Panel immer nach oben (statt nach unten), damit es nicht aus
+  // dem Screen ragt; max-height wird auf den tatsächlich verfügbaren Platz
+  // oberhalb des Triggers begrenzt.
   function positionPanel() {
     const margin = 8;
     const preferredMax = 220;
     const rect = trigger.getBoundingClientRect();
-    const spaceBelow = window.innerHeight - rect.bottom - margin;
     const spaceAbove = rect.top - margin;
-    const openUp = spaceBelow < Math.min(preferredMax, 120) && spaceAbove > spaceBelow;
-    panel.classList.toggle('pp-panel-up', openUp);
-    panel.style.maxHeight = Math.max(120, Math.min(preferredMax, openUp ? spaceAbove : spaceBelow)) + 'px';
+    panel.classList.add('pp-panel-up');
+    panel.style.maxHeight = Math.max(120, Math.min(preferredMax, spaceAbove)) + 'px';
   }
 
   let open = false;
