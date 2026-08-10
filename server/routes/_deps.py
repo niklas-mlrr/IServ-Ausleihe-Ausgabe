@@ -190,6 +190,11 @@ class BooklistHiddenRequest(BaseModel):
     hidden: list[str] | None = None
 
 
+class BooklistEmptyRequest(BaseModel):
+    grade: int | None = None
+    empty: list[str] | None = None
+
+
 class AddStudentRequest(BaseModel):
     student_id: int | None = None
     lastname: str = ""

@@ -81,6 +81,33 @@ def test_hidden_books_count_in_neither_x_nor_y():
     assert (s.as_dict()["books_done"], s.as_dict()["books_total"]) == (0, 1)
 
 
+def test_empty_stock_book_counts_neither_in_active_y_nor_hidden_from_true_total():
+    """Anders als `apply_hidden_books` bleibt eine „Bestand leer"-Zeile in
+    `info["books"]"`/`books_total` erhalten — der Client zieht sie nur für die
+    aktive Y-Anzeige ab (`books_empty_outstanding`), die wahre Gesamtzahl
+    (`books_total`) bleibt unverändert für die Klammer-Anzeige `X/Y (Z)`."""
+    st, s = _state_with_student()
+    st.caches.empty_isbns = {"EMPTY"}
+    info = _info(("A", "vorgemerkt"), ("EMPTY", "vorgemerkt"))
+    sessions.init_book_progress(st, 7, info)
+    d = s.as_dict()
+    assert (d["books_done"], d["books_total"]) == (0, 2)  # Zeile bleibt in books_total
+    assert d["books_empty_outstanding"] == 1
+
+
+def test_scanning_empty_stock_book_clears_outstanding_counter():
+    """`mark_book_done` dekrementiert `books_empty_outstanding` beim
+    tatsächlichen Scan — unabhängig von der Ja/Nein-Rückfrage im Helfer-
+    Client (die hängt nicht an diesem Zähler)."""
+    st, s = _state_with_student()
+    st.caches.empty_isbns = {"EMPTY"}
+    sessions.init_book_progress(st, 7, _info(("A", "vorgemerkt"), ("EMPTY", "vorgemerkt")))
+    assert s.as_dict()["books_empty_outstanding"] == 1
+    sessions.mark_book_done(st, 7, "EMPTY")
+    assert s.as_dict()["books_empty_outstanding"] == 0
+    assert s.as_dict()["books_done"] == 1
+
+
 def test_scanned_book_counts_and_is_idempotent():
     st, s = _state_with_student()
     sessions.init_book_progress(st, 7, _info(("A", "vorgemerkt"), ("B", "vorgemerkt")))
@@ -129,7 +156,7 @@ def test_hydrate_fills_progress(monkeypatch):
     target = _Target(7)
     asyncio.run(
         sessions.hydrate_student_info(
-            st, _info(("A", "ausgeliehen"), ("B", "vorgemerkt")), "10a", target
+            st, _info(("A", "ausgeliehen"), ("B", "vorgemerkt")), "10a", target, is_helper=True
         )
     )
     assert (s.as_dict()["books_done"], s.as_dict()["books_total"]) == (1, 2)

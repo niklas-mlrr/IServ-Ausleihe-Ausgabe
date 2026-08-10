@@ -8,6 +8,65 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-10 — Dritter Buchreihen-Status „Bestand leer"
+
+- Neben „da"/„ausgeblendet" gibt es jetzt einen dritten Status für Buchreihen:
+  **„Bestand leer"** (physischer Bestand vorübergehend leer, Reihe bleibt aber
+  vorgemerkt/buchbar — anders als „ausgeblendet"). Global gepflegt
+  (`IservCaches.empty_isbns` in `server/state.py`, nicht pro Jahrgang, da
+  Mehrjahresbände denselben physischen Bestand über mehrere Jahrgangs-
+  Kataloge hinweg teilen), persistiert über `server/booklist_store.py`
+  (dritter, flacher JSON-Key `"empty"`).
+- **Helfer-Client** (Modus A, `web/scan-*.js`): „Bestand leer"-Zeilen zeigen
+  ein rotes Kästchen mit „−" statt des normalen Status-Icons. Beim Drucken
+  oder Aufrufen des nächsten Schülers (nur wenn dabei ein zugewiesener
+  Schüler beendet wird) erscheint bei noch offenen vorgemerkten Büchern eine
+  Checkbox „Als Keine Bücher im Lager mehr markieren" — angehakt + bestätigt
+  markiert die noch offenen Bücher als Bestand leer (WS `mark_empty_stock`).
+  Wird ein Bestand-leer-Buch erneut gescannt, fragt ein nicht-blockierendes
+  Ja/Nein-Popup „Soll dieses Buch wieder als 'da' gelten?" — die Buchung
+  selbst läuft in jedem Fall normal weiter (WS `clear_empty_stock` bei „Ja").
+- **Schüler-Client** (Modus B): sieht nichts davon — weder Markierung noch
+  Popup — kann das Buch aber ganz normal selbst einscannen
+  (`apply_empty_stock_flag(..., visible=False)` in `server/sessions.py`
+  setzt das Flag nur für den Helfer-Payload, entfernt die Zeile nie).
+- **Buchungs-Vorabprüfung** (`evaluate_scan_for_booking`) bewusst unverändert
+  — „Bestand leer" darf den `not_in_stock`-Gate niemals blockieren.
+- **X/Y-Fortschrittszähler** (Host-Queue, `web/host-render.js`
+  `activeStatusDetails`): Bestand-leer-Bücher zählen wie ausgeblendete aus
+  dem aktiven Soll raus, die wahre Gesamtzahl bleibt aber in Klammern
+  sichtbar (`X/Y (Z)`) — verschwindet automatisch, sobald das Buch
+  tatsächlich gescannt wird (`QueueStudent.books_empty_outstanding`).
+- **Host-Admin-Bücherlisten-Editor**: drittes gelbes Feld mit „0"
+  (`ICON_EMPTY`), 3-Wege-Klick-Zyklus da → Bestand leer → ausgeblendet → da
+  (`onBlCycleStatus` in `web/host-render.js`), neuer Endpoint
+  `POST /api/booklist-empty` mit „scoped replace" (ein Jahrgang darf beim
+  Speichern keine Bestand-leer-Flags anderer Jahrgänge löschen).
+
+## 2026-08-10 — Drucker-Auswahlmenüs: Popover/Dropdown ragten aus dem Bildschirm
+
+- **Druckerauswahl-Dropdown** (`common.js` `mountPrinterPicker`, Klasse
+  `.printer-picker`/`.pp-panel`, genutzt in `host.css` und `scan.html`):
+  öffnet jetzt immer nach oben statt nach unten (`.pp-panel-up`), `max-height`
+  wird dynamisch auf den tatsächlich verfügbaren Platz oberhalb des Triggers
+  begrenzt (`positionPanel()` in `common.js`).
+- **„+"-Popover an einer Drucker-Anzeige** (`openPdAddMenu` in
+  `host-render.js`, Klasse `.pd-add-popover`): öffnet ebenfalls oberhalb der
+  „+"-Box statt darunter; Höhe/Breite werden erst nach dem Anhängen an
+  `document.body` gemessen (Timing-Voraussetzung für korrekte
+  `getBoundingClientRect()`-Werte), horizontal an den rechten Viewport-Rand
+  geklemmt; zusätzlich `max-height: 60vh` mit Scroll in `host.css` für lange
+  Drucker-Listen.
+- **Debugging-Lektion:** Nach dem Fix wurde der Bug vom Nutzer zunächst als
+  weiterhin bestehend gemeldet. Isolierte Nachstellung der Positionierungs-
+  Logik mit Playwright (Button ganz oben + viele Drucker, Button ganz unten +
+  wenige Drucker, kleines Viewport 500×700) zeigte, dass die Berechnung
+  korrekt innerhalb des Viewports bleibt. Ursache war ein veralteter Stand auf
+  dem Ausgabegerät (eigenständiger Checkout/Server, s. `docs/deployment.md`)
+  — kein Code-Fehler. Reproduktion in Isolation vor erneutem Rätselraten am
+  Live-Code hat die falsche Fährte (vermeintlich weiterhin fehlerhafte Logik)
+  vermieden.
+
 ## 2026-08-10 — Betreuerauslöser-Druck: Server statt Client entscheidet, ob ein Auftrag als Schüler-Auftrag zählt
 
 - `POST /api/print-loan-slip` (Host-Button „Aktuell in Ausgabe") verließ sich

@@ -82,10 +82,14 @@ function renderBooks(books, animate = false) {
     });
   bookRowsEl.innerHTML = ordered.map(([b, idx]) => {
     const done = isBookDone(b, scannedIsbns);
+    const bestandLeer = !done && !!b.bestand_leer;
     const icon = done
       ? '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>'
+      : bestandLeer
+      ? '<span class="empty-stock-badge">−</span>'
       : '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
-    return `<div class="book-row row-${done ? 'ausgeliehen' : 'vorgemerkt'}" data-book-idx="${idx}">`
+    const rowClass = `row-${done ? 'ausgeliehen' : 'vorgemerkt'}${bestandLeer ? ' row-bestand-leer' : ''}`;
+    return `<div class="book-row ${rowClass}" data-book-idx="${idx}">`
       + `<div class="b-fach">${escapeHtml(b.subject)}</div>`
       + `<div class="b-title">${escapeHtml(b.title)}</div>`
       + `<div class="b-icon">${icon}</div></div>`;
@@ -501,11 +505,23 @@ async function requestNext() {
   const { vorgemerkt, offen } = computeOpenBooks();
   if (offen.length === 0) { advanceToNext(); return; }
   renderOpenWarning(nextWarnEl, vorgemerkt, offen);
+  pendingOpenIsbns = offen.map(b => b.isbn).filter(Boolean);
+  nextMarkEmptyCheck.checked = false;
+  nextMarkEmptyWrapEl.style.display = '';
   nextModal.classList.add('show');
   updateFocusBanner();
 }
+function sendMarkEmptyStockIfChecked(checkbox) {
+  if (checkbox.checked && pendingOpenIsbns.length && ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'mark_empty_stock', isbns: pendingOpenIsbns }));
+  }
+}
 nextBtn.addEventListener('click', requestNext);
-modalNextConfirmBtn.addEventListener('click', () => { closeNextModal(); advanceToNext(); });
+modalNextConfirmBtn.addEventListener('click', () => {
+  sendMarkEmptyStockIfChecked(nextMarkEmptyCheck);
+  closeNextModal();
+  advanceToNext();
+});
 modalNextCancelBtn.addEventListener('click', closeNextModal);
 nextModal.addEventListener('click', (e) => { if (e.target === nextModal) closeNextModal(); });
 
@@ -651,6 +667,8 @@ async function openPrintDialog(targetStudentId) {
     printTargetStudentId = targetStudentId;
     modalPrintNextBtn.style.display = 'none';
     printWarnEl.style.display = 'none';
+    pendingOpenIsbns = [];
+    printMarkEmptyWrapEl.style.display = 'none';
     printPickerErrEl.textContent = '';
     printPickerErrEl.style.display = 'none';
     slipCheck.checked = slipSecondPageDefault;
@@ -674,6 +692,9 @@ async function openPrintDialog(targetStudentId) {
   const { vorgemerkt, offen } = computeOpenBooks();
   printWarnEl.classList.remove('is-error');
   renderOpenWarning(printWarnEl, vorgemerkt, offen);
+  pendingOpenIsbns = offen.map(b => b.isbn).filter(Boolean);
+  printMarkEmptyCheck.checked = false;
+  printMarkEmptyWrapEl.style.display = offen.length ? '' : 'none';
   printPickerErrEl.textContent = '';
   printPickerErrEl.style.display = 'none';
   slipCheck.checked = slipSecondPageDefault;
@@ -721,6 +742,7 @@ function sendPrint(thenNext) {
     closePrintModal();
     return;
   }
+  sendMarkEmptyStockIfChecked(printMarkEmptyCheck);
   printThenNext = thenNext;
   // Die ID trennt ein veraltetes Ergebnis eines Drucks vor einem neuen Scan
   // von dem danach gestarteten Druckauftrag.
@@ -812,11 +834,38 @@ lendConfirmModal.addEventListener('click', (e) => {
     setStatusText('Nicht ausgeliehen — Buch nicht eingegeben');
   }
 });
+// ---- Bestand-leer-Rescan-Popup ----
+// Rein informativ — der Scan/die Buchung ist zu diesem Zeitpunkt bereits
+// vollständig verarbeitet (s. scan-ws.js scan_result-Handler). „Nein"/
+// Klick-außerhalb/Escape schließen nur, ohne Wirkung.
+function closeEmptyStockModal() {
+  emptyStockModal.classList.remove('show');
+  pendingEmptyStockIsbn = null;
+  updateFocusBanner();
+}
+function showEmptyStockPopup(isbn) {
+  if (!isbn) return;
+  pendingEmptyStockIsbn = isbn;
+  emptyStockModal.classList.add('show');
+  updateFocusBanner();
+}
+modalEmptyYesBtn.addEventListener('click', () => {
+  const isbn = pendingEmptyStockIsbn;
+  closeEmptyStockModal();
+  if (isbn && ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'clear_empty_stock', isbn }));
+  }
+});
+modalEmptyNoBtn.addEventListener('click', closeEmptyStockModal);
+emptyStockModal.addEventListener('click', (e) => { if (e.target === emptyStockModal) closeEmptyStockModal(); });
+window.__scan.showEmptyStockPopup = showEmptyStockPopup;
+
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   if (printModal.classList.contains('show')) closePrintModal();
   if (nextModal.classList.contains('show')) closeNextModal();
   if (bookAlertModal.classList.contains('show')) dismissBookAlert();
+  if (emptyStockModal.classList.contains('show')) closeEmptyStockModal();
   if (lendConfirmModal.classList.contains('show')) {
     closeLendModal();
     heldScanValue = null;

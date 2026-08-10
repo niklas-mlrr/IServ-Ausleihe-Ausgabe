@@ -328,6 +328,18 @@ const lendConfirmModal = document.getElementById('lend-confirm-modal');
 const lendWarnEl = document.getElementById('lend-warn');
 const modalLendYesBtn = document.getElementById('modal-lend-yes');
 const modalLendNoBtn = document.getElementById('modal-lend-no');
+// „Bestand leer": Checkbox in Print-/Next-Modal (nur sichtbar, wenn die
+// jeweilige Warnung selbst sichtbar ist, s. renderOpenWarning) + nicht-
+// blockierendes Ja/Nein-Rescan-Popup.
+const printMarkEmptyWrapEl = document.getElementById('print-mark-empty-wrap');
+const printMarkEmptyCheck = document.getElementById('print-mark-empty');
+const nextMarkEmptyWrapEl = document.getElementById('next-mark-empty-wrap');
+const nextMarkEmptyCheck = document.getElementById('next-mark-empty');
+const emptyStockModal = document.getElementById('empty-stock-modal');
+const modalEmptyYesBtn = document.getElementById('modal-empty-yes');
+const modalEmptyNoBtn = document.getElementById('modal-empty-no');
+let pendingOpenIsbns = [];          // zuletzt berechnete `offen`-ISBNs (Next-/Print-Warnung)
+let pendingEmptyStockIsbn = null;   // ISBN, auf die sich das Rescan-Popup gerade bezieht
 let scanFlashTimeout = null;
 const OK_STATUSES = new Set(['staged', 'booked']);
 // Bei diesen Ergebnissen bleibt der Helfer-Scan bis zum bewussten Schließen

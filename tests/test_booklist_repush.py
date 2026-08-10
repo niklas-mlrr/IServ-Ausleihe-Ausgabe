@@ -94,6 +94,21 @@ def test_repush_preserves_session_scan_progress_for_visible_books():
     assert s.done_isbns == {"A", "B"}
 
 
+def test_repush_flags_empty_stock_but_keeps_the_row():
+    """Anders als `hidden`: eine Bestand-leer-ISBN bleibt in der gepushten
+    Liste (weiterhin buchbar), bekommt nur `bestand_leer=True` — nur für den
+    Helfer-Client (`helper=True`)."""
+    st, h, _s = _setup()
+    st.caches.empty_isbns = {"A"}
+    hub = _FakeHub()
+    asyncio.run(sessions.repush_booklist(st, hub, 7, h, helper=True))
+    _token, msg = hub.sent[0]
+    by_isbn = {b["isbn"]: b for b in msg["books"]}
+    assert by_isbn["A"].get("bestand_leer") is True
+    assert "bestand_leer" not in by_isbn["B"]
+    assert "A" in h.vormerk_isbns  # bleibt buchbar
+
+
 class _SessionTarget:
     """Minimaler Stand-in für StudentSessionB (Modus B) in repush_booklist."""
 
@@ -116,6 +131,21 @@ def test_repush_skips_session_without_ws():
     hub = _FakeHub()
     asyncio.run(sessions.repush_booklist(st, hub, 7, sess, helper=False))
     assert hub.sent == []
+
+
+def test_repush_never_flags_empty_stock_for_student_session():
+    """Modus B (Schüler-Client, `helper=False`): `bestand_leer` erscheint NIE
+    — auch nicht bei einem Duck-Typed-Fake, das nicht von der echten
+    StudentSessionB-Klasse erbt (Regression: `is_helper` muss vom Call-Site
+    kommen, nicht per `isinstance`-Erkennung an `target`)."""
+    st, _h, _s = _setup()
+    st.caches.empty_isbns = {"A"}
+    sess = _SessionTarget()
+    sess.ws = object()  # verbunden, damit gesendet wird
+    hub = _FakeHub()
+    asyncio.run(sessions.repush_booklist(st, hub, 7, sess, helper=False))
+    _token, msg = hub.sent[0]
+    assert all("bestand_leer" not in b for b in msg["books"])
 
 
 def test_repush_survives_iserv_error():

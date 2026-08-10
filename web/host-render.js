@@ -2159,16 +2159,23 @@ window.__host = window.__host || {};
       const loaned = s.loaned_at_load || 0;
       const sessionX = s.books_done - loaned;
       const sessionY = s.books_total - loaned;
+      // „Bestand leer": aus der AKTIVEN Y-Zählung raus (wie ausgeblendet),
+      // aber die wahre Gesamtzahl bleibt in Klammern sichtbar, solange noch
+      // offene Bestand-leer-Bücher da sind — verschwindet automatisch, sobald
+      // das Buch tatsächlich gescannt wird (s. server/sessions.py::mark_book_done).
+      const emptyOut = s.books_empty_outstanding || 0;
+      const totalStr = emptyOut > 0 ? `${s.books_total - emptyOut} (${s.books_total})` : `${s.books_total}`;
       if (loaned > 0 && sessionY > 0) {
+        const sessionYStr = emptyOut > 0 ? `${sessionY - emptyOut} (${sessionY})` : `${sessionY}`;
         return {
           progress: true,
           title: `seit Aufrufen ${sessionX}/${sessionY} (offene vorgemerkte) · insgesamt ${s.books_done}/${s.books_total} (ausgeliehene/angemeldete)`,
-          content: `<span class="q-progress-main">${sessionX}/${sessionY} ohne Mjb</span><span class="q-progress-sub">${s.books_done}/${s.books_total} gesamt</span>`,
+          content: `<span class="q-progress-main">${sessionX}/${sessionYStr} ohne Mjb</span><span class="q-progress-sub">${s.books_done}/${totalStr} gesamt</span>`,
         };
       }
       return {
         title: 'ausgegebene / angemeldete Bücher',
-        content: `${s.books_done}/${s.books_total} gesamt`,
+        content: `${s.books_done}/${totalStr} gesamt`,
       };
     }
     return { content: 'Aktiv' }; // geladen, aber ohne Bücher
@@ -2643,9 +2650,11 @@ window.__host = window.__host || {};
       ((d && d.catalog) || []).forEach(b => { cat[b.isbn] = b; });
       const order = ((d && d.order) || []).filter(isbn => cat[isbn]);
       const hidden = new Set(((d && d.hidden) || []).filter(isbn => cat[isbn]));
+      const empty = new Set(((d && d.empty) || []).filter(isbn => cat[isbn]));
       blData[grade] = {
         catalog: cat, order, saved: order.slice(), loaded: true,
         hidden, savedHidden: new Set(hidden),
+        empty, savedEmpty: new Set(empty),
       };
     }
     renderBooklistList();
@@ -2655,6 +2664,8 @@ window.__host = window.__host || {};
   const ICON_CHECK = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="5,12 10,17 19,7"/></svg>';
   // Ausgeblendet-Indikator: rotes Kästchen mit Verbotssymbol (Kreis + 45°-Strich).
   const ICON_NO = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="12" cy="12" r="8.2"/><line x1="6.2" y1="6.2" x2="17.8" y2="17.8"/></svg>';
+  // Bestand-leer-Indikator: gelbes Kästchen mit „0".
+  const ICON_EMPTY = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="12" cy="12" r="8.2"/><text x="12" y="16" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" stroke="none">0</text></svg>';
 
   function renderBooklistList() {
     const list = document.getElementById('bl-list');
@@ -2667,12 +2678,16 @@ window.__host = window.__host || {};
     list.innerHTML = data.order.map((isbn, i) => {
       const b = data.catalog[isbn] || { title: isbn, subject: '' };
       const hidden = data.hidden.has(isbn);
-      return `<div class="bo-row${hidden ? ' bo-hidden' : ''}" draggable="true" data-idx="${i}" data-isbn="${escapeHtml(isbn)}">`
+      const empty = !hidden && data.empty.has(isbn);
+      const stateClass = hidden ? ' bo-hidden' : empty ? ' bo-empty' : '';
+      const icon = hidden ? ICON_NO : empty ? ICON_EMPTY : ICON_CHECK;
+      const title = hidden ? 'Wieder einblenden' : empty ? 'Als Bestand leer markiert — Klick: Ausblenden' : 'Klick: Als Bestand leer markieren';
+      return `<div class="bo-row${stateClass}" draggable="true" data-idx="${i}" data-isbn="${escapeHtml(isbn)}">`
         + `<span class="bo-grip">⠿</span>`
         + `<span class="bo-num">${i + 1}</span>`
         + `<span class="bo-fach">${escapeHtml(b.subject || '')}</span>`
         + `<span class="bo-title">${escapeHtml(b.title || isbn)}</span>`
-        + `<button type="button" class="bo-hide-btn" title="${hidden ? 'Wieder einblenden' : 'Ausblenden'}" aria-label="${hidden ? 'Wieder einblenden' : 'Ausblenden'}">${hidden ? ICON_NO : ICON_CHECK}</button></div>`;
+        + `<button type="button" class="bo-hide-btn" title="${title}" aria-label="${title}">${icon}</button></div>`;
     }).join('');
     list.querySelectorAll('.bo-row').forEach(row => {
       row.addEventListener('dragstart', onBlDragStart);
@@ -2681,16 +2696,26 @@ window.__host = window.__host || {};
       row.addEventListener('dragend', onBlDragEnd);
       row.querySelector('.bo-hide-btn').addEventListener('click', (e) => {
         e.stopPropagation();
-        onBlToggleHidden(row.dataset.isbn);
+        onBlCycleStatus(row.dataset.isbn);
       });
     });
   }
 
-  function onBlToggleHidden(isbn) {
+  // 3-Wege-Zyklus: da → Bestand leer → ausgeblendet → da. „Bestand leer" liegt
+  // dabei nur einen Klick von „da" entfernt (häufigerer Fall — Bestand
+  // vorübergehend leer, bleibt buchbar), „ausgeblendet" ist der drastischere,
+  // zwei Klicks entfernte Schritt (Reihe nicht mehr vorgemerkt/buchbar).
+  function onBlCycleStatus(isbn) {
     const data = blData[blActiveGrade];
     if (!data) return;
-    if (data.hidden.has(isbn)) data.hidden.delete(isbn);
-    else data.hidden.add(isbn);
+    if (data.hidden.has(isbn)) {
+      data.hidden.delete(isbn);
+    } else if (data.empty.has(isbn)) {
+      data.empty.delete(isbn);
+      data.hidden.add(isbn);
+    } else {
+      data.empty.add(isbn);
+    }
     renderBooklistList();
   }
 
@@ -2748,6 +2773,12 @@ window.__host = window.__host || {};
         d.savedHidden = new Set(d.hidden);
         saveBooklistHidden(Number(g), hiddenArr);
       }
+      const emptyArr = [...d.empty].sort();
+      const savedEmptyArr = [...d.savedEmpty].sort();
+      if (JSON.stringify(emptyArr) !== JSON.stringify(savedEmptyArr)) {
+        d.savedEmpty = new Set(d.empty);
+        saveBooklistEmpty(Number(g), emptyArr);
+      }
     }
   }
   async function saveBooklistOrder(grade, order) {
@@ -2763,6 +2794,14 @@ window.__host = window.__host || {};
       await fetch('/api/booklist-hidden', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ grade, hidden }),
+      });
+    } catch (_) {}
+  }
+  async function saveBooklistEmpty(grade, empty) {
+    try {
+      await fetch('/api/booklist-empty', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ grade, empty }),
       });
     } catch (_) {}
   }
@@ -3124,7 +3163,7 @@ window.__host.settingsOpen = settingsOpen;
 window.__host.loadBooklistTabs = loadBooklistTabs;
 window.__host.selectBooklistTab = selectBooklistTab;
 window.__host.renderBooklistList = renderBooklistList;
-window.__host.onBlToggleHidden = onBlToggleHidden;
+window.__host.onBlCycleStatus = onBlCycleStatus;
 window.__host.clearBlDropMarks = clearBlDropMarks;
 window.__host.onBlDragStart = onBlDragStart;
 window.__host.onBlDragOver = onBlDragOver;
@@ -3133,6 +3172,7 @@ window.__host.onBlDragEnd = onBlDragEnd;
 window.__host.saveChangedBooklistOrders = saveChangedBooklistOrders;
 window.__host.saveBooklistOrder = saveBooklistOrder;
 window.__host.saveBooklistHidden = saveBooklistHidden;
+window.__host.saveBooklistEmpty = saveBooklistEmpty;
 window.__host.handleDelegatedAction = handleDelegatedAction;
 window.__host.showPrintProgress = showPrintProgress;
 window.__host.showPrintResult = showPrintResult;

@@ -1,9 +1,10 @@
-"""Persistenz der jahrgangsweiten Bücher-Reihenfolge/Ausblendung.
+"""Persistenz der jahrgangsweiten Bücher-Reihenfolge/Ausblendung/Bestand-leer.
 
 Deckt ab: load bei fehlender/korrupter Datei, save→load Round-Trip, Anlegen
 des data-Verzeichnisses sowie die eigentliche Anforderung — neue Katalog-ISBNs,
 die im gespeicherten Stand fehlen, werden per `normalize_book_order` sichtbar
-ans Ende angehängt, ausgeblendete neue ISBNs bleiben sichtbar.
+ans Ende angehängt, ausgeblendete neue ISBNs bleiben sichtbar. `empty` (Bestand
+leer) ist als drittes Element GLOBAL (flache Liste, nicht Jahrgang-geschlüsselt).
 
 Rein logisch / tmp-Datei, kein IServ/HTTP. STORE_PATH wird per monkeypatch
 in ein tmp-Verzeichnis umgebogen, sodass die Tests die echte `data/` nicht
@@ -25,52 +26,62 @@ def _use_tmp_store(monkeypatch, tmp_path) -> None:
 
 def test_load_returns_empty_when_file_missing(monkeypatch, tmp_path):
     _use_tmp_store(monkeypatch, tmp_path)
-    orders, hidden = booklist_store.load()
-    assert orders == {} and hidden == {}
+    orders, hidden, empty = booklist_store.load()
+    assert orders == {} and hidden == {} and empty == set()
 
 
 def test_save_then_load_roundtrip(monkeypatch, tmp_path):
     _use_tmp_store(monkeypatch, tmp_path)
     orders = {9: ["C", "A", "B"], 10: ["X"], 7: []}
     hidden = {9: {"B"}, 10: set(), 7: {"Y"}}
-    booklist_store.save(orders, hidden)
+    empty = {"C", "X"}
+    booklist_store.save(orders, hidden, empty)
 
-    loaded_orders, loaded_hidden = booklist_store.load()
+    loaded_orders, loaded_hidden, loaded_empty = booklist_store.load()
     assert loaded_orders == {9: ["C", "A", "B"], 10: ["X"], 7: []}
     assert loaded_hidden == {9: {"B"}, 10: set(), 7: {"Y"}}
+    assert loaded_empty == {"C", "X"}
 
 
 def test_load_corrupt_json_returns_empty(monkeypatch, tmp_path):
     _use_tmp_store(monkeypatch, tmp_path)
     booklist_store.STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
     booklist_store.STORE_PATH.write_text("{ kein gültiges json ", encoding="utf-8")
-    orders, hidden = booklist_store.load()
-    assert orders == {} and hidden == {}
+    orders, hidden, empty = booklist_store.load()
+    assert orders == {} and hidden == {} and empty == set()
 
 
 def test_load_empty_file_returns_empty(monkeypatch, tmp_path):
     _use_tmp_store(monkeypatch, tmp_path)
     booklist_store.STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
     booklist_store.STORE_PATH.write_text("", encoding="utf-8")
-    orders, hidden = booklist_store.load()
-    assert orders == {} and hidden == {}
+    orders, hidden, empty = booklist_store.load()
+    assert orders == {} and hidden == {} and empty == set()
 
 
 def test_save_creates_data_dir_if_missing(monkeypatch, tmp_path):
     target = tmp_path / "nested" / "data" / "booklist_settings.json"
     monkeypatch.setattr(booklist_store, "STORE_PATH", target)
-    booklist_store.save({9: ["A"]}, {9: set()})
+    booklist_store.save({9: ["A"]}, {9: set()}, set())
     assert target.is_file()
-    assert booklist_store.load() == ({9: ["A"]}, {9: set()})
+    assert booklist_store.load() == ({9: ["A"]}, {9: set()}, set())
 
 
 def test_save_serializes_hidden_sorted_and_grades_as_strings(monkeypatch, tmp_path):
     _use_tmp_store(monkeypatch, tmp_path)
     # Reihenfolge mit unsortiertem Set — Serialisierung muss deterministisch sein.
-    booklist_store.save({9: ["A"]}, {9: {"Z", "A", "M"}})
+    booklist_store.save({9: ["A"]}, {9: {"Z", "A", "M"}}, set())
     raw = json.loads(booklist_store.STORE_PATH.read_text(encoding="utf-8"))
     assert raw["orders"] == {"9": ["A"]}
     assert raw["hidden"] == {"9": ["A", "M", "Z"]}  # sortiert
+
+
+def test_save_serializes_empty_sorted_flat_list(monkeypatch, tmp_path):
+    """`empty` ist GLOBAL — flache sortierte Liste, keine Jahrgangs-Schachtelung."""
+    _use_tmp_store(monkeypatch, tmp_path)
+    booklist_store.save({}, {}, {"Z", "A", "M"})
+    raw = json.loads(booklist_store.STORE_PATH.read_text(encoding="utf-8"))
+    assert raw["empty"] == ["A", "M", "Z"]
 
 
 def test_new_catalog_books_appended_visible_at_end():
@@ -98,10 +109,12 @@ def test_load_drops_non_string_entries(monkeypatch, tmp_path):
             {
                 "orders": {"9": ["A", 123, "B"], "bad": ["Z"], "11": "keine-liste"},
                 "hidden": {"9": ["A", 7, "B"], "bad": ["Q"]},
+                "empty": ["A", 7, "B"],
             }
         ),
         encoding="utf-8",
     )
-    orders, hidden = booklist_store.load()
+    orders, hidden, empty = booklist_store.load()
     assert orders == {9: ["A", "B"]}  # "bad"/"11" (keine Liste) übersprungen
     assert hidden == {9: {"A", "B"}}
+    assert empty == {"A", "B"}

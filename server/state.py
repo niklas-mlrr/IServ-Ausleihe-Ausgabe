@@ -70,6 +70,17 @@ class QueueStudent:
     # `process_scan`; 0/None solange der Schüler noch nie geladen wurde.
     books_total: int | None = None
     done_isbns: set[str] = field(default_factory=set)
+    # Anzahl der aktuell noch offenen (nicht ausgeliehenen) Bücher des
+    # Schülers, deren ISBN in `IservCaches.empty_isbns` steht („Bestand
+    # leer"). Anders als ausgeblendete Bücher bleiben diese Zeilen in
+    # `info["books"]`/`books_total` erhalten (buchbar!) — der Client zieht
+    # sie nur für die *aktive* Y-Anzeige ab: `X/(books_total -
+    # books_empty_outstanding)`, mit `books_total` selbst in Klammern
+    # dahinter, solange `books_empty_outstanding > 0`. Gefüllt in
+    # `init_book_progress`, dekrementiert in `mark_book_done` sobald das
+    # Buch tatsächlich gescannt wird (unabhängig von der Ja/Nein-Rückfrage im
+    # Helfer-Client) — die Klammer verschwindet dann von selbst.
+    books_empty_outstanding: int = 0
     # Bei Hydration bereits ausgeliehene Bücher (status == „ausgeliehen" beim
     # Laden) — die Grundlage für den session-basierten Fortschritt in der Host-
     # Status-Spalte: „seit Aufrufen ausgeliehene" = books_done - loaned_at_load,
@@ -158,6 +169,7 @@ class QueueStudent:
             "assigned_helper_name": assigned_helper_name,
             "books_total": self.books_total,
             "books_done": len(self.done_isbns),
+            "books_empty_outstanding": self.books_empty_outstanding,
             "loaned_at_load": self.loaned_at_load,
             "slip_printed": self.slip_printed,
             # Leihschein-Druck läuft gerade (Auftrag in der Print-Queue, noch
@@ -210,6 +222,7 @@ class QueueStudent:
         mit den Zählern des alten startet."""
         self.books_total = None
         self.done_isbns = set()
+        self.books_empty_outstanding = 0
         self.loaned_at_load = 0
         self.slip_printed = False
         self.slip_collected = False
@@ -490,7 +503,7 @@ class RuntimeSettings:
 
 @dataclass
 class IservCaches:
-    """Die fünf jahrgangs-/schuljahrbezogenen IServ-Caches — gemeinsam von
+    """Die sechs jahrgangs-/schuljahrbezogenen IServ-Caches — gemeinsam von
     `AppState.reset_booklist_orders()` beim Schuljahreswechsel geleert
     (`clear_all()`). Zugriff ausschließlich über `state.caches.<name>`."""
 
@@ -500,6 +513,15 @@ class IservCaches:
     # Ausgeblendete Buchreihen pro Jahrgang (nicht vorgemerkt/buchbar).
     # Rationale: docs/PLAN.md § State-Feld-Rationale
     hidden_isbns_by_grade: dict[int, set[str]] = field(default_factory=dict)
+    # Buchreihen mit leerem Bestand ("Bestand leer") — GLOBAL, nicht pro
+    # Jahrgang: Mehrjahresbände teilen sich denselben physischen Bestand über
+    # mehrere Jahrgangs-Kataloge hinweg, ein Pro-Jahrgang-Set würde für die
+    # gleiche ISBN widersprüchliche Zustände erlauben. Anders als
+    # `hidden_isbns_by_grade` bleibt die Reihe weiterhin buchbar/vorgemerkt —
+    # nur eine zusätzliche Markierung für den Helfer-Client. Gepflegt vom
+    # Helfer (Scan-Client, Checkbox beim Drucken/Nächster) und vom Admin-
+    # Bücherlisten-Editor (Host).
+    empty_isbns: set[str] = field(default_factory=set)
     # Katalog-Cache für klassenübergreifende Warteschlangen
     # (form -> (grade, catalog_isbns)). Rationale: docs/PLAN.md § State-Feld-Rationale
     form_catalog_cache: dict[str, tuple[int | None, list[str]]] = field(default_factory=dict)
@@ -509,10 +531,11 @@ class IservCaches:
     form_students_cache: dict[str, list[dict]] = field(default_factory=dict)
 
     def clear_all(self) -> None:
-        """Alle fünf Caches leeren (Schuljahreswechsel: andere Booklists,
+        """Alle sechs Caches leeren (Schuljahreswechsel: andere Booklists,
         ISBNs passen nicht mehr)."""
         self.book_orders_by_grade = {}
         self.hidden_isbns_by_grade = {}
+        self.empty_isbns = set()
         self.form_catalog_cache = {}
         self.class_names_cache = {}
         self.form_students_cache = {}

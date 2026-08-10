@@ -36,10 +36,16 @@ class _FakeIserv:
         return self._book
 
 
+class _Caches:
+    def __init__(self):
+        self.empty_isbns: set[str] = set()
+
+
 class _State:
     def __init__(self, iserv=None, worker=None):
         self.iserv = iserv
         self.student_worker_sessions = {42: worker} if worker else {}
+        self.caches = _Caches()
 
     def find_student(self, student_id):
         return None
@@ -91,6 +97,17 @@ def test_reject_not_in_stock_distributed():
 def test_reject_not_in_stock_unavailable():
     res = _eval(_State(_FakeIserv(_book(available=False))), {"978-1"}, set())
     assert res["ok"] is False and res["status"] == "not_in_stock"
+
+
+def test_empty_stock_book_still_bookable():
+    """„Bestand leer" (`state.caches.empty_isbns`) darf die Buchungs-Vorab-
+    prüfung NIEMALS blockieren — die Reihe bleibt vorgemerkt/buchbar, es ist
+    nur eine Zusatzmarkierung für den Helfer-Client."""
+    state = _State(_FakeIserv(_book()))
+    state.caches.empty_isbns = {"978-1"}
+    res = _eval(state, {"978-1"}, set())
+    assert res["ok"] is True
+    assert res["isbn"] == "978-1"
 
 
 def test_not_in_stock_carries_loaned_to():

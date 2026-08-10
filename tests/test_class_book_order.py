@@ -12,7 +12,7 @@ import asyncio
 from server.book_order import get_hidden_isbns_for_form
 from server.iserv_client import IsServClient
 from server.routes.api import normalize_book_order
-from server.sessions import apply_hidden_books
+from server.sessions import apply_empty_stock_flag, apply_hidden_books
 from server.state import AppState
 
 # ---------------------------------------------------------------------------
@@ -234,6 +234,33 @@ def test_apply_hidden_books_noop_when_nothing_hidden():
     info = {"books": [{"isbn": "A", "status": "vorgemerkt"}]}
     apply_hidden_books(info, set())
     assert [b["isbn"] for b in info["books"]] == ["A"]
+
+
+# ---------------------------------------------------------------------------
+# „Bestand leer" (apply_empty_stock_flag) — nur für den Helfer-Client sichtbar,
+# entfernt NIE die Zeile (anders als apply_hidden_books, bleibt buchbar).
+# ---------------------------------------------------------------------------
+
+
+def test_apply_empty_stock_flag_sets_flag_when_visible():
+    info = {"books": [{"isbn": "A", "status": "vorgemerkt"}, {"isbn": "B", "status": "vorgemerkt"}]}
+    apply_empty_stock_flag(info, {"A"}, visible=True)
+    assert info["books"][0].get("bestand_leer") is True
+    assert "bestand_leer" not in info["books"][1]
+    # Zeile bleibt erhalten — anders als apply_hidden_books.
+    assert [b["isbn"] for b in info["books"]] == ["A", "B"]
+
+
+def test_apply_empty_stock_flag_noop_when_not_visible():
+    info = {"books": [{"isbn": "A", "status": "vorgemerkt"}]}
+    apply_empty_stock_flag(info, {"A"}, visible=False)
+    assert "bestand_leer" not in info["books"][0]
+
+
+def test_apply_empty_stock_flag_noop_when_nothing_empty():
+    info = {"books": [{"isbn": "A", "status": "vorgemerkt"}]}
+    apply_empty_stock_flag(info, set(), visible=True)
+    assert "bestand_leer" not in info["books"][0]
 
 
 def test_get_hidden_isbns_for_form_resolves_grade_via_class_catalog():

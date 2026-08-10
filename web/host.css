@@ -457,6 +457,9 @@
     .bo-title { flex: 1; }
     .bo-row.bo-hidden { opacity: .5; }
     .bo-row.bo-hidden .bo-title, .bo-row.bo-hidden .bo-fach { text-decoration: line-through; }
+    /* Bestand leer: weniger drastisch als ausgeblendet (bleibt buchbar) —
+       kein Durchstreichen, nur leicht abgedunkelt. */
+    .bo-row.bo-empty { opacity: .75; }
     .bo-hide-btn {
       flex-shrink: 0; width: 30px; height: 30px; padding: 0;
       display: inline-flex; align-items: center; justify-content: center;
@@ -465,8 +468,9 @@
       background: #2e9e5b; /* sichtbar → grünes Kästchen mit Haken */
     }
     .bo-row.bo-hidden .bo-hide-btn { background: #c0392b; /* ausgeblendet → rotes Kästchen mit Verbotssymbol */ }
-    /* Verbotssymbol bleibt auch im ausgeblendeten (abgedunkelten) Row deutlich sichtbar. */
-    .bo-row.bo-hidden .bo-hide-btn { opacity: 1; }
+    .bo-row.bo-empty .bo-hide-btn { background: #d4a017; /* Bestand leer → gelbes Kästchen mit „0" */ }
+    /* Verbotssymbol/„0" bleiben auch im abgedunkelten Row deutlich sichtbar. */
+    .bo-row.bo-hidden .bo-hide-btn, .bo-row.bo-empty .bo-hide-btn { opacity: 1; }
     .bo-hide-btn:hover { filter: brightness(1.12); }
     .col-label {
       font-size: .8rem; text-transform: uppercase; letter-spacing: .06em;

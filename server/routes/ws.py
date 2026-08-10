@@ -26,6 +26,7 @@ from ..sessions import (
     process_scan,
     rebind_helper_to_context,
     release_student_worker,
+    repush_for_changed_empty_isbns,
     send_display_update,
     send_printer_display_update,
     send_teacher_update,
@@ -40,6 +41,7 @@ from ..state import (
     own_print_defaults,
     pool_light,
 )
+from .booklists import _persist_booklist_settings
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -506,6 +508,38 @@ async def _handle_clear_book_alert(state, hub, helper, websocket, raw) -> None:
         )
 
 
+async def _handle_mark_empty_stock(state, hub, helper, websocket, raw) -> None:
+    """Helfer markiert Buchreihen als „Bestand leer" (Checkbox im Next-/
+    Print-Warn-Modal, s. web/scan-render.js). Nur ISBNs des AKTUELL
+    zugewiesenen Schülers dürfen markiert werden (`helper.expected_isbns`) —
+    Defense in Depth gegen einen buggy/kompromittierten Client, der beliebige
+    ISBNs fremder Schüler flaggen wollte."""
+    isbns = raw.get("isbns")
+    if not isinstance(isbns, list):
+        return
+    valid = {i for i in isbns if isinstance(i, str) and i in helper.expected_isbns}
+    if not valid:
+        return
+    state.caches.empty_isbns |= valid
+    _persist_booklist_settings(state)
+    await hub.broadcast_settings()
+    await repush_for_changed_empty_isbns(state, hub, valid)
+
+
+async def _handle_clear_empty_stock(state, hub, helper, websocket, raw) -> None:
+    """Helfer bestätigt im Rescan-Popup „Ja, wieder da" — Bestand-leer-
+    Markierung dieser einen ISBN entfernen. Nicht-blockierend: die Buchung
+    selbst ist zu diesem Zeitpunkt bereits abgeschlossen (s.
+    `_process_scan_locked`'s `was_empty_stock`-Flag)."""
+    isbn = raw.get("isbn")
+    if not isinstance(isbn, str) or isbn not in state.caches.empty_isbns:
+        return
+    state.caches.empty_isbns.discard(isbn)
+    _persist_booklist_settings(state)
+    await hub.broadcast_settings()
+    await repush_for_changed_empty_isbns(state, hub, {isbn})
+
+
 async def _handle_print(state, hub, helper, websocket, raw) -> None:
     # Leihschein des aktuell zugewiesenen Schülers drucken — über die interne
     # Druckerwarteschlange (Rollen-Rangfolge, 2-in-flight). Read-only PDF-Abruf
@@ -760,6 +794,8 @@ _SCANNER_HANDLERS = {
     "print_for_student": _handle_print_for_student,
     "finish_signed": _handle_finish_signed,
     "scan": _handle_scan,
+    "mark_empty_stock": _handle_mark_empty_stock,
+    "clear_empty_stock": _handle_clear_empty_stock,
 }
 
 
@@ -810,7 +846,9 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
             # erst beim nächsten echten Aufrufen (assign_student_to_helper)
             # neu an. done_isbns wird trotzdem aus dem aktuellen IServ-Stand
             # aufgefrischt.
-            info = await hydrate_student_info(state, info, form, helper, reset_baseline=False)
+            info = await hydrate_student_info(
+                state, info, form, helper, reset_baseline=False, is_helper=True
+            )
             book_order = info["book_order"]
             helper.last_scan = None  # Worker-Page wird ggf. neu geladen → Feld leer
             # Modus A: Bücherliste sofort. Sends über das Hub-Lock
@@ -872,7 +910,7 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
                 helper.spectating_student_id, state.selected_schoolyear
             )
             info = await hydrate_student_info(
-                state, info, helper.student_form or "", helper, reset_baseline=False
+                state, info, helper.student_form or "", helper, reset_baseline=False, is_helper=True
             )
             book_order = info["book_order"]
             await hub.send_websocket(
@@ -1184,7 +1222,7 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
             # reset_baseline=False: Reload derselben Verbindung — die „seit
             # Aufrufen"-Baseline (loaned_at_load) bleibt stehen, s. ws_scanner.
             info = await hydrate_student_info(
-                state, info, qs.form if qs else "", session, reset_baseline=False
+                state, info, qs.form if qs else "", session, reset_baseline=False, is_helper=False
             )
             books = info.get("books", [])
             await hub.send_websocket(

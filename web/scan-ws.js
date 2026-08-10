@@ -130,6 +130,9 @@ function handleServerMessage(msg) {
       // veraltet. Der alte Druck darf physisch fertig werden, aber die
       // Anzeige kehrt sofort zum Buchfortschritt zurück.
       clearStatus('print');
+      // „Bestand leer" erneut gescannt: Buchung ist bereits abgeschlossen
+      // (oben) — die Rückfrage ist rein informativ und blockiert nichts.
+      if (msg.was_empty_stock) showEmptyStockPopup(msg.isbn);
     }
     drainScanWaiters();
     // Jeder nicht-verbuchbare Scan (alles außer staged/booked) → Statuszeile

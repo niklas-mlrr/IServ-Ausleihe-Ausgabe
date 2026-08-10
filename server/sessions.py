@@ -98,7 +98,7 @@ async def handle_scan(state: AppState, student_id: int, barcode: str) -> dict:
 
 
 async def hydrate_student_info(
-    state: AppState, info: dict, form: str, target, *, reset_baseline: bool = True
+    state: AppState, info: dict, form: str, target, *, reset_baseline: bool = True, is_helper: bool
 ) -> dict:
     """Reiner Hydrations-Teil, gemeinsam für alle vier Lade-/Reconnect-Pfade
     (Modus A: `load_and_push_helper_student`, `ws_scanner`-Reconnect; Modus B:
@@ -117,12 +117,19 @@ async def hydrate_student_info(
 
     `reset_baseline` (Default True): siehe `init_book_progress`. Reconnect-
     Aufrufer (Seiten-Reload derselben Verbindung) übergeben False, damit die
-    „seit Aufrufen"-Baseline über den Reload hinweg stehen bleibt."""
+    „seit Aufrufen"-Baseline über den Reload hinweg stehen bleibt.
+
+    `is_helper` (Pflicht, kein Default): steuert `apply_empty_stock_flag` —
+    True für Modus A (Helfer sieht die „Bestand leer"-Markierung), False für
+    Modus B (Schüler bekommt sie NIE, s. server/sessions.py::apply_empty_stock_flag).
+    Bewusst KEIN `isinstance`-Check auf `target` (bricht bei Duck-Typed-Fakes
+    in Tests) — jeder der vier Call-Sites kennt seinen Modus ohnehin."""
     info["form"] = form
     helper = state.find_helper_for_student(getattr(target, "student_id", None))
     info["helper_name"] = helper.name if helper is not None else None
     info["book_order"] = await get_book_order_for_form(state, form)
     apply_hidden_books(info, await get_hidden_isbns_for_form(state, form))
+    apply_empty_stock_flag(info, state.caches.empty_isbns, visible=is_helper)
     target.expected_isbns = expected_isbns_from_info(info)
     target.vormerk_isbns, target.lent_isbns, target.lent_codes = booking_isbn_sets_from_info(info)
     init_book_progress(
@@ -163,6 +170,11 @@ def init_book_progress(
     student.done_isbns = {
         b["isbn"] for b in books if b.get("isbn") and b.get("status") == "ausgeliehen"
     }
+    student.books_empty_outstanding = sum(
+        1
+        for b in books
+        if b.get("isbn") in state.caches.empty_isbns and b["isbn"] not in student.done_isbns
+    )
     if reset_baseline:
         # Bei Laden bereits ausgeliehene Bücher — Grundlage für den session-
         # basierten Fortschritt in der Host-Status-Spalte („seit Aufrufen … /
@@ -179,7 +191,13 @@ def mark_book_done(state: AppState, student_id: int, isbn: str | None) -> None:
         return
     student = state.find_student(student_id)
     if student is not None:
+        was_open = isbn not in student.done_isbns
         student.done_isbns.add(isbn)
+        # Klammer-Anzeige `X/Y (Z)` verschwindet, sobald das Buch tatsächlich
+        # gescannt wird — unabhängig von der Ja/Nein-Rückfrage im Helfer-Client
+        # (die betrifft nur `empty_isbns` selbst, nicht diesen Zähler).
+        if was_open and isbn in state.caches.empty_isbns and student.books_empty_outstanding > 0:
+            student.books_empty_outstanding -= 1
 
 
 def invalidate_slip_after_scan(state: AppState, student_id: int) -> None:
@@ -226,6 +244,23 @@ def apply_hidden_books(info: dict, hidden_isbns: set[str]) -> None:
     if not hidden_isbns:
         return
     info["books"] = [b for b in info.get("books", []) if b.get("isbn") not in hidden_isbns]
+
+
+def apply_empty_stock_flag(info: dict, empty_isbns: set[str], *, visible: bool) -> None:
+    """Markiert Buchzeilen mit leerem Bestand (`b["bestand_leer"] = True`) —
+    NUR für den Helfer-Client (`visible=True`). Bei `visible=False`
+    (Schüler-Client, Modus B) passiert nichts: der Schüler bekommt weder eine
+    Markierung noch eine Rückfrage, das Buch bleibt für ihn ein ganz normales,
+    einscannbares Buch.
+
+    Anders als `apply_hidden_books` wird die Zeile NIE entfernt — „Bestand
+    leer" bleibt vorgemerkt und buchbar (`evaluate_scan_for_booking` bleibt
+    unberührt), es ist nur eine zusätzliche Info-Markierung."""
+    if not visible or not empty_isbns:
+        return
+    for b in info.get("books", []):
+        if b.get("isbn") in empty_isbns:
+            b["bestand_leer"] = True
 
 
 def expected_isbns_from_info(info: dict) -> set[str]:
@@ -535,7 +570,13 @@ async def _process_scan_locked(
     # X=0, während die Client-Bücherliste die Reihen längst als erledigt zeigt.
     if result.get("status") in ("booked", "staged"):
         invalidate_slip_after_scan(state, student_id)
-        mark_book_done(state, student_id, result.get("isbn"))
+        isbn = result.get("isbn")
+        # Nur für den Helfer-Client relevant (löst dort die nicht-blockierende
+        # Ja/Nein-Rückfrage aus, s. web/scan-render.js) — der Schüler-Client
+        # liest dieses Feld schlicht nicht aus.
+        if isbn and isbn in state.caches.empty_isbns:
+            result["was_empty_stock"] = True
+        mark_book_done(state, student_id, isbn)
     return result
 
 
@@ -1311,7 +1352,9 @@ async def load_and_push_helper_student(state: AppState, hub, student, helper) ->
         await hub.send_scanner(helper.token, {"type": "error", "msg": f"IServ-Fehler: {e}"})
         return
 
-    info = await hydrate_student_info(state, info, getattr(student, "form", ""), helper)
+    info = await hydrate_student_info(
+        state, info, getattr(student, "form", ""), helper, is_helper=True
+    )
     # Modus A: Bücherliste sofort sichtbar. `worker_ready` (ohne Bücher) folgt,
     # sobald der Worker buchungsbereit ist — bis dahin zeigt der Helferclient
     # „Warten…" und ignoriert Scans (clientseitig). Der Host bleibt bis zum
@@ -1398,7 +1441,7 @@ async def repush_booklist(
         log.exception("Schülerinfo für booklist_update (%d) fehlgeschlagen", student_id)
         return
     info = await hydrate_student_info(
-        state, info, getattr(student, "form", ""), target, reset_baseline=False
+        state, info, getattr(student, "form", ""), target, reset_baseline=False, is_helper=helper
     )
     new_isbns = {b.get("isbn") for b in info.get("books", []) if b.get("isbn")}
     student.done_isbns |= prev_done & new_isbns
@@ -1411,6 +1454,42 @@ async def repush_booklist(
         await hub.send_scanner(target.token, msg)
     elif target.ws is not None:
         await hub.send_websocket(target.ws, msg)
+
+
+async def repush_for_changed_empty_isbns(state: AppState, hub, changed: set[str]) -> None:
+    """Alle Helfer-/Schüler-Sessions live nachziehen, deren aktuell erwartete
+    Bücher (`expected_isbns`) von einer Bestand-leer-Änderung betroffen sind.
+
+    Global statt jahrgangsgebunden (anders als `set_booklist_hidden`'s
+    `_student_in_grade`-Filter in `routes/booklists.py`): `empty_isbns` ist
+    kein Pro-Jahrgang-Set, ein Mehrjahresband-ISBN kann mehrere Jahrgänge
+    gleichzeitig betreffen. Gemeinsam genutzt vom Admin-Endpoint
+    (`POST /api/booklist-empty`) und den Helfer-WS-Handlern
+    (`mark_empty_stock`/`clear_empty_stock`)."""
+    if not changed:
+        return
+    tasks: list[asyncio.Task] = []
+    for helper in state.helper_sessions.values():
+        if helper.student_id is None or helper.ws is None:
+            continue
+        if helper.expected_isbns & changed:
+            tasks.append(
+                asyncio.create_task(
+                    repush_booklist(state, hub, helper.student_id, helper, helper=True)
+                )
+            )
+    for session in state.student_sessions.values():
+        if session.student_id is None or session.ws is None or session.state != "paired":
+            continue
+        if session.expected_isbns & changed:
+            tasks.append(
+                asyncio.create_task(
+                    repush_booklist(state, hub, session.student_id, session, helper=False)
+                )
+            )
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await hub.broadcast_host(state.state_snapshot())
 
 
 async def advance_helper(state: AppState, hub, helper, context_id: str | None = None) -> dict:
@@ -1587,7 +1666,7 @@ async def spectate_student(
         helper.spectating_student_id = None
         await hub.send_scanner(helper.token, {"type": "error", "msg": f"IServ-Fehler: {e}"})
         return
-    info = await hydrate_student_info(state, info, form, helper)
+    info = await hydrate_student_info(state, info, form, helper, is_helper=True)
     await hub.send_scanner(
         helper.token, {"type": "student_info", "student": info, "spectator": True}
     )
@@ -1624,7 +1703,9 @@ async def load_and_push_paired_student(
     # poppen. Ohne Stale-Gard registriert der Task danach den Context für einen
     # student_id, der schon nicht mehr zur Session gehört → Worker-Orphan.
     paired_student_id = student.student_id
-    info = await hydrate_student_info(state, info, getattr(student, "form", ""), session)
+    info = await hydrate_student_info(
+        state, info, getattr(student, "form", ""), session, is_helper=False
+    )
     # Bücher erst mit `worker_ready` senden — Identität (inkl. book_order) sofort.
     books = info.get("books", [])
     if session.ws is not None:

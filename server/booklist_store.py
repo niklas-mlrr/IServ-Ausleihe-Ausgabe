@@ -1,7 +1,8 @@
-"""Persistenz der jahrgangsweiten Bücher-Reihenfolge & Ausblendung.
+"""Persistenz der jahrgangsweiten Bücher-Reihenfolge, Ausblendung & Bestand.
 
-Schmaler Sync-IO-Layer: lädt/speichert `book_orders_by_grade` und
-`hidden_isbns_by_grade` als einzelner globaler Satz in
+Schmaler Sync-IO-Layer: lädt/speichert `book_orders_by_grade`,
+`hidden_isbns_by_grade` und `empty_isbns` (Bestand-leer, global über alle
+Jahrgänge — Mehrjahresbände teilen sich denselben physischen Bestand) in
 `data/booklist_settings.json`. Kein IServ-Kontakt, keine AppState-Abhängigkeit
 — reine Datei-IO, damit der In-Memory-State (`server/state.py`) die Leading
 Source bleibt und Schreibfehler nie den Endpoint crashen.
@@ -26,14 +27,15 @@ STORE_PATH = Path(__file__).resolve().parent.parent / "data/booklist_settings.js
 _write_lock = threading.Lock()
 
 
-def _empty() -> tuple[dict[int, list[str]], dict[int, set[str]]]:
-    return {}, {}
+def _empty() -> tuple[dict[int, list[str]], dict[int, set[str]], set[str]]:
+    return {}, {}, set()
 
 
-def load() -> tuple[dict[int, list[str]], dict[int, set[str]]]:
-    """Gespeicherten Stand lesen. Liefert `({}, {})` bei fehlender oder
-    korrupter Datei (non-fatal — In-Memory-State bleibt leer wie vor dieser
-    Persistenz). Grades kommen als `int` zurück, `hidden` als `set`."""
+def load() -> tuple[dict[int, list[str]], dict[int, set[str]], set[str]]:
+    """Gespeicherten Stand lesen. Liefert `({}, {}, set())` bei fehlender
+    oder korrupter Datei (non-fatal — In-Memory-State bleibt leer wie vor
+    dieser Persistenz). Grades kommen als `int` zurück, `hidden`/`empty` als
+    `set`. `empty` ist eine flache Liste (nicht Jahrgang-geschlüsselt)."""
     if not STORE_PATH.is_file():
         return _empty()
     try:
@@ -45,6 +47,7 @@ def load() -> tuple[dict[int, list[str]], dict[int, set[str]]]:
 
     orders_raw = data.get("orders", {}) if isinstance(data, dict) else {}
     hidden_raw = data.get("hidden", {}) if isinstance(data, dict) else {}
+    empty_raw = data.get("empty", []) if isinstance(data, dict) else []
     orders: dict[int, list[str]] = {}
     hidden: dict[int, set[str]] = {}
     for grade_key, seq in orders_raw.items():
@@ -61,17 +64,22 @@ def load() -> tuple[dict[int, list[str]], dict[int, set[str]]]:
             continue
         if isinstance(seq, list):
             hidden[grade] = {s for s in seq if isinstance(s, str)}
-    return orders, hidden
+    empty: set[str] = (
+        {s for s in empty_raw if isinstance(s, str)} if isinstance(empty_raw, list) else set()
+    )
+    return orders, hidden, empty
 
 
-def save(orders: dict[int, list[str]], hidden: dict[int, set[str]]) -> None:
+def save(orders: dict[int, list[str]], hidden: dict[int, set[str]], empty: set[str]) -> None:
     """Aktuellen In-Memory-Stand atomar wegschreiben. Sets werden als
     `sorted(list)` serialisiert, Grades als `str` (JSON erlaubt nur String-
-    Keys). Schreibfehler werden geloggt, nicht weitergeworfen — der Aufrufer
+    Keys). `empty` ist global, daher flach (keine Jahrgangs-Schachtelung).
+    Schreibfehler werden geloggt, nicht weitergeworfen — der Aufrufer
     (Endpoint) darf nicht crashen."""
     data = {
         "orders": {str(g): list(seq) for g, seq in orders.items()},
         "hidden": {str(g): sorted(seq) for g, seq in hidden.items()},
+        "empty": sorted(empty),
     }
     with _write_lock:
         tmp_path = STORE_PATH.with_suffix(".json.tmp")

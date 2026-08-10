@@ -14,9 +14,9 @@ from fastapi import HTTPException
 from ..book_order import normalize_book_order
 from ..booklist_store import save as save_booklist_state
 from ..hub import get_hub
-from ..sessions import repush_booklist
+from ..sessions import repush_booklist, repush_for_changed_empty_isbns
 from ..state import get_state
-from ._deps import BooklistHiddenRequest, BooklistOrderRequest, host_router
+from ._deps import BooklistEmptyRequest, BooklistHiddenRequest, BooklistOrderRequest, host_router
 
 log = logging.getLogger(__name__)
 
@@ -48,7 +48,11 @@ def _persist_booklist_settings(state) -> None:
     Schreibfehler werden geloggt, der In-Memory-State bleibt Leading und der
     Endpoint crasht nicht."""
     try:
-        save_booklist_state(state.caches.book_orders_by_grade, state.caches.hidden_isbns_by_grade)
+        save_booklist_state(
+            state.caches.book_orders_by_grade,
+            state.caches.hidden_isbns_by_grade,
+            state.caches.empty_isbns,
+        )
     except Exception:
         log.exception("Speichern der booklist-Einstellungen fehlgeschlagen (non-fatal)")
 
@@ -106,7 +110,8 @@ async def get_booklist_order(grade: int) -> dict:
     stored = state.caches.book_orders_by_grade.get(grade)
     order = normalize_book_order(catalog_isbns, stored) if stored else catalog_isbns
     hidden = sorted(state.caches.hidden_isbns_by_grade.get(grade, set()) & set(catalog_isbns))
-    return {"grade": grade, "catalog": catalog, "order": order, "hidden": hidden}
+    empty = sorted(state.caches.empty_isbns & set(catalog_isbns))
+    return {"grade": grade, "catalog": catalog, "order": order, "hidden": hidden, "empty": empty}
 
 
 @host_router.post("/api/booklist-order")
@@ -209,3 +214,41 @@ async def set_booklist_hidden(body: BooklistHiddenRequest) -> dict:
         # Reihen zählen nicht mehr) → Host-Snapshot neu pushen.
         await hub.broadcast_host(state.state_snapshot())
     return {"ok": True, "grade": grade, "hidden": sorted(hidden)}
+
+
+@host_router.post("/api/booklist-empty")
+async def set_booklist_empty(body: BooklistEmptyRequest) -> dict:
+    """Buchreihen mit leerem Bestand („Bestand leer", Einstellungen-Dialog)
+    für einen Jahrgang setzen.
+
+    `empty_isbns` ist GLOBAL (nicht jahrgangsgeschlüsselt, s.
+    `IservCaches.empty_isbns`) — dieser Endpoint ersetzt daher nur den
+    Schnitt mit dem Katalog des übergebenen `grade` ("scoped replace"), damit
+    das Bearbeiten eines Jahrgangs nicht versehentlich Bestand-leer-Flags
+    eines Mehrjahresbands löscht, der nur im Katalog eines ANDEREN Jahrgangs
+    sichtbar ist. Anders als `set_booklist_hidden` bleiben die betroffenen
+    Reihen weiterhin vorgemerkt/buchbar — nur eine Zusatzmarkierung im
+    Helfer-Client (`apply_empty_stock_flag` in `sessions.py`)."""
+    state = get_state()
+    grade = body.grade
+    requested = body.empty
+    if grade is None or requested is None:
+        raise HTTPException(400, "grade (int) und empty (Liste) erforderlich")
+    try:
+        catalog = await state.iserv.get_booklist_catalog_by_grade(grade, state.selected_schoolyear)
+    except Exception as e:
+        log.exception("Jahrgangs-Bücherliste konnte nicht geladen werden")
+        raise HTTPException(502, f"IServ-Fehler: {e}") from e
+    catalog_isbns = {b["isbn"] for b in catalog}
+    requested_subset = {
+        isbn for isbn in requested if isinstance(isbn, str) and isbn in catalog_isbns
+    }
+    before = state.caches.empty_isbns
+    after = (before - catalog_isbns) | requested_subset
+    changed = before ^ after
+    state.caches.empty_isbns = after
+    _persist_booklist_settings(state)
+    hub = get_hub()
+    await hub.broadcast_settings()
+    await repush_for_changed_empty_isbns(state, hub, changed)
+    return {"ok": True, "grade": grade, "empty": sorted(after & catalog_isbns)}
