@@ -141,8 +141,9 @@
       gap: 10px; margin: 12px 2px 8px; width: 100%;
       padding: 8px 10px; border-radius: 8px; background: var(--surface);
     }
-    /* Im Scan-View (view-active) ohne umschließende Box — reiner Text. */
-    #view-active .name-row {
+    /* Im Scan-View (view-active) sowie im Druck-/Leihschein-unterschreiben-
+       Modus (view-print/view-slip) ohne umschließende Box — reiner Text. */
+    #view-active .name-row, #view-print .name-row, #view-slip .name-row, #view-done .name-row {
       background: none; padding: 0 2px;
     }
     .s-name { font-size: 1.5rem; font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.2; }
@@ -215,6 +216,7 @@
     #view-print .big-msg { margin-top: 0; }
     #view-slip .print-name-row { margin-top: 12px; }
     #view-slip .big-msg { margin-top: 0; }
+    #view-done .print-name-row { margin-top: 12px; }
     #view-done .big-msg { margin-top: 0; }
     #print-intro {
       max-width: 520px; margin: 0 auto 18px; line-height: 1.45;
@@ -383,6 +385,12 @@
        — kein erneuter Serverzugriff nötig, der Session-Token ist zu diesem
        Zeitpunkt bereits entwertet. -->
   <div class="view" id="view-done">
+    <div class="name-row print-name-row">
+      <div class="s-name" id="done-name">–</div>
+      <div class="s-meta">
+        <div class="s-form" id="done-form"></div>
+      </div>
+    </div>
     <div class="scroll-center">
       <div class="big-msg">
         <div class="icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.801 10A10 10 0 1 1 17 3.335"/><path d="m9 11 3 3L22 4"/></svg></div>

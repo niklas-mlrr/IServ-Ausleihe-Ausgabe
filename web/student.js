@@ -14,9 +14,10 @@ function show(name) {
 
 // Druckmodus/Leihscheinmodus/Abschluss (view-print/view-slip/view-done): der
 // Inhalt (.scroll-center) soll mittig bezogen auf die GESAMTE View-Höhe
-// stehen, nicht nur mittig im Bereich unter einem evtl. Namen — außer das
-// würde mit dem Namen (.print-name-row, nur bei Druck-/Leihscheinmodus
-// vorhanden; view-done hat keinen) kollidieren, dann direkt darunter. Ist
+// stehen, nicht nur mittig im Bereich unter dem Namen (.print-name-row, in
+// allen drei Views vorhanden) — außer das würde mit dem Namen kollidieren,
+// dann direkt darunter. Der Name selbst bleibt dabei immer fix oben stehen
+// (außerhalb von .scroll-center) und wird nie Teil des Scroll-Bereichs. Ist
 // der Inhalt selbst zu groß für den verbleibenden Platz, wird nur
 // .scroll-center scrollbar (statt über den Bildschirmrand zu laufen oder —
 // der ursprüngliche Bug bei view-done — mit CSS-`justify-content:center`
@@ -632,6 +633,8 @@ function renderStudent(s, overridden) {
   document.getElementById('print-form').textContent = studentForm;
   document.getElementById('slip-name').textContent = studentName;
   document.getElementById('slip-form').textContent = studentForm;
+  document.getElementById('done-name').textContent = studentName;
+  document.getElementById('done-form').textContent = studentForm;
   const pay = document.getElementById('s-pay');
   if (!s.enrolled) {
     pay.innerHTML = '<span class="pay-badge wait">Nicht angemeldet</span>';
