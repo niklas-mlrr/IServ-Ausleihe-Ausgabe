@@ -1448,10 +1448,14 @@ window.__host = window.__host || {};
           <div class="ns-meta"><span class="ns-class">${escapeHtml(s.form)}</span>${statusLbl}${helperLbl}</div>
           ${alertLbl}
           <div class="ns-actions">
-            <button class="success icon-only" data-action="finish" data-student-id="${s.student_id}" title="Abschließen" aria-label="Abschließen">${ICON_ACTION_CHECK}</button>
-            ${printAction}
-            ${studentSignature ? `<button class="secondary icon-only" data-action="finish-signed" data-student-id="${s.student_id}" title="Leihschein unterschrieben" aria-label="Leihschein unterschrieben">${ICON_SIGN}</button>` : ''}
-            <button class="secondary icon-only" data-action="disconnect" data-student-id="${s.student_id}" title="Trennen" aria-label="Trennen">${ICON_DISCONNECT}</button>
+            <div class="ns-actions-left">
+              <button class="success icon-only" data-action="finish" data-student-id="${s.student_id}" title="Abschließen" aria-label="Abschließen">${ICON_ACTION_CHECK}</button>
+              <button class="secondary icon-only" data-action="disconnect" data-student-id="${s.student_id}" title="Trennen" aria-label="Trennen">${ICON_DISCONNECT}</button>
+            </div>
+            <div class="ns-actions-right">
+              ${printAction}
+              ${studentSignature ? `<button class="secondary icon-only" data-action="finish-signed" data-student-id="${s.student_id}" title="Leihschein unterschrieben" aria-label="Leihschein unterschrieben">${ICON_SIGN}</button>` : ''}
+            </div>
           </div>
         </div>`;
       }).join('') + '</div>';

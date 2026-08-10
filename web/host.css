@@ -528,7 +528,9 @@
     /* Verliehen-an-Alert: Meldungstext normal (nur „verliehen an …" ist rot). */
     .ns-alert.ns-alert-muted { color: var(--text); font-weight: 500; }
     .ns-borrower { font-size: .8rem; font-weight: 600; color: var(--danger); margin-top: 2px; }
-    .ns-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+    .ns-actions { display: flex; justify-content: space-between; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+    .ns-actions-left, .ns-actions-right { display: flex; gap: 6px; flex-wrap: wrap; }
+    .ns-actions-right { margin-left: auto; }
     .ns-actions button.icon-only { width: 40px; min-width: 40px; height: 40px; padding: 9px; }
     .ns-empty { color: var(--text-muted); font-size: .95rem; padding: 6px 0; }
     .ns-next { margin-top: 12px; font-size: .9rem; color: var(--text-muted); }
