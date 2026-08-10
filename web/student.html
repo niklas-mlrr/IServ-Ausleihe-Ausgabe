@@ -244,16 +244,6 @@
     .info-box h4 { font-size: .95rem; font-weight: 700; margin-bottom: 6px; }
     .info-box p { font-size: .85rem; line-height: 1.45; opacity: .8; }
     .info-box p + p { margin-top: 10px; }
-    /* Im Schüler-Druck-/Unterschreiben-Modus bleibt der Hinweis am unteren
-       Rand der sichtbaren Ansicht — auch wenn der übrige Inhalt mittig sitzt. */
-    #view-print .info-box, #view-slip .info-box {
-      position: fixed;
-      left: 50%;
-      bottom: calc(16px + env(safe-area-inset-bottom, 0px));
-      width: min(520px, calc(100vw - 28px));
-      margin: 0;
-      transform: translateX(-50%);
-    }
   </style>
 </head>
 <body>
