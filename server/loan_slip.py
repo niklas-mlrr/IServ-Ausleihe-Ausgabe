@@ -129,15 +129,42 @@ def override_class_on_slip(pdf_bytes: bytes, form: str) -> bytes:
         return pdf_bytes
 
 
+# Rechter Rand für den Zeilenumbruch der Hinweiszeile — dieselbe Marge wie
+# IServ typischerweise am Seitenrand lässt (grobe Annäherung, das Original-PDF
+# hat kein explizites Layoutraster, das wir auslesen könnten).
+_RIGHT_MARGIN = 36.0
+
+
+def _wrap_text(font, text: str, fontsize: float, max_width: float) -> list[str]:
+    """Wortweiser Zeilenumbruch: so viele Wörter pro Zeile, wie in `max_width`
+    passen (Font-Metrik-genau via `font.text_length`). Ein einzelnes Wort, das
+    für sich schon zu breit ist, bleibt trotzdem auf einer eigenen Zeile
+    (kein Silbentrennen) — Druck darf daran nicht scheitern."""
+    words = text.split(" ")
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        if not current or font.text_length(candidate, fontsize) <= max_width:
+            current = candidate
+        else:
+            lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines
+
+
 def overlay_missing_stock_note(pdf_bytes: bytes, subjects: list[str]) -> bytes:
-    """Hinweiszeile auf Seite 1 (Schul-Kopie) einfügen: die Fächer der Reihen,
-    die vorgemerkt, aber noch nicht ausgeliehen sind UND als „Bestand leer"
-    markiert sind, kommagetrennt + „fehlt"/„fehlen" (Singular bei genau einem
-    Fach). Sitzt mit etwas Abstand UNTER der „Klasse <code>"-Wertzeile (selber
-    x-Ursprung, damit sie optisch zur Klassen-Zeile gehört), auf derselben
-    Seite wie `override_class_on_slip` sucht (dort aber alle Seiten — hier
-    NUR Seite 1, da die Schul-Kopie gemeint ist, nicht der Schüler-Leihschein
-    auf Seite 2).
+    """Hinweiszeile(n) auf Seite 1 (Schul-Kopie) einfügen: die Fächer der
+    Reihen, die vorgemerkt, aber noch nicht ausgeliehen sind UND als „Bestand
+    leer" markiert sind, kommagetrennt + „fehlt"/„fehlen" (Singular bei genau
+    einem Fach). Sitzt mit etwas Abstand UNTER der „Klasse <code>"-Wertzeile
+    (selber x-Ursprung, damit sie optisch zur Klassen-Zeile gehört), auf
+    derselben Seite wie `override_class_on_slip` sucht (dort aber alle Seiten
+    — hier NUR Seite 1, da die Schul-Kopie gemeint ist, nicht der Schüler-
+    Leihschein auf Seite 2). Reicht der Text über den Seitenrand hinaus, wird
+    er wortweise umgebrochen (`_wrap_text`) statt abgeschnitten.
 
     Rein lokale PDF-Bearbeitung, kein IServ-Write. Bei Fehlern oder wenn keine
     Klassen-Wertzeile gefunden wird: unveränderte Original-Bytes zurück — ein
@@ -172,16 +199,21 @@ def overlay_missing_stock_note(pdf_bytes: bytes, subjects: list[str]) -> bytes:
             return pdf_bytes
         x0, baseline = anchor["origin"]
         size = anchor["size"] * 0.85
+        line_height = anchor["size"] * 1.3
         gap = anchor["size"] * 1.5  # „mit etwas Abstand" unter der Klassen-Zeile
-        page.insert_text(
-            (x0, baseline + gap),
-            note,
-            fontname="helv",
-            fontsize=size,
-            color=0,
-        )
+        font = fitz.Font("helv")
+        max_width = page.rect.width - _RIGHT_MARGIN - x0
+        lines = _wrap_text(font, note, size, max_width) if max_width > 0 else [note]
+        for i, line in enumerate(lines):
+            page.insert_text(
+                (x0, baseline + gap + i * line_height),
+                line,
+                fontname="helv",
+                fontsize=size,
+                color=0,
+            )
         out = doc.tobytes()
-        log.info("Bestand-leer-Hinweis auf Leihschein gesetzt: %r", note)
+        log.info("Bestand-leer-Hinweis auf Leihschein gesetzt (%d Zeile(n)): %r", len(lines), note)
         return out
     except Exception:  # noqa: BLE001 — Druck darf hieran nie scheitern
         log.exception("Bestand-leer-Hinweis konnte nicht gesetzt werden — Original wird gedruckt")

@@ -4,7 +4,7 @@ import asyncio
 
 import fitz  # PyMuPDF
 
-from server.loan_slip import overlay_missing_stock_note, override_class_on_slip
+from server.loan_slip import _wrap_text, overlay_missing_stock_note, override_class_on_slip
 
 
 def _make_slip(class_code: str = "12Slw") -> bytes:
@@ -108,6 +108,44 @@ def test_overlay_missing_stock_note_below_left_school_placeholder():
     out = overlay_missing_stock_note(_make_left_school_slip(), ["Mathematik"])
     text = fitz.open(stream=out, filetype="pdf")[0].get_text().replace("\n", " ")
     assert "Mathematik fehlt" in text
+
+
+def test_wrap_text_keeps_short_text_on_one_line():
+    font = fitz.Font("helv")
+    assert _wrap_text(font, "Mathematik, Biologie fehlen", 10, 400) == [
+        "Mathematik, Biologie fehlen"
+    ]
+
+
+def test_wrap_text_breaks_long_text_into_multiple_lines():
+    font = fitz.Font("helv")
+    text = "Mathematik, Biologie, Chemie, Physik, Erdkunde, Geschichte fehlen"
+    lines = _wrap_text(font, text, 10, 100)
+    assert len(lines) > 1
+    assert " ".join(lines) == text  # kein Wort verloren
+    for line in lines:
+        assert font.text_length(line, 10) <= 100 or " " not in line  # Einzelwort darf überstehen
+
+
+def test_overlay_missing_stock_note_wraps_long_subject_list():
+    # Viele Fächer -> die Hinweiszeile ist breiter als die Seite -> Umbruch
+    # auf mehrere Zeilen statt Abschneiden/Überlaufen über den Rand.
+    many_subjects = [f"Fach{i:02d}" for i in range(20)]
+    out = overlay_missing_stock_note(_make_slip("12Slw"), many_subjects)
+    doc = fitz.open(stream=out, filetype="pdf")
+    words = [w[4] for w in doc[0].get_text("words")]
+    for subj in many_subjects:
+        assert f"{subj}," in words or subj in words
+    assert "fehlen" in words
+    # Mehr als eine Textzeile im relevanten Bereich unter der Klassen-Zeile.
+    note_lines = [
+        line
+        for block in doc[0].get_text("dict")["blocks"]
+        for line in block.get("lines", [])
+        if line["spans"] and any("Fach" in s["text"] for s in line["spans"])
+    ]
+    baselines = {round(line["spans"][0]["origin"][1], 1) for line in note_lines}
+    assert len(baselines) > 1  # mehrere unterschiedliche Zeilen-Baselines
 
 
 def test_overlay_missing_stock_note_empty_list_is_noop():
