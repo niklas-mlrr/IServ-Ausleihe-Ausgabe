@@ -24,11 +24,13 @@ window.__host = window.__host || {};
   // Druckersymbol für die Leihschein-Buttons — dasselbe SVG wie im Helfer-Client
   // (scan.html #print-btn), nur hier statt dem Wort „Leihschein".
   const ICON_PRINTER = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>';
-  const ICON_ACTION_CHECK = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4.5 4.5L19 7"/></svg>';
+  // Zielflagge für „Abschließen", angelehnt an `Abschließen.PNG`: Fahnenmast
+  // links, karierte Fläche mit gezacktem (flatterndem) rechten Rand.
+  const ICON_ACTION_CHECK = '<svg class="ico" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="2" width="1.5" height="20" rx="0.75"/><rect x="5" y="3" width="3.5" height="4"/><rect x="12" y="3" width="3.5" height="4"/><rect x="8.5" y="7" width="3.5" height="4"/><polygon points="15.5,7 19,7 17,9 19,11 15.5,11"/><path d="M5 3 H19 L17 5 L19 7 L17 9 L19 11 H5 Z" fill="none" stroke="currentColor" stroke-width="1" stroke-linejoin="round"/></svg>';
   // Getrenntes Kettensymbol aus geometrischen Formen, angelehnt an
   // `Trennen.PNG`: kräftige Kettenglieder, diagonale Sperrlinie und Strahlen
   // ober- und unterhalb der unterbrochenen Verbindung.
-  const ICON_DISCONNECT = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 7H7a5 5 0 0 0 0 10h3a5 5 0 0 0 4.4-2.6"/><path d="M14 7h3a5 5 0 0 1 0 10h-3a5 5 0 0 1-4.4-2.6"/><path d="M4.2 3.5 19.8 20.5" stroke-width="2.9"/><path d="M12 1.5v3M8.6 2.9 6.5 5.1M15.4 2.9l2.1 2.2M12 19.5v3M8.6 21.1l-2.1-2.2M15.4 21.1l2.1-2.2" stroke-width="1.15"/></svg>';
+  const ICON_DISCONNECT = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M11 7H8a3 3 0 0 0-3 3v4a3 3 0 0 0 3 3h3"/><path d="M13 7h3a3 3 0 0 1 3 3v4a3 3 0 0 1-3 3h-3"/><path d="M4.2 20.5 19.8 3.5" stroke-width="2.7"/><path d="M12 1.5v3M8.6 2.9 6.5 5.1M15.4 2.9l2.1 2.2M12 19.5v3M8.6 21.1l-2.1-2.2M15.4 21.1l2.1-2.2" stroke-width="1.15"/></svg>';
   const ICON_SIGN = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 3.5a2.1 2.1 0 0 1 3 3L8 16 4 17l1-4Z"/><line x1="12.5" y1="5.5" x2="15.5" y2="8.5"/><path d="M2 20.5c1.3-1.7 2.2-1.5 3-.3.7 1 .6 1.8 1.8 1.3 1.6-.6 1.8-2.2 3.5-1.7.9.3 1.1 1.1 2 1L20.5 17.2"/></svg>';
   // Schließen-X für den „Code verwerfen"-Button neben „Zuordnen" (Modus B).
   // Dasselbe X-Pfad-SVG wie beim Helfer-Entfernen-Button (s. renderHelpers).

@@ -8,6 +8,31 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-10 — Schülerclient: Unterschriften-Bestätigung entfernt, Scan-View/Statuszeilen-Layout überarbeitet
+
+- **Unterschriften-Modus:** Der Schülerclient bietet keine Möglichkeit mehr,
+  den Leihschein selbst als unterschrieben zu markieren — der „Leihschein
+  unterschrieben"-Button (samt `finish_signed`-Aufruf) wurde entfernt. Der
+  Abschluss dieses Schritts läuft damit ausschließlich noch über den
+  Helferclient (Stift-Button, s. Eintrag 2026-08-07); serverseitig ist
+  `finish_signed`/`slip_signing` unverändert. Dies ersetzt die Änderung vom
+  2026-08-09 („Leihschein-unterschrieben"-Button im Schülerclient").
+- Der Button „Leihschein erhalten" heißt jetzt „Ich habe den Leihschein
+  erhalten"; die Druck-Statusbox behält nach dem Druck ihr Aussehen
+  (Rahmen/Fläche) bei, statt sich auf eine schlichte Zeile zu reduzieren.
+- **Scan-View:** Die Statuszeile sitzt jetzt direkt unter der Kamera (gleicher
+  Abstand wie zwischen den übrigen Top-Bar-Elementen: Zahnrad/Kamera/Torch),
+  Name und Klasse stehen darunter ohne umschließende Box. Ein Scan erzeugt
+  sofort die Rückmeldung „<Code> wird geprüft" in der Statuszeile, statt erst
+  nach der Serverantwort.
+- **Druck-/Unterschreiben-/Abschluss-Screens:** Name/Klasse stehen dort
+  ebenfalls ohne Box; der Abschluss-Screen („Vorgang abgeschlossen") zeigt
+  jetzt zusätzlich Name/Klasse, fix oben stehend und außerhalb des
+  scrollbaren Bereichs (analog zu Druck-/Unterschreiben-Modus). Der
+  Leihschein-Hinweiskasten ist dort nicht mehr am unteren Bildschirmrand
+  fixiert, sondern folgt im normalen Fluss direkt unter den
+  Text-/Button-Elementen.
+
 ## 2026-08-09 — Betreuerauslöser-Hinweis im Schülerclient
 
 - Im Schülerclient zeigt der Betreuerauslöser jetzt den Hinweis „Bitte wende
