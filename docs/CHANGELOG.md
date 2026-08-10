@@ -8,6 +8,32 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-10 — Leihschein-Druckauslöser auf zwei Stellen begrenzt
+
+- Der Druckerbutton in der Klassen-Tabelle (`renderCtxQueue`, sowohl bei
+  „aktiv" als auch bei „fertig") ist entfernt. Er sendete Druckaufträge ohne
+  `student_client`/`student_token`, wodurch ein per Betreuerauslöser vom Host
+  aus dieser Tabelle gedruckter Leihschein dem Schülerclient keinen
+  Druckerstatus lieferte (`print_progress`/`print_result` gingen nur an
+  `host_sid`).
+- Statt den Bug dort zu fixen, wurde der Auslöser entfernt: Drucken ist jetzt
+  nur noch über den Druckerbutton in „Aktuell in Ausgabe" (Host-Board,
+  `printLoanSlip` mit korrektem `data-student-client`) und über den
+  Warteschlangen-Druckbutton im Helferclient (`helper-print-btn` →
+  `print_for_student`, setzt `student_token` bereits korrekt) möglich.
+
+## 2026-08-10 — Host-Aktionssymbole „Aktuell in Ausgabe“ überarbeitet
+
+- **Trennen:** Statt des geometrischen Ketten-Symbols (Eintrag 2026-08-09)
+  jetzt ein durchgestrichenes WLAN-Symbol (Bögen + Punkt, Diagonale von
+  links unten nach rechts oben).
+- **Abschließen:** Statt des Häkchens jetzt eine Zielflagge, reduziert auf
+  ein großes 4x4-Karomuster ohne Fahnenmast.
+- Drucker- und Unterschrift-Symbol (`ICON_PRINTER`, `ICON_SIGN`) auf dieselbe
+  vergrößerte Darstellung (neue CSS-Klasse `.ico-lg`, 1.55em statt 1em)
+  gebracht, damit alle vier Aktionssymbole in „Aktuell in Ausgabe“
+  größenkonsistent wirken.
+
 ## 2026-08-10 — Schülerclient: Unterschriften-Bestätigung entfernt, Scan-View/Statuszeilen-Layout überarbeitet
 
 - **Unterschriften-Modus:** Der Schülerclient bietet keine Möglichkeit mehr,

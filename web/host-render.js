@@ -2242,7 +2242,6 @@ window.__host = window.__host || {};
       // einen Einmal-QR (POST /api/helper-scan/start → QR-Modal).
       const helperScanBtn = (state.modus_b && state.modus_b.open)
         ? `<button class="secondary" data-action="helper-scan" data-student-id="${s.student_id}">Bücher als Helfer einscannen</button> ` : '';
-      const printBtn = `<button class="secondary" data-action="print" data-student-id="${s.student_id}" title="Leihschein drucken" aria-label="Leihschein drucken">${ICON_PRINTER}</button>`;
       // Trennen: löst Helfer-/Schüler-Verbindung und setzt den Schüler zurück auf "Wartend".
       const disconnectBtn = `<button class="secondary" data-action="disconnect" data-student-id="${s.student_id}">Trennen</button>`;
       const actions = s.status === 'pending'
@@ -2252,12 +2251,10 @@ window.__host = window.__host || {};
           // Helfer-Scan-QR + Überspringen + Trennen wie bei einem Wartenden.
           ? `${helperScanBtn}<button class="secondary" data-action="skip" data-student-id="${s.student_id}">Überspringen</button> ${disconnectBtn}`
           : s.status === 'active'
-            ? `<button class="success" data-action="finish" data-student-id="${s.student_id}">Abschließen</button> <button class="secondary" data-action="skip" data-student-id="${s.student_id}">Abbrechen</button> ${disconnectBtn} ${printBtn}`
+            ? `<button class="success" data-action="finish" data-student-id="${s.student_id}">Abschließen</button> <button class="secondary" data-action="skip" data-student-id="${s.student_id}">Abbrechen</button> ${disconnectBtn}`
             : s.status === 'skipped'
               ? helperScanBtn
-              : s.status === 'done'
-                ? printBtn
-                : '';
+              : '';
       return `<tr class="${s.status === 'active' ? 'row-active' : ''}">
         <td>${escapeHtml(s.lastname)}, ${escapeHtml(s.firstname)}</td>
         <td>${escapeHtml((s.form || '').replace(/^Klasse\s+/i, ''))}</td>
