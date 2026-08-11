@@ -8,6 +8,18 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-11 — Bücherliste scrollt hinter dem Fokus-Warnbanner weiter
+
+- Das rote Banner „Vorsicht: Eingabefeld nicht fokussiert!" (manueller Modus im
+  Helfer-Client) liegt `position: fixed` über der Bücherliste und verdeckte
+  dadurch meist die unterste Buchzeile. `updateFocusBanner()`
+  (`web/scan-render.js`) misst jetzt die tatsächliche Bannerhöhe und setzt sie
+  als CSS-Variable `--focus-banner-h`; `.book-table-wrap` (`web/scan.html`)
+  nutzt sie als `padding-bottom`, sodass sich die Liste genau bis zur
+  Banner-Oberkante weiterscrollen lässt. Gemessen statt fest verdrahtet, weil
+  der Bannertext auf schmalen Displays umbrechen kann; ein `resize`-Listener
+  misst nach Rotation neu, ohne Banner ist das Padding `0px`.
+
 ## 2026-08-10 — „Bestand leer": roter Strich ohne Kasten + Fehlt-Hinweis auf dem Leihschein
 
 - **Helfer-Client:** das rote „−"-Icon für Bestand-leer-Zeilen zeigt jetzt nur
