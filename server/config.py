@@ -36,7 +36,11 @@ class Config:
     tls_key: Path = field(default_factory=lambda: PROJECT_ROOT / "certs/server.key")
     # Modus B: harte Zugriffsentzug-Schwellen (Sekunden).
     pending_pairing_ttl_s: int = 300  # QR gescannt, aber nicht gepairt → verfällt
-    paired_idle_ttl_s: int = 900  # gepairt, aber inaktiv → verfällt
+    # Gepairt, aber GETRENNT (keine WebSocket) → verfällt. Verbundene Sessions
+    # verfallen nicht (s. sessions.sweep_expired_sessions). 30 min überbrücken
+    # ein zwischendurch ausgeschaltetes Handy, ohne dass eine wirklich
+    # abgebrochene Session den Worker-Context ewig hält.
+    paired_idle_ttl_s: int = 1800
     # Helfer-Scan-QR („Bücher als Helfer einscannen") ungenutzt → verfällt.
     helper_scan_ttl_s: int = 600
     # Host-Login: gleitendes Timeout (verlängert sich bei jeder Anfrage).
@@ -128,7 +132,7 @@ def load_config(env_file: Path | None = None) -> Config:
         tls_cert=tls_cert,
         tls_key=tls_key,
         pending_pairing_ttl_s=positive("PENDING_PAIRING_TTL_S", 300),
-        paired_idle_ttl_s=positive("PAIRED_IDLE_TTL_S", 900),
+        paired_idle_ttl_s=positive("PAIRED_IDLE_TTL_S", 1800),
         helper_scan_ttl_s=positive("HELPER_SCAN_TTL_S", 600),
         host_session_ttl_s=positive("HOST_SESSION_TTL_S", 43200),
         print_backend=backend,

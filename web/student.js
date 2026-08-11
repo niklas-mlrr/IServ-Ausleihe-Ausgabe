@@ -73,7 +73,20 @@ const joinSecret = new URLSearchParams(location.search).get('j');
 // Einmaliges Helfer-Secret („Bücher als Helfer einscannen"): bindet die
 // Session direkt an den übersprungenen Schüler, ohne Pairing-Schritt.
 const helperSecret = new URLSearchParams(location.search).get('h');
-let token = sessionStorage.getItem('mb_token');
+// Der Session-Token liegt bewusst in `localStorage`, NICHT in
+// `sessionStorage`: Handys beenden den Browser beim Ausschalten/Speicherdruck,
+// und `sessionStorage` stirbt mit der Tab-Session — der Schüler landete dann
+// mitten in der Ausgabe wieder beim Pairing-Code. `localStorage` überlebt das,
+// der Server prüft den Token ohnehin bei jedem Verbindungsaufbau.
+// Aufgeräumt wird an genau den Stellen, an denen der Token stirbt
+// (`clearToken` bei `closed` und bei Close-Code 4006), damit ein Folgeschüler
+// am selben Gerät keinen fremden Token erbt.
+let token = localStorage.getItem('mb_token');
+if (!token) {
+  // Migration: Sessions, die noch unter der alten Ablage laufen, mitnehmen.
+  token = sessionStorage.getItem('mb_token');
+  if (token) { localStorage.setItem('mb_token', token); sessionStorage.removeItem('mb_token'); }
+}
 let ws = null, finished = false, scannerStarted = false;
 let scanInFlight = false;              // genau ein Scan bis zur Serverantwort
 let lastValue = '', cooldown = false, scanCooldownTimer = null;
@@ -113,7 +126,7 @@ function showError(title, text) {
   if (text) document.getElementById('error-text').textContent = text;
   show('error');
 }
-function clearToken() { token = null; sessionStorage.removeItem('mb_token'); }
+function clearToken() { token = null; localStorage.removeItem('mb_token'); sessionStorage.removeItem('mb_token'); }
 
 function resetScanLock() {
   scanInFlight = false;
@@ -136,7 +149,7 @@ async function join() {
     }
     const d = await r.json();
     token = d.session_token;
-    sessionStorage.setItem('mb_token', token);
+    localStorage.setItem('mb_token', token);
     document.getElementById('pair-code').textContent = d.pairing_code;
     return true;
   } catch (_) {
@@ -161,7 +174,7 @@ async function helperJoin() {
     }
     const d = await r.json();
     token = d.session_token;
-    sessionStorage.setItem('mb_token', token);
+    localStorage.setItem('mb_token', token);
     return true;
   } catch (_) {
     showError('Verbindungsfehler', 'Bitte erneut versuchen.');
@@ -188,6 +201,15 @@ function connect() {
     onClose: async (e, reconnect) => {
       document.getElementById('dot').className = 'dot err';
       if (finished) return;                       // regulär abgeschlossen
+      // 4009 = `_take_over_ws`: eine andere Verbindung mit DEMSELBEN Token hat
+      // übernommen (z. B. QR ein zweites Mal gescannt → zweiter Tab, der sich
+      // den Token jetzt über `localStorage` teilt). Ohne diesen Zweig würden
+      // sich beide Tabs gegenseitig endlos rauswerfen.
+      if (e.code === 4009) {
+        showError('In anderem Tab geöffnet',
+          'Diese Ausgabe läuft in einem anderen Tab weiter. Bitte dort fortfahren.');
+        return;
+      }
       if (e.code === 4006) {                       // Token ungültig/entwertet
         clearToken();
         if (joinSecret) { if (await join()) reconnect(0); }

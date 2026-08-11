@@ -8,6 +8,42 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-11 — Schüler-Session überlebt ein ausgeschaltetes Handy
+
+- Symptom: Wurde ein Schüler-Handy mitten in der Ausgabe ausgeschaltet (oder nur
+  lange gesperrt) und wieder eingeschaltet, landete der Schülerclient wieder
+  beim Pairing-Code. Zwei unabhängige Ursachen:
+  1. Der `session_token` lag in `sessionStorage` und starb mit der Tab-Session,
+     sobald das Handy den Browser-Prozess beendete → `join()` legte eine neue
+     Session mit neuem Code an.
+  2. Der Sweeper entwertete gepairte Sessions nach `paired_idle_ttl_s` ab
+     `last_activity`; das Feld wird nur von eingehenden WS-Frames aufgefrischt,
+     einen Heartbeat gibt es nicht. 15 min ohne Scan reichten also — auch bei
+     offenem Tab, etwa beim Warten in der Schlange.
+- Fix 1 (`web/student.js`): Der Token liegt jetzt in `localStorage` (inklusive
+  Einmal-Migration aus `sessionStorage`); `clearToken()` räumt beide Ablagen,
+  greift also weiterhin bei `closed` und Close-Code 4006 — ein Folgeschüler am
+  selben Gerät erbt keinen fremden Token. Neu behandelt wird Close-Code 4009
+  („Neue Verbindung" aus `_take_over_ws`): Da sich zwei Tabs den Token über
+  `localStorage` teilen können, reconnectet der übernommene Tab nicht mehr,
+  sondern zeigt „In anderem Tab geöffnet" — sonst würden sich beide Tabs
+  endlos gegenseitig rauswerfen.
+- Fix 2 (`server/sessions.py`, `server/state.py`, `server/routes/ws.py`):
+  `StudentSessionB.disconnected_at` hält fest, seit wann keine WebSocket mehr
+  hängt (`None` = verbunden; gesetzt im `finally` von `ws_student`, geleert
+  beim Verbindungsaufbau). Die TTL-Regeln stecken jetzt in der reinen Funktion
+  `expired_student_sessions()`: Eine **verbundene** gepairte Session verfällt
+  nicht mehr — der offene Socket ist der Liveness-Beweis, tote Sockets schließt
+  Uvicorns WS-Ping/Pong-Keepalive (~40 s) und setzt damit `disconnected_at`.
+  Erst getrennt läuft das TTL, mit Fallback auf `last_activity`.
+- `paired_idle_ttl_s` (`PAIRED_IDLE_TTL_S`) bedeutet damit „gepairt **und
+  getrennt**" und steigt von 900 s auf 1800 s — 30 min überbrücken ein
+  zwischendurch ausgeschaltetes Handy, ohne dass eine wirklich abgebrochene
+  Session den Worker-Context ewig hält.
+- Neu: `tests/test_session_ttl.py` (5 Fälle: verbunden/still, kurze Trennung,
+  Trennung über TTL, Fallback ohne `disconnected_at`, pending nach Alter).
+  Suite grün.
+
 ## 2026-08-11 — Hinweis „Seite noch nicht schließen" im Unterschreiben-Modus
 
 - Im Schülerclient endete der Leihschein-unterschreiben-Modus (`view-slip`,

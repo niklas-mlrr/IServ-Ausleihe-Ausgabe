@@ -394,6 +394,12 @@ class StudentSessionB:
     created_at: datetime = field(default_factory=datetime.now)
     paired_at: datetime | None = None
     last_activity: datetime = field(default_factory=datetime.now)
+    # Zeitpunkt, seit dem KEINE WebSocket mehr hängt (None = verbunden). Der
+    # Idle-Sweeper misst das TTL einer gepairten Session hieran statt an
+    # `last_activity` — ein verbundener Client ist am Leben, auch wenn er
+    # minutenlang nichts scannt (Warteschlange, Bildschirm aus).
+    # s. sessions.sweep_expired_sessions
+    disconnected_at: datetime | None = field(default_factory=datetime.now)
 
     def as_dict_public(self) -> dict:
         """Für den Host sichtbar — bewusst OHNE Schülerdaten.

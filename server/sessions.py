@@ -22,7 +22,7 @@ from datetime import datetime
 import qrcode
 
 from .book_order import get_book_order_for_form, get_hidden_isbns_for_form
-from .config import get_config
+from .config import Config, get_config
 from .hub import get_hub
 from .ratelimit import join_limiter
 from .state import (
@@ -1974,6 +1974,35 @@ def sweep_helper_scan_secrets(
             del state.helper_scan_secrets[secret]
 
 
+def expired_student_sessions(
+    state: AppState, cfg: Config, now: datetime
+) -> list[StudentSessionB]:
+    """Modus-B-Sessions, deren TTL abgelaufen ist (rein rechnend, ohne Effekte).
+
+    Ausgelagert aus `sweep_expired_sessions`, damit die TTL-Regeln testbar
+    sind — s. tests/test_session_ttl.py.
+    """
+    expired: list[StudentSessionB] = []
+    for session in list(state.student_sessions.values()):
+        if session.state == "pending_pairing":
+            if (now - session.created_at).total_seconds() > cfg.pending_pairing_ttl_s:
+                expired.append(session)
+        elif session.state == "paired":
+            # Verbundene Sessions verfallen NICHT: ein offener Socket ist der
+            # Liveness-Beweis. `last_activity` taugt dafür nicht — ein Schüler,
+            # der 20 min in der Schlange steht oder den Bildschirm ausschaltet,
+            # sendet keine Frames und flog früher mitten im Vorgang raus
+            # (→ neuer Pairing-Code). Tote Sockets erkennt Uvicorns
+            # WS-Ping/Pong-Keepalive (~40 s) und schließt sie, womit
+            # `disconnected_at` gesetzt wird und das Offline-TTL greift.
+            if session.ws is not None:
+                continue
+            since = session.disconnected_at or session.last_activity
+            if (now - since).total_seconds() > cfg.paired_idle_ttl_s:
+                expired.append(session)
+    return expired
+
+
 async def sweep_expired_sessions() -> None:
     """Hintergrund-Loop: pending/paired Sessions nach TTL hart entwerten."""
     cfg = get_config()
@@ -1991,16 +2020,7 @@ async def sweep_expired_sessions() -> None:
                 await hub.close_host_session(host_sid, state)
             now = datetime.now()
             sweep_helper_scan_secrets(state, cfg.helper_scan_ttl_s, now)
-            expired: list[StudentSessionB] = []
-            for session in list(state.student_sessions.values()):
-                if session.state == "pending_pairing":
-                    age = (now - session.created_at).total_seconds()
-                    if age > cfg.pending_pairing_ttl_s:
-                        expired.append(session)
-                elif session.state == "paired":
-                    idle = (now - session.last_activity).total_seconds()
-                    if idle > cfg.paired_idle_ttl_s:
-                        expired.append(session)
+            expired = expired_student_sessions(state, cfg, now)
             # broadcast=False — einmal am Ende bündeln (wie /api/disconnect-all),
             # sonst N Snapshots pro Sweep.
             for session in expired:

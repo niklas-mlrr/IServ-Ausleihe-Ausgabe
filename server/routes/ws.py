@@ -1207,6 +1207,9 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
     # Reconnect: vorherige Verbindung derselben Session sauber schließen.
     await _take_over_ws(session, websocket)
     session.last_activity = datetime.now()
+    # Verbunden → der Idle-Sweeper lässt die Session in Ruhe (s. state.py::
+    # StudentSessionB.disconnected_at).
+    session.disconnected_at = None
 
     if session.state == "pending_pairing":
         await hub.send_websocket(
@@ -1517,6 +1520,8 @@ async def ws_student(websocket: WebSocket, session_token: str) -> None:
         # WS-Referenz nur lösen, wenn es noch unsere Verbindung ist.
         if session.ws is websocket:
             session.ws = None
+            # Ab jetzt läuft das Offline-TTL (Handy aus, Netz weg).
+            session.disconnected_at = datetime.now()
         await safe_broadcast(hub, state)
 
 
