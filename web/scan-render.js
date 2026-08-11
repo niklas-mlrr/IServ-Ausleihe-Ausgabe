@@ -814,7 +814,7 @@ modalLendYesBtn.addEventListener('click', () => {
   if (v == null) return;
   lastValue = v; cooldown = true;
   setTimeout(() => { cooldown = false; lastValue = ''; }, 2000);
-  setStatusText('Gesendet: ' + v);
+  setStatusText(v + ' wird geprüft');
   if (!sendScan(v)) scanInFlight = false;
 });
 
@@ -1367,7 +1367,7 @@ function onScanSuccess(value) {
     updateFocusBanner();
     setStatusText('Freigabe erforderlich — Buch zurückgehalten');
   } else {
-    setStatusText('Gesendet: ' + value);
+    setStatusText(value + ' wird geprüft');
     if (!sendScan(value)) scanInFlight = false;
   }
   if (navigator.vibrate) navigator.vibrate(80);

@@ -19,7 +19,7 @@ function statusSlotEl(slot) {
 // Zentraler Setter für die drei Statuszeilen in #status (oben → unten):
 //   • `wait`   (oben)  — Worker-/Helfer-Zustand: „Warten …", „Warten bis
 //     Schüler frei …", „Scanner bereit — Buch scannen", idle-Warteschlange.
-//   • `trans`  (Mitte) — flüchtige Zeile: Scan-Ergebnisse, „Gesendet",
+//   • `trans`  (Mitte) — flüchtige Zeile: Scan-Ergebnisse, „… wird geprüft",
 //     „Prüfe Scans", Kamera-/Verbindungs-Hinweise.
 //   • `print`  (unten) — Drucker-Zeile: alle Druckermeldungen + Countdown.
 // Zwei Arten von Meldungen:
