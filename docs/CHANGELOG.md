@@ -8,6 +8,18 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-11 — „Bestand leer"-Hinweis auf dem Leihschein größer und mittig
+
+- Der Hinweis auf fehlende Fächer (Reihen im Status „Bestand leer") saß dicht
+  unter der Klassen-Wertzeile und war mit 85 % der Klassen-Schriftgröße klein.
+  `overlay_missing_stock_note()` (`server/loan_slip.py`) setzt ihn jetzt mit
+  130 % dieser Größe und platziert ihn vertikal mittig in die Lücke zwischen
+  der Klassen-Zeile und der großen Überschrift „Leihschein" — die Oberkante der
+  Überschrift wird dafür über `_find_heading_top()` aus dem PDF gelesen.
+- Defensiv wie zuvor: Wird die Überschrift nicht gefunden, bleibt es beim alten
+  Verhalten (fester Abstand unter der Klassen-Zeile); der Hinweis ragt nie in
+  die Klassen-Zeile hinein, und Fehler lassen den Druck nie scheitern.
+
 ## 2026-08-11 — Bücherliste scrollt hinter dem Fokus-Warnbanner weiter
 
 - Das rote Banner „Vorsicht: Eingabefeld nicht fokussiert!" (manueller Modus im

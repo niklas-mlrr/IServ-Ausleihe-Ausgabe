@@ -134,6 +134,21 @@ def override_class_on_slip(pdf_bytes: bytes, form: str) -> bytes:
 # hat kein explizites Layoutraster, das wir auslesen könnten).
 _RIGHT_MARGIN = 36.0
 
+# Große Überschrift auf dem Leihschein; sie begrenzt die Lücke, in die der
+# „Bestand leer"-Hinweis mittig gesetzt wird (nach oben begrenzt sie die
+# Klassen-Wertzeile).
+_HEADING = "Leihschein"
+
+
+def _find_heading_top(page) -> float | None:
+    """Oberkante der „Leihschein"-Überschrift; ``None``, wenn nicht gefunden."""
+    for block in page.get_text("dict")["blocks"]:
+        for line in block.get("lines", []):
+            for span in line["spans"]:
+                if span["text"].strip() == _HEADING:
+                    return span["bbox"][1]
+    return None
+
 
 def _wrap_text(font, text: str, fontsize: float, max_width: float) -> list[str]:
     """Wortweiser Zeilenumbruch: so viele Wörter pro Zeile, wie in `max_width`
@@ -198,15 +213,27 @@ def overlay_missing_stock_note(pdf_bytes: bytes, subjects: list[str]) -> bytes:
             log.warning("Bestand-leer-Hinweis: keine Klassen-Wertzeile gefunden - unveraendert")
             return pdf_bytes
         x0, baseline = anchor["origin"]
-        size = anchor["size"] * 0.85
-        line_height = anchor["size"] * 1.3
-        gap = anchor["size"] * 1.5  # „mit etwas Abstand" unter der Klassen-Zeile
+        size = anchor["size"] * 1.3  # deutlich größer als die Klassen-Zeile
+        line_height = size * 1.25
         font = fitz.Font("helv")
         max_width = page.rect.width - _RIGHT_MARGIN - x0
         lines = _wrap_text(font, note, size, max_width) if max_width > 0 else [note]
+        # Vertikal mittig in die Lücke zwischen Klassen-Wertzeile und der
+        # „Leihschein"-Überschrift. Ohne gefundene Überschrift bleibt es beim
+        # alten Verhalten: fester Abstand unter der Klassen-Zeile.
+        first_baseline = baseline + anchor["size"] * 1.5
+        heading_top = _find_heading_top(page)
+        if heading_top is not None and heading_top > anchor["bbox"][3]:
+            block_height = (len(lines) - 1) * line_height + _CAP * size
+            middle = (anchor["bbox"][3] + heading_top) / 2
+            # Nie in die Klassen-Zeile darüber hineinragen.
+            first_baseline = max(
+                middle - block_height / 2 + _CAP * size,
+                anchor["bbox"][3] + _CAP * size,
+            )
         for i, line in enumerate(lines):
             page.insert_text(
-                (x0, baseline + gap + i * line_height),
+                (x0, first_baseline + i * line_height),
                 line,
                 fontname="helv",
                 fontsize=size,
