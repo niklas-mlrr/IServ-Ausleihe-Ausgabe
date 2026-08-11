@@ -8,6 +8,16 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-11 — Hinweis „Seite noch nicht schließen" im Unterschreiben-Modus
+
+- Im Schülerclient endete der Leihschein-unterschreiben-Modus (`view-slip`,
+  `web/student.html`) bisher mit der Leihschein-Info-Box; es fehlte ein Hinweis,
+  dass die Seite noch offen bleiben muss, bis der Helfer abschließt.
+- Unter der Info-Box steht jetzt „Seite noch nicht schließen" — bewusst nicht
+  fett und mit denselben Schrifteigenschaften/Abständen wie der Satz „Du hast
+  den Ausleihvorgang nun abgeschlossen und kannst die Seite schließen." im
+  Schülerleihscheinmodus (`view-done`): `class="text"` plus `margin-top: 20px`.
+
 ## 2026-08-11 — „Bestand leer"-Hinweis auf dem Leihschein größer und mittig
 
 - Der Hinweis auf fehlende Fächer (Reihen im Status „Bestand leer") saß dicht
