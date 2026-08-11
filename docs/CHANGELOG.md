@@ -16,7 +16,8 @@
 - Unter der Info-Box steht jetzt „Seite noch nicht schließen" — bewusst nicht
   fett und mit denselben Schrifteigenschaften/Abständen wie der Satz „Du hast
   den Ausleihvorgang nun abgeschlossen und kannst die Seite schließen." im
-  Schülerleihscheinmodus (`view-done`): `class="text"` plus `margin-top: 20px`.
+  Schülerleihscheinmodus (`view-done`): `class="text"` plus `margin-top: 20px`,
+  dazu `font-weight: 400`, damit die Zeile garantiert nicht fett rendert.
 
 ## 2026-08-11 — „Bestand leer"-Hinweis auf dem Leihschein größer und mittig
 
