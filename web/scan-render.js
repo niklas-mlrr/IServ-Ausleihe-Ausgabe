@@ -1406,6 +1406,11 @@ function updateFocusBanner() {
     && document.activeElement !== manualInput
     && !anyModalOpen();
   focusBanner.classList.toggle('show', show);
+  // Das Banner liegt fixed über der Bücherliste. Damit die unterste Buchzeile
+  // trotzdem erreichbar bleibt, bekommt der Scroll-Bereich ein padding-bottom
+  // in Bannerhöhe (gemessen, da der Text auf schmalen Displays umbrechen kann).
+  document.documentElement.style.setProperty(
+    '--focus-banner-h', show ? focusBanner.offsetHeight + 'px' : '0px');
 }
 
 // Manuell getippten Wert senden (Enter-Taste oder Enter-Button). Feld leeren
@@ -1477,6 +1482,8 @@ async function setInputMode(mode) {
 modeCameraBtn.addEventListener('click', () => setInputMode('camera'));
 modeManualBtn.addEventListener('click', () => setInputMode('manual'));
 focusBanner.addEventListener('click', () => { if (manualInput) manualInput.focus(); });
+// Bannerhöhe kann sich bei Rotation/Resize ändern (Textumbruch) → neu messen.
+window.addEventListener('resize', updateFocusBanner);
 // Sicherheitsnetz: Fokus wandert woanders hin → Banner neu bewerten.
 document.addEventListener('focusin', updateFocusBanner);
 document.addEventListener('focusout', updateFocusBanner);

@@ -5,8 +5,9 @@
 > Risiko hier unter „Offen / zu testen" eintragen; nach erfolgreichem Test in
 > „Verifiziert" verschieben (mit Datum + Skript/Befund). Bezug: `docs/PLAN.md`.
 >
-> Stand: 2026-08-10 (Betreuerauslöser-Druck ausschließlich serverseitig als
-> Schüler-Auftrag erkannt, statt aus einem Client-Flag — 432 Tests grün).
+> Stand: 2026-08-10 (Dritter Buchreihen-Status „Bestand leer" — global über
+> Jahrgänge, weiterhin buchbar, Fehlt-Hinweis mit Zeilenumbruch auf dem
+> Leihschein — 463 Tests grün).
 > Alle bisherigen Tests sind **read-only** gegen IServ
 > (kein Submit, keine Buchung — PLAN §6).
 >
@@ -89,8 +90,26 @@
 | V60 | **Aktionssymbole und Modus-B-Leihscheinaktionen:** „Aktuell in Ausgabe“ verwendet Haken-, Drucker-, Trennen- und Signatur-SVGs mit Tooltip; Schülerclients können beim Betreuerauslöser einen `student`-Druckauftrag verarbeiten; der Unterschriftenmodus bietet die Abschlussaktion auch am Schülerclient und im Host. | `tests/test_ws_scanner.py` (Betreuerauslöser als Schülerauftrag + Schülerabschluss im Unterschriftenmodus) + `uv run pytest -q` + `uvx ruff check server/ automation/ tests/` + `node --check web/*.js` | 2026-08-09 | **428 Tests grün**, Ruff, JavaScript-Syntaxprüfung und `git diff --check` grün; echter Browser-/Touchscreen-/Drucker-Livecheck weiterhin offen. |
 | V61 | **Betreuerauslöser-Hinweis im Schülerclient:** Der Schülerclient zeigt beim Betreuerauslöser den Hinweis, sich zum Drucken an einen Betreuer zu wenden, und blendet den eigenen Druckbutton aus; der Host-Druckbutton bleibt verfügbar. | `node --check web/student.js` + `git diff --check` | 2026-08-09 | JavaScript-Syntax und Diff-Prüfung grün; echter Browser-/Touchscreen-Livecheck weiterhin offen. |
 | V62 | **Betreuerauslöser-Druck ausschließlich serverseitig als Schüler-Auftrag erkannt:** `POST /api/print-loan-slip` leitet „ist dies ein Betreuerauslöser-Druck für einen live Schülerclient" nicht mehr aus einem Client-Flag ab, sondern aus dem State (`assigned_helper is None and slip_trigger == "helper"`); der redundante dritte Druckerbutton in der Klassen-Tabelle ist entfernt — Drucken nur noch über „Aktuell in Ausgabe" (Host) und die Warteschlange im Helferclient. | `tests/test_print_loan_slip_route.py` (4 Fälle: Betreuerauslöser→Schüler-Auftrag, Helfer-zugewiesen→Host-Auftrag, Auto-Trigger→Host-Auftrag, bereits gedruckt→409) + `uv run pytest` (432 Tests) + `uvx ruff check server/ automation/ tests/` | 2026-08-10 | **432 Tests grün**, Ruff grün; per direktem Endpoint-Repro-Skript verifiziert, dass Job-Felder (`role`/`host_sid`/`student_token`) korrekt gesetzt werden; echter Browser-/Drucker-Livecheck weiterhin offen. |
+| V63 | **Dritter Buchreihen-Status „Bestand leer":** globales `empty_isbns` (nicht pro Jahrgang, Mehrjahresbände teilen sich Bestand), Reihe bleibt vorgemerkt/buchbar (`evaluate_scan_for_booking` unverändert), Helfer-Client zeigt roten „−" ohne Kasten + Checkbox „Als Keine Bücher im Lager mehr markieren" im Print-/Next-Modal + nicht-blockierendes Ja/Nein-Rescan-Popup; Schüler-Client sieht nichts, kann aber normal einscannen; X/Y-Zähler zeigen die wahre Gesamtzahl in Klammern (`X/Y (Z)`) bis zum Scan; neuer Endpoint `POST /api/booklist-empty` (scoped replace) + zwei Helfer-WS-Handler (`mark_empty_stock`/`clear_empty_stock`); Host-Admin-Editor drittes gelbes Feld mit 3-Wege-Zyklus; Leihschein Seite 1 druckt bei fehlenden Bestand-leer-Reihen einen Fächer-Hinweis („… fehlt/fehlen") unter der Klassen-Zeile, mit Wortumbruch bei zu langer Fächerliste. | `tests/test_booklist_store.py`, `tests/test_class_book_order.py`, `tests/test_queue_progress.py`, `tests/test_booking_precheck.py`, `tests/test_booklist_repush.py`, `tests/test_booklist_empty_endpoint.py` (neu), `tests/test_ws_scanner_empty_stock.py` (neu), `tests/test_loan_slip.py` (Overlay + Wortumbruch) + `uv run pytest` (463 Tests) + `uvx ruff check server/ automation/ tests/` | 2026-08-10 | **463 Tests grün** (432 → 463), Ruff grün. Regressionstest gegen Duck-Typing-Antipattern (`isinstance` bricht bei Test-Fakes) ergänzt. Echter Browser-/Leihschein-Druck-Livecheck weiterhin offen. |
 
 ## Offen / zu testen
+
+### Offen 2026-08-10 (Bestand-leer-Status: Live-Check)
+
+Logik ist per Unit-/Endpoint-Tests abgesichert (V63). Am echten Gerät noch
+offen (read-only, kein Buchungstest):
+
+- [ ] Helfer-Client: Checkbox im Print-/Next-Modal erscheint nur bei offenen
+      vorgemerkten Büchern, setzt beim Bestätigen korrekt Bestand-leer.
+- [ ] Rescan eines Bestand-leer-Buchs zeigt das Ja/Nein-Popup, ohne die
+      Buchung/den Scan sichtbar zu verzögern.
+- [ ] Schüler-Client zeigt in der Praxis keinerlei Markierung/Popup, kann das
+      Buch aber anstandslos selbst scannen.
+- [ ] Host-Admin-Editor: drittes gelbes Feld, 3-Wege-Zyklus, Persistenz über
+      Neuladen hinweg.
+- [ ] Leihschein-Druck (echter Drucker/PDF-Viewer): Fächer-Hinweis unter der
+      Klassen-Zeile korrekt platziert und lesbar, inkl. Zeilenumbruch bei
+      vielen Fächern (nicht nur im Unit-Test mit synthetischem PDF).
 
 ### Offen 2026-08-09 (Modus-B-Workflow-Integrität)
 

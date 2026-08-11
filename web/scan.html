@@ -321,8 +321,15 @@
     .qtab-suggested { border-color: var(--info, #5ac8fa); color: var(--info, #5ac8fa); }
     .qtab-suggested:hover { background: var(--info-bg, #0a3d6b); }
 
-    /* ---- Bücher-Tabelle (einziger Scroll-Bereich) ---- */
-    .book-table-wrap { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+    /* ---- Bücher-Tabelle (einziger Scroll-Bereich) ----
+       --focus-banner-h wird in updateFocusBanner() auf die gemessene Höhe des
+       Fokus-Warnbanners gesetzt (sonst 0). Als padding-bottom verlängert es den
+       Scrollweg genau um die überdeckte Fläche, damit die unterste Buchzeile
+       hinter dem Banner hervorgescrollt werden kann. */
+    .book-table-wrap {
+      flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+      padding-bottom: var(--focus-banner-h, 0px);
+    }
     .book-row {
       display: grid; grid-template-columns: 5rem 1fr 1.8rem; align-items: center;
       gap: 8px; padding: 8px 10px; margin-bottom: 7px; color: var(--fg);
