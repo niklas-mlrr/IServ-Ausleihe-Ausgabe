@@ -17,7 +17,9 @@
   fett und mit denselben Schrifteigenschaften/Abständen wie der Satz „Du hast
   den Ausleihvorgang nun abgeschlossen und kannst die Seite schließen." im
   Schülerleihscheinmodus (`view-done`): `class="text"` plus `margin-top: 20px`,
-  dazu `font-weight: 400`, damit die Zeile garantiert nicht fett rendert.
+  dazu `font-weight: 400`, damit die Zeile garantiert nicht fett rendert. Nur
+  das Wort „nicht" steht — wie beim Name/Klasse/Datum-Hinweis im
+  Schülerleihscheinmodus — in `<strong>`.
 
 ## 2026-08-11 — „Bestand leer"-Hinweis auf dem Leihschein größer und mittig
 
