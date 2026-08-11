@@ -125,6 +125,15 @@ Sicherheitsanforderungen (aus Klärung 2026-06-12, „keine Sicherheitslücken")
    Ausgabe-Prozess; der Host beendet die offene Schüler-Session danach
    ausdrücklich. Erneuter Aufruf der URL → neutrale
    „Vorgang abgeschlossen"-Seite, keine Daten.
+   Der Timeout-Arm (`sessions.expired_student_sessions`) läuft **nur, solange
+   die Session getrennt ist**: eine gepairte Session mit offener WebSocket gilt
+   als lebend (tote Sockets schließt Uvicorns WS-Keepalive nach ~40 s), erst ab
+   `disconnected_at` tickt `PAIRED_IDLE_TTL_S` (30 min). Sonst verlor ein
+   Schüler, der nur wartet oder sein Handy kurz ausschaltet, mitten im Vorgang
+   den Zugang. Der Token liegt clientseitig in `localStorage` (überlebt den
+   Browser-Neustart des Handys) — er bleibt trotzdem nur so lange gültig, wie
+   der Server-Zustand ihn führt, und wird bei `closed`/Code 4006 lokal
+   gelöscht.
 3. **Doppelte Bestätigung:** Token allein reicht nicht — die Session wird erst
    aktiv, wenn der Host den 4-stelligen Pairing-Code dem Schüler zuordnet
    und bestätigt.
