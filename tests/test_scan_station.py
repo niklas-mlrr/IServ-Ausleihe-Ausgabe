@@ -246,6 +246,8 @@ def ctx(monkeypatch):
     monkeypatch.setattr(sessions, "get_hub", lambda: hub_inst)
     monkeypatch.setattr(sessions, "get_state", lambda: state)
     monkeypatch.setattr(hub, "get_hub", lambda: hub_inst)
+    # Persistenz-Isolation (data/scan_stations.json) macht die autouse
+    # `_isolate_device_persistence`-Fixture (conftest.py).
     return state, cfg, hub_inst
 
 

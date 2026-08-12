@@ -8,6 +8,279 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-12 — Lehreransicht: fünf Statuszähler, irreversible Leihschein-Aktion und Sortierung
+
+- Die fünf Lehrerzähler bleiben getrennt: **abgeschlossen**, **aktiv**,
+  **offen**, **übersprungen** und **abwesend**. `teacher_snapshot()` ordnet
+  jeden Schüler genau einem Zähler zu; `done + auto_skipped` wird weiterhin nur
+  in der Lehreransicht als `skipped` gezählt.
+- `POST /api/teacher/slip-collected` ist jetzt eine reine Setz-Aktion:
+  `collected=true` setzt den Marker idempotent auf `true`, `collected=false`
+  wird abgewiesen. Session-, Klassen-, Status- und Druck-Gates bleiben
+  erhalten. `reset_progress()` löscht den Marker weiterhin bewusst für einen
+  neuen Durchlauf.
+- Die Checkbox wurde durch einen Button ersetzt. Nach Erfolg ist er
+  deaktiviert und als erledigt markiert; während des Requests verhindert er
+  Doppelklicks, bei einem Fehler wird er wieder freigegeben. Der bestehende
+  Text „Leihschein & Bücherstapel entgegengenommen" bleibt bei `helper_scanned`
+  erhalten.
+- Die Schülerliste ist per Auswahl alphabetisch oder nach Status sortierbar.
+  Die Statusreihenfolge ist `active -> pending -> absent -> done -> skipped`;
+  innerhalb der Gruppe wird nach Nachname, Vorname und stabiler Schüler-ID
+  sortiert. WebSocket-Updates behalten den Modus; die Eingangsdaten werden
+  nicht mutiert.
+- Verifiziert mit `tests/test_teacher.py`, `tests/test_queue_progress.py`, der
+  vollständigen Offline-Suite, Ruff, JavaScript-Syntaxprüfung, `git diff
+  --check` und einem lokalen Headless-Browsercheck.
+
+## 2026-08-12 — Helfer/Drucker-Displays/Scan-Stationen überleben einen Serverneustart
+
+- **Warum:** Bisher gingen Helfer-Registrierungen, freigeschaltete Drucker-
+  Displays (Name/Theme/Drucker-Zuweisung) und freigeschaltete Scan-Stationen
+  (Name/Theme/Eingabeart) bei jedem Serverneustart verloren — Niklas wollte,
+  dass nach einem Neustart mit demselben Token (URL bereits auf Handy/
+  Display/Station offen) wieder alles da ist.
+- **Architektur:** drei neue, schmale Sync-IO-Store-Module (Spiegel von
+  `booklist_store.py`/`printer_store.py`, jeweils eigene JSON statt einer
+  gemeinsamen Datei — andere Domäne, andere Validierung):
+  `server/helper_store.py` → `data/helpers.json` (nur `token`+`name`, kein
+  Klassen-/Queue-/Worker-Zustand), `server/printer_display_store.py` →
+  `data/printer_displays.json` (Drucker-Zuweisung über den *Namen*
+  referenziert, nicht die nur laufzeitstabile Pool-`id`, s.
+  `printer_store.py`), `server/scan_station_store.py` →
+  `data/scan_stations.json`. Persist-Hooks (jetzt zentral als
+  `sessions.persist_helpers/persist_printer_displays/persist_scan_stations`,
+  nicht in den einzelnen `routes/*.py`, weil `routes/ws.py` sie ebenfalls
+  braucht) laufen bei jeder Konfigurationsänderung (add/enable/assign/label/
+  theme/input-mode/forget); Laden passiert in `app.py`s Lifespan-Startup,
+  nach dem Drucker-Pool-Load (Namen → frische Pool-`id`s auflösen).
+- **Zwei Verwerfungsregeln (Nachbesserung auf Niklas' Wunsch), unabhängig
+  von der reinen Datei-IO:**
+  1. **Andere Server-IP:** `sessions.server_lan_ip()` (Auto-Erkennung wie
+     bei QR-URLs, ohne Request) wird als Fingerprint mitgespeichert; weicht
+     die beim Laden erkannte IP ab, wird die jeweilige Persistenz GAR NICHT
+     geladen — die alten Token stecken in URLs, die auf die alte IP zeigen
+     und auf einem anderen Netz ohnehin nie erreichbar wären.
+  2. **Nie verbunden im Serverlauf:** neues transientes Feld
+     `connected_since_start: bool` auf `HelperSession`/
+     `PrinterDisplaySession`/`ScanStationSession`, gesetzt bei der ersten
+     echten WS-Verbindung dieses Laufs (`routes/ws.py`). Die drei
+     `persist_*`-Funktionen schreiben nur Einträge mit
+     `connected_since_start=True` — ein Eintrag (auch ein wiederhergestellter),
+     der einen kompletten Lauf über nie verbunden war, fällt beim nächsten
+     Neustart automatisch raus. `app.py`s Lifespan ruft die drei Funktionen
+     zusätzlich beim Shutdown auf, damit das auch ohne ein anderes
+     auslösendes Ereignis im selben Lauf greift.
+- **Gotcha (Testpollution):** die neuen Persist-Aufrufe in `routes/ws.py`
+  hätten bei praktisch jedem WS-Test (nicht nur den beiden
+  Drucker-Display-/Scan-Station-Routen-Testdateien) in die echten
+  `data/*.json` geschrieben. Fix: `autouse`-Fixture
+  `_isolate_device_persistence` in `conftest.py` leitet alle drei
+  Store-Pfade für JEDEN Test automatisch auf `tmp_path` um.
+- Neue `tests/test_device_persistence.py` (7 Tests) prüft beide
+  Verwerfungsregeln direkt auf Store- und Sessions-Ebene. 576 → **583**
+  Tests grün, Ruff clean. Details:
+  `_logs/2026-08-12_sba_geraete_persistenz.md`.
+
+## 2026-08-12 — Fix: Bestand-leer-/Ausblenden-Änderungen erreichen jetzt auch laufende Scan-Station-Sessions live
+
+- **Warum:** Niklas meldete, dass an der Scan-Station eine als „Bestand
+  leer" oder „Ausgeblendet" markierte Buchreihe erst nach Neuladen/Neu-
+  Anmelden aus der Liste verschwand, nicht sofort wie am Schülerclient. Der
+  Repush-Fanout beim Speichern der Buchreihen-Einstellungen
+  (`POST /api/booklist-empty`/`POST /api/booklist-hidden`) lief bisher nur
+  über `state.helper_sessions` und `state.student_sessions` — eine an einer
+  Scan-Station angemeldete Session (`state.scan_stations`) wurde dabei
+  schlicht nie mitgenommen, obwohl `ScanStationSession` dieselben Felder wie
+  `HelperSession`/`StudentSessionB` trägt und `repush_booklist` sie darüber
+  genauso bedienen kann.
+- **`server/sessions.py::repush_for_changed_empty_isbns`** (Bestand-leer,
+  global) und **`server/routes/booklists.py::set_booklist_hidden`**
+  (Ausblenden, jahrgangsgebunden über `_student_in_grade`) iterieren jetzt
+  zusätzlich über `state.scan_stations.values()` und stoßen bei betroffenen
+  Sessions denselben `repush_booklist(..., helper=False)` an wie für Modus B.
+- **`web/scan-station.js`**: neuer `booklist_update`-Handler (bisher
+  komplett ungehandhabt — die Nachricht kam vorher nie an, da der Server sie
+  nie schickte) — Gegenstück zum bereits vorhandenen Handler in
+  `web/student.js`, ersetzt nur Bücherliste + Reihenfolge, lässt
+  `scannedIsbns`/`scanOrder` unangetastet. Kein Druckmodus an der Station,
+  daher kein `maybeEnterDruckmodus()`-Äquivalent.
+- **Neue Tests:** `tests/test_booklist_empty_endpoint.py`
+  (`test_set_booklist_empty_repushes_affected_scan_station_session`,
+  `test_set_booklist_hidden_repushes_affected_scan_station_session` — neu
+  `hub.ws_sent` in `_FakeHub` zum Erfassen von `send_websocket`-Aufrufen,
+  vorher nur `send_scanner` erfasst). 586 Tests grün (583 → 586), Ruff und
+  JavaScript-Syntaxprüfung grün.
+
+## 2026-08-12 — „Bestand leer"-Reihen verschwinden aus Schülerclient/Scan-Station/Zettel
+
+- **Warum:** Bisher war die Bestand-leer-Markierung nur für den Helfer-
+  Client (Modus A) sichtbar — der Schülerclient (Modus B), die Scan-Station
+  und der Scan-Station-Zettel zeigten eine als „Bestand leer" markierte
+  Buchreihe unverändert als ganz normal vorgemerkt an. Niklas wollte, dass
+  solche Reihen dort gar nicht erst auftauchen, solange sie tatsächlich
+  nicht ausgeliehen sind — sobald ein Exemplar doch ausgegeben wird, soll
+  die Reihe ganz normal als „ausgeliehen" erscheinen. Die Reihe soll dabei
+  weiterhin regulär buchbar bleiben (kein `apply_hidden_books`-Äquivalent)
+  und die Druckmodus-Prüfung im Schülerclient soll eine so ausgeblendete
+  Reihe wie eine tatsächlich ausgeblendete behandeln — auch dann, wenn sie
+  erst NACH dem Laden (durch eine Änderung der Buchreihen-Einstellungen)
+  als „Bestand leer" markiert wird und der Schüler die übrigen Reihen
+  bereits fertig hat.
+- **`server/sessions.py`**: neue `apply_empty_stock_visibility(info,
+  empty_isbns)` — entfernt eine Bestand-leer-Reihe komplett aus
+  `info["books"]`, außer sie ist bereits `status == "ausgeliehen"`.
+  Eingehängt in `hydrate_student_info` für `is_helper=False` (deckt alle
+  vier Lade-/Reconnect-Pfade von Modus B und Scan-Station ab) sowie separat
+  in `_load_and_activate_station_student` (gemeinsamer Kern von
+  `print_station_sheet_for`/`activate_station_student` — betrifft also auch
+  den gedruckten Zettel). Beide Aufrufstellen wenden den Filter bewusst
+  NACH der Buchungsmengen-Berechnung
+  (`expected_isbns_from_info`/`booking_isbn_sets_from_info`) und nach
+  `init_book_progress` an: die Reihe bleibt dadurch weiterhin buchbar, und
+  der Host-„X/Y"-Zähler (inkl. `books_empty_outstanding`) rechnet
+  unverändert mit der vollen Liste.
+- **Kein Client-Code nötig für die Druckmodus-Prüfung:** `allVorgemerkteDone()`
+  in `web/student.js` filtert bereits auf `currentBooks`, das dank des
+  serverseitigen Filters die offene Bestand-leer-Reihe gar nicht mehr
+  enthält. Wird eine Reihe nachträglich als „Bestand leer" markiert (Host-
+  Einstellungen-Dialog → `POST /api/booklist-empty` →
+  `repush_for_changed_empty_isbns` → `repush_booklist` →
+  `booklist_update`), war der `maybeEnterDruckmodus()`-Aufruf im
+  `booklist_update`-Handler bereits vorhanden (ursprünglich für
+  „Ausblenden") — er greift jetzt automatisch mit, ohne Änderung.
+- **Leihschein-„fehlt"-Hinweis** (`_missing_stock_subjects_for`/
+  `overlay_missing_stock_note` in `server/sessions.py`/`server/loan_slip.py`)
+  war bereits unabhängig von der Auslöserquelle (Helfer/Host/Schülerclient
+  rufen alle denselben `print_loan_slip_for` auf) — keine Änderung nötig,
+  nur verifiziert.
+- **Neue Tests:** `tests/test_class_book_order.py`
+  (`test_apply_empty_stock_visibility_*`, 3 Fälle) und
+  `tests/test_queue_progress.py` (`test_hydrate_hides_unloaned_empty_stock_book_for_non_helper`,
+  `test_hydrate_keeps_loaned_empty_stock_book_visible_for_non_helper`,
+  `test_hydrate_keeps_empty_stock_book_visible_for_helper` — bestätigt auch,
+  dass Modus A unverändert bleibt). 583 Tests grün (574 → 583), Ruff clean.
+  Details: `docs/test_status.md` V76.
+
+## 2026-08-12 — Scan-Station: „Trennen" entwertet den Zettel-Code, „Erstellen" bietet Reaktivierung per Checkbox
+
+- **Warum:** Bisher blieb der Zettel-Code eines Schülers über ein „Trennen"
+  am Host hinweg unverändert gültig — ein Schüler, der getrennt und später
+  neu zugeordnet wurde, konnte sich mit demselben (evtl. herumliegenden)
+  Zettel wieder an einer Station anmelden. Niklas wollte, dass „Trennen"
+  den Code hart entwertet (Station nimmt ihn nicht mehr an, eine laufende
+  Stationsanmeldung wird sofort gelöst), der Host beim nächsten „Erstellen"
+  aber die Wahl hat, genau diesen zuletzt entwerteten Code per Checkbox
+  wieder zu aktivieren (Default: angehakt) statt einen neuen zu ziehen.
+- **Server** (`server/state.py`): neues `AppState.
+  station_last_code_by_student` (Code → wird bei JEDER Neuvergabe
+  überschrieben, zeigt also immer auf den zeitlich jüngsten, egal ob
+  reaktiviert oder frisch gezogen). `AppState.invalidate_station_code()`
+  entwertet den aktiven Code (entfernt aus `station_codes`/
+  `station_code_by_student`, `station_last_code_by_student` bleibt stehen).
+  `allocate_station_code(reactivate_old=True)` (Default) reaktiviert den
+  letzten Code, wenn kein aktiver existiert; `reactivate_old=False` zieht
+  immer einen frischen. Neu: `AppState.station_reactivate_code()` (nur ein
+  Vorschlag, solange kein aktiver Code existiert) für den Host-Snapshot.
+- **`server/sessions.py::end_student`**: der `pending`-Zweig (Trennen/Alle
+  trennen/Zurücksetzen/Teardown) löst jetzt zusätzlich eine laufende
+  Stationsbindung (`release_station_student`) und entwertet den Code
+  (`invalidate_station_code`) — vorher blieb beides von einem „Trennen"
+  unberührt. `activate_station_student`/`print_station_sheet_for`/
+  `_load_and_activate_station_student` nehmen neu `reactivate_old_code`
+  entgegen und reichen es an `allocate_station_code` durch.
+- **`server/print_queue.py`**: `PrintJob` bekommt `reactivate_station_code`
+  (Default `True`), weil der Druckauftrag für „Erstellen und Drucken"
+  asynchron durch die Warteschlange läuft — der Checkbox-Wert muss den
+  `_dispatch`-Aufruf von `print_station_sheet_for` überleben.
+- **Endpunkte** (`server/routes/scan_station.py`, `_deps.py`):
+  `ScanStationPrintRequest`/neues `ScanStationActivateRequest` bekommen
+  `reactivate_old_code: bool = True`.
+- **Client** (`web/host.html`, `web/host-render.js`): neue Checkbox-Zeile im
+  Druck-Dialog (`#print-dialog-reactivate-row`, per `style.display`
+  ein-/ausgeblendet wie die bestehende Leihschein-Checkbox-Zeile — ein
+  `hidden`-Attribut hätte gegen die `.modal-check { display:flex }`-Regel
+  verloren). Sichtbar nur im Zettel-Erstellen-Dialog (nicht beim reinen
+  Nachdruck, dort ist der Code ohnehin schon aktiv), Text „Alten Code
+  (‹Code›) reaktivieren" aus `station_reactivate_code` im Host-Snapshot
+  (`AppState._queue_student_as_dict`, nur Host-Pfad wie `station_code`
+  selbst — Credential, PLAN §3.7).
+- Getestet: `uv run pytest` (weiterhin grün, keine Regressionen) +
+  `uvx ruff check server/ automation/ tests/` grün. **Kein dedizierter
+  Unit-Test für die neue Entwertungs-/Reaktivierungslogik selbst** (s.
+  `docs/test_status.md` „Offen 2026-08-12") — nur die bestehende Suite
+  wurde als Regressionsnetz genutzt, keine neuen Testfälle geschrieben.
+
+## 2026-08-12 — Drucker-Nachfrage bei feststeckendem Druckauftrag + Fix: dauerhaft gesperrter Druckenbutton
+
+- **Warum:** Ist ein Druckauftrag noch unzugewiesen in der zentralen
+  Warteschlange und werden ALLE seine erlaubten Drucker fehlerhaft (Stall-
+  Erkennung), blieb er zuvor unbegrenzt stecken — der Nutzer sah nur eine
+  generische „Es dauert ungewöhnlich lange …"-Meldung, konnte aber nichts
+  tun außer warten. Niklas wollte stattdessen aktiv nachgefragt bekommen, ob
+  der Zieldrucker geändert werden soll.
+- **Server** (`server/print_queue.py`): neue `PrintQueue.update_job_printers
+  (job_id, requester, printer_ids)` — findet den Job ausschließlich in
+  `self.waiting` (nur erlaubt, solange „noch an keinen Drucker gesendet"),
+  prüft die Urheberschaft (`helper_token`/`host_sid`-Abgleich gegen
+  `requester`), mutiert `job.allowed_printers` **in-place** (kein Pop/
+  Insert) — der Job behält seinen bestehenden Platz und damit seine
+  Warteposition unverändert. Weckt danach den Scheduler und pusht sofort
+  aktualisierte Positionen/Status (`_notify_all`). `print_progress`-Payload
+  trägt jetzt zusätzlich `allowed_printers` (aktuelle Auswahl des Jobs, zum
+  Vorbefüllen des Dropdowns beim Client). Neuer WS-Typ
+  `update_print_printers` (`server/routes/ws.py`, Helferclient) sowie
+  `POST /api/print-queue/{job_id}/printers` (`server/routes/slips.py`,
+  Host) — beide rufen dieselbe Methode auf.
+- **Client — Helferclient** (`web/scan.html`, `scan-render.js`,
+  `scan-state.js`, `scan-ws.js`): neues, schlankes Modal
+  `#printer-change-modal` (Dropdown wie gewohnt + „Druckauftrag
+  aktualisieren"/„Abbrechen"). Zwei Zugriffswege: **automatisch**, wenn
+  wirklich alle erlaubten Drucker fehlerhaft sind (`status=='queued' &&
+  peer_error` aus `print_progress`); **manuell** über den Druckenbutton
+  (`#print-btn`), solange der Auftrag nur noch unzugewiesen `queued` ist —
+  unabhängig vom `peer_error`-Flag. „Abbrechen" schließt nur das Fenster,
+  ändert nichts am Auftrag.
+- **Client — Host** (`web/host-render.js`, `web/host.css`): keine neues
+  Fenster, sondern der bestehende persistente Druck-Toast (rechts unten)
+  wird bei `status=='queued'` klickbar und klappt Picker + „Druckauftrag
+  aktualisieren"-Button ein (`renderPrintToast`, kompakte CSS-Variante —
+  Trigger/Panel/Button nur Text-Höhe + etwas Puffer). Im Stuck-Fall klappt
+  er automatisch auf; kein Abbrechen-Button (der Hinweis wartet einfach).
+- **Gemeinsam** (`web/common.js`, `web/host.css`, `web/scan.html`):
+  `mountPrinterPicker` zeigt fehlerhafte Drucker jetzt überall ausgegraut
+  mit „(deaktiviert)"-Hinweis, bleiben aber anwählbar — gilt auch für die
+  normalen Druck-Start-Dialoge, nicht nur das neue Nachfrage-Fenster.
+- **Nutzer-Korrektur (Host-CSS):** der klickbare Toast-Hinweis war
+  unterstrichen (`text-decoration: underline dotted`) — auf Wunsch entfernt
+  (nur noch `cursor: pointer`). Dropdown-Text im Toast erbte außerdem die
+  Textfarbe des umgebenden `.toast`/`.toast-warn` (z. B. weiß auf rotem
+  Grund im Stuck-Fall), obwohl der Dropdown-Panel-Hintergrund unverändert
+  dunkel (`--surface-2`) blieb — `.printer-picker` bekommt jetzt
+  `color: var(--text)` explizit, statt vererbt zu werden.
+- **Nachträglich gefundener Bug (Nutzer-Feedback „ich kann den Button nicht
+  drücken"):** der Druckenbutton wurde beim Absenden eines Drucks auf
+  `disabled` gesetzt und nur bei `print_result` wieder freigegeben. Ein
+  feststeckender Auftrag bekommt aber NIE ein `print_result` — nur
+  wiederholte `print_progress`-Meldungen, solange er in `waiting` steht —
+  der Button blieb also dauerhaft gesperrt, das eben gebaute Nachfrage-Menü
+  war so über den Druckenbutton gar nicht erst erreichbar. Fix
+  (`scan-ws.js`): `printBtn.disabled = msg.status !== 'queued'` bei jedem
+  `print_progress` statt nur bei `print_result` aufgehoben. **Lektion:**
+  ein Disabled-Zustand, der auf ein „terminales" Ereignis wartet, muss für
+  JEDEN Job-Endzustand erreichbar sein — ein Job, der (absichtlich) nie
+  terminiert, hält ihn sonst für immer gesperrt.
+- Getestet: `tests/test_print_queue.py`
+  (`test_update_job_printers_ok_preserves_position_and_redispatches` —
+  Position bleibt exakt erhalten, Dispatch klappt nach Reaktivierung;
+  `test_update_job_printers_forbidden_for_non_owner`,
+  `test_update_job_printers_forbidden_for_wrong_host_sid`,
+  `test_update_job_printers_not_waiting_once_dispatched`,
+  `test_update_job_printers_empty_selection_rejected`). Volle Suite (570
+  Tests, 565 → 570) + `uvx ruff check server/` + `node --check web/*.js`
+  grün. Kein Browser-Livecheck (keine GUI in der Entwicklungsumgebung) —
+  Details `docs/test_status.md` V75.
+
 ## 2026-08-12 — Korrektur: Zettel-Code doch wieder stabil, nur die Bücherliste wird pro Druck aktualisiert
 
 - **Warum:** Der vorherige Eintrag (unten) führte `AppState.

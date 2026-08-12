@@ -209,10 +209,27 @@ seine Bücher wie sonst am Handy. Nach 30 s ohne Aktivität fällt die Station a
 - Der vierstellige Code ist der Zugangs-Credential des Zettels. Er wird
   **nie geloggt** und steht **nicht** im Host-Snapshot (nur der
   Registrierungs-Code des Geräts, der keinen Datenzugriff gewährt).
-- Codes werden **innerhalb einer Server-Laufzeit nie recycelt** — auch nicht,
-  wenn der Schüler fertig ist. Sonst könnte ein alter, noch herumliegender
-  Zettel plötzlich einen anderen Schüler laden. Umgekehrt bleibt der Code pro
-  Schüler stabil, ein Nachdruck trägt also denselben Barcode.
+- Codes werden **innerhalb einer Server-Laufzeit nie an einen ANDEREN
+  Schüler recycelt** — auch nicht, wenn der Schüler fertig ist. Sonst könnte
+  ein alter, noch herumliegender Zettel plötzlich einen anderen Schüler
+  laden. Umgekehrt bleibt der Code pro Schüler stabil, ein Nachdruck trägt
+  also denselben Barcode.
+- **„Trennen" am Host entwertet den aktiven Code** (seit 2026-08-12):
+  `AppState.invalidate_station_code` — der Zettel wird an der Station nicht
+  mehr angenommen, und eine laufende Stationsanmeldung wird zugleich gelöst
+  (`release_station_student`). Der entwertete Code bleibt aber unter
+  `AppState.station_last_code_by_student` als „letzter Code" gemerkt. Beim
+  nächsten „Erstellen"/„Erstellen und Drucken" für denselben Schüler zeigt
+  der Host-Druckdialog eine Checkbox „Alten Code (‹Code›) reaktivieren",
+  **standardmäßig angehakt** — reaktiviert genau diesen Code (der alte
+  Zettel bleibt gültig) statt einen neuen zu ziehen (`AppState.
+  allocate_station_code(reactivate_old=True)`, Default). Ein abgewählter
+  Haken zieht einen frischen Code; dieser wird ab dann selbst zum „letzten
+  Code" für eine spätere Reaktivierung — bei mehrfachem Trennen/Erstellen
+  zeigt die Checkbox also immer den zeitlich JÜNGSTEN entwerteten Code, nie
+  einen älteren. Durchgereicht bis in den `PrintJob` (Checkbox-Wert
+  überlebt die asynchrone Druckerwarteschlange bei „Erstellen und
+  Drucken").
 - Code-Versuche sind pro Station auf **10/Minute** gedrosselt (4 Stellen =
   10 000 Möglichkeiten wären sonst durchprobierbar).
 - Ein Code wird nur angenommen, wenn der Schüler eindeutig frei ist: in einer

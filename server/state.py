@@ -351,6 +351,13 @@ class HelperSession:
     # View-Toggle „Menü": Queue-Ansicht offen, Schüler bleibt im Hintergrund →
     # weiter Live-queue_updates. Rationale: docs/PLAN.md § State-Feld-Rationale
     peeking: bool = False
+    # True, sobald das Handy in DIESEM Serverlauf mindestens einmal per WS
+    # verbunden war (s. `routes/ws.py::ws_scanner`). Steuert, ob der Helfer
+    # beim nächsten Neustart überhaupt persistiert wird (s.
+    # `sessions.persist_helpers`) — nie transient, immer `False` direkt nach
+    # `AppState`-Aufbau, auch bei aus der Persistenz wiederhergestellten
+    # Helfern.
+    connected_since_start: bool = False
 
     def as_dict(self) -> dict:
         return {
@@ -485,6 +492,12 @@ class PrinterDisplaySession:
                               # scheme); 'light'/'dark' = Host hat überschrieben.
     ws: object | None = None
     created_at: datetime = field(default_factory=datetime.now)
+    # True, sobald DIESES Display in DIESEM Serverlauf mindestens einmal per WS
+    # verbunden war (s. `routes/ws.py::ws_drucker_display`). Steuert, ob das
+    # Display beim nächsten Neustart überhaupt persistiert wird (s.
+    # `sessions.persist_printer_displays`) — analog `HelperSession.
+    # connected_since_start`.
+    connected_since_start: bool = False
 
 
 @dataclass
@@ -551,6 +564,12 @@ class ScanStationSession:
     # Reconnect setzt die Station ohnehin ganz zurück (s. `clear_student`),
     # es gibt also keinen Wiederherstellungsfall.
     book_alert_open: bool = False
+    # True, sobald DIESE Station in DIESEM Serverlauf mindestens einmal per WS
+    # verbunden war (s. `routes/ws.py::ws_scan_station`). Steuert, ob die
+    # Station beim nächsten Neustart überhaupt persistiert wird (s.
+    # `sessions.persist_scan_stations`) — analog `HelperSession.
+    # connected_since_start`.
+    connected_since_start: bool = False
 
     def clear_student(self) -> None:
         """Schüler-Bindung lösen (Rückfall auf „Zettel-Code scannen").
@@ -1375,9 +1394,12 @@ class AppState:
         `done_collected` steuert, ob die Lehrkraft Leihschein-Eingänge erfassen
         darf; `slip_collected_count` zählt dann die abgeschlossenen Schüler,
         deren gedruckter Leihschein über `/api/teacher/slip-collected` als
-        entgegengenommen markiert wurde. Automatisch beim Klassen-Laden
+        entgegengenommen markiert wurde. Dieser Marker ist in der
+        Lehreransicht nicht rücknehmbar und wird nur durch `reset_progress()`
+        für einen neuen Durchlauf gelöscht. Automatisch beim Klassen-Laden
         übersprungene Schüler werden für diese Ansicht als `skipped` abgebildet,
-        obwohl die Host-Queue ihren Ablaufstatus `done` behält."""
+        obwohl die Host-Queue ihren Ablaufstatus `done` behält. Jeder Schüler
+        wird dabei genau einem der fünf Lehrer-Statuszähler zugeordnet."""
         ctx = self.contexts.get(context_id)
         counts = {"pending": 0, "active": 0, "done": 0, "skipped": 0, "absent": 0}
         if ctx is None or ctx.loading:
@@ -1411,6 +1433,10 @@ class AppState:
                     "helper_scanned": s.helper_scanned,
                 }
             )
+        # The loop above is deliberately the single source for both the
+        # student rows and the five counters: every queue student contributes
+        # exactly once, including `done + auto_skipped` as `skipped`.
+        assert sum(counts.values()) == len(students)
         return {
             "class_form": ctx.form,
             "counts": counts,

@@ -34,6 +34,25 @@ class _CookieCompatTestClient(TestClient):
                     self.cookies.set(name, value)
 
 
+@pytest.fixture(autouse=True)
+def _isolate_device_persistence(tmp_path, monkeypatch):
+    """Helfer-/Drucker-Display-/Scan-Station-Persistenz (`server/helper_store.py`,
+    `printer_display_store.py`, `scan_station_store.py`) schreibt bei jeder
+    erste WS-Verbindung UND beim App-Shutdown auf die Platte (s.
+    `sessions.persist_helpers` & Co., aufgerufen aus `routes/ws.py` und
+    `app.py`-Lifespan) — automatisch (autouse) für JEDEN Test auf `tmp_path`
+    umgeleitet, sonst würden schon einfache WS-Tests in die echten
+    `data/*.json` schreiben (Spiegel der Isolation, die `booklist_store.py`/
+    `printer_store.py`-Tests einzeln per Hand machen)."""
+    import server.helper_store as helper_store
+    import server.printer_display_store as printer_display_store
+    import server.scan_station_store as scan_station_store
+
+    monkeypatch.setattr(helper_store, "STORE_PATH", tmp_path / "helpers.json")
+    monkeypatch.setattr(printer_display_store, "STORE_PATH", tmp_path / "printer_displays.json")
+    monkeypatch.setattr(scan_station_store, "STORE_PATH", tmp_path / "scan_stations.json")
+
+
 @pytest.fixture
 def client() -> TestClient:
     """Echter HTTP-Client (Starlette TestClient) auf einer frischen App-Instanz.

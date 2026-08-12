@@ -12,12 +12,13 @@ from __future__ import annotations
 
 import server.routes.booklists as booklists_routes
 from server.routes import _deps as deps_routes
-from server.state import AppState, HelperSession, QueueStudent
+from server.state import AppState, HelperSession, QueueStudent, ScanStationSession
 
 
 class _FakeHub:
     def __init__(self) -> None:
         self.sent: list[tuple[str, dict]] = []
+        self.ws_sent: list[tuple[object, dict]] = []
         self.host_broadcasts: list[dict] = []
         self.settings_broadcasts = 0
 
@@ -31,6 +32,7 @@ class _FakeHub:
         self.sent.append((token, msg))
 
     async def send_websocket(self, websocket, msg) -> bool:
+        self.ws_sent.append((websocket, msg))
         return True
 
 
@@ -137,6 +139,66 @@ def test_set_booklist_empty_repushes_affected_helper_session(client, monkeypatch
     )
     assert r.status_code == 200
     assert any(msg.get("type") == "booklist_update" for _tok, msg in hub.sent)
+
+
+def test_set_booklist_empty_repushes_affected_scan_station_session(client, monkeypatch):
+    """Wie `test_set_booklist_empty_repushes_affected_helper_session`, aber
+    für eine an einer Scan-Station angemeldete Session — dieselbe
+    `repush_for_changed_empty_isbns` muss auch `state.scan_stations`
+    durchlaufen, sonst bleibt die Bestand-leer-Reihe an der Station bis zum
+    nächsten Reload sichtbar."""
+    state, hub = _ctx(monkeypatch, _catalog("A", "B"))
+    ctx = state.open_context("9a")
+    ctx.queue.append(
+        QueueStudent(student_id=5, lastname="N", firstname="V", form="9a", status="active")
+    )
+    station = ScanStationSession(station_id="abc123abc123", registration_code="1234")
+    station.student_id = 5
+    station.ws = object()
+    station.expected_isbns = {"A"}
+    state.scan_stations["abc123abc123"] = station
+
+    async def _fake_get_student_info(student_id, schoolyear):
+        return {"enrolled": True, "books": [{"isbn": "A", "status": "vorgemerkt"}]}
+
+    state.iserv.get_student_info = _fake_get_student_info
+
+    r = client.post(
+        "/api/booklist-empty", json={"grade": 9, "empty": ["A"]}, cookies={"session_id": "sid"}
+    )
+    assert r.status_code == 200
+    assert any(msg.get("type") == "booklist_update" for _ws, msg in hub.ws_sent)
+
+
+def test_set_booklist_hidden_repushes_affected_scan_station_session(client, monkeypatch):
+    """`POST /api/booklist-hidden` (Ausblenden statt Bestand-leer) muss
+    ebenfalls eine an einer Scan-Station angemeldete Session live
+    nachziehen — Gegenstück zu
+    `test_set_booklist_empty_repushes_affected_scan_station_session`."""
+    state, hub = _ctx(monkeypatch, _catalog("A", "B"))
+    ctx = state.open_context("9a")
+    ctx.queue.append(
+        QueueStudent(student_id=5, lastname="N", firstname="V", form="9a", status="active")
+    )
+    # `_student_in_grade` liest den Jahrgang aus dem beim Laden befüllten
+    # `form_catalog_cache` — hier vorab gesetzt, um den Katalog-Roundtrip zu
+    # sparen (wie in `tests/test_booklist_repush.py::_setup`).
+    state.caches.form_catalog_cache["9a"] = (9, ["A", "B"])
+    station = ScanStationSession(station_id="def456def456", registration_code="5678")
+    station.student_id = 5
+    station.ws = object()
+    state.scan_stations["def456def456"] = station
+
+    async def _fake_get_student_info(student_id, schoolyear):
+        return {"enrolled": True, "books": [{"isbn": "A", "status": "vorgemerkt"}]}
+
+    state.iserv.get_student_info = _fake_get_student_info
+
+    r = client.post(
+        "/api/booklist-hidden", json={"grade": 9, "hidden": ["A"]}, cookies={"session_id": "sid"}
+    )
+    assert r.status_code == 200
+    assert any(msg.get("type") == "booklist_update" for _ws, msg in hub.ws_sent)
 
 
 def test_get_booklist_order_includes_empty(client, monkeypatch):

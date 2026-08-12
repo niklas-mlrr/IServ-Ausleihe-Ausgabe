@@ -122,9 +122,12 @@ async def hydrate_student_info(
 
     `is_helper` (Pflicht, kein Default): steuert `apply_empty_stock_flag` —
     True für Modus A (Helfer sieht die „Bestand leer"-Markierung), False für
-    Modus B (Schüler bekommt sie NIE, s. server/sessions.py::apply_empty_stock_flag).
-    Bewusst KEIN `isinstance`-Check auf `target` (bricht bei Duck-Typed-Fakes
-    in Tests) — jeder der vier Call-Sites kennt seinen Modus ohnehin."""
+    Modus B (Schüler bekommt sie NIE, s. server/sessions.py::apply_empty_stock_flag)
+    UND `apply_empty_stock_visibility` (Bestand-leer-Reihen werden aus
+    `info["books"]` entfernt, solange nicht ausgeliehen — Modus B, Scan-Station
+    und deren gemeinsamer Rückgabewert für den Scan-Station-Zettel). Bewusst
+    KEIN `isinstance`-Check auf `target` (bricht bei Duck-Typed-Fakes in
+    Tests) — jeder der vier Call-Sites kennt seinen Modus ohnehin."""
     info["form"] = form
     helper = state.find_helper_for_student(getattr(target, "student_id", None))
     info["helper_name"] = helper.name if helper is not None else None
@@ -136,6 +139,8 @@ async def hydrate_student_info(
     init_book_progress(
         state, getattr(target, "student_id", None), info, reset_baseline=reset_baseline
     )
+    if not is_helper:
+        apply_empty_stock_visibility(info, state.caches.empty_isbns)
     return info
 
 
@@ -262,6 +267,27 @@ def apply_empty_stock_flag(info: dict, empty_isbns: set[str], *, visible: bool) 
     for b in info.get("books", []):
         if b.get("isbn") in empty_isbns:
             b["bestand_leer"] = True
+
+
+def apply_empty_stock_visibility(info: dict, empty_isbns: set[str]) -> None:
+    """Entfernt Buchreihen mit leerem Bestand aus `info["books"]`, SOLANGE sie
+    noch nicht ausgeliehen sind — für Schüler-Client (Modus B), Scan-Station-
+    Client und den Scan-Station-Zettel. Bereits ausgeliehene Reihen bleiben
+    sichtbar (Status „ausgeliehen"), sonst würde eine später doch ausgegebene
+    Reihe für den Schüler spurlos verschwinden.
+
+    MUSS nach der Buchungsmengen-Berechnung
+    (`expected_isbns_from_info`/`booking_isbn_sets_from_info`) und nach
+    `init_book_progress` laufen: die Reihe bleibt weiterhin regulär buchbar
+    (dieser Filter betrifft nur die Anzeige) und der Host-„X/Y Bücher"-Zähler
+    (inkl. `books_empty_outstanding`) rechnet weiterhin mit der vollen Liste."""
+    if not empty_isbns:
+        return
+    info["books"] = [
+        b
+        for b in info.get("books", [])
+        if b.get("isbn") not in empty_isbns or b.get("status") == "ausgeliehen"
+    ]
 
 
 def expected_isbns_from_info(info: dict) -> set[str]:
@@ -1556,8 +1582,9 @@ async def repush_booklist(
 
 
 async def repush_for_changed_empty_isbns(state: AppState, hub, changed: set[str]) -> None:
-    """Alle Helfer-/Schüler-Sessions live nachziehen, deren aktuell erwartete
-    Bücher (`expected_isbns`) von einer Bestand-leer-Änderung betroffen sind.
+    """Alle Helfer-/Schüler-/Scan-Station-Sessions live nachziehen, deren
+    aktuell erwartete Bücher (`expected_isbns`) von einer Bestand-leer-
+    Änderung betroffen sind.
 
     Global statt jahrgangsgebunden (anders als `set_booklist_hidden`'s
     `_student_in_grade`-Filter in `routes/booklists.py`): `empty_isbns` ist
@@ -1584,6 +1611,15 @@ async def repush_for_changed_empty_isbns(state: AppState, hub, changed: set[str]
             tasks.append(
                 asyncio.create_task(
                     repush_booklist(state, hub, session.student_id, session, helper=False)
+                )
+            )
+    for station in state.scan_stations.values():
+        if station.student_id is None or station.ws is None:
+            continue
+        if station.expected_isbns & changed:
+            tasks.append(
+                asyncio.create_task(
+                    repush_booklist(state, hub, station.student_id, station, helper=False)
                 )
             )
     if tasks:
@@ -2307,6 +2343,12 @@ async def _load_and_activate_station_student(
         init_book_progress(state, student_id, info, reset_baseline=is_first_call)
         await get_hub().broadcast_host(state.state_snapshot())
 
+    # Wie in `hydrate_student_info` (Modus B/Scan-Station): Bestand-leer-Reihen
+    # verschwinden vom Zettel, solange sie nicht ausgeliehen sind — erst NACH
+    # `init_book_progress`, damit der Host-„X/Y"-Zähler weiterhin mit der
+    # vollen Liste rechnet.
+    apply_empty_stock_visibility(info, state.caches.empty_isbns)
+
     return student, form, info, code
 
 
@@ -2440,6 +2482,108 @@ async def sweep_scan_stations() -> None:
         except Exception:
             log.exception("Scan-Station-Sweeper fehlgeschlagen (non-fatal)")
             continue
+
+
+# ---------------------------------------------------------------------------
+# Persistenz über Serverneustarts: Helfer, Drucker-Displays, Scan-Stationen
+# ---------------------------------------------------------------------------
+#
+# Gemeinsam von den jeweiligen Routen (bei jeder Konfigurationsänderung) UND
+# von routes/ws.py (beim ersten WS-Connect je Serverlauf) sowie der
+# `app.py`-Lifespan (Shutdown, s. dort) aufgerufen — daher hier statt in den
+# einzelnen `routes/*.py`, die sich sonst gegenseitig importieren müssten.
+#
+# Zwei Verwerfungsregeln, unabhängig von der reinen Datei-IO in den
+# `*_store.py`-Modulen:
+#  1. Andere Server-IP als beim Speichern (`server_lan_ip()`) → beim nächsten
+#     Start wird GAR NICHT geladen (die alten Token stecken in URLs, die auf
+#     die alte IP zeigen — auf einem anderen Netz ohnehin nie erreichbar).
+#  2. Ein Eintrag, der in einem kompletten Serverlauf (Start bis Ende) nie
+#     per WS verbunden war (`connected_since_start`), wird gar nicht erst auf
+#     die Platte geschrieben — Karteileichen (z. B. ein wiederhergestellter,
+#     nie wieder angeschlossener Helfer) fallen so beim übernächsten Neustart
+#     automatisch raus, spätestens beim Shutdown-Aufruf in `app.py`.
+
+
+def server_lan_ip() -> str | None:
+    """LAN-IP dieses Servers — Fingerprint für die Persistenz-Verwerfungsregel
+    (1). Dieselbe Auto-Erkennung wie für QR-/Join-URLs (`routes/_deps.py::
+    _base_url`), aber ohne Request und unabhängig vom Tailscale-Toggle (der
+    selbst nicht persistiert wird und bei jedem Neustart auf False steht) —
+    reflektiert also schlicht, an welchem physischen Netz die Maschine hängt."""
+    from .tls import primary_lan_ip
+
+    return primary_lan_ip()
+
+
+def persist_helpers(state: AppState) -> None:
+    """Helfer, die in DIESEM Serverlauf mindestens einmal verbunden waren, auf
+    die Server-Persistenz (`data/helpers.json`) wegschreiben. Non-fatal —
+    Schreibfehler werden geloggt, der In-Memory-State bleibt Leading."""
+    from .helper_store import save as save_helpers
+
+    try:
+        save_helpers(
+            [h for h in state.helper_sessions.values() if h.connected_since_start],
+            server_lan_ip(),
+        )
+    except Exception:
+        log.exception("Speichern der Helfer-Persistenz fehlgeschlagen (non-fatal)")
+
+
+def persist_printer_displays(state: AppState) -> None:
+    """Freigeschaltete Drucker-Displays, die in DIESEM Serverlauf mindestens
+    einmal verbunden waren, auf die Server-Persistenz
+    (`data/printer_displays.json`) wegschreiben. Non-fatal. Zugewiesene
+    Drucker werden über ihren `name` referenziert (laufzeitstabile Pool-`id`
+    s. `printer_store.py`)."""
+    from .printer_display_store import save as save_printer_displays
+
+    try:
+        printer_names_by_id = {p.id: p.name for p in state.settings.printers}
+        entries = [
+            {
+                "display_id": d.display_id,
+                "label": d.label,
+                "theme": d.theme,
+                "assigned_printer_names": (
+                    None
+                    if d.assigned_printer_ids is None
+                    else [
+                        printer_names_by_id[pid]
+                        for pid in d.assigned_printer_ids
+                        if pid in printer_names_by_id
+                    ]
+                ),
+            }
+            for d in state.printer_displays.values()
+            if d.authorized and d.connected_since_start
+        ]
+        save_printer_displays(entries, server_lan_ip())
+    except Exception:
+        log.exception("Speichern der Drucker-Display-Persistenz fehlgeschlagen (non-fatal)")
+
+
+def persist_scan_stations(state: AppState) -> None:
+    """Freigeschaltete Scan-Stationen, die in DIESEM Serverlauf mindestens
+    einmal verbunden waren, auf die Server-Persistenz
+    (`data/scan_stations.json`) wegschreiben. Non-fatal."""
+    from .scan_station_store import save as save_scan_stations
+
+    try:
+        entries = [
+            {
+                "station_id": s.station_id,
+                "label": s.label,
+                "theme": s.theme,
+                "input_mode": s.input_mode,
+            }
+            for s in state.scan_stations.values()
+            if s.authorized and s.connected_since_start
+        ]
+        save_scan_stations(entries, server_lan_ip())
+    except Exception:
+        log.exception("Speichern der Scan-Station-Persistenz fehlgeschlagen (non-fatal)")
 
 
 # ---------------------------------------------------------------------------

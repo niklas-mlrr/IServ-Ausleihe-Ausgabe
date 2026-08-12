@@ -1,8 +1,8 @@
 """Lehrkraft-Statusansicht (`/teacher`) — Live-Fortschritt genau einer
 Modus-B-Klasse für ein eigenes Lehrkraft-Gerät. Host-Endpunkte für QR-Minten,
 Autorisieren und Trennen; öffentliche, token-authentifizierte Endpunkte für
-die der Lehrkraft erlaubten Aktionen (`pending <-> skipped` sowie das
-informative „Leihschein entgegengenommen"-Flag). Die Lehrkraft selbst
+die der Lehrkraft erlaubten Aktionen (`pending <-> skipped` sowie die
+einmalige Setz-Aktion „Leihschein entgegengenommen"). Die Lehrkraft selbst
 verbindet sich unauthentifiziert (per Cookie) via `/ws/teacher?token=...`
 (s. routes/ws.py) und sieht vor der Host-Freischaltung ausschließlich den
 Registrierungscode — keine Klassen-/Schülerdaten (PLAN
@@ -176,9 +176,13 @@ async def teacher_undo_skip(body: TeacherStatusRequest) -> dict:
 
 @router.post("/api/teacher/slip-collected")
 async def teacher_set_slip_collected(body: TeacherSlipCollectedRequest) -> dict:
-    """Die Lehrkraft markiert, ob sie den (unterschriebenen) Leihschein eines
-    Schülers ihrer Klasse entgegengenommen hat — rein informatives Flag
-    (`QueueStudent.slip_collected`), ändert nie `status`. Die Klassenoption
+    """Den entgegengenommenen Leihschein einmalig markieren.
+
+    Der Endpunkt ist absichtlich keine Toggle-Aktion: `collected=true` setzt
+    das rein informative Flag (`QueueStudent.slip_collected`) idempotent auf
+    `True`; `collected=false` wird abgewiesen und kann den Marker nie löschen.
+    Das bewusste Löschen für einen neuen Durchlauf bleibt ausschließlich dem
+    globalen `reset_progress()`-Pfad vorbehalten. Die Klassenoption
     `done_collected` und der Status `done` müssen aktiv sein; außerdem muss für
     den Schüler bereits ein Leihschein gedruckt worden sein (`slip_printed`)."""
     state = get_state()
@@ -198,6 +202,11 @@ async def teacher_set_slip_collected(body: TeacherSlipCollectedRequest) -> dict:
         )
     if not student.slip_printed:
         raise HTTPException(409, "Für diesen Schüler wurde noch kein Leihschein gedruckt")
-    student.slip_collected = bool(body.collected)
+    if not body.collected:
+        raise HTTPException(
+            409,
+            "Leihschein-Marker kann nur gesetzt, nicht zurückgenommen werden",
+        )
+    student.slip_collected = True
     await get_hub().broadcast_host(state.state_snapshot())
-    return {"ok": True, "slip_collected": student.slip_collected}
+    return {"ok": True, "slip_collected": True}

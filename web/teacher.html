@@ -41,11 +41,11 @@
     #view-class { display: none; }
     #view-class.show { display: block; }
     .counts {
-      display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+      display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
       gap: 8px; margin-bottom: 16px;
     }
     .counts.has-collected {
-      grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(0, 2fr);
+      grid-template-columns: repeat(5, minmax(0, 1fr)) minmax(0, 1.7fr);
     }
     .count-pill {
       min-width: 0; background: var(--surface); border: 1px solid var(--border);
@@ -62,6 +62,15 @@
     .hint { color: var(--muted); font-size: .82rem; text-align: left; }
     .swipe-tip { margin: -6px 0 12px; display: none; }
     .swipe-tip.show { display: block; }
+    .sort-row {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
+      color: var(--muted); font-size: .82rem;
+    }
+    .sort-row select {
+      min-width: 150px; border: 1px solid var(--border); border-radius: 8px;
+      background: var(--surface); color: var(--fg); padding: 7px 9px;
+      font: inherit; cursor: pointer;
+    }
     .swipe-hint {
       flex: none; margin-left: auto; color: var(--muted); opacity: .45; font-size: 1rem;
       letter-spacing: -2px; line-height: 1;
@@ -110,13 +119,15 @@
       font-size: .82rem; padding: 8px 10px; cursor: pointer; flex: none;
     }
     button.act:active { opacity: .7; }
-    .slip-check {
-      display: flex; align-items: center; gap: 6px; flex: none;
-      font-size: .78rem; color: var(--muted); white-space: nowrap; cursor: pointer;
+    .slip-action {
+      max-width: 100%; color: var(--fg) !important;
+      border: 1px solid var(--border) !important;
+      background: var(--surface-2) !important;
     }
-    .slip-check input { width: 18px; height: 18px; flex: none; }
+    .slip-action.pending { opacity: .6; cursor: wait; }
+    .slip-action.done { color: var(--done) !important; cursor: default; }
     @media (max-width: 420px) {
-      .slip-check { white-space: normal; }
+      .slip-action { white-space: normal; }
     }
     @media (prefers-reduced-motion: reduce) {
       .stud-row { transition: opacity .18s ease; }
@@ -164,6 +175,13 @@
     <div class="sub">Live-Status der Bücherausgabe</div>
     <div class="counts" id="counts"></div>
     <p class="hint swipe-tip" id="swipe-tip">Wartende Schüler nach links wischen, um sie als abwesend zu markieren.</p>
+    <div class="sort-row">
+      <label for="student-sort">Sortierung</label>
+      <select id="student-sort">
+        <option value="alphabetical">Alphabetisch</option>
+        <option value="status">Nach Status</option>
+      </select>
+    </div>
     <div class="stud-list" id="stud-list"></div>
   </div>
 

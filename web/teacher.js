@@ -6,8 +6,9 @@
 // Aktionen erlaubt: ein wartender Schüler wird per Wisch-Geste (nach links,
 // Touch-first via Pointer Events) als abwesend markiert bzw. per Button
 // zurückgesetzt (`pending <-> skipped`); zusätzlich kann sie je abgeschlossenem
-// Schüler ankreuzen, ob sie den unterschriebenen Leihschein entgegengenommen
-// hat (`slip_collected`, rein informativ; nur bei aktivem `done_collected`).
+// Schüler den unterschriebenen Leihschein einmalig als entgegengenommen
+// markieren kann (`slip_collected`, rein informativ; nur bei aktivem
+// `done_collected`).
 // Alles andere ist reine Anzeige.
 
 (() => {
@@ -19,6 +20,14 @@
     forbidden: document.getElementById('view-forbidden'),
   };
   const classView = document.getElementById('view-class');
+  const sortSelect = document.getElementById('student-sort');
+  let sortMode = sortSelect.value;
+  let latestClassData = null;
+  // Lokaler UI-Zustand für den kurzen Zeitraum zwischen Klick und WS-/HTTP-
+  // Antwort. Der Server bleibt die Quelle der Wahrheit; der lokale Zustand
+  // verhindert nur Doppelklicks und hält die Darstellung während eines
+  // laufenden Requests stabil.
+  const slipActionState = new Map();
 
   function show(name) {
     for (const k in views) views[k].classList.toggle('show', k === name);
@@ -49,12 +58,43 @@
     ['done', 'abgeschlossen'], ['active', 'aktiv'], ['pending', 'offen'], ['skipped', 'übersprungen'], ['absent', 'abwesend'],
   ];
 
+  const STATUS_ORDER = {
+    active: 0,
+    pending: 1,
+    absent: 2,
+    done: 3,
+    skipped: 4,
+  };
+  const NAME_COLLATOR = new Intl.Collator('de-DE', { sensitivity: 'base', numeric: true });
+
+  function compareNames(a, b) {
+    const last = NAME_COLLATOR.compare(a.lastname || '', b.lastname || '');
+    if (last !== 0) return last;
+    const first = NAME_COLLATOR.compare(a.firstname || '', b.firstname || '');
+    if (first !== 0) return first;
+    return NAME_COLLATOR.compare(String(a.student_id), String(b.student_id));
+  }
+
+  function sortedStudents(students) {
+    const copy = [...students];
+    copy.sort((a, b) => {
+      if (sortMode === 'status') {
+        const statusDifference = (STATUS_ORDER[a.status] ?? Number.MAX_SAFE_INTEGER)
+          - (STATUS_ORDER[b.status] ?? Number.MAX_SAFE_INTEGER);
+        if (statusDifference !== 0) return statusDifference;
+      }
+      return compareNames(a, b);
+    });
+    return copy;
+  }
+
   function renderClass(data) {
+    latestClassData = data;
     document.getElementById('class-form').textContent = data.class_form || 'Klasse';
     const c = data.counts || { pending: 0, active: 0, done: 0, skipped: 0, absent: 0 };
     const pills = COUNT_PILLS.map(([k, l]) => `<div class="count-pill"><span class="n">${c[k] || 0}</span><span class="l">${l}</span></div>`);
     // Die Sammel-Funktion ist eine Klassenoption. Ohne sie weder den Counter
-    // noch die Checkboxen anzeigen; `done_collected` kommt aus dem
+    // noch die Leihschein-Buttons anzeigen; `done_collected` kommt aus dem
     // minimierten Teacher-Snapshot (s. AppState.teacher_snapshot).
     if (data.done_collected === true) {
       pills.push(`<div class="count-pill count-pill-collected"><span class="n">${data.slip_collected_count || 0}</span><span class="l">Leihschein abgegeben</span></div>`);
@@ -65,9 +105,18 @@
     // Wisch-Hinweis nur zeigen, solange es überhaupt wartende Schüler gibt —
     // die Geste ist sonst nur durch Zufall auffindbar (s. Wisch-Chevron je Zeile).
     document.getElementById('swipe-tip').classList.toggle('show', (c.pending || 0) > 0);
+    sortSelect.value = sortMode;
 
-    const students = data.students || [];
+    const students = sortedStudents(data.students || []);
     document.getElementById('stud-list').innerHTML = students.map(s => {
+      if (s.slip_collected) {
+        slipActionState.set(s.student_id, 'done');
+      } else if (s.status !== 'done' || !s.slip_printed || data.done_collected !== true) {
+        // Ein neuer Durchlauf (oder ein anderer nicht mehr passender Status)
+        // darf einen alten lokalen UI-Zustand nicht in die neue Zeile tragen.
+        slipActionState.delete(s.student_id);
+      }
+      const currentSlipState = slipActionState.get(s.student_id);
       const name = `${escapeHtml(s.lastname)}, ${escapeHtml(s.firstname)}`;
       let extra = '';
       if ((s.status === 'skipped' || s.status === 'absent') && !s.auto_skipped) {
@@ -76,10 +125,9 @@
         // Abwesender, dessen Bücher ein Helfer eingescant hat: die Lehrkraft
         // nimmt neben dem Leihschein auch den physischen Bücherstapel entgegen.
         const slipLabel = s.helper_scanned ? 'Leihschein & Bücherstapel entgegengenommen' : 'Leihschein entgegengenommen';
-        extra = `<label class="slip-check">
-          <input type="checkbox" data-slip="${s.student_id}"${s.slip_collected ? ' checked' : ''}>
-          ${slipLabel}
-        </label>`;
+        const slipDone = s.slip_collected || currentSlipState === 'done';
+        const slipPending = currentSlipState === 'pending';
+        extra = `<button type="button" class="act slip-action${slipDone ? ' done' : ''}${slipPending ? ' pending' : ''}" data-slip="${s.student_id}"${slipDone || slipPending ? ' disabled' : ''}>${slipLabel}${slipDone ? ' ✓' : ''}</button>`;
       }
       const swipeable = s.status === 'pending';
       // Dezenter Wisch-Hinweis (Chevrons) am rechten Rand wartender Zeilen —
@@ -188,11 +236,36 @@
 
   async function postAction(path, studentId, extra) {
     try {
-      await fetch(path, {
+      const response = await fetch(path, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token, student_id: studentId, ...extra }),
       });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return true;
     } catch (_e) { /* nächster teacher_state-Push korrigiert die Anzeige ohnehin */ }
+    return false;
+  }
+
+  async function collectSlip(button, studentId) {
+    if (slipActionState.has(studentId)) return;
+    slipActionState.set(studentId, 'pending');
+    button.disabled = true;
+    button.classList.add('pending');
+
+    const ok = await postAction('/api/teacher/slip-collected', studentId, { collected: true });
+    const currentButton = document.querySelector(`button[data-slip="${studentId}"]`) || button;
+    currentButton.classList.remove('pending');
+    if (ok) {
+      slipActionState.set(studentId, 'done');
+      currentButton.disabled = true;
+      currentButton.classList.add('done');
+      if (!currentButton.textContent.trim().endsWith('✓')) {
+        currentButton.textContent = `${currentButton.textContent.trim()} ✓`;
+      }
+    } else {
+      slipActionState.delete(studentId);
+      currentButton.disabled = false;
+    }
   }
 
   document.getElementById('stud-list').addEventListener('click', (e) => {
@@ -200,14 +273,18 @@
     if (undoBtn) {
       const id = parseInt(undoBtn.dataset.undo, 10);
       askConfirm('Diesen Schüler als nicht abwesend markieren?', () => postAction('/api/teacher/undo-skip', id));
+      return;
+    }
+    const slipBtn = e.target.closest('[data-slip]');
+    if (slipBtn) {
+      const id = parseInt(slipBtn.dataset.slip, 10);
+      collectSlip(slipBtn, id);
     }
   });
 
-  document.getElementById('stud-list').addEventListener('change', (e) => {
-    const cb = e.target.closest('[data-slip]');
-    if (!cb) return;
-    const id = parseInt(cb.dataset.slip, 10);
-    postAction('/api/teacher/slip-collected', id, { collected: cb.checked });
+  sortSelect.addEventListener('change', () => {
+    sortMode = sortSelect.value;
+    if (latestClassData) renderClass(latestClassData);
   });
 
   function handleServerMessage(msg) {

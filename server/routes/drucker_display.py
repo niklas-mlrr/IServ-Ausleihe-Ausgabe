@@ -13,7 +13,7 @@ from pathlib import Path
 from fastapi import HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse
 
-from ..sessions import make_qr_data_url, send_printer_display_update
+from ..sessions import make_qr_data_url, persist_printer_displays, send_printer_display_update
 from ..state import get_state
 from ._deps import (
     PrinterDisplayAssignRequest,
@@ -113,6 +113,7 @@ async def printer_display_enable(body: PrinterDisplayEnableRequest) -> dict:
         raise HTTPException(404, "Drucker-Display nicht gefunden")
     display.authorized = True
     display.label = (body.label or "").strip()
+    persist_printer_displays(state)
     await send_printer_display_update(state, display)
     from ..hub import get_hub
 
@@ -142,6 +143,7 @@ async def printer_display_assign(body: PrinterDisplayAssignRequest) -> dict:
                 seen.add(pid)
                 ordered.append(pid)
         display.assigned_printer_ids = ordered
+    persist_printer_displays(state)
     await send_printer_display_update(state, display)
     from ..hub import get_hub
 
@@ -159,6 +161,7 @@ async def printer_display_label(body: PrinterDisplayLabelRequest) -> dict:
     if not display or not display.authorized:
         raise HTTPException(404, "Drucker-Display nicht gefunden oder nicht freigeschaltet")
     display.label = (body.label or "").strip()
+    persist_printer_displays(state)
     await send_printer_display_update(state, display)
     from ..hub import get_hub
 
@@ -179,6 +182,7 @@ async def printer_display_theme(body: PrinterDisplayThemeRequest) -> dict:
     if theme not in ("light", "dark"):
         raise HTTPException(400, "theme muss 'light' oder 'dark' sein")
     display.theme = theme
+    persist_printer_displays(state)
     await send_printer_display_update(state, display)
     from ..hub import get_hub
 
@@ -199,6 +203,7 @@ async def printer_display_forget(body: PrinterDisplayForgetRequest) -> dict:
         raise HTTPException(404, "Drucker-Display nicht gefunden")
     # Token verbieten — künftige Verbindungen mit diesem Token werden gesperrt.
     state.banned_printer_display_tokens.add(display.display_id)
+    persist_printer_displays(state)
     # Display über die Sperre informieren (falls gerade verbunden), dann WS
     # schließen. Der `finally`-Block des WS-Handlers setzt nur noch ws=None
     # (Session ist hier schon entfernt).

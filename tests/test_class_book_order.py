@@ -12,7 +12,7 @@ import asyncio
 from server.book_order import get_hidden_isbns_for_form
 from server.iserv_client import IsServClient
 from server.routes.api import normalize_book_order
-from server.sessions import apply_empty_stock_flag, apply_hidden_books
+from server.sessions import apply_empty_stock_flag, apply_empty_stock_visibility, apply_hidden_books
 from server.state import AppState
 
 # ---------------------------------------------------------------------------
@@ -261,6 +261,37 @@ def test_apply_empty_stock_flag_noop_when_nothing_empty():
     info = {"books": [{"isbn": "A", "status": "vorgemerkt"}]}
     apply_empty_stock_flag(info, set(), visible=True)
     assert "bestand_leer" not in info["books"][0]
+
+
+# ---------------------------------------------------------------------------
+# „Bestand leer" — Sichtbarkeitsfilter für Schüler-Client/Scan-Station/Zettel
+# (apply_empty_stock_visibility): nicht ausgeliehene Bestand-leer-Reihen
+# verschwinden aus der Anzeige, ausgeliehene bleiben stehen.
+# ---------------------------------------------------------------------------
+
+
+def test_apply_empty_stock_visibility_removes_unloaned_empty_stock_rows():
+    info = {
+        "books": [
+            {"isbn": "A", "status": "vorgemerkt"},
+            {"isbn": "B", "status": "vorgemerkt"},
+            {"isbn": "C", "status": "ausgeliehen"},
+        ]
+    }
+    apply_empty_stock_visibility(info, {"A"})
+    assert [b["isbn"] for b in info["books"]] == ["B", "C"]
+
+
+def test_apply_empty_stock_visibility_keeps_already_loaned_empty_stock_row():
+    info = {"books": [{"isbn": "A", "status": "ausgeliehen"}]}
+    apply_empty_stock_visibility(info, {"A"})
+    assert [b["isbn"] for b in info["books"]] == ["A"]
+
+
+def test_apply_empty_stock_visibility_noop_when_nothing_empty():
+    info = {"books": [{"isbn": "A", "status": "vorgemerkt"}]}
+    apply_empty_stock_visibility(info, set())
+    assert [b["isbn"] for b in info["books"]] == ["A"]
 
 
 def test_get_hidden_isbns_for_form_resolves_grade_via_class_catalog():

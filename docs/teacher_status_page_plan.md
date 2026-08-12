@@ -9,7 +9,9 @@
 Eine Lehrkraft einer laufenden Modus-B-Klasse kann auf einem eigenen Gerät den
 Fortschritt **ausschließlich dieser Klasse** live verfolgen. Die Ansicht zeigt
 alle Schüler mit ihrem aktuellen Ausgabestatus und erlaubt nur, wartende Schüler
-als abwesend zu überspringen bzw. diese Aktion rückgängig zu machen.
+als abwesend zu überspringen bzw. diese Aktion rückgängig zu machen. Bei
+abgeschlossenen Schülern kann ein gedruckter Leihschein einmalig als
+entgegengenommen markiert werden.
 
 Die Lehrkraft erhält den Zugang über einen QR-Code, den der Host im jeweiligen
 Klassen-Tab erzeugt. Der QR-Code enthält einen langen, zufälligen Token, der
@@ -26,7 +28,14 @@ Klassenansicht.
 | `active` + Fortschritt | In Ausgabe — X/Y Bücher erfasst |
 | `active` + `slip_printing` | Leihschein wird gedruckt |
 | `done` | Ausgabe abgeschlossen |
-| `skipped` | Übersprungen / abwesend |
+| `skipped` | Übersprungen |
+| `absent` | Abwesend |
+
+Die Kopfansicht führt fünf getrennte Zähler: **abgeschlossen**, **aktiv**,
+**offen**, **übersprungen** und **abwesend**. Jeder Schüler zählt genau einmal.
+Ein beim Klassen-Laden automatisch fertig gesetzter Schüler (`done` mit
+`auto_skipped`) zählt in dieser Ansicht als **übersprungen**; `absent` bleibt
+ein eigener Status.
 
 `Ausgabe abgeschlossen` bedeutet ausdrücklich: Alle vorgesehenen Bücher wurden
 gescannt und der Leihschein wurde gedruckt. Die Ansicht behauptet nicht, dass
@@ -74,13 +83,23 @@ versehentlicher QR-Klick keine laufende Ansicht unterbricht.
 ## Lehrer-Ablauf und Rechte
 
 - `/teacher` ist mobil lesbar, hat keine Host-/Buchungs-/Druck-Steuerung und
-  zeigt Klasse sowie Summen `abgeschlossen / aktiv / offen / übersprungen`.
+  zeigt Klasse sowie die fünf getrennten Summen `abgeschlossen / aktiv / offen /
+  übersprungen / abwesend`.
 - Bei `pending` darf die Lehrkraft „Als abwesend überspringen" auswählen;
   ein Bestätigungsdialog verhindert Fehlklicks.
 - Bei `skipped` darf sie „Wieder auf wartend setzen" wählen.
 - Der Server erlaubt nur `pending -> skipped` und `skipped -> pending`.
   `active` und `done` bleiben vollständig hostgesteuert, damit eine Lehrkraft
   weder eine laufende Ausgabe beendet noch einen Abschluss vortäuscht.
+- Bei aktiviertem `done_collected` und gedrucktem Leihschein setzt der Button
+  „Leihschein entgegengenommen" den Marker einmalig. Die Aktion ist für die
+  Lehrkraft nicht rücknehmbar und bei erneutem Aufruf idempotent. Der globale
+  Host-Befehl `reset_progress()` darf den Marker für einen neuen Durchlauf
+  weiterhin löschen. Bei `helper_scanned` bleibt der Text „Leihschein &
+  Bücherstapel entgegengenommen" erhalten.
+- Die Schülerliste kann alphabetisch oder nach Status sortiert werden. Die
+  Statusreihenfolge lautet `active -> pending -> absent -> done -> skipped`;
+  innerhalb einer Gruppe gilt Nachname, Vorname, stabile Schüler-ID.
 - Der Statuswechsel erfolgt lokal im Runtime-State; kein IServ-API-Write und
   keine Playwright-Aktion.
 
@@ -95,8 +114,9 @@ versehentlicher QR-Klick keine laufende Ansicht unterbricht.
 4. Host-UI: QR-Button, QR-Dialog, Registrierungscode, Verbindungsanzeige und
    Trennen im konkreten Klassen-Tab.
 5. Teacher-UI: neue `web/teacher.html`/`web/teacher.js` und Clean-Route
-   `/teacher`; responsive Statusliste, Leer-/Offline-/Sperrstatus sowie
-   Skip/Undo-Dialoge.
+   `/teacher`; responsive Statusliste, fünf getrennte Zähler,
+   Leer-/Offline-/Sperrstatus, Skip/Undo-Dialoge, irreversible
+   Leihschein-Aktion und Sortierung.
 6. Tests: Token-/Autorisierungs-/Klassen-Isolation, Snapshot-Privacy,
    erlaubte und verbotene Statusübergänge, WebSocket-Pairing, Live-Updates,
    Reconnect und Entwertung.
@@ -110,7 +130,14 @@ versehentlicher QR-Klick keine laufende Ansicht unterbricht.
 - Vor Freischaltung sind keine Schülerdaten im Browser oder WebSocket-Payload.
 - Die Liste folgt Pairing, Scan-Fortschritt, Druck, Abschluss, Überspringen
   und Rücknahme ohne Reload live.
+- Die fünf Lehrerzähler sind getrennt und summieren sich exakt auf die Zahl der
+  Schüler in der Liste, einschließlich der `auto_skipped`-Abbildung.
 - Ein Lehrer kann nur `pending <-> skipped` für Schüler seiner Klasse ändern.
+- Die Leihschein-Aktion setzt nur `false -> true` (idempotent bei `true`);
+  ein Zurücknehmen durch die Lehrkraft wird abgewiesen. `reset_progress()` darf
+  den Marker für einen neuen Durchlauf löschen.
+- Die Liste ist alphabetisch oder nach `active -> pending -> absent -> done ->
+  skipped` sortierbar; WebSocket-Updates behalten die Auswahl.
 - Token-Entwertung stoppt sofort weitere Datenupdates und ein Reload kann den
   Zugang nicht wiederherstellen.
 - Die komplette Änderung bleibt ohne IServ-API-Write; der bestehende

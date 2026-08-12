@@ -9,7 +9,7 @@ import uuid
 from fastapi import HTTPException, Request
 
 from ..hub import get_hub
-from ..sessions import end_student, make_qr_data_url
+from ..sessions import end_student, make_qr_data_url, persist_helpers
 from ..state import HelperSession, get_state
 from ._deps import AddHelperRequest, SetHelperClassRequest, _base_url, host_router
 
@@ -35,6 +35,7 @@ async def add_helper(body: AddHelperRequest, request: Request) -> dict:
             None,
         )
     state.helper_sessions[token] = HelperSession(token=token, name=name, context_id=context_id)
+    persist_helpers(state)
     url = f"{_base_url(request)}/scan?token={token}"
     qr_data_url = make_qr_data_url(url)
 
@@ -102,5 +103,6 @@ async def remove_helper(token: str) -> dict:
         except Exception:
             pass
     state.helper_sessions.pop(token, None)
+    persist_helpers(state)
     await hub.broadcast_host(state.state_snapshot())
     return {"ok": True}

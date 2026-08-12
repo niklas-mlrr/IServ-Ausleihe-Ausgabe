@@ -184,11 +184,12 @@ async def set_booklist_hidden(body: BooklistHiddenRequest) -> dict:
     _persist_booklist_settings(state)
     hub = get_hub()
     await hub.broadcast_settings()
-    # Allen aktiven Clients (Modus A Helfer + Modus B Schüler), deren
-    # zugewiesener Schüler in diesem Jahrgang ist, die neu gefilterte Bücherliste
-    # live nachschieben — Ausblenden wirkt damit sofort auf dem Gerät, nicht erst
-    # beim nächsten Schülerladen. `booklist_update` ersetzt nur die Liste und
-    # lässt den Scan-Fortschritt am Client unangetastet (s. `repush_booklist`).
+    # Allen aktiven Clients (Modus A Helfer + Modus B Schüler + Scan-Station),
+    # deren zugewiesener Schüler in diesem Jahrgang ist, die neu gefilterte
+    # Bücherliste live nachschieben — Ausblenden wirkt damit sofort auf dem
+    # Gerät, nicht erst beim nächsten Schülerladen. `booklist_update` ersetzt
+    # nur die Liste und lässt den Scan-Fortschritt am Client unangetastet
+    # (s. `repush_booklist`).
     tasks: list[asyncio.Task] = []
     for helper in state.helper_sessions.values():
         if helper.student_id is None or helper.ws is None:
@@ -206,6 +207,15 @@ async def set_booklist_hidden(body: BooklistHiddenRequest) -> dict:
             tasks.append(
                 asyncio.create_task(
                     repush_booklist(state, hub, session.student_id, session, helper=False)
+                )
+            )
+    for station in state.scan_stations.values():
+        if station.student_id is None or station.ws is None:
+            continue
+        if _student_in_grade(state, station.student_id, grade):
+            tasks.append(
+                asyncio.create_task(
+                    repush_booklist(state, hub, station.student_id, station, helper=False)
                 )
             )
     if tasks:

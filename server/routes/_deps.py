@@ -453,9 +453,11 @@ class TeacherStatusRequest(BaseModel):
 
 
 class TeacherSlipCollectedRequest(BaseModel):
-    """Body für `POST /api/teacher/slip-collected` — die Lehrkraft markiert,
-    ob sie den (unterschriebenen) Leihschein eines Schülers ihrer Klasse
-    entgegengenommen hat. Token-authentifiziert wie `TeacherStatusRequest`."""
+    """Body für `POST /api/teacher/slip-collected` — die Lehrkraft setzt den
+    einmaligen Marker, dass sie den (unterschriebenen) Leihschein eines
+    Schülers entgegengenommen hat. `collected=false` wird vom Endpunkt
+    abgewiesen; der Default hält ältere Setz-Clients kompatibel.
+    Token-authentifiziert wie `TeacherStatusRequest`."""
 
     token: str = ""
     student_id: int | None = None

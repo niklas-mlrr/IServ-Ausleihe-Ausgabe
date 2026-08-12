@@ -25,6 +25,9 @@ from ..sessions import (
     gen_registration_code,
     hydrate_student_info,
     load_station_student,
+    persist_helpers,
+    persist_printer_displays,
+    persist_scan_stations,
     process_scan,
     rebind_helper_to_context,
     release_station_student,
@@ -842,6 +845,12 @@ async def ws_scanner(websocket: WebSocket, token: str) -> None:
 
     await websocket.accept()
     helper = state.helper_sessions[token]
+    # Erste WS-Verbindung dieses Helfers in DIESEM Serverlauf (auch bei einem
+    # aus der Persistenz wiederhergestellten Helfer) → jetzt erst persistenz-
+    # würdig (s. sessions.persist_helpers). Reconnects danach sind No-ops.
+    if not helper.connected_since_start:
+        helper.connected_since_start = True
+        persist_helpers(state)
     # Frische Verbindung → Peek-Zustand ist clientseitig nicht mehr gesetzt.
     helper.peeking = False
     # Reconnect (Seite erneut geöffnet): einen noch laufenden Grace-Teardown-
@@ -1126,6 +1135,14 @@ async def ws_drucker_display(websocket: WebSocket, token: str | None = None) -> 
         )
         state.printer_displays[token] = display
     display.ws = websocket
+    # Erste WS-Verbindung dieses Displays in DIESEM Serverlauf (auch bei einem
+    # aus der Persistenz wiederhergestellten Display) → jetzt erst
+    # persistenzwürdig (s. sessions.persist_printer_displays). Ein noch nicht
+    # freigeschaltetes Display wird dadurch nicht gespeichert (Filter dort
+    # verlangt zusätzlich `authorized`).
+    if not display.connected_since_start:
+        display.connected_since_start = True
+        persist_printer_displays(state)
     await send_printer_display_update(state, display)  # Code bzw. Queue-Sicht
     await hub.broadcast_host(state.state_snapshot())
 
@@ -1212,6 +1229,12 @@ async def ws_scan_station(websocket: WebSocket, token: str | None = None) -> Non
         # keine fremden Daten an der Station hängen bleiben.
         await release_station_student(state, station, reason="station reconnected")
     station.ws = websocket
+    # Erste WS-Verbindung dieser Station in DIESEM Serverlauf (auch bei einer
+    # aus der Persistenz wiederhergestellten Station) → jetzt erst
+    # persistenzwürdig (s. sessions.persist_scan_stations).
+    if not station.connected_since_start:
+        station.connected_since_start = True
+        persist_scan_stations(state)
     await send_scan_station_update(state, station)
     await hub.broadcast_host(state.state_snapshot())
 

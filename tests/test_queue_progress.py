@@ -162,6 +162,62 @@ def test_hydrate_fills_progress(monkeypatch):
     assert (s.as_dict()["books_done"], s.as_dict()["books_total"]) == (1, 2)
 
 
+def test_hydrate_hides_unloaned_empty_stock_book_for_non_helper(monkeypatch):
+    """Modus B/Scan-Station (`is_helper=False`): eine noch nicht ausgeliehene
+    Bestand-leer-Reihe fällt aus `info["books"]"` (Anzeige) — bleibt aber in
+    `books_total`/`vormerk_isbns` mitgezählt bzw. buchbar."""
+    st, s = _state_with_student()
+    st.caches.empty_isbns = {"EMPTY"}
+    monkeypatch.setattr(sessions, "get_book_order_for_form", _async_none)
+    monkeypatch.setattr(sessions, "get_hidden_isbns_for_form", _async_empty_set)
+    target = _Target(7)
+    info = asyncio.run(
+        sessions.hydrate_student_info(
+            st,
+            _info(("A", "vorgemerkt"), ("EMPTY", "vorgemerkt")),
+            "10a",
+            target,
+            is_helper=False,
+        )
+    )
+    assert [b["isbn"] for b in info["books"]] == ["A"]
+    assert target.vormerk_isbns == {"A", "EMPTY"}  # bleibt regulär buchbar
+    d = s.as_dict()
+    assert d["books_total"] == 2  # Host-Zähler rechnet weiterhin mit der vollen Liste
+    assert d["books_empty_outstanding"] == 1
+
+
+def test_hydrate_keeps_loaned_empty_stock_book_visible_for_non_helper(monkeypatch):
+    st, _s = _state_with_student()
+    st.caches.empty_isbns = {"EMPTY"}
+    monkeypatch.setattr(sessions, "get_book_order_for_form", _async_none)
+    monkeypatch.setattr(sessions, "get_hidden_isbns_for_form", _async_empty_set)
+    target = _Target(7)
+    info = asyncio.run(
+        sessions.hydrate_student_info(
+            st, _info(("EMPTY", "ausgeliehen")), "10a", target, is_helper=False
+        )
+    )
+    assert [b["isbn"] for b in info["books"]] == ["EMPTY"]
+
+
+def test_hydrate_keeps_empty_stock_book_visible_for_helper(monkeypatch):
+    """Modus A (`is_helper=True`): keine Filterung — die Reihe bleibt in der
+    Liste, nur mit `bestand_leer`-Flag markiert (unveränderte Alt-Logik)."""
+    st, _s = _state_with_student()
+    st.caches.empty_isbns = {"EMPTY"}
+    monkeypatch.setattr(sessions, "get_book_order_for_form", _async_none)
+    monkeypatch.setattr(sessions, "get_hidden_isbns_for_form", _async_empty_set)
+    target = _Target(7)
+    info = asyncio.run(
+        sessions.hydrate_student_info(
+            st, _info(("EMPTY", "vorgemerkt")), "10a", target, is_helper=True
+        )
+    )
+    assert [b["isbn"] for b in info["books"]] == ["EMPTY"]
+    assert info["books"][0].get("bestand_leer") is True
+
+
 def test_reset_to_pending_clears_progress_and_slip():
     """Zurück in die Warteschlange = neuer Durchlauf → Zähler und Leihschein-
     Marker fallen auf Null zurück (done/skipped behalten ihren Stand)."""

@@ -255,6 +255,15 @@ function handleServerMessage(msg) {
     renderBooks();
     setStatusText('Scanner bereit — Buch scannen');
     startIdle();
+  } else if (msg.type === 'booklist_update') {
+    // Live-Nachzug der Bücherliste nach einer Ausblendungs-/Bestand-leer-
+    // Änderung im Einstellungen-Dialog (Gegenstück zum Schülerclient, s.
+    // `student.js`) — ersetzt nur die Liste + Reihenfolge, lässt den
+    // Scan-Fortschritt (scannedIsbns/scanOrder) unangetastet. Kein
+    // Druckmodus an der Station, daher kein `maybeEnterDruckmodus()`-Äquivalent.
+    if (Array.isArray(msg.book_order)) bookOrder = msg.book_order;
+    if (Array.isArray(msg.books)) currentBooks = msg.books;
+    renderBooks();
   } else if (msg.type === 'scan_result') {
     // Blockierende Meldungen (ausgemustert/anderweitig verliehen) halten
     // `scanInFlight` bewusst offen — wie am Handy endet die Sperre erst mit

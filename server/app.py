@@ -14,7 +14,15 @@ from .iserv_client import IsServClient
 from .routes.api import router as api_router
 from .routes.ws import router as ws_router
 from .runtime import Runtime, RuntimeBindingMiddleware
-from .sessions import sweep_expired_sessions, sweep_scan_stations
+from .sessions import (
+    gen_registration_code,
+    persist_helpers,
+    persist_printer_displays,
+    persist_scan_stations,
+    server_lan_ip,
+    sweep_expired_sessions,
+    sweep_scan_stations,
+)
 from .state import get_state
 
 log = logging.getLogger(__name__)
@@ -57,6 +65,12 @@ async def lifespan(app: FastAPI):
         except Exception:
             log.exception("Laden der booklist-Persistenz fehlgeschlagen (non-fatal)")
 
+    # Server-IP-Fingerprint für die Helfer-/Display-/Stations-Persistenz (s.
+    # sessions.persist_helpers & Co.): weicht sie vom beim Speichern erkannten
+    # Netz ab, wird unten gar nicht erst geladen (alte Token stecken in URLs,
+    # die auf die alte IP zeigen — auf einem anderen Netz ohnehin tot).
+        current_ip = server_lan_ip()
+
     # Liegengebliebene Druck-Temp-PDFs vom letzten Lauf wegräumen (win-default-Leak).
         from .printing import cleanup_stale_print_tempfiles
 
@@ -81,6 +95,68 @@ async def lifespan(app: FastAPI):
             )
         except Exception:
             log.exception("Laden der Drucker-Persistenz fehlgeschlagen (non-fatal)")
+
+    # Helfer aus letzter Sitzung laden (Persistenz): reine Datei-IO, non-fatal.
+    # Der alte Token bleibt gültig — ein Handy mit noch offener /scan?token=…-
+    # Seite verbindet sich nach dem Neustart wieder mit demselben Helfer.
+        from .helper_store import load as load_helper_state
+        from .state import HelperSession
+
+        try:
+            for token, name in load_helper_state(current_ip):
+                state.helper_sessions[token] = HelperSession(token=token, name=name)
+            log.info("Helfer geladen: %d", len(state.helper_sessions))
+        except Exception:
+            log.exception("Laden der Helfer-Persistenz fehlgeschlagen (non-fatal)")
+
+    # Freigeschaltete Drucker-Displays aus letzter Sitzung laden: Drucker-
+    # Zuweisung ist über den (laufzeitstabilen) Drucker-`name` gespeichert und
+    # wird hier auf die frisch geladenen Pool-`id`s aufgelöst (s.
+    # printer_display_store.py). Non-fatal, reine Datei-IO.
+        from .printer_display_store import load as load_printer_display_state
+        from .state import PrinterDisplaySession
+
+        try:
+            printer_ids_by_name: dict[str | None, str] = {}
+            for p in state.settings.printers:
+                printer_ids_by_name.setdefault(p.name, p.id)
+            for entry in load_printer_display_state(current_ip):
+                names = entry["assigned_printer_names"]
+                assigned_printer_ids = (
+                    None
+                    if names is None
+                    else [printer_ids_by_name[n] for n in names if n in printer_ids_by_name]
+                )
+                state.printer_displays[entry["display_id"]] = PrinterDisplaySession(
+                    display_id=entry["display_id"],
+                    registration_code=gen_registration_code(),
+                    authorized=True,
+                    label=entry["label"],
+                    theme=entry["theme"],
+                    assigned_printer_ids=assigned_printer_ids,
+                )
+            log.info("Drucker-Displays geladen: %d", len(state.printer_displays))
+        except Exception:
+            log.exception("Laden der Drucker-Display-Persistenz fehlgeschlagen (non-fatal)")
+
+    # Freigeschaltete Scan-Stationen aus letzter Sitzung laden. Non-fatal,
+    # reine Datei-IO.
+        from .scan_station_store import load as load_scan_station_state
+        from .state import ScanStationSession
+
+        try:
+            for entry in load_scan_station_state(current_ip):
+                state.scan_stations[entry["station_id"]] = ScanStationSession(
+                    station_id=entry["station_id"],
+                    registration_code=gen_registration_code(),
+                    authorized=True,
+                    label=entry["label"],
+                    theme=entry["theme"],
+                    input_mode=entry["input_mode"],
+                )
+            log.info("Scan-Stationen geladen: %d", len(state.scan_stations))
+        except Exception:
+            log.exception("Laden der Scan-Station-Persistenz fehlgeschlagen (non-fatal)")
 
         from automation.worker import WorkerPool
 
@@ -119,6 +195,14 @@ async def lifespan(app: FastAPI):
         log.info("Druckerwarteschlange gestartet")
 
         yield
+
+        # Letzter Persistenz-Stand vor dem Beenden: entfernt Einträge, die in
+        # diesem kompletten Lauf nie verbunden waren (s. sessions.persist_*),
+        # auch wenn seit ihrem Laden kein anderes Ereignis mehr geschrieben
+        # hat — sonst würden sie beim nächsten Start erneut geladen.
+        persist_helpers(state)
+        persist_printer_displays(state)
+        persist_scan_stations(state)
 
         sweeper.cancel()
         station_sweeper.cancel()

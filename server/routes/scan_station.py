@@ -27,6 +27,7 @@ from ..sessions import (
     activate_station_student,
     allowed_printers_for,
     make_qr_data_url,
+    persist_scan_stations,
     release_station_student,
     send_scan_station_update,
 )
@@ -139,6 +140,7 @@ async def scan_station_enable(body: ScanStationEnableRequest) -> dict:
     state, station = _station_or_404(body.station_id)
     station.authorized = True
     station.label = (body.label or "").strip()
+    persist_scan_stations(state)
     await send_scan_station_update(state, station)
     await _broadcast(state)
     return {"ok": True, "station_id": station.station_id, "label": station.label}
@@ -150,6 +152,7 @@ async def scan_station_label(body: ScanStationLabelRequest) -> dict:
     Überschrift auf der Station."""
     state, station = _station_or_404(body.station_id, authorized_only=True)
     station.label = (body.label or "").strip()
+    persist_scan_stations(state)
     await send_scan_station_update(state, station)
     await _broadcast(state)
     return {"ok": True, "label": station.label}
@@ -163,6 +166,7 @@ async def scan_station_theme(body: ScanStationThemeRequest) -> dict:
     if theme not in ("light", "dark"):
         raise HTTPException(400, "theme muss 'light' oder 'dark' sein")
     station.theme = theme
+    persist_scan_stations(state)
     await send_scan_station_update(state, station)
     await _broadcast(state)
     return {"ok": True, "theme": station.theme}
@@ -179,6 +183,7 @@ async def scan_station_input_mode(body: ScanStationInputModeRequest) -> dict:
     if mode not in ("camera", "manual"):
         raise HTTPException(400, "input_mode muss 'camera' oder 'manual' sein")
     station.input_mode = mode
+    persist_scan_stations(state)
     await send_scan_station_update(state, station)
     await _broadcast(state)
     return {"ok": True, "input_mode": station.input_mode}
@@ -223,6 +228,7 @@ async def scan_station_forget(body: ScanStationForgetRequest) -> dict:
     await release_station_student(state, station, reason="forbidden")
     state.scan_stations.pop(station.station_id, None)
     state.banned_scan_station_tokens.add(station.station_id)
+    persist_scan_stations(state)
     if station.ws is not None:
         try:
             from ..hub import get_hub

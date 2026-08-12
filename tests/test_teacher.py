@@ -386,6 +386,34 @@ def test_teacher_snapshot_maps_auto_skipped_done_to_skipped(ctx):
     assert by_id[c.queue[1].student_id]["auto_skipped"] is False
 
 
+def test_teacher_snapshot_five_counts_cover_every_student_including_auto_skipped(ctx):
+    """Die fünf getrennten Lehrerzähler bilden die sichtbare Schülerliste
+    vollständig und überschneidungsfrei ab."""
+    state, _, _ = ctx
+    c = _open_ctx(state, students=6)
+    c.queue[0].status = "pending"
+    c.queue[1].status = "active"
+    c.queue[2].status = "absent"
+    c.queue[3].status = "done"
+    c.queue[4].status = "skipped"
+    c.queue[5].status = "done"
+    c.queue[5].auto_skipped = True
+
+    snap = state.teacher_snapshot(c.id)
+
+    assert snap["counts"] == {
+        "pending": 1,
+        "active": 1,
+        "done": 1,
+        "skipped": 2,
+        "absent": 1,
+    }
+    assert sum(snap["counts"].values()) == len(c.queue) == len(snap["students"])
+    assert {s["status"] for s in snap["students"]} == {
+        "pending", "active", "absent", "done", "skipped"
+    }
+
+
 def test_teacher_snapshot_counts_absent(ctx):
     """Ein von der Lehrkraft als abwesend markierter Schüler erscheint in der
     Lehreransicht als eigener Status `absent` (nicht als `skipped`)."""
@@ -616,7 +644,7 @@ def test_slip_collected_requires_class_option(client, ctx):
     assert c.queue[0].slip_collected is False
 
 
-def test_slip_collected_sets_and_unsets_flag(client, ctx):
+def test_slip_collected_sets_idempotently_and_cannot_be_unset(client, ctx):
     state, _, hub_inst = ctx
     c = _open_ctx(state, students=1)
     c.queue[0].status = "done"
@@ -634,11 +662,21 @@ def test_slip_collected_sets_and_unsets_flag(client, ctx):
     assert len(hub_inst.broadcasts) == 1
     assert hub_inst.broadcasts[0]["contexts"][c.id]["queue"][0]["slip_collected"] is True
 
+    # Wiederholtes Setzen bleibt erfolgreich und lässt den Marker gesetzt.
+    r = client.post(
+        "/api/teacher/slip-collected", json={"token": "tok", "student_id": 100, "collected": True}
+    )
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "slip_collected": True}
+    assert c.queue[0].slip_collected is True
+
+    # Ein Request zum Zurücknehmen wird abgewiesen und darf den State nicht
+    # verändern. Das globale reset_progress bleibt der bewusste neue Durchlauf.
     r = client.post(
         "/api/teacher/slip-collected", json={"token": "tok", "student_id": 100, "collected": False}
     )
-    assert r.status_code == 200
-    assert c.queue[0].slip_collected is False
+    assert r.status_code == 409
+    assert c.queue[0].slip_collected is True
 
 
 def test_slip_collected_student_of_other_class_404(client, ctx):
