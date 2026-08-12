@@ -87,6 +87,13 @@
       transition: transform .5s cubic-bezier(.22, .61, .36, 1);
     }
     .dd-order:first-child { margin-top: 0; }
+    @keyframes dd-finished-outline-fade {
+      from { box-shadow: 0 0 0 3px #30d158; }
+      to { box-shadow: 0 0 0 0 transparent; }
+    }
+    .dd-order-finished {
+      animation: dd-finished-outline-fade 5s ease-out both;
+    }
     .dd-form { color: var(--muted); font-weight: 600; }
     .dd-stname { color: var(--text); min-width: 0; }
     /* Auftraggeber rechts im Kästchen: Helfer (Person-Symbol + Name) bzw.
@@ -101,6 +108,7 @@
     .dd-origin-name { overflow-wrap: anywhere; }
     @media (prefers-reduced-motion: reduce) {
       .dd-order, .printer-card, .dd-waiting-card, .dd-cat-label { transition: transform .01ms !important; }
+      .dd-order-finished { animation: none; box-shadow: 0 0 0 3px #30d158; }
     }
     /* Druckerfehler: Name + „ - Fehler" rot in Namensgröße, darunter der
        Betreuer-Hinweis. Die Auftrags-Kategorien bleiben sichtbar, die Namen

@@ -12,6 +12,73 @@ const connText = document.getElementById('conn-text');
 const content = document.getElementById('dd-content');
 // Laufende TTL-Timer, die „Gedruckt"-Kategorien nach 30s ausblenden.
 let printedTimers = [];
+// Feedback für den Übergang „Wird gedruckt" → „Gedruckt". Der Server hält den
+// zuletzt fertigen Auftrag pro Drucker 30s; der Client merkt sich zusätzlich,
+// wann dieser Auftrag neu eingetroffen ist, damit ein erneuter WebSocket-
+// Snapshot die 5s-Animation nicht wieder auf volle Grünintensität zurücksetzt.
+const FINISHED_FEEDBACK_MS = 5000;
+const printedJobByPrinter = new Map();
+const finishedHighlights = new Map();
+let hasQueueSnapshot = false;
+
+function printedJobKey(printer) {
+  if (printer.printed_job_id != null) return `id:${printer.printed_job_id}`;
+  return printer.printed_name ? `name:${printer.printed_name}` : null;
+}
+
+function markFinishedJob(printerId, jobKey) {
+  const highlightKey = `${printerId}::${jobKey}`;
+  const startedAt = Date.now();
+  finishedHighlights.set(highlightKey, startedAt);
+  setTimeout(() => {
+    if (finishedHighlights.get(highlightKey) === startedAt) finishedHighlights.delete(highlightKey);
+  }, FINISHED_FEEDBACK_MS + 100);
+}
+
+function detectFinishedJobs(pool) {
+  let finishedCount = 0;
+  for (const printer of pool) {
+    const printerId = String(printer.id);
+    const currentJob = printedJobKey(printer);
+    const previousJob = printedJobByPrinter.get(printerId);
+    if (hasQueueSnapshot && currentJob && currentJob !== previousJob) {
+      markFinishedJob(printerId, currentJob);
+      finishedCount += 1;
+    }
+    printedJobByPrinter.set(printerId, currentJob);
+  }
+  hasQueueSnapshot = true;
+  return finishedCount;
+}
+
+function finishedFeedbackFor(printer) {
+  const jobKey = printedJobKey(printer);
+  const highlightKey = jobKey ? `${printer.id}::${jobKey}` : '';
+  const startedAt = highlightKey ? finishedHighlights.get(highlightKey) : undefined;
+  if (startedAt == null) return { className: '', inlineStyle: '' };
+  const age = Date.now() - startedAt;
+  if (age >= FINISHED_FEEDBACK_MS) {
+    finishedHighlights.delete(highlightKey);
+    return { className: '', inlineStyle: '' };
+  }
+  return {
+    className: 'dd-order-finished',
+    inlineStyle: `animation-delay: -${Math.max(0, age)}ms;`,
+  };
+}
+
+// Drucker-Displays laufen oft ohne weitere Interaktion. Der Ladeversuch ist
+// deshalb best effort; die erste Pointer-/Tastaturgeste kann einen vom Browser
+// gesperrten AudioContext nachträglich freischalten (Autoplay-Regel).
+function primePrinterAudio() { void Beeper.initAudio(); }
+primePrinterAudio();
+document.addEventListener('pointerdown', primePrinterAudio, { once: true, passive: true });
+document.addEventListener('keydown', primePrinterAudio, { once: true });
+
+function playFinishedSound() {
+  void Beeper.initAudio().then(() => Beeper.playBeep());
+}
+
 // Wurde das Display vom Betreuer gesperrt? Dann KEIN automatischer Reconnect
 // (der Token bleibt verboten — erneute Verbindungsversuche sind sinnlos und
 // würden nur „gesperrt"-Meldungen flackern lassen).
@@ -82,9 +149,10 @@ function originatorHtml(o) {
 // `name`/`form` kommen direkt (Warteschlange: w.student/w.form) oder werden
 // aus dem kombinierten String „Name (Form)" gesplittet (Druckeraufträge:
 // j.name, printed_name) — letzteres via parseOrder.
-function orderBox(key, name, form, extraClass, originator) {
+function orderBox(key, name, form, extraClass, originator, inlineStyle = '') {
   const cls = extraClass ? ` ${extraClass}` : '';
-  return `<div class="dd-order${cls}" data-order-key="${escapeHtml(key)}">`
+  const style = inlineStyle ? ` style="${escapeHtml(inlineStyle)}"` : '';
+  return `<div class="dd-order${cls}"${style} data-order-key="${escapeHtml(key)}">`
     + `<span class="dd-form">${escapeHtml(form || '')}</span>`
     + `<span class="dd-stname">${escapeHtml(name)}</span>`
     + `<span class="dd-origin">${originatorHtml(originator)}</span>`
@@ -92,9 +160,9 @@ function orderBox(key, name, form, extraClass, originator) {
 }
 // Variante für kombinierte Strings „Name (Form)" (Druckeraufträge, gedruckt):
 // splittet per parseOrder und reicht die Teile an orderBox weiter.
-function orderBoxFromRaw(key, raw, extraClass, originator) {
+function orderBoxFromRaw(key, raw, extraClass, originator, inlineStyle = '') {
   const { name, form } = parseOrder(raw);
-  return orderBox(key, name, form, extraClass, originator);
+  return orderBox(key, name, form, extraClass, originator, inlineStyle);
 }
 
 // FLIP nach einer DOM-Änderung: Karten, Auftrags-Kästchen UND Kategorie-Labels
@@ -223,6 +291,8 @@ function renderQueue(msg) {
     return;
   }
 
+  if (detectFinishedJobs(pool)) playFinishedSound();
+
   // Alte TTL-Timer („Gedruckt" nach 30s ausblenden) abräumen — der neue
   // Snapshot baut sie neu auf.
   for (const t of printedTimers) clearTimeout(t);
@@ -280,8 +350,15 @@ function renderQueue(msg) {
     // Die drei Kategorien stehen immer (mit Label), auch ohne Eintrag — dann
     // halt leer. So bleibt das Layout pro Drucker stabil. FLIP-Schlüssel je
     // Box = job_id (stabil über Behälterwechsel).
+    const finishedFeedback = finishedFeedbackFor(p);
     const printedBox = printed
-      ? orderBoxFromRaw(p.printed_job_id || `printed::${p.id}::${printed}`, printed, '', p.printed_originator)
+      ? orderBoxFromRaw(
+        p.printed_job_id || `printed::${p.id}::${printed}`,
+        printed,
+        finishedFeedback.className,
+        p.printed_originator,
+        finishedFeedback.inlineStyle,
+      )
       : '';
     const printingBox = printingOrd
       ? orderBoxFromRaw(printingOrd.id, printingOrd.name, '', printingOrd.originator) : '';

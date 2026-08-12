@@ -8,6 +8,14 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-12 — Drucker-Display: Fertigmeldung mit Ton und Highlight
+
+- Ein neu fertig gedruckter Auftrag löst am Drucker-Display einmalig den
+  vorhandenen Beep-Ton aus.
+- Das zugehörige „Gedruckt"-Kästchen wird fünf Sekunden lang grün umrandet;
+  die Umrandung blendet anschließend transparent aus. Die Animation wird bei
+  zwischenzeitlichen WebSocket-Updates zeitlich fortgesetzt statt neu gestartet.
+
 ## 2026-08-12 — Lehreransicht: Offene Leihschein-Eingänge zuerst
 
 - Innerhalb der Statusgruppe „Ausgabe abgeschlossen" stehen Schüler mit

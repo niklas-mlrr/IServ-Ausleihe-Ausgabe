@@ -1,5 +1,5 @@
 // web/common.js — Gemeinsame Helfer für die Ausleihe-Ausgabe-Frontends
-// (host.js, scan.js, student.html, qr-display.html). Kein Build-Step: als
+// (host.js, scan.js, student.html, qr-display.html, drucker-display.js). Kein Build-Step: als
 // globale Funktionen/Objekte auf window verfügbar. MUSS per <script src>
 // VOR den Skripten eingebunden werden, die diese Funktionen nutzen.
 
@@ -123,27 +123,48 @@ function printResultStatusText(msg) {
 }
 
 // ---- Beeper: Scan-Ton, kapselt AudioContext/-Buffer als Closure-State ----
-// Gemeinsam für scan.js/student.html. Aufrufer prüfen weiterhin SELBST
+// Gemeinsam für scan.js/student.html/drucker-display.js. Aufrufer prüfen weiterhin SELBST
 // `soundEnabled`, AUSSERHALB von playBeep() — Beeper entscheidet nicht,
 // ob geblept wird, nur wie.
 const Beeper = (() => {
-  let audioCtx = null, audioBuffer = null;
+  let audioCtx = null, audioBuffer = null, audioInitPromise = null;
+
+  async function resumeAudio() {
+    if (!audioCtx || audioCtx.state === 'running') return;
+    try { await audioCtx.resume(); } catch (_e) { /* Audio optional */ }
+  }
+
   async function initAudio() {
+    if (!audioCtx) {
+      try {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      } catch (_e) { return; }
+    }
+    await resumeAudio();
     if (audioBuffer) return;
-    try {
-      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      // Silent buffer to unlock iOS AudioContext during user gesture
-      const silence = audioCtx.createBuffer(1, 1, audioCtx.sampleRate);
-      const silSrc = audioCtx.createBufferSource();
-      silSrc.buffer = silence; silSrc.connect(audioCtx.destination); silSrc.start(0);
-      await audioCtx.resume();
-      const response = await fetch('/beep.mp3');
-      const arrayBuf = await response.arrayBuffer();
-      audioBuffer = await audioCtx.decodeAudioData(arrayBuf);
-    } catch (e) { /* Audio optional — Ton entfällt, Rest der Seite bleibt nutzbar */ }
+    if (!audioInitPromise) {
+      audioInitPromise = (async () => {
+        try {
+          // Silent buffer to unlock iOS AudioContext during user gesture
+          const silence = audioCtx.createBuffer(1, 1, audioCtx.sampleRate);
+          const silSrc = audioCtx.createBufferSource();
+          silSrc.buffer = silence; silSrc.connect(audioCtx.destination); silSrc.start(0);
+          await audioCtx.resume();
+          const response = await fetch('/beep.mp3');
+          const arrayBuf = await response.arrayBuffer();
+          audioBuffer = await audioCtx.decodeAudioData(arrayBuf);
+        } catch (_e) { /* Audio optional — Ton entfällt, Rest der Seite bleibt nutzbar */ }
+      })();
+    }
+    const pending = audioInitPromise;
+    await pending;
+    if (audioInitPromise === pending) audioInitPromise = null;
+    // Ein erster Ladeversuch kann vom Browser noch als „suspended" behandelt
+    // werden. Eine spätere Nutzergeste darf denselben AudioContext aufwecken.
+    await resumeAudio();
   }
   function playBeep() {
-    if (!audioCtx || !audioBuffer) return;
+    if (!audioCtx || audioCtx.state !== 'running' || !audioBuffer) return;
     const src = audioCtx.createBufferSource();
     src.buffer = audioBuffer;
     src.connect(audioCtx.destination);
@@ -521,4 +542,3 @@ function renderBookRows(rows, books, opts) {
     });
   }
 }
-
