@@ -28,7 +28,8 @@
 > Ausblenden-Änderungen erreichen jetzt auch laufende Scan-Station-
 > Sessions live (nicht erst nach Neuladen/Neu-Anmelden), Lehreransicht mit
 > fünf getrennten Statuszählern, irreversibler Leihschein-Aktion als Button
-> und alphabetischer/Status-Sortierung — 587 Tests grün.
+> und alphabetischer/Status-Sortierung, Drucker-Display-Fertigton und
+> 5-Sekunden-Highlight — 586 Tests grün.
 > Alle bisherigen Tests sind **read-only** gegen IServ
 > (kein Submit, keine Buchung — PLAN §6).
 >
@@ -144,6 +145,8 @@
 
 | V79 | **Lehreransicht: fünf getrennte Statuszähler, irreversible Leihschein-Aktion und sortierbare Schülerliste:** `teacher_snapshot()` zählt `pending`, `active`, `absent`, `done` und `skipped` getrennt; `done + auto_skipped` bleibt als `skipped` abgebildet und die Summe deckt die komplette Schülerliste ab. `POST /api/teacher/slip-collected` akzeptiert nur das idempotente Setzen auf `true`; `collected=false` wird nach den bestehenden Session-/Klassen-/Status-/Druck-Gates mit 409 abgewiesen, `reset_progress()` löscht den Marker weiterhin für einen neuen Durchlauf. Die Checkbox wurde durch einen Button ersetzt (Request-Schutz, Erfolg/Fehler-Zustände); der `helper_scanned`-Text bleibt erhalten. Auswahl `Alphabetisch` bzw. `Nach Status` mit Reihenfolge `active -> pending -> absent -> done -> skipped`, innerhalb der Statusgruppe Nachname/Vorname/Schüler-ID; Sortiermodus und Originaldaten bleiben bei Teacher-WS-Updates erhalten. | `tests/test_teacher.py` (gemischter Fünf-Zähler-Test, idempotentes Setzen, `collected=false` ohne Rücknahme) + bestehender `tests/test_queue_progress.py`-Reset-Test + lokaler Playwright-Browsercheck (Sortierung, WS-Update-Persistenz, Button/Doppelklick/Fehlerfreigabe) + `uv run pytest -q` (587 Tests) + `uvx ruff check server/ automation/ tests/` + `node --check web/teacher.js` + `git diff --check` | 2026-08-12 | **587 Tests grün**, Ruff clean, JavaScript-Syntaxprüfung, Browsercheck und Diff-Prüfung grün. Echter Touchscreen-/Lehrerhandy-Livecheck bleibt offen.
 | V78 | **Fix: Bestand-leer-/Ausblenden-Änderungen erreichen jetzt auch laufende Scan-Station-Sessions live:** Der Repush-Fanout beim Speichern der Buchreihen-Einstellungen (`POST /api/booklist-empty` → `sessions.repush_for_changed_empty_isbns`, `POST /api/booklist-hidden` → `routes/booklists.py::set_booklist_hidden`) iterierte bisher nur über `state.helper_sessions` und `state.student_sessions` — eine an einer Scan-Station angemeldete Session (`state.scan_stations`) wurde nie mitgenommen, obwohl `ScanStationSession` dieselben Felder trägt wie `HelperSession`/`StudentSessionB` und `repush_booklist` sie darüber genauso bedienen kann. Beide Stellen iterieren jetzt zusätzlich über `state.scan_stations.values()`. `web/scan-station.js` bekam dafür einen neuen `booklist_update`-Handler (bisher komplett ungehandhabt, da die Nachricht vorher nie ankam) — Gegenstück zum bereits vorhandenen Handler in `web/student.js`, ersetzt nur Bücherliste + Reihenfolge, kein Druckmodus-Äquivalent nötig (die Station kennt keinen Druckmodus). | `tests/test_booklist_empty_endpoint.py` (`test_set_booklist_empty_repushes_affected_scan_station_session`, `test_set_booklist_hidden_repushes_affected_scan_station_session` — neu `hub.ws_sent` in `_FakeHub` zum Erfassen von `send_websocket`-Aufrufen, vorher nur `send_scanner` erfasst) + `uv run pytest` (586 Tests) + `uvx ruff check server/ tests/` + `node --check web/*.js` | 2026-08-12 | **586 Tests grün** (583 → 586), Ruff und JavaScript-Syntaxprüfung grün. **Browser-Livecheck offen** (s. unten) — insbesondere das Live-Verschwinden einer neu markierten Reihe an einer bereits angemeldeten Scan-Station-Session, ohne Neuladen/Neu-Anmelden.
+
+| V83 | Drucker-Display: Fertigmeldung mit Ton und 5-Sekunden-Highlight: Beim Übergang eines Auftrags nach „Gedruckt" wird der vorhandene Beep ausgelöst; das fertige Auftragskästchen erhält eine grüne Umrandung, die innerhalb von fünf Sekunden transparent ausfadet. Die Animation setzt bei WebSocket-Updates zeitlich korrekt fort. | uv run pytest (586 Tests) + uvx ruff check server/ automation/ tests/ + node --check web/common.js web/drucker-display.js + git diff --check | 2026-08-12 | Offline-Suite, Ruff, JavaScript-Syntaxprüfung und Diff-Prüfung grün. Echter Drucker-Display-/Autoplay-Livecheck bleibt offen.
 
 ## Offen / zu testen
 
@@ -401,6 +404,11 @@ Pairing-Flow, Zuweisung, Snapshot-Schnittstelle und WS-Push sind offline per
 Unit-Suite + `websocket_connect`-Smoke abgesichert (V36); berühren keine
 IServ-/Buchungs-Logik (rein Anzeige). Am echten Display-Bildschirm neben den
 Druckern noch offen:
+
+- [ ] Fertigmeldung: Einen echten abgeschlossenen Druckauftrag prüfen —
+  Beep wird hörbar ausgelöst und nur das fertige Auftragskästchen wird fünf
+  Sekunden grün umrandet, danach blendet die Umrandung aus. Dabei auch den
+  Browser-Autoplay-Fall ohne vorherige Nutzergeste prüfen.
 
 - `/drucker-display` im Schul-WLAN öffnen → zeigt 4-stelligen Pairing-Code.
 - Host: „QR für Druckerdisplay" zeigt QR auf die Seite; Code eingeben → Display
