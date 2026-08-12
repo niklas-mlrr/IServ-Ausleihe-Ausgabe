@@ -290,12 +290,24 @@ function renderQueue(msg) {
     // Bei Fehler: Name + „ - Fehler" in rot, gleicher Schriftgröße wie der Name;
     // darunter der Betreuer-Hinweis. Die Kategorien (Aufträge) bleiben sichtbar.
     const faulty = !!p.faulty;
-    const nameSuffix = faulty ? ' - Fehler' : '';
+    // Vorrang-Hinweis: im Schülerauftrag-Modus (msg.students_only, s.
+    // `AppState._printer_display_students_only`) steckt in der „Nächster"-
+    // Kategorie ein Host-/Helferauftrag — der ist in der zentralen
+    // Warteschlange oben ausgeblendet, druckt aber real vorgezogen. Fehler
+    // hat Vorrang vor diesem Hinweis (beides gleichzeitig zeigen wäre
+    // widersprüchlich).
+    const vorrang = !faulty && !!msg.students_only && nextOrds.some(
+      o => o.originator && (o.originator.type === 'host' || o.originator.type === 'helper')
+    );
+    const nameSuffix = faulty ? ' - Fehler' : (vorrang ? ' - Vorrang' : '');
     const faultMsg = faulty
       ? `<div class="dd-fault-msg">Es scheint ein Fehler vorzuliegen. Bitte melde dich beim Betreuer.</div>`
-      : '';
+      : vorrang
+        ? `<div class="dd-priority-msg">Ein Betreuer druckt etwas. Dieser Druckauftrag hat Vorrang.</div>`
+        : '';
+    const nameClass = faulty ? ' dd-fault-name' : (vorrang ? ' dd-priority-name' : '');
     return `<div class="printer-card" data-flip-id="${escapeHtml(p.id)}" data-printer="${escapeHtml(p.id)}">
-      <div class="printer-name${faulty ? ' dd-fault-name' : ''}">${escapeHtml(printerLabel(p))}${nameSuffix}</div>
+      <div class="printer-name${nameClass}">${escapeHtml(printerLabel(p))}${nameSuffix}</div>
       ${faultMsg}
       <div class="dd-cat dd-printed" data-printed-for="${escapeHtml(p.id)}">
         <div class="dd-cat-label" data-flip-id="${escapeHtml(p.id)}::printed">Gedruckt</div>

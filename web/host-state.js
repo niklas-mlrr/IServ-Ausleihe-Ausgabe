@@ -37,6 +37,10 @@ window.__host = window.__host || {};
   // Drag-Zustand für die Drucker-Boxen eines Display-Reiters (HTML5 DnD),
   // analog blDragIndex für die Bücherlisten. PID des gezogenen Druckers.
   let pdDragPid = null;
+  // Aufgeklappter Scan-Stations-Reiter im Live-Ausgabe-Kasten (<station_id>)
+  // oder null = kein Panel offen. Anders als bei den Drucker-Displays gibt es
+  // hier keinen statischen ersten Reiter — die Reiter sind Umschalter.
+  let activeSsTab = null;
   let classList = [];                 // Klassen-Liste aus /api/classes (für Wähler + Single-Selects)
   let ctxSingleStudents = {};         // context_id -> [students] für den Einzelne-Schüler-Select
   // SVG-Icons für die Queue-Steuer-Buttons (pro Klassen-Tab neu gerendert).
@@ -44,6 +48,11 @@ window.__host = window.__host || {};
   const ICO_CLEAR = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
   const ICO_DISC  = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/></svg>';
   const ICO_HELPER = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
+  // Host-Symbol (Laptop) — dasselbe SVG wie im Drucker-Display (dort
+  // `ICO_LAPTOP` in drucker-display.js) für den Auftraggeber „Host". Hier für
+  // die Scan-Station-Kennzeichnung wiederverwendet (s. Anforderung: „wo ein
+  // Symbol benötigt wird, das des Hostes im Druckerdisplay").
+  const ICO_HOST = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="11" rx="1"/><path d="M2 20h20"/></svg>';
   const ICO_PAUSE = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>';
   const ICO_PLAY = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 5 11 7-11 7V5Z"/></svg>';
 

@@ -21,6 +21,7 @@ from ._deps import (
     PrinterRemoveRequest,
     PrinterReorderRequest,
     PrintLoanSlipRequest,
+    UpdatePrintJobPrintersRequest,
     host_router,
     require_host,
 )
@@ -285,6 +286,27 @@ async def reactivate_printer(body: PrinterReactivateRequest) -> dict:
     if not state.print_queue.reactivate(pid):
         raise HTTPException(400, "Drucker ist nicht fehlerhaft")
     return await _after_pool_change(state, wake=True)
+
+
+@host_router.post("/api/print-queue/{job_id}/printers")
+async def update_print_job_printers(
+    job_id: str, body: UpdatePrintJobPrintersRequest, sid: str = Depends(require_host),
+) -> dict:
+    """Erlaubte Drucker eines eigenen, noch wartenden (nicht dispatchten)
+    Druckauftrags ändern — Nachfrage-Menü, wenn alle erlaubten Drucker
+    fehlerhaft sind, bzw. proaktives Umbuchen, solange der Auftrag noch
+    unzugewiesen in der zentralen Warteschlange steht. Der Job behält dabei
+    seine Warteposition (`PrintQueue.update_job_printers` mutiert in-place)."""
+    result = await get_state().print_queue.update_job_printers(
+        job_id, ("host", sid), body.printers
+    )
+    if result == "not_waiting":
+        raise HTTPException(400, "Auftrag wurde bereits einem Drucker zugewiesen")
+    if result == "forbidden":
+        raise HTTPException(403, "Kein eigener Druckauftrag")
+    if result == "empty":
+        raise HTTPException(400, "Bitte mindestens einen Drucker auswählen")
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------

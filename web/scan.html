@@ -465,6 +465,8 @@
     .pp-row:hover { background: var(--surface-3, var(--surface-2, var(--surface))); border-radius: 4px; }
     .pp-row input { flex: none; width: 16px; height: 16px; margin: 0; accent-color: var(--accent, #2e7d32); cursor: pointer; }
     .pp-empty { padding: 8px; color: var(--text-muted, #888); font-size: .85rem; }
+    .pp-row-faulty { opacity: .55; font-style: italic; }
+    .pp-faulty-hint { opacity: .85; font-style: normal; font-size: .8em; }
     .modal-warn.is-error { background: rgba(192,57,43,.14); border-color: rgba(192,57,43,.55); color: #c0392b; }
     .modal-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
     .modal-actions button { padding: 12px; font-size: .95rem; width: 100%; }
@@ -592,6 +594,25 @@
         <button class="primary" id="modal-print">Drucken</button>
         <button class="primary" id="modal-print-next">Drucken &amp; nächster Schüler</button>
         <button class="ghost" id="modal-cancel">Abbrechen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Drucker-Nachfrage: der aktuelle Druckauftrag steckt noch unzugewiesen in
+       der zentralen Warteschlange (status 'queued') — entweder weil alle
+       erlaubten Drucker fehlerhaft sind (dann öffnet sich dieses Fenster
+       automatisch), oder weil der Helfer proaktiv über den Druckenbutton
+       umbuchen will. Abbrechen schließt nur das Fenster, ändert nichts am
+       Auftrag; die Warteschlange läuft währenddessen unverändert weiter. -->
+  <div class="modal-overlay" id="printer-change-modal">
+    <div class="modal-box">
+      <h3>Drucker ändern</h3>
+      <p id="printer-change-hint" style="margin:0 0 4px;font-size:.9rem"></p>
+      <div id="printer-change-picker"></div>
+      <p id="printer-change-error" style="display:none;margin:0;color:#f44336;font-weight:700;font-size:.9rem"></p>
+      <div class="modal-actions">
+        <button class="primary" id="printer-change-update">Druckauftrag aktualisieren</button>
+        <button class="ghost" id="printer-change-cancel">Abbrechen</button>
       </div>
     </div>
   </div>

@@ -111,6 +111,16 @@
     .dd-fault-msg { color: var(--danger); font-size: 1.5rem; line-height: 1.3;
       margin-bottom: 16px; overflow-wrap: anywhere; }
     .txt-danger { color: var(--danger); }
+    /* Vorrang-Hinweis: gleiches Muster wie der Druckerfehler oben (Name +
+       Suffix in Namensgröße, Hinweistext in Kategorie-Label-Größe darunter),
+       nur in Gelb/Orange statt Rot — dasselbe Gelb wie die „wartet"-Statuszeile
+       im Helferclient (`.status-alert-orange` in scan-view.css, #e69500). Zeigt
+       an, dass ein Host-/Helferauftrag in der „Nächster"-Kategorie steckt,
+       obwohl Host-/Helferaufträge in der zentralen Warteschlange gerade
+       ausgeblendet sind (Schülerauftrag-Modus). */
+    .printer-name.dd-priority-name { color: #e69500; }
+    .dd-priority-msg { color: #e69500; font-size: 1.5rem; line-height: 1.3;
+      margin-bottom: 16px; overflow-wrap: anywhere; }
 
     table { width: 100%; border-collapse: collapse; font-size: 1.05rem; }
     th { text-align: left; opacity: .5; font-weight: 600; padding: 8px 10px;

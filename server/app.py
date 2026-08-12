@@ -14,7 +14,7 @@ from .iserv_client import IsServClient
 from .routes.api import router as api_router
 from .routes.ws import router as ws_router
 from .runtime import Runtime, RuntimeBindingMiddleware
-from .sessions import sweep_expired_sessions
+from .sessions import sweep_expired_sessions, sweep_scan_stations
 from .state import get_state
 
 log = logging.getLogger(__name__)
@@ -108,6 +108,11 @@ async def lifespan(app: FastAPI):
         sweeper = asyncio.create_task(sweep_expired_sessions())
         log.info("Modus-B-Timeout-Sweeper gestartet")
 
+        # Eigener, feinerer Takt für die Scan-Stationen: ihr Leerlauf-TTL ist
+        # mit 30 s kürzer als der 30-s-Takt des Modus-B-Sweepers.
+        station_sweeper = asyncio.create_task(sweep_scan_stations())
+        log.info("Scan-Station-Sweeper gestartet")
+
     # Interne Druckerwarteschlange (Rollen-Rangfolge, 2-in-flight, OS-Completion-
     # Polling) — startet den Worker-Task, der Druckaufträge serialisiert.
         state.print_queue.start()
@@ -116,10 +121,12 @@ async def lifespan(app: FastAPI):
         yield
 
         sweeper.cancel()
-        try:
-            await sweeper
-        except asyncio.CancelledError:
-            pass
+        station_sweeper.cancel()
+        for task in (sweeper, station_sweeper):
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
         await state.print_queue.stop()
         log.info("Druckerwarteschlange gestoppt")

@@ -49,6 +49,10 @@ function handleServerMessage(msg) {
     printRequestId = null;
     printThenNext = false;
     printBtn.disabled = false;
+    if (currentPrintJob) {
+      currentPrintJob = null;
+      if (printerChangeModal.classList.contains('show')) closePrinterChangeModal();
+    }
     renderBooks(currentBooks);
     closeBookAlertModal();
     // Bücher sofort sichtbar; Scans+„Scanner bereit"-Status aber erst, sobald
@@ -159,7 +163,7 @@ function handleServerMessage(msg) {
     // der Dialog NICHT offen ist — sonst würde ein fremder settings-Push (z. B.
     // Dev-Toggle am Host) die laufende manuelle Auswahl des Helfers zurücksetzen.
     if (Array.isArray(msg.printers)) {
-      printerPool = msg.printers.map(p => ({id: p.id, name: p.name, label: p.label, is_default: p.is_default}));
+      printerPool = msg.printers.map(p => ({id: p.id, name: p.name, label: p.label, is_default: p.is_default, faulty: p.faulty}));
       if (printPicker) printPicker.setPool(printerPool);
     }
     if (Array.isArray(msg.print_default_ids)) {
@@ -208,12 +212,40 @@ function handleServerMessage(msg) {
       // von dieser neuen Meldung verdrängt.
       setStatusText(text, null, 'print');
     }
+    // Live-Status des eigenen Auftrags für die Druckenbutton-Umschaltung +
+    // das Drucker-Nachfrage-Fenster (s. scan-render.js). Solange der Job in
+    // der zentralen Warteschlange steht, bleibt `status` 'queued'.
+    currentPrintJob = {
+      job_id: msg.job_id, status: msg.status,
+      allowed: (msg.allowed_printers === undefined) ? null : msg.allowed_printers,
+      peer_error: !!msg.peer_error,
+    };
+    const stuck = msg.status === 'queued' && msg.peer_error;
+    if (stuck && !printerChangeModal.classList.contains('show')) {
+      openPrinterChangeModal();
+    } else if (msg.status !== 'queued' && printerChangeModal.classList.contains('show')) {
+      // Auftrag wurde regulär einem Drucker zugewiesen, während das Fenster
+      // offen war — die Warteschlange lief unverändert weiter (kein Pause-
+      // Mechanismus ans offene Fenster geknüpft), das Fenster folgt nur nach.
+      closePrinterChangeModal();
+    }
+  } else if (msg.type === 'print_printers_update_result') {
+    if (msg.ok === false && printerChangeModal.classList.contains('show')) {
+      printerChangeErrEl.textContent = msg.msg || 'Aktualisieren fehlgeschlagen';
+      printerChangeErrEl.style.display = '';
+    }
   } else if (msg.type === 'print_result') {
     if (msg.request_id && printRequestId && msg.request_id !== printRequestId) return;
     printBtn.disabled = false;
     const wasPrintThenNext = printThenNext;
     printThenNext = false;
     printRequestId = null;
+    // Auftrag ist finalisiert (gedruckt/fehlgeschlagen) — Nachfrage-Fenster
+    // (falls offen) gehört zu keinem lebenden Job mehr.
+    if (currentPrintJob && currentPrintJob.job_id === msg.job_id) {
+      currentPrintJob = null;
+      if (printerChangeModal.classList.contains('show')) closePrinterChangeModal();
+    }
     if (msg.stale) {
       // Ergebnis des alten, durch einen Scan entwerteten Jobs: keine
       // Drucker-/Fehlermeldung zurück in die Statuszeile schreiben.
@@ -278,6 +310,10 @@ function handleServerMessage(msg) {
     printRequestId = null;
     printThenNext = false;
     printBtn.disabled = false;
+    if (currentPrintJob) {
+      currentPrintJob = null;
+      if (printerChangeModal.classList.contains('show')) closePrinterChangeModal();
+    }
     drainScanWaiters();
     closeBookAlertModal();
     currentStudent = null;

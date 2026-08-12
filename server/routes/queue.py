@@ -3,10 +3,17 @@ Buch-Alert freigeben."""
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi import HTTPException
 
 from ..hub import get_hub
-from ..sessions import assign_student_to_helper, end_student, teardown_students
+from ..sessions import (
+    assign_student_to_helper,
+    broadcast_printer_displays,
+    end_student,
+    teardown_students,
+)
 from ..state import get_state
 from ._deps import (
     _EMPTY_CONTEXT_BODY,
@@ -157,6 +164,9 @@ async def clear_queue(body: ContextIdBody = _EMPTY_CONTEXT_BODY) -> dict:
     ctx.queue = []
     # book_order/Katalog bleiben (Klasse/Tab bleibt offen, nur Queue leer).
     await hub.broadcast_host(state.state_snapshot())
+    # Queue geleert → aktive Modus-B-Schüler dieser Klasse weg, kann die
+    # Schülerauftrag-Bedingung eines Drucker-Displays kippen.
+    await broadcast_printer_displays(state)
     return {"ok": True, "count": count}
 
 
@@ -209,10 +219,10 @@ async def finish_signed_student(body: StudentRef) -> dict:
 @host_router.post("/api/clear-book-alert")
 async def clear_book_alert(body: StudentRef) -> dict:
     """Blockierendes Ausgemustert-Hinweis-Modal am Schüler-Client (Modus B)
-    freigeben — der Client selbst hat dafür bewusst keinen Schließen-Button
-    (Freigabe nur durch den Host). Wird das Buch am Helfer-Scanner (Modus A)
-    gemeldet, gibt es keine Client-Session dazu — dann räumt dieser Call nur
-    das Host-Kästchen auf."""
+    oder an einer Scan-Station freigeben — beide Clients haben dafür bewusst
+    keinen Schließen-Button (Freigabe nur durch den Host). Wird das Buch am
+    Helfer-Scanner (Modus A) gemeldet, gibt es keine Client-Session dazu —
+    dann räumt dieser Call nur das Host-Kästchen auf."""
     if body.student_id is None:
         raise HTTPException(400, "student_id fehlt")
     student_id = body.student_id
@@ -224,6 +234,16 @@ async def clear_book_alert(body: StudentRef) -> dict:
         session.book_alert_payload = None
         if session.ws is not None:
             await get_hub().send_websocket(session.ws, {"type": "book_alert_clear"})
+
+    station = state.find_station_by_student(student_id)
+    if station is not None and station.book_alert_open:
+        station.book_alert_open = False
+        # Das 30-s-Leerlauf-TTL stand während der offenen Meldung still
+        # (s. `sessions.expired_scan_stations`) — hier erst wieder scharf
+        # stellen, sonst würde die stillstehende Zeit sofort nachgeholt.
+        station.last_activity = datetime.now()
+        if station.ws is not None:
+            await get_hub().send_websocket(station.ws, {"type": "book_alert_clear"})
 
     await get_hub().broadcast_host(
         {"type": "book_alert", "student_id": student_id, "cleared": True}

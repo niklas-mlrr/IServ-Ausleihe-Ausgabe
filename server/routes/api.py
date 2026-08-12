@@ -2,7 +2,7 @@
 
 Diese Datei enthält KEINE Endpunkte — sie sind in themenweise Module
 aufgeteilt (`auth`, `classes`, `booklists`, `helpers`, `queue`, `slips`,
-`modus_b`, `settings`), die gemeinsamen Bausteine liegen in `_deps`. Dieses
+`modus_b`, `scan_station`, `settings`), die gemeinsamen Bausteine liegen in `_deps`. Dieses
 Modul bleibt als stabiler Einstiegspunkt bestehen:
 
 - `server/app.py` importiert weiterhin `from .routes.api import router`,
@@ -24,6 +24,7 @@ from . import (  # noqa: F401 — Import NUR wegen Seiteneffekt (Routen-Registri
     helpers,
     modus_b,
     queue,
+    scan_station,
     settings,
     slips,
     teacher,

@@ -67,6 +67,17 @@
             </div>
             <p class="hint" style="margin-top:8px">Pairing-Codes werden im jeweiligen Klassen-Reiter zugeordnet.</p>
           </div>
+
+          <!-- Scan-Stationen: feste Scan-Geräte für Schüler ohne Handy.
+               Je verbundener Station ein Reiter (Titel = Name, sonst der
+               Registrierungs-Code); „+" zeigt QR + URL von /scan-station.
+               Gedruckt wird der Zettel im Pairing-Kasten der Klasse. -->
+          <div class="pdd-section-label">Scan-Stationen</div>
+          <div class="pd-tabs" id="ss-tabs-bar">
+            <span id="ss-tab-list"></span>
+            <button class="pd-tab-add" id="ss-tab-add" title="Scan-Station verbinden">+</button>
+          </div>
+          <div id="ss-panels"></div>
         </div>
 
         <!-- Helfer -->
@@ -206,12 +217,13 @@
     <h3 id="print-dialog-title">Leihschein drucken</h3>
     <div id="print-dialog-picker"></div>
     <p id="print-dialog-picker-error" style="display:none;margin:0;color:var(--danger-text);font-weight:700;font-size:.9rem"></p>
-    <label class="modal-check">
+    <label class="modal-check" id="print-dialog-slip-row">
       <input type="checkbox" id="print-dialog-slip">
       Schüler-Leihschein (2. Seite)
     </label>
     <div class="modal-actions">
       <button class="primary" id="print-dialog-ok">Drucken</button>
+      <button class="secondary" id="print-dialog-activate-only" hidden>Erstellen</button>
       <button class="ghost" id="print-dialog-cancel">Abbrechen</button>
     </div>
   </div>

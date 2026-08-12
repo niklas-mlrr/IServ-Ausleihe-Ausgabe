@@ -108,6 +108,7 @@ Helfer-/Schüler-Handy (Browser: Kamera-Scanner)      iPad (QR-Anzeige)
 | Helfer-Scanner (Modus A) | Helfer-Handy | Join-Code vom Host (oder Passwort) | zugewiesenen Schüler sehen, Bücher scannen |
 | QR-Anzeige (Modus B) | iPad | Registrierung am Host per Code; danach **nur** QR-Anzeige, keine Schülerdaten im Klartext | QR-Codes anzeigen |
 | Schüler-Session (Modus B) | Schüler-Handy | allgemeiner **konstanter** Join-QR (festes Secret, kein Rotieren) → Server mintet pro Browser-Session `session_token` + 4-stelligen Pairing-Code, vom Host bestätigt | nur eigene Bestelldaten sehen, nur eigene Bücher scannen |
+| Scan-Station (Modus B) | festes Gerät neben den Regalen | Token in der URL (wie das Drucker-Display) + Freischaltung durch den Host per Namenseingabe; Schüler meldet sich mit dem vierstelligen Code seines gedruckten Zettels an | Bücher für den gerade angemeldeten Schüler scannen — **kein** Leihschein-Druck, **kein** Abschließen |
 
 Sicherheitsanforderungen (aus Klärung 2026-06-12, „keine Sicherheitslücken"):
 
@@ -147,6 +148,130 @@ Sicherheitsanforderungen (aus Klärung 2026-06-12, „keine Sicherheitslücken")
    nach Python portieren), nur im Schul-WLAN erreichbar.
 7. **Keine Persistenz:** Schülerdaten nur im RAM der Session; Logs ohne
    personenbezogene Daten (Buch-Codes ja, Namen nein).
+
+### 3.8 Scan-Station (`/scan-station`) — Schüler ohne Handy
+
+Modus B setzt ein eigenes Handy pro Schüler voraus. Wer keins hat, fiel bisher
+komplett auf die Helfer-Bedienung zurück. Die **Scan-Station** schließt die
+Lücke: ein festes Gerät (Laptop/Tablet mit Kamera), an dem sich nacheinander
+mehrere Schüler kurz anmelden.
+
+**Der Scanmodus ist derselbe wie am Handy — inklusive Blockierverhalten.**
+Station und Schülerclient teilen sich Aussehen (`web/scan-view.css`) und Logik
+(`renderBookRows`/`renderBookAlert`/`statusAlertClass` in `web/common.js`) —
+obere Leiste, Statuszeile samt Farbregeln, Namenszeile, Bücher-Tabelle mit
+FLIP-Animation und Buch-Hinweis-Modal sind identisch. Ein ausgemustertes oder
+anderweitig verliehenes Buch (`book_deleted`/`not_in_stock`) öffnet an der
+Station **exakt wie am Handy** ein blockierendes Modal ohne eigenen
+Schließen-Weg (`ScanStationSession.book_alert_open`) — Kamera-Scan **und**
+manuelle Eingabe werden ignoriert (das Feld selbst bleibt bedienbar, wirkt
+nur nicht), bis der Host per `/api/clear-book-alert` freigibt (dieselbe
+Route wie für Modus-B-Sessions, jetzt auch für Stationen,
+s. `AppState.find_station_by_student`). Ersatzansprüche (`loaned_to`-Details)
+gehen unverändert **nur** an den Host — `process_scan(..., source="student")`
+liefert sie an Station wie Handy grundsätzlich nicht mit, der volle Umfang
+landet ausschließlich im `book_alert`-Broadcast an den Host. Einzige bewusste
+Abweichung: die Station zeigt keinen Zahl-/Anmeldestatus (geteiltes Gerät).
+Zusätzlich lässt sich — wie im Helferclient — zwischen **Kamera** und
+**Manuell** (Tastatur-/Handscanner tippt ins Lesefeld, mit Fokus-Warnbanner)
+umschalten; die Station merkt sich die Wahl lokal, eine Host-Vorgabe
+(`input_mode`) überschreibt sie, genau wie beim Theme.
+
+**Stationswechsel per Zettel-Code.** Jeder Scan während einer laufenden
+Anmeldung wird zuerst darauf geprüft, ob es sich eigentlich um den
+Zettel-Code eines ANDEREN Schülers handelt. Der Treffer-Check selbst läuft
+**unabhängig von Länge/Ziffernform** des gescannten Werts (ein einfacher,
+billiger Dict-Lookup gegen die vergebenen Codes) — nur so scheitert ein
+echter Treffer nie an einer zu strengen Formannahme über das, was der
+Scanner tatsächlich liefert. Trifft es zu, wechselt die Station sofort zu
+diesem Schüler (der bisherige wird über `release_station_student`
+freigegeben, inkl. Worker-Rückgabe), statt den Code als unbekannten
+Buch-Barcode zu melden — ein Schüler, der an einer belegten Station seinen
+eigenen Zettel scannt, muss nicht warten. Ist der Zielschüler nicht (mehr)
+wechselbar (z. B. inzwischen `done`), bleibt der aktuell angemeldete Schüler
+unangetastet, nur eine Fehlermeldung erscheint. Das Rate-Limit (10/Minute)
+bleibt an die 4-stellige Form gebunden (Buch-Barcodes sind länger, s.
+`Code.PNG`) und greift für jeden 4-stelligen Versuch — Treffer wie
+Fehlversuch — sonst liefe ein Durchprobieren fremder Codes während einer
+laufenden Sitzung daran vorbei.
+
+**Ablauf.** Der Host druckt dem Schüler im Pairing-Kasten seiner Klasse einen
+A4-Zettel („Scan-Station: [Schüler] [Drucken]"). Darauf stehen oben links
+Klasse und Name, oben rechts ein **Code-39-Barcode (6,5 × 1,2 cm)** mit der
+vierstelligen Nummer darunter, im Blattkörper die bereits ausgeliehenen und die
+noch vorgemerkten Reihen — letztere mit Kästchen zum Abhaken mit dem Stift. Der
+Schüler scannt an der Station den Barcode, bekommt seine Bücherliste und scannt
+seine Bücher wie sonst am Handy. Nach 30 s ohne Aktivität fällt die Station auf
+„Zettel-Code scannen" zurück und ist für den Nächsten frei.
+
+**Sicherheitsmodell** (Ergänzung zu 1.–7. oben):
+
+- Der vierstellige Code ist der Zugangs-Credential des Zettels. Er wird
+  **nie geloggt** und steht **nicht** im Host-Snapshot (nur der
+  Registrierungs-Code des Geräts, der keinen Datenzugriff gewährt).
+- Codes werden **innerhalb einer Server-Laufzeit nie recycelt** — auch nicht,
+  wenn der Schüler fertig ist. Sonst könnte ein alter, noch herumliegender
+  Zettel plötzlich einen anderen Schüler laden. Umgekehrt bleibt der Code pro
+  Schüler stabil, ein Nachdruck trägt also denselben Barcode.
+- Code-Versuche sind pro Station auf **10/Minute** gedrosselt (4 Stellen =
+  10 000 Möglichkeiten wären sonst durchprobierbar).
+- Ein Code wird nur angenommen, wenn der Schüler eindeutig frei ist: in einer
+  offenen Klasse, nicht `done`, keinem Helfer zugewiesen, keine gepairte
+  Handy-Session, nicht an einer anderen Station angemeldet.
+- Die Station sieht **nur Name und Klasse** des angemeldeten Schülers — anders
+  als am eigenen Handy keine Zahl-/Anmeldedaten (geteiltes Gerät).
+- Ein Reload/Disconnect der Station gibt einen angemeldeten Schüler sofort
+  frei; ein Gerät kann per × am Reiter endgültig verboten werden (Bannliste).
+
+**Host-Queue-Status des Zettel-/Stations-Flusses.** Der Zettel-Druck ist das
+„Aufrufen" dieses Flusses — der Schüler wechselt (falls noch `pending`) auf
+`active` und bekommt seinen Fortschritt befüllt wie beim Aufrufen durch einen
+Helfer (`init_book_progress`, `reset_baseline=True`). Solange er NICHT an
+einer Station angemeldet ist und noch nicht alles ausgeliehen hat, zeigt die
+Host-Queue statt einer Zahl „Bücher sammeln" (`QueueStudent.
+station_zettel_printed`, persistiert über ein Ab-/Anmelden hinweg — nur
+„Status zurücksetzen"/„Trennen" am Host löscht die Markierung). Ist er an
+einer Station angemeldet, zeigt die Queue immer die zweizeilige Zahl
+(„X/Y ohne Mjb" + „X/Y gesamt", wie beim Helfer mit Vorbestand). Meldet er
+sich ab, fällt die Anzeige auf „Bücher sammeln" zurück — außer alle Bücher
+sind bereits ausgeliehen, dann bleibt es bei der Zahl stehen. Der
+Stationsname erscheint dabei wie ein Helfer-Badge (Now-Serving-Kästchen +
+Klassen-Queue), mit dem Host-Symbol aus dem Drucker-Display (`ICO_LAPTOP`
+dort, `ICO_HOST` im Host) statt des Helfer-Symbols; ein übernehmender Helfer
+hat Vorrang vor dem Stations-Badge. Im Now-Serving-Kästchen ("Aktuell in
+Ausgabe") steht das seit 2026-08-11 als eigene Zeile direkt unter dem Namen:
+links Stationsname + Symbol + ein kleiner Trennen-Knopf, der NUR die
+Stationsbindung löst (`POST /api/scan-station/release-student`, adressiert
+über die `student_id` statt der `station_id` — Spiegel von
+`/api/scan-station/release`), rechts der vierstellige Zettel-Code. Die Zeile
+erscheint, sobald der Schüler einen Code hat (unabhängig vom aktuellen
+Anmeldestatus); der Stations-Trennen-Knopf nur, solange er GERADE
+angemeldet ist. Der Code wird bewusst NUR in den beiden `state_snapshot()`-
+Aufrufen von `_queue_student_as_dict`/`queue_as_list` mitgegeben
+(`include_station_code=True`) — die Helferclient-Queue-Pfade
+(`pending_queue_as_list`/`real_contexts_summary`) lassen ihn weiterhin weg,
+er bleibt ein Host-only sichtbares Credential (§3.7).
+
+**Rangfolge vor dem Worker-Pool.** Mit der Station bewerben sich drei Rollen um
+die begrenzten Playwright-Contexts. `WorkerPool.open_student(priority=…)`
+bedient sie in der Reihenfolge **Helfer → Scan-Station → Schülerclient**
+(innerhalb einer Rolle FIFO), analog der Rollen-Rangfolge der
+Druckerwarteschlange. Der Helfer bedient eine ganze Queue und darf nie hinter
+Einzelgeräten anstehen. Wartende Clients bekommen ihre Position gemeldet
+(`worker_waiting`), statt stumm „Wird geladen…" zu zeigen.
+
+**Leerlauf-TTL.** Die 30 s zählen **erst ab `worker_ready`** — solange die
+Station auf einen freien Worker wartet oder die Kartei lädt, läuft die Uhr
+nicht. Sonst würde ein wartender Schüler mitten im Laden hinausgeworfen. Der
+Client hat denselben Timer lokal (Restzeit-Anzeige), der Server-Sweeper
+(5-s-Takt) ist das Sicherheitsnetz für eingefrorene Geräte.
+
+**Produktionsschutz.** Der gesamte Pfad bleibt read-only: `get_student_info`
+ist ein GET, der Zettel wird lokal gebaut (`server/scan_station.py`) und lokal
+gedruckt. Buch-Scans laufen über dasselbe `process_scan` wie am Handy und
+stagen ohne `ALLOW_BOOKING` nur (§ 6.1). Der Zetteldruck läuft durch dieselbe
+Druckerwarteschlange wie ein Host-Leihschein (`kind="station_sheet"`,
+`role="host"`), setzt aber **keinen** Leihschein-Status.
 
 ## 4. Offene Punkte
 

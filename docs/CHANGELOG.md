@@ -8,6 +8,591 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-12 — Korrektur: Zettel-Code doch wieder stabil, nur die Bücherliste wird pro Druck aktualisiert
+
+- **Warum:** Der vorherige Eintrag (unten) führte `AppState.
+  reallocate_station_code()` ein, die bei JEDEM Erstellen/Nachdruck einen
+  neuen Zettel-Code zog und den alten ungültig machte. Niklas wollte das
+  zurückgenommen haben: der Code soll wieder pro Schüler stabil bleiben
+  (derselbe Zettel bleibt gültig), NUR die Bücherliste auf dem Zettel soll
+  bei jedem Druck aktuell sein — das war ohnehin schon immer der Fall
+  (`get_student_info` wird bei jedem Aufruf frisch geholt), unabhängig vom
+  Code.
+- **Server:** `AppState.reallocate_station_code()`/`_draw_station_code()`
+  wieder entfernt (waren erst seit dem vorherigen Eintrag da, nie in einer
+  Zwischen-Version live) — `allocate_station_code()` zurück auf den
+  Originalstand (Stabil-Lookup, „ein Nachdruck trägt garantiert denselben
+  Code"). `server/sessions.py::_load_and_activate_station_student` nutzt
+  wieder `allocate_station_code` statt `reallocate_station_code`.
+- **Client** (`web/host-render.js`): Kommentare an `openPrintDialog`/
+  `printStationSheet` korrigiert (kein „frischer Code" mehr, sondern
+  „Bücherliste wird pro Aufruf frisch geholt, Code bleibt stabil"). Der
+  Zwei-Knopf-Nachdruck-Dialog (nur „Drucken"/„Abbrechen" im „Aktuell in
+  Ausgabe"-Kästchen, s. unten) bleibt unverändert bestehen — das war ein
+  eigenständiger, weiterhin gewollter Teil des vorherigen Eintrags.
+- Getestet: die drei `test_reallocate_station_code_*`-Tests entfernt
+  (Methode existiert nicht mehr). `test_print_sheet_reprint_draws_a_fresh_
+  code` → `test_print_sheet_reprint_keeps_same_code` (Code jetzt gleich
+  statt verschieden), `test_activate_and_print_both_draw_fresh_codes_
+  across_each_other` → `test_activate_and_print_share_the_same_code`. Neu:
+  `test_print_sheet_reprint_refreshes_book_list` (per `_FakeIServChanging
+  Books`-Fake, das zwischen zwei Aufrufen den Buchstatus wechselt) belegt
+  explizit, dass `done_isbns` sich zwischen zwei Drucken aktualisiert,
+  während der Code gleich bleibt. Volle Suite (565 Tests) + Ruff +
+  `node --check` grün.
+
+## 2026-08-12 — Zettel-Nachdruck: nur Drucken/Abbrechen + immer frischer Code
+
+- **Warum:** Niklas wollte im Nachdruck-Dialog im „Aktuell in
+  Ausgabe"-Kästchen nur „Drucken" und „Abbrechen" — der Zettel-Code wurde
+  ja schon vorher erstellt, ein separates „Erstellen" ergibt dort keinen
+  Sinn. Zusätzlich sollen BEIDE Wege (Pairing-Kasten „Erstellen" UND der
+  „Drucken"-Knopf im „Aktuell in Ausgabe"-Kästchen) bei jedem Aufruf einen
+  komplett neuen Zettel-Code ziehen, damit der Zettel immer den
+  aktuellsten Bücherlisten-Stand trägt — ein alter, physisch
+  herumliegender Zettel soll danach nicht mehr laden.
+- **Server** (`server/state.py`): neue `AppState.reallocate_station_code()`
+  neben dem bestehenden `allocate_station_code()` (bleibt als
+  Stabil-Lookup-Primitiv unverändert, z. B. für die WS-Annahmeprüfung
+  `resolve_station_code`). `reallocate_station_code` macht einen evtl.
+  vorhandenen alten Code des Schülers zuerst ungültig (aus `station_codes`
+  entfernt — löst danach nicht mehr auf) und zieht dann einen frischen;
+  beide teilen sich den Ziehungs-Kern `_draw_station_code`.
+  `server/sessions.py::_load_and_activate_station_student` (gemeinsamer
+  Kern von `print_station_sheet_for`/`activate_station_student`) nutzt
+  jetzt `reallocate_station_code` statt `allocate_station_code` — betrifft
+  also automatisch beide Wege ohne Sonderfall-Code.
+- **Client** (`web/host.html`, `web/host-render.js`): `openPrintDialog`
+  bekommt einen neuen `opts.reprint`-Schalter. `reprint:true`
+  (Nachdruck-Knopf im „Aktuell in Ausgabe"-Kästchen) blendet den
+  „Erstellen"-Knopf aus und beschriftet den OK-Knopf schlicht „Drucken"
+  (Titel „Zettel für Scan-Station drucken") — nur zwei Optionen.
+  `reprint:false` (Pairing-Kasten, weiterhin über `printStationSheet(id,
+  btn)` ohne Optionen aufgerufen) bleibt bei den bisherigen drei Knöpfen
+  „Erstellen und Drucken"/„Erstellen"/„Abbrechen". Der Nachdruck-Aufruf
+  (`data-action="reprint-station-sheet"`) übergibt jetzt `{reprint: true}`.
+- Getestet: `tests/test_scan_station.py`
+  (`test_reallocate_station_code_invalidates_old_code`,
+  `test_reallocate_station_code_first_call_behaves_like_allocate`,
+  `test_reallocate_station_code_repeated_calls_always_differ` — reiner
+  State-Primitiv; `test_print_sheet_reprint_draws_a_fresh_code`,
+  `test_activate_and_print_both_draw_fresh_codes_across_each_other` —
+  beide Wege quer gegeneinander); bestehende Code-Stabilitätstests für
+  `allocate_station_code` unverändert grün (unberührter Primitiv). Der
+  Zwei-Knopf-Nachdruck-Dialog per Playwright-Screenshot gegengeprüft. Volle
+  Suite (567 Tests) + Ruff + `node --check` grün.
+
+## 2026-08-12 — Host: „Erstellen" statt „Drucken" im Pairing-Kasten — Zettel aktivieren ohne Sofortdruck
+
+- **Warum:** Niklas wollte im Pairing-Kasten den Knopf neben der
+  Schüler-Auswahl der „Scan-Station:"-Zeile nicht mehr „Drucken", sondern
+  „Erstellen" nennen. Klick öffnet weiterhin einen Druckdialog, der aber
+  jetzt zusätzlich zu „Erstellen und Drucken" auch ein reines „Erstellen"
+  anbietet (Rückfrage bestätigt: aktiviert den Schüler — Zettel-Code,
+  Status, Fortschritt —, baut aber KEIN PDF und druckt nicht), daneben
+  „Abbrechen". Druckerauswahl bleibt wie gehabt auf die erlaubten
+  Klassen-Drucker vorausgewählt.
+- `web/host.html`: neuer dritter Knopf `#print-dialog-activate-only`
+  („Erstellen", `secondary`, initial `hidden`) zwischen OK und Abbrechen im
+  `#print-dialog`.
+- `web/host-render.js::openPrintDialog`: im Zettel-Modus (`opts.sheet`)
+  heißt der OK-Knopf jetzt „Erstellen und Drucken" statt „Drucken" (Titel:
+  „Zettel für Scan-Station erstellen"), der neue Knopf wird eingeblendet
+  und löst direkt `{mode:'activate'}` aus — ohne die
+  Druckerauswahl-Pflichtprüfung des OK-Pfads, da nicht gedruckt wird.
+  `printStationSheet()` verzweigt auf `choice.mode`: `'activate'` postet an
+  den neuen Endpoint, `'print'` läuft wie bisher über
+  `/api/scan-station/print-sheet`. `renderCtxStationPrint`s Zeilen-Knopf
+  heißt jetzt ebenfalls „Erstellen" (derselbe Dialog dahinter).
+- **Server:** `server/sessions.py` — die Aktivierungslogik aus
+  `print_station_sheet_for` (Status-Flip, Zettel-Code-Vergabe,
+  `init_book_progress`, Host-Broadcast) in einen gemeinsamen Kern
+  `_load_and_activate_station_student()` extrahiert; neues
+  `activate_station_student()` ruft nur diesen Kern auf (kein PDF, kein
+  Druck). Neuer Endpoint `POST /api/scan-station/activate`
+  (`server/routes/scan_station.py`) — synchron (kein `PrintJob`, anders als
+  `/print-sheet`, das über die Druckerwarteschlange läuft), gibt
+  `{ok, code}` zurück. Der physische Druck kann jederzeit später über den
+  Zettel-Nachdruck-Knopf im „Aktuell in Ausgabe"-Kästchen nachgeholt werden
+  — derselbe Zettel-Code bleibt stabil (`allocate_station_code` ist bereits
+  idempotent pro Schüler).
+- Getestet: `tests/test_scan_station.py`
+  (`test_activate_station_student_marks_active_without_printing`,
+  `test_activate_station_student_reprint_keeps_baseline`,
+  `test_scan_station_activate_endpoint` — bestätigt auch, dass KEIN
+  `PrintJob` enqueued wird, `test_scan_station_activate_for_unknown_
+  student_404`); bestehende `print_station_sheet_for`-Tests unverändert
+  grün (reiner Extract-Refactor, keine Verhaltensänderung). Drei-Knopf-
+  Dialog per Playwright-Screenshot gegengeprüft. Volle Suite (562 Tests) +
+  Ruff + `node --check` grün.
+
+## 2026-08-12 — Host-Badge: gesamt-Zeile statt Doppelzeile bei Gleichstand
+
+- `web/host-render.js::activeStatusDetails()`: die zweizeilige
+  Fortschrittsanzeige (`X/Y ohne Mjb` + `X/Y gesamt`) erscheint nur noch,
+  wenn sich Session- und Gesamtwerte tatsächlich unterscheiden. Bisher
+  wurde an der Station immer zweizeilig angezeigt, auch ohne Vorbestand
+  (`sessionCombined === totalCombined`) — jetzt reicht dann die
+  `X/Y gesamt`-Zeile allein.
+
+## 2026-08-12 — Drucker-Display: Schülerauftrag-Modus in der Warteschlange + Vorrang-Hinweis
+
+- **Warum:** Niklas wollte, dass das Drucker-Display (`/drucker-display`)
+  in seiner zentralen Warteschlangen-Anzeige nicht mehr Host-/Helfer-Namen
+  zeigt, sobald eine Klasse mit offener Liveausgabe aktiv ist, deren
+  freigegebene Drucker das Display abdecken und die einen zugeordneten,
+  noch nicht fertigen Modus-B-Schüler hat — nur dann sollen ausschließlich
+  Schüleraufträge in der Warteschlange stehen. Vorab per drei
+  `AskUserQuestion`-Fragen geklärt: Filter gilt für die **gesamte** Liste
+  (nicht pro Eintrag), Fallback ohne passende Klasse ist **wie bisher**
+  (alle Rollen), `pending_pairing`-Sessions (noch keiner Klasse
+  zuordenbar) werden **ignoriert**.
+- `server/state.py::AppState._printer_display_students_only()`: neue
+  Bedingung — `live_ausgabe=True`, Schnittmenge Display-Zuweisung ∩
+  Klassen-Druck-Allowlist nicht leer, mindestens ein `paired`-Schüler
+  dieser Klasse mit `status != "done"`. `printer_display_view()` reicht
+  das Ergebnis an `PrintQueue.display_view()` durch.
+- `server/print_queue.py::display_view()`: neuer Parameter
+  `students_only` filtert `waiting_list` auf
+  `originator_info.type == "student"` — nur die zentrale Warteschlange,
+  nicht die „druckt"/„als nächstes"-Kategorien je Drucker (dort bleiben
+  bereits gesendete Aufträge aller Rollen sichtbar, sie sind physisch
+  verbindlich). Flag wird zusätzlich im Response-Dict mitgegeben.
+- **Broadcast-Lücke geschlossen:** der Gate hängt von State ab, der bisher
+  keinen Drucker-Display-Push auslöste (`broadcast_printer_displays` lief
+  nur bei Druck-Übergängen). Ergänzt in `sessions.py::end_student`,
+  `routes/modus_b.py` (beide Pairing-Wege), `routes/classes.py` (Klasse
+  öffnen/schließen, Liveausgabe-Toggle, Drucker-Allowlist-Änderung,
+  Schuljahrwechsel), `routes/queue.py::clear_queue`.
+- **Vorrang-Hinweis** (Folge-Anforderung): Da die „Nächster"-Kategorie
+  weiterhin alle Rollen zeigt, kann dort im Schülerauftrag-Modus ein
+  Host-/Helferauftrag auftauchen, der in der zentralen Warteschlange
+  unsichtbar wäre. `web/drucker-display.js` prüft pro Drucker-Karte
+  `msg.students_only` + ob ein Auftrag in `nextOrds` `originator.type` ∈
+  {`host`,`helper`} hat; falls ja (Fehler hat Vorrang vor diesem Hinweis):
+  Druckername wird zu `"<Name> - Vorrang"`, darunter
+  `"Ein Betreuer druckt etwas. Dieser Druckauftrag hat Vorrang."` —
+  identisches Markup/CSS-Muster wie der Fehler-Hinweis
+  (`.dd-fault-name`/`.dd-fault-msg` → neue `.dd-priority-name`/
+  `.dd-priority-msg`), nur Farbe `#e69500` (dasselbe Gelb wie
+  `.status-alert-orange` im Helferclient) statt Rot.
+- Getestet: Ruff clean, `node --check` auf `drucker-display.js`, volle
+  Offline-Testsuite grün (Exit 0, keine Regressionen). Details/Lektionen:
+  [`_logs/2026-08-12_sba_drucker_display_students_only.md`](../../../../_logs/2026-08-12_sba_drucker_display_students_only.md).
+
+## 2026-08-12 — Host: Zettel-Nachdruck-Knopf im „Aktuell in Ausgabe"-Kästchen
+
+- **Warum:** Niklas wollte neben dem „Trennen"-Knopf eines aktiven Schülers
+  einen Weg, dessen Scan-Station-Zettel (Barcode + Bücherliste zum Abhaken)
+  erneut zu drucken — z. B. wenn das Original verloren geht oder unleserlich
+  wird.
+- `web/host-render.js::renderCtxNowServing`: neuer Icon-Knopf
+  (`data-action="reprint-station-sheet"`) rechts neben „Trennen", sichtbar
+  sobald der Schüler überhaupt einen Zettel-Code hat (`s.station_code`,
+  dieselbe Bedingung wie die bestehende Code-Anzeige links). Neues
+  `ICON_SHEET` — Blatt mit Eselsohr oben LINKS (Grundform wie
+  `docLetterIcon` in `scan-render.js`, aber gespiegelt — die Antrags-Icons
+  dort knicken oben rechts), Barcode oben rechts davon (fünf schmale
+  Striche) und darunter zwei gleich lange Listenzeilen mit sichtbarem
+  Abstand zum Häkchen, das NUR die untere trägt — spiegelt den echten
+  Zettel (Barcode + Abhak-Liste, s. `server/scan_station.py::
+  build_sheet_pdf`). Höhe (`y2–22` im 24er viewBox) deckungsgleich mit
+  `ICON_ACTION_CHECK`/`ICON_PRINTER` (per `getBBox()` gegengeprüft); mit
+  `ICON_DISCONNECT` (`y3–21`) bis auf 1 px identisch — dessen eigene Form
+  gibt dort das Limit vor; die Breite ist bewusst SCHMALER als die anderen
+  Icons (`x5–19` statt `x2–22`) — Seitenverhältnis ~1:1,43, angelehnt an ein
+  echtes A4-Blatt (1:√2), muss also nicht zu den quadratischeren
+  Nachbar-Icons passen. Vier Korrekturrunden nach Niklas' Feedback: (1)
+  Eselsohr raus + Inhalt zentriert, (2) Blatt vergrößert + Häkchen nur an
+  der unteren Zeile, (3) Zeilen gleich lang + mehr Abstand vor dem Häkchen
+  + Höhen-Angleich an Abschließen/Trennen/Drucken + Eselsohr zurück (jetzt
+  oben links) + Barcode nach rechts verschoben, (4) Breite reduziert aufs
+  A4-Seitenverhältnis (Höhe blieb deckungsgleich mit den Nachbar-Icons).
+  Jede Runde per Playwright-Screenshot gegengeprüft. Der Klick ruft die
+  bestehende `printStationSheet()` auf
+  (öffnet denselben Druck-Dialog/Druckerauswahl wie beim ersten Zettel-Druck
+  aus der Klassen-Queue, postet an `/api/scan-station/print-sheet`) — keine
+  neue Funktion nötig, nur ein neuer Aufrufweg direkt für den bereits aktiven
+  Schüler statt über die Wartend-Auswahl.
+- **Server-Korrektur** (`server/sessions.py::print_station_sheet_for`):
+  `reset_baseline` war bisher hart auf `True` verdrahtet — richtig für das
+  echte „Aufrufen" (`pending → active`, wo eine neue Fortschritts-Zählung für
+  die Host-Statuszeile beginnen soll), aber falsch für einen reinen Nachdruck
+  eines bereits aktiven Schülers: der hätte den „seit Aufrufen"-Fortschritt
+  (`loaned_at_load`) unbeabsichtigt zurückgesetzt. Jetzt nur noch bei
+  `status == "pending"` vor der Statusänderung gesetzt — der neue Host-Knopf
+  ist der erste tatsächliche Aufrufer dieses Pfads mit einem bereits aktiven
+  Schüler (die alte Klassen-Queue-Auswahl zeigte nur Wartende).
+- Getestet: `tests/test_scan_station.py::
+  test_print_sheet_reprint_for_active_student_keeps_baseline` (neu,
+  `loaned_at_load` bleibt bei einem Nachdruck für einen aktiven Schüler
+  unverändert); bestehende `test_print_sheet_marks_student_active_and_
+  collecting`/`test_print_sheet_does_not_reactivate_a_done_student`
+  weiterhin grün (unveränderte Semantik für `pending`/`done`). Volle Suite
+  + Ruff + `node --check` grün.
+
+## 2026-08-12 — Helferclient: Namenskollision mit `common.js` behoben (`ALERT_META`)
+
+- **Symptom:** Der Helferclient (`web/scan.html`) hing im Dev/Test-Setup
+  dauerhaft bei „Verbinde…", Buttons reagierten nicht. Browser-Konsole:
+  `Uncaught SyntaxError: Identifier 'ALERT_META' has already been declared
+  (at scan-state.js:1:1)`, gefolgt von `token is not defined` (`scan-ws.js`)
+  und `bookRowsEl is not defined` (`scan-render.js`).
+- **Ursache:** Der laufende Umbau (Scan-Ansicht-Logik von `student.js` nach
+  `web/common.js` ausgelagert, geteilt zwischen Schülerclient + Scan-Station —
+  **nicht** dem Helferclient, der eigene Perspektiven-Texte hat, „an den
+  Schüler" statt „an dich") führte in `common.js` eine neue `const
+  ALERT_META` ein, die mit der bereits bestehenden, inhaltlich anderen `const
+  ALERT_META` in `web/scan-state.js` kollidiert — beide Skripte teilen sich in
+  `scan.html` dieselbe globale Top-Level-Scope (kein Build-Step). Die doppelte
+  `const`-Deklaration ist ein Parse-Time-`SyntaxError`, wodurch `scan-state.js`
+  komplett nicht ausgeführt wurde und alle nachfolgend geladenen Skripte auf
+  undefinierten Variablen liefen. Da der Crash schon vor `connect()` passierte,
+  wurde nie ein WS-Handshake versucht — daher keine Spur im Server-Log.
+- **Fix:** Helfer-lokale Konstante in `web/scan-state.js` zu
+  `HELPER_ALERT_META` umbenannt (+ Referenz in `web/scan-render.js`);
+  `common.js`s `ALERT_META` bleibt für Schülerclient/Scan-Station unverändert.
+  Verhalten/Texte des Helferclients unverändert.
+- **Verifiziert:** `node --check` auf den konkatenierten Skripten jeder Seite
+  (Ladereihenfolge wie im Browser) für `scan.html`, `student.html`,
+  `scan-station.html`, `host.html`, `teacher.html` — keine weiteren
+  Namenskollisionen. Kein Server-Neustart nötig (statische Dateien werden
+  direkt vom Disk ausgeliefert).
+- **Lektion:** Bei geteilten Top-Level-`<script>`-Scopes (kein Modul-System)
+  kollidiert eine neue „gemeinsame" Datei garantiert mit gleichnamigen,
+  bewusst abweichenden lokalen Deklarationen von Konsumenten, die NICHT zur
+  Zielgruppe der Auslagerung gehören. Details:
+  `_logs/2026-08-12_sba_helferclient_alert_meta_collision.md`.
+
+## 2026-08-12 — Scan-Station: „Fertig"-Knopf neben der Statuszeile entfernt
+
+- **Warum:** Niklas wollte den „Fertig"-Knopf neben der Statuszeile ganz
+  weghaben — die Station meldet Schüler ohnehin automatisch nach 30 s
+  Inaktivität ab (s. Hinweistext oben), ein manueller Weg war nicht gewollt.
+- `web/scan-station.html`: `#done-btn` entfernt, die jetzt überflüssige
+  `.status-row`-Wrapper-Zeile (nur noch ein Kind) samt zugehöriger
+  CSS-Regeln (`.status-row`, `#done-btn`) ebenfalls entfernt — `#status`
+  bringt Breite/Abstand bereits selbst aus `scan-view.css` mit.
+  `web/scan-station.js`: `$('done-btn')`-Zeile aus `renderBinding()` und der
+  Klick-Listener entfernt; `release()` bleibt (wird weiterhin vom
+  Leerlauf-Timer aufgerufen).
+- Getestet: `node --check`, `uv run pytest tests/test_scan_station.py
+  tests/test_ws_scan_station.py` weiterhin grün (keine Assertion referenzierte
+  `done-btn`); per Playwright gegen einen lokalen HTTP-Server geladen, keine
+  JS-Fehler beim Fehlen des Elements.
+
+## 2026-08-12 — Scan-Station: Startbildschirm erklärt den Ablauf statt nur die Kamera-Position
+
+- **Warum:** Der Hinweistext vor der Anmeldung nannte nur, wo der Barcode auf
+  dem Zettel sitzt („Halte den Barcode oben rechts … vor die Kamera"), aber
+  nicht den eigentlichen Ablauf. Niklas wollte stattdessen kurz erklären, dass
+  zuerst der Schülerbarcode, danach die Bücher gescannt werden und dass 30 s
+  Inaktivität zur automatischen Abmeldung führt.
+- `web/scan-station.html`: `#ready-block`-Hinweistext ersetzt durch „Scanne
+  zuerst deinen Schülerbarcode vom Zettel, danach deine Bücher. Nach 30 s
+  Inaktivität wirst du automatisch abgemeldet." Reiner Text-/Markup-Fix, kein
+  Server-/JS-Bezug.
+
+## 2026-08-12 — Erkennbare Dateinamen: Leihschein-Druckjob (OS-Warteschlange) + Schülerleihschein-Download (Klasse ergänzt)
+
+- **Warum:** Landete ein Leihschein-Druck in der **physischen** OS-
+  Druckerwarteschlange (nicht die interne App-Queue mit Sortierung) unter
+  einem generischen `leihschein_<student_id>`-Namen, war er dort im
+  Fehlerfall (Stau, Papierstau, falscher Drucker) kaum einem Schüler
+  zuzuordnen. Niklas wollte stattdessen Klasse, Nachname, Vorname sehen.
+  Zusätzlich sollte der Download-Dateiname des Schülerleihscheins (Eigenabruf
+  am Abschluss-Screen) neben Name/Vorname auch die Klasse tragen.
+- **Leihschein-Druckjob** (`server/sessions.py`): neuer Helper
+  `_slip_print_label(state, student_id)` baut `Leihschein_<Klasse>_
+  <Nachname>_<Vorname>` (Sonderzeichen/Leerzeichen zu `_` normalisiert) und
+  ersetzt in `print_loan_slip_for` das bisherige `label=f"leihschein_
+  {student_id}"` an beiden `print_pdf`-Aufrufen (Datei- und regulärer
+  Druckpfad). `printing.py` verwendet `label` unverändert als Präfix der
+  Temp-PDF-Datei — `lp` (kein `-t`-Flag) und SumatraPDF reichen den
+  Dateinamen 1:1 als Job-/Dokumentname an die OS-Druckerwarteschlange durch,
+  daher wirkt die Umbenennung dort direkt. Fallback auf die alte
+  `leihschein_<student_id>`-Form, wenn Klasse/Name nicht ermittelbar sind
+  (defensiv per `getattr`, nicht über den bestehenden `_student_form`-Direkt-
+  zugriff, damit Test-Doubles ohne diese Attribute nicht crashen). Der
+  Scan-Station-Zettel (`print_station_sheet_for`) blieb bewusst unverändert
+  — nur explizit nach dem Leihschein gefragt.
+- **Schülerleihschein-Download** (`server/sessions.py`): neuer Helper
+  `_own_slip_filename(lastname, firstname, form)` baut
+  `Schülerleihschein <Nachname>, <Vorname>, <Klasse>.pdf` (Klasse fällt weg,
+  wenn unbekannt) und ersetzt das bisherige Format ohne Klasse in
+  `_prefetch_own_slip` (Vorlade-Pfad beim Leihschein-Druck) und
+  `_send_own_slip_download` (Frisch-Fetch-Fallback kurz vor Session-Ende) —
+  beide nutzen dafür `_student_form(state, student_id)`.
+- Getestet: bestehende Assertions in `tests/test_print_queue.py` und
+  `tests/test_printing.py` angepasst (`"Schülerleihschein Test,
+  Schüler.pdf"` → `"...Schüler, 10a.pdf"`); volle Suite weiterhin grün.
+
+## 2026-08-12 — Scan-Station: Schülername blieb nach dem Abmelden sichtbar (CSS-Bug)
+
+- **Warum:** Niklas meldete, dass nach dem Abmelden eines Schülers (Timeout,
+  „Fertig"-Knopf, Stationswechsel) dessen Name weiter über der Namenszeile
+  stand, statt zu verschwinden.
+- **Ursache:** `renderBinding()` (`web/scan-station.js`) setzt zwar
+  `#student-row.hidden = true`, aber `.name-row { display: flex; … }`
+  (`web/scan-view.css`) ist eine normale Autor-Regel und schlägt die
+  UA-Regel `[hidden]{display:none}` unabhängig von der Selektor-Spezifität —
+  Autor-Deklarationen gewinnen gegen User-Agent-Deklarationen immer, auch bei
+  gleicher Spezifität. Das `hidden`-Attribut blieb dadurch wirkungslos, die
+  Zeile war permanent `display:flex`. Mit Playwright gegen einen lokalen
+  HTTP-Server (nicht `file://`, sonst lädt `/scan-view.css` wegen des
+  Root-Pfads gar nicht) nachgestellt: `getComputedStyle(#student-row).display`
+  blieb `flex` trotz gesetztem `hidden`-Attribut.
+- **Fix:** `#student-row[hidden] { display: none; }` in `scan-view.css`
+  ergänzt (ID+Attribut schlägt die Klassen-Regel per Spezifität). Andere über
+  `hidden` gesteuerte Elemente (`#book-wrap`, `#done-btn`, Modal-Absätze)
+  waren nicht betroffen — sie haben keine eigene `display`-Deklaration, die
+  UA-Regel griff dort bereits. Kein Server-/Test-Impact (reiner CSS-Fix),
+  nachverifiziert per Playwright: `display:none` mit, `display:flex` ohne
+  `hidden`-Attribut.
+
+## 2026-08-12 — Scan-Station: Leerlauf-Timer während blockierendem Buch-Hinweis ausgesetzt
+
+- **Warum:** Öffnet ein Buch-Scan an der Station ein blockierendes Hinweis-
+  Modal (ausgemustert/anderweitig verliehen — wartet auf Freigabe durch den
+  Host per `/api/clear-book-alert`), lief der 30-s-Leerlauf-Timer bislang
+  unbeeindruckt weiter mit. Wartete der Betreuer länger als 30 s, wurde der
+  wartende Schüler von der Station geworfen, obwohl er nichts falsch gemacht
+  hatte. Niklas wollte den Timer für die Dauer genau dieser (und nur dieser)
+  Meldung aussetzen; alle anderen, selbst schließbaren Meldungen sollen den
+  Timer unverändert weiterlaufen lassen.
+- **Server** (`server/sessions.py::expired_scan_stations`): Stationen mit
+  offenem `book_alert_open` zählen jetzt nicht mehr zum 30-s-Sweeper — analog
+  zur bestehenden `worker_ready`-Ausnahme. `server/routes/queue.py::
+  clear_book_alert` setzt beim Freigeben `station.last_activity` neu, damit
+  der Timer ab der Host-Freigabe wieder mit vollen 30 s zählt, statt die
+  stillstehende Wartezeit sofort nachzuholen.
+- **Client** (`web/scan-station.js`): neue `freezeIdle()`/`unfreezeIdle()`
+  stoppen bzw. starten den lokalen Countdown-Timer — `freezeIdle()` beim
+  Öffnen eines blockierenden `scan_result` (parallel zu `bookAlertOpen =
+  true`), `unfreezeIdle()` bei `book_alert_clear` (startet über `startIdle()`
+  wieder frisch bei vollen 30 s, spiegelbildlich zum Server-Reset).
+- Getestet: `tests/test_scan_station.py`
+  (`test_idle_sweep_ignores_stations_with_open_book_alert`,
+  `test_clear_book_alert_unblocks_station` um den `last_activity`-Reset
+  erweitert); volle Suite `uv run pytest` grün (557 Tests).
+
+## 2026-08-12 — Now-Serving-Kästchen: Info-Zeile in Zwei-Spalten-Layout
+
+- **Warum:** Die am 2026-08-11 eingeführte Stationszeile stand als eigene
+  Zeile über der Klasse/Status-Zeile; Niklas wollte stattdessen ein
+  kompakteres, klar spaltenweise sortiertes Layout: links bündig Zettel-Code
+  (1. Zeile) und Klasse (2. Zeile), rechts bündig Stationsname + Symbol +
+  Trennen-Knopf (1. Zeile) und Status (2. Zeile) — dazu die Zeilen enger.
+- `renderCtxNowServing` (`web/host-render.js`) baut die beiden vormals
+  getrennten Zeilen (`ns-station-row`, `ns-meta`) jetzt zu einem gemeinsamen
+  `ns-info-grid` mit `ns-info-left`/`ns-info-right` zusammen; reine
+  Markup-/CSS-Umstellung, keine neuen Server-Felder oder Endpunkte.
+- `web/host.css`: `.ns-tile`-Gap von 8px auf 4px reduziert, neue
+  `.ns-info-grid`/`.ns-info-left`/`.ns-info-right`-Regeln (Flex, je 1px
+  Zeilenabstand) ersetzen `.ns-station-row`/`.ns-station-left`/`.ns-meta`.
+
+## 2026-08-11 — Now-Serving-Kästchen: Stationszeile mit Zettel-Code + eigenständigem Stations-Trennen
+
+- **Warum:** Der Stationsname stand bisher als kleines Badge zwischen Status
+  und Helfer-Badge; der vierstellige Zettel-Code des Schülers war im Host
+  gar nicht sichtbar (nützlich, um ihn dem Schüler erneut zu nennen oder
+  gegen den gedruckten Zettel zu prüfen). Ein „nur von der Station
+  abmelden"-Weg (ohne den Schüler komplett zu trennen) fehlte ebenfalls.
+- **Neue eigene Zeile im Now-Serving-Kästchen** (`web/host-render.js::
+  renderCtxNowServing`), direkt unter dem Namen: links Stationsname + Symbol
+  + kleiner Trennen-Knopf (grau, wie die Klasse in der Zeile darunter),
+  rechts der Zettel-Code (blau, wie der Status). Die Zeile erscheint nur,
+  wenn der Schüler überhaupt einen Zettel-Code hat; der Stationsname/Knopf
+  darin nur, solange er GERADE an einer Station angemeldet ist.
+- **`QueueStudent.as_dict()`** führt jetzt `station_code`. Bewusst NICHT
+  einfach am bestehenden `_queue_student_as_dict` ergänzt (der ist auch der
+  Serialisierungsweg für die Helferclient-Queue-Ansichten
+  `pending_queue_as_list`/`real_contexts_summary`!) — neuer Parameter
+  `include_station_code: bool = False`, nur an den beiden `state_snapshot()`-
+  Stellen (Host) auf `True` gesetzt. Der Zettel-Code bleibt damit ein
+  Credential, das ausschließlich der Host sieht (PLAN §3.7) — der Host kennt
+  ihn ohnehin, er hat den Zettel selbst gedruckt.
+- **`POST /api/scan-station/release-student`** (neu, `server/routes/
+  scan_station.py`) — Spiegel von `/api/scan-station/release`, aber vom
+  Schüler statt von der Station aus adressiert (das Now-Serving-Kästchen
+  kennt nur die `student_id`, nicht die interne `station_id`). Löst NUR die
+  Stationsbindung (`release_station_student`), der Schüler bleibt ansonsten
+  unverändert aktiv — anders als der allgemeine „Trennen"-Knopf. Idempotent
+  ohne aktive Stationsbindung.
+- Tests: `tests/test_scan_station.py` (`station_code` nur mit
+  `include_station_code=True`, nie in den Helferclient-Pfaden, im echten
+  `state_snapshot()` an beiden Stellen; neuer Endpoint inkl. Host-Auth-Gate,
+  fehlendem `student_id` und Idempotenz ohne Station) + `uv run pytest`
+  (556 Tests) + `uvx ruff check server/ automation/ tests/` + `node --check
+  web/*.js`. 556 Tests grün (547 → 556).
+
+## 2026-08-11 — Scan-Station: Host-Queue-Status „Bücher sammeln" + Stationsname-Badge
+
+- **Warum:** Ein Schüler, für den ein Zettel gedruckt wurde, tauchte in der
+  Host-Queue bis zur ersten Anmeldung an einer Station weiterhin als
+  „Wartend" auf — kein sichtbarer Unterschied zu einem Schüler, der noch gar
+  nicht dran ist.
+- **Der Zettel-Druck ist jetzt das „Aufrufen" des Zettel-/Stations-Flusses**
+  (`server/sessions.py::print_station_sheet_for`): ein wartender Schüler
+  wechselt auf `active`, sein Fortschritt wird befüllt
+  (`init_book_progress(..., reset_baseline=True)`, wie beim Aufrufen durch
+  einen Helfer), und der Host bekommt sofort einen frischen Snapshot (nicht
+  erst beim nächsten ohnehin fälligen Broadcast).
+- **`QueueStudent.station_zettel_printed`** (`server/state.py`, neu,
+  persistiert über ein Ab-/Anmelden an der Station hinweg — nur „Status
+  zurücksetzen"/„Trennen" am Host löscht sie über `reset_progress()`).
+  Steuert zusammen mit dem aktuellen Stationsstatus die Host-Statuszeile
+  (`activeStatusDetails` in `web/host-render.js`):
+  - Zettel gedruckt, NICHT an einer Station angemeldet, noch nicht alles
+    ausgeliehen → „Bücher sammeln" statt einer Zahl.
+  - An einer Station angemeldet → immer die zweizeilige Anzeige
+    „X/Y ohne Mjb" + „X/Y gesamt" (bisher nur bei vorhandenem Vorbestand
+    zweizeilig — an der Station jetzt unabhängig davon, s. `atStation` in
+    `activeStatusDetails`).
+  - Abgemeldet → zurück zu „Bücher sammeln", **außer** alle Bücher sind
+    bereits ausgeliehen — dann bleibt es bei der Zahl.
+- **`AppState._queue_student_as_dict`** löst jetzt zusätzlich `station_name`
+  auf (Spiegel von `assigned_helper_name`, über das neue
+  `AppState.find_station_by_student`) — Stationsname bzw. Kurz-ID als
+  Fallback ohne gesetzten Namen.
+- **Stationsname-Badge wie beim Helfer**, Host-Symbol statt Helfer-Symbol:
+  `ICO_HOST` (`web/host-state.js`, dasselbe SVG wie `ICO_LAPTOP` im
+  Drucker-Display) im Now-Serving-Kästchen und in der Klassen-Queue-Tabelle;
+  ein übernehmender Helfer hat Vorrang vor dem Stations-Badge.
+- Tests: `tests/test_scan_station.py` (Zettel-Druck aktiviert wartende
+  Schüler, reaktiviert aber keinen bereits fertigen; „Status zurücksetzen"
+  löscht die Markierung; `station_name` im Queue-Snapshot mit/ohne
+  Stationsname/Anmeldung) + `uv run pytest` (547 Tests) + `uvx ruff check
+  server/ automation/ tests/` + `node --check web/*.js`. 547 Tests grün
+  (541 → 547). **Browser-Livecheck der neuen Statustexte/Badges offen.**
+
+## 2026-08-11 — Scan-Station: Blockierverhalten wie am Handy + Stationswechsel per Zettel-Code
+
+- **Warum:** Die Station verhielt sich bei ausgemusterten/anderweitig
+  verliehenen Büchern bisher anders als das Handy — der Schüler konnte den
+  Hinweis selbst schließen. Jetzt exakte Parität: `book_deleted`/`not_in_stock`
+  öffnen ein blockierendes Modal, das nur der Host per
+  `/api/clear-book-alert` freigibt.
+- **`ScanStationSession.book_alert_open`** (`server/state.py`, neu, kein
+  `book_alert_payload` — anders als `StudentSessionB` braucht die Station
+  keinen Reconnect-Wiederherstellungsfall, ein Reconnect setzt sie ohnehin
+  ganz zurück). Solange offen werden Kamera-Scan **und** das manuelle
+  Eingabefeld ignoriert (`onScanSuccess`-Guard) — das Feld selbst bleibt
+  bedienbar (weitere Codes eintippen + Enter drücken funktioniert, wirkt nur
+  nicht), keine Auto-Schließung durch den nächsten Scan.
+- **`/api/clear-book-alert`** (`server/routes/queue.py`) prüft jetzt zusätzlich
+  `AppState.find_station_by_student` (neu, Spiegel von
+  `find_session_by_student`/`find_helper_for_student`) und schickt bei Bedarf
+  `book_alert_clear` an die Station.
+- **Ersatzansprüche bleiben ausschließlich am Host** — hierfür war keine
+  Änderung nötig: `process_scan(..., source="student")` (Default-Parameter,
+  von der Station bereits so aufgerufen) liefert `loaned_to`-Details grundsätzlich
+  nicht an Station/Handy zurück, nur der `book_alert`-Broadcast an den Host
+  trägt sie (`server/sessions.py::_process_scan_locked`, unverändert).
+- **Stationswechsel per Zettel-Code** (`server/routes/ws.py::ws_scan_station`):
+  Jeder Scan während einer laufenden Anmeldung wird zuerst geprüft, ob er
+  eigentlich der Zettel-Code eines ANDEREN Schülers ist. Der Treffer-Check
+  selbst läuft **unabhängig von Länge/Ziffernform** (einfacher Dict-Lookup) —
+  eine anfängliche Fassung filterte vorab auf „exakt 4-stellig", was echte
+  Treffer je nach vom Scanner gelieferter Zeichenkette zu Unrecht als
+  Buch-Barcode fehlschlagen ließ; korrigiert, sodass ein Treffer nie an einer
+  zu strengen Formannahme scheitert. Trifft es zu, wechselt die Station sofort
+  (`release_station_student` + `load_station_student` für den neuen Schüler)
+  statt „Buch unbekannt" zu melden. Scheitert der Wechsel (Zielschüler z. B.
+  inzwischen fertig), bleibt der aktuell angemeldete Schüler unangetastet —
+  nur eine Fehlermeldung erscheint. Das bestehende 10/Minute-Rate-Limit
+  bleibt an die 4-stellige Form gebunden und greift weiterhin für JEDEN
+  4-stelligen Versuch (Treffer wie Fehlversuch), nicht nur beim initialen
+  Zettel-Code-Scan.
+- Tests: `tests/test_scan_station.py` (`find_station_by_student`,
+  `/api/clear-book-alert` löst Stationen und zielt nur auf die passende),
+  `tests/test_ws_scan_station.py` (Blockade hält über einen ignorierten Scan
+  hinweg, Host-Freigabe schaltet frei, erfolgreicher/gescheiterter
+  Stationswechsel, ein zufällig 4-stelliger unbekannter Barcode landet
+  weiterhin bei `unknown_book` statt fälschlich als Wechselversuch). 541 Tests
+  grün (532 → 541).
+
+## 2026-08-11 — Scan-Station: Zettel mit Barcode für Schüler ohne Handy
+
+- **Warum:** Modus B setzt ein eigenes Handy pro Schüler voraus. Wer keins hat,
+  fiel komplett auf die Helfer-Bedienung zurück. Neu: ein festes Scan-Gerät
+  (`/scan-station`), an dem sich Schüler nacheinander mit einem gedruckten
+  Zettel anmelden. Zielbild + Sicherheitsmodell: `docs/PLAN.md` §3.8.
+- **Zettel** (`server/scan_station.py`, neu): A4 hoch — oben links Klasse und
+  „Nachname, Vorname", oben rechts ein Code-39-Barcode **6,5 × 1,2 cm** mit der
+  vierstelligen Nummer darunter, im Blattkörper „Noch vorgemerkt" (mit Kästchen
+  zum Abhaken) und „Bereits ausgeliehen". Der Code-39-Encoder ist selbst
+  gebaut (Standardtabelle, Breitverhältnis 2), gezeichnet wird mit dem schon
+  vorhandenen PyMuPDF — kein neues Dependency.
+- **Code-Vergabe** (`AppState.allocate_station_code`): stabil pro Schüler (ein
+  Nachdruck trägt denselben Barcode) und **nie recycelt** innerhalb einer
+  Server-Laufzeit — ein alter, herumliegender Zettel darf nie jemand anderen
+  laden. Der Code steht weder im Log noch im Host-Snapshot.
+- **Station** (`web/scan-station.html`/`.js`, `server/routes/scan_station.py`,
+  `ws_scan_station`): Pairing-Fluss wie beim Drucker-Display — Token in der URL,
+  Registrierungs-Code auf dem Schirm, Freischaltung am Host per Namenseingabe,
+  Light/Dark und **Kamera/Manuell** vom Host umschaltbar. Nach einem gültigen
+  Zettel-Code lädt der Server den Schüler; gescannt wird über dasselbe
+  `process_scan` wie am Handy (read-only, staged ohne `ALLOW_BOOKING`). Kein
+  Leihschein-Druck, kein Abschließen — das bleibt bei Host/Helfer. Die Station
+  sieht nur Name und Klasse (geteiltes Gerät), nicht den Zahl-/Anmeldestatus.
+- **Der Scanmodus ist derselbe wie im Schülerclient — nicht nur „ähnlich":**
+  Das Aussehen liegt jetzt in `web/scan-view.css` (aus `student.html`
+  herausgezogen), die Logik in `web/common.js` (`renderBookRows`,
+  `renderBookAlert`/`hideBookAlert`, `ALERT_META`, `statusAlertClass`,
+  `OK_SCAN_STATUSES`/`BLOCKING_SCAN_STATUSES` — vormals `*_STUDENT` in
+  `student.js`). Beide Seiten nutzen dieselbe obere Leiste, Statuszeile samt
+  Farbregeln, Namenszeile, Bücher-Tabelle mit FLIP-Animation und dasselbe
+  Buch-Hinweis-Modal. Ein Unterschied bleibt: An der Station schließt der
+  Schüler auch blockierende Buch-Meldungen selbst — den Host-Freigabe-Weg
+  (`book_alert_clear`) gibt es nur für Modus-B-Sessions.
+- **Eingabeart Kamera/Manuell wie im Helferclient** (`ScanStationSession.
+  input_mode`, `POST /api/scan-station/input-mode`): Umschalter im
+  Kamera-Dropdown der Station (Aufbau aus `scan.html`) — im manuellen Modus
+  wird die Kamera gestoppt, `#reader` zum Eingabefeld, der Taschenlampen- zum
+  Enter-Knopf, plus rotes Fokus-Warnbanner, wenn das Feld den Fokus verliert
+  (sonst tippt ein Handscanner ins Leere). Die Station merkt sich die Wahl
+  lokal; eine Host-Vorgabe überschreibt sie — genau wie beim Theme, mit einem
+  zweiten Schieberegler „Manuell" neben „Dunkel" im Stations-Reiter.
+- **Bugfix im Aufräumpfad:** Der `finally`-Block des Stations-WS (und
+  `/departed`) löst die `ws`-Referenz jetzt **vor** dem Freigeben des
+  Schülers. Vorher versuchte `release_station_student` noch `released`/`ready`
+  auf den bereits toten Socket zu schicken; das verzögerte das Aufräumen von
+  Schüler und Worker-Context (im Test als Zeitrennen sichtbar).
+- **Annahmeregeln** (`resolve_station_code`): streng bei Unsicherheit — Schüler
+  muss in einer offenen Klasse sein, nicht `done`, ohne Helfer, ohne gepairte
+  Handy-Session und nicht an einer anderen Station. Code-Versuche sind pro
+  Station auf 10/Minute gedrosselt.
+- **30-s-Leerlauf**: fällt zurück auf „Zettel-Code scannen", zählt aber **erst
+  ab `worker_ready`** — Warten auf einen freien Playwright-Context oder das
+  Laden der Kartei darf den Schüler nicht hinauswerfen. Client-Timer mit
+  Restzeit-Anzeige plus Server-Sweeper (5-s-Takt) als Sicherheitsnetz.
+- **Worker-Pool bekommt eine echte Warteschlange** (`automation/worker.py`):
+  Statt `Condition.notify_all()` („wer den Lock zuerst erwischt") jetzt eine
+  Waiter-Liste mit Rangfolge **Helfer → Scan-Station → Schülerclient**, FIFO
+  innerhalb einer Rolle; ein freiwerdender Context wird dem ranghöchsten
+  Wartenden direkt zugeteilt. `open_student(priority=…, on_wait=…)`; Wartezeit
+  12 s für Helfer, 60 s für Station/Handy. Wartende bekommen ihre Position
+  gemeldet (`worker_waiting`) statt eines stummen „Wird geladen…".
+- **Druck** läuft durch dieselbe Druckerwarteschlange wie ein Host-Leihschein
+  (`PrintJob.kind="station_sheet"`, `role="host"`) — auf dem Drucker-Display
+  also gewohnt mit Klasse/Name und Host-Symbol. `_mark_slip_printed_after_
+  completion` überspringt `station_sheet` explizit: ein Zetteldruck darf weder
+  den „Leihschein gedruckt"-Marker setzen noch eine Modus-B-Session abschließen.
+- **Host-UI**: Reiter je Station unten im Live-Ausgabe-Kasten (Titel = Name,
+  sonst Registrierungs-Code; „+" zeigt QR + URL; × verbietet endgültig). Panel
+  mit Name, QR, Dunkel-Schalter und — falls jemand angemeldet ist — dessen Name
+  plus „Freigeben". Gedruckt wird im Pairing-Kasten der Klasse:
+  „Scan-Station: [Schüler] [Drucken]" öffnet den bekannten Druck-Dialog (ohne
+  die „2. Seite"-Option, der Zettel ist einseitig).
+- **Draht-Format**: `state_snapshot()` bekommt `scan_stations`,
+  `worker_pool` zusätzlich `waiting` (Wartende je Rolle) —
+  `tests/test_state_contract.py` entsprechend erweitert.
+- Tests: `tests/test_scan_station.py` (Barcode-Maße im PDF, Code-Vergabe,
+  Endpunkte inkl. Eingabeart, Annahmeregeln, TTL, Druckauftrag),
+  `tests/test_ws_scan_station.py` (WS-Fluss end-to-end) und vier neue
+  Rangfolge-Tests in `tests/test_worker_pool.py`. **532 Tests grün.**
+
 ## 2026-08-11 — Schüler-Session überlebt ein ausgeschaltetes Handy
 
 - Symptom: Wurde ein Schüler-Handy mitten in der Ausgabe ausgeschaltet (oder nur

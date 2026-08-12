@@ -262,6 +262,14 @@ class PrinterReactivateRequest(BaseModel):
     id: str = ""
 
 
+class UpdatePrintJobPrintersRequest(BaseModel):
+    """Body für `POST /api/print-queue/{job_id}/printers` — erlaubte Drucker
+    eines eigenen, noch wartenden (nicht dispatchten) Druckauftrags ändern
+    (Nachfrage-Menü bei fehlerhaften Druckern bzw. proaktives Umbuchen)."""
+
+    printers: list[str] = []
+
+
 class AddHelperRequest(BaseModel):
     name: str = "Helfer"
     context_id: str | None = None
@@ -348,6 +356,64 @@ class PrinterDisplayThemeRequest(BaseModel):
 
     display_id: str = ""
     theme: str = "dark"
+
+
+class ScanStationEnableRequest(BaseModel):
+    """Body für `POST /api/scan-station/enable` — Scan-Station durch Eingabe
+    eines Namens freischalten (autorisieren). Der Registrierungs-Code dient nur
+    dem visuellen Abgleich mit dem Stationsbildschirm."""
+
+    station_id: str = ""
+    label: str = ""
+
+
+class ScanStationLabelRequest(BaseModel):
+    """Body für `POST /api/scan-station/label` — Stationsname setzen. Leer =
+    kein Name (Reiter zeigt den Registrierungs-Code)."""
+
+    station_id: str = ""
+    label: str = ""
+
+
+class ScanStationThemeRequest(BaseModel):
+    """Body für `POST /api/scan-station/theme` — Darstellung auf der Station
+    setzen. ``theme`` = ``'light'`` oder ``'dark'``."""
+
+    station_id: str = ""
+    theme: str = "dark"
+
+
+class ScanStationInputModeRequest(BaseModel):
+    """Body für `POST /api/scan-station/input-mode` — Eingabeart auf der
+    Station setzen (wie im Helferclient). ``input_mode`` = ``'camera'``
+    (Kamera-Scanner) oder ``'manual'`` (Tastatur-/Handscanner)."""
+
+    station_id: str = ""
+    input_mode: str = "camera"
+
+
+class ScanStationForgetRequest(BaseModel):
+    """Body für `POST /api/scan-station/forget` — eine Scan-Station verbieten
+    (Token auf die Bannliste, Session entfernen, WS wird geschlossen)."""
+
+    station_id: str = ""
+
+
+class ScanStationReleaseRequest(BaseModel):
+    """Body für `POST /api/scan-station/release` — den an einer Station
+    angemeldeten Schüler vom Host aus freigeben (Station fällt auf
+    „Zettel-Code scannen" zurück)."""
+
+    station_id: str = ""
+
+
+class ScanStationPrintRequest(BaseModel):
+    """Body für `POST /api/scan-station/print-sheet` — Zettel mit Barcode und
+    Bücherliste für einen Schüler drucken. `printers` = im Druck-Dialog
+    gewählte Drucker-IDs (`None` = Klassen-Allowlist wie beim Leihschein)."""
+
+    student_id: int | None = None
+    printers: list[str] | None = None
 
 
 class TeacherAuthorizeRequest(BaseModel):

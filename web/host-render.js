@@ -30,6 +30,18 @@ window.__host = window.__host || {};
   // links unten nach rechts oben.
   const ICON_DISCONNECT = '<svg class="ico ico-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/><line x1="3" y1="21" x2="21" y2="3" stroke-width="2.4"/></svg>';
   const ICON_SIGN = '<svg class="ico ico-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 3.5a2.1 2.1 0 0 1 3 3L8 16 4 17l1-4Z"/><line x1="12.5" y1="5.5" x2="15.5" y2="8.5"/><path d="M2 20.5c1.3-1.7 2.2-1.5 3-.3.7 1 .6 1.8 1.8 1.3 1.6-.6 1.8-2.2 3.5-1.7.9.3 1.1 1.1 2 1L20.5 17.2"/></svg>';
+  // Zettel (Barcode + Bücherliste) erneut drucken: Blatt mit Eselsohr oben
+  // links (Grundform wie `docLetterIcon` in scan-render.js, aber gespiegelt
+  // — die Antrags-Icons dort knicken oben rechts), Barcode oben rechts
+  // davon (fünf schmale Striche) und darunter zwei gleich lange
+  // Listenzeilen mit sichtbarem Abstand zum Häkchen, das NUR die untere
+  // trägt (Strich allein wirkt sonst wie zwei gleichrangige
+  // „erledigt"-Zeilen) — spiegelt den echten Zettel (Barcode + Abhak-Liste,
+  // s. `server/scan_station.py::build_sheet_pdf`). Höhe (y2–22 im 24er
+  // viewBox) deckungsgleich mit `ICON_ACTION_CHECK`/`ICON_PRINTER`; die
+  // Breite ist bewusst schmaler als die anderen Icons (x5–19 statt x2–22)
+  // — Seitenverhältnis ~1:1,43, angelehnt an ein echtes A4-Blatt (1:√2).
+  const ICON_SHEET = '<svg class="ico ico-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.8 2H8.5l-3.5 3.5V20.8a1.2 1.2 0 0 0 1.2 1.2H17.8a1.2 1.2 0 0 0 1.2-1.2V3.2a1.2 1.2 0 0 0-1.2-1.2Z"/><path d="M8.5 2v3.5h-3.5"/><g stroke-width="1.3"><line x1="10.4" y1="6.5" x2="10.4" y2="10"/><line x1="11.7" y1="6.5" x2="11.7" y2="10"/><line x1="13" y1="6.5" x2="13" y2="10"/><line x1="14.3" y1="6.5" x2="14.3" y2="10"/><line x1="15.6" y1="6.5" x2="15.6" y2="10"/></g><line x1="8" y1="14" x2="13" y2="14"/><line x1="8" y1="18.5" x2="13" y2="18.5"/><polyline points="14.7,18.8 15.8,20.0 17.7,17.6"/></svg>';
   // Schließen-X für den „Code verwerfen"-Button neben „Zuordnen" (Modus B).
   // Dasselbe X-Pfad-SVG wie beim Helfer-Entfernen-Button (s. renderHelpers).
   const ICON_CLOSE = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
@@ -203,6 +215,7 @@ window.__host = window.__host || {};
             <h2 style="margin:0 0 8px">Pairing (Modus B)</h2>
             <div class="ctx-arm-banner mb-arm-banner" data-ctx-id="${id}"></div>
             <div class="ctx-codes" data-ctx-id="${id}"></div>
+            <div class="ctx-station" data-ctx-id="${id}"></div>
           </div>
           <div class="card">
             <h2 style="margin:0 0 8px">Lehrkraft-Ansicht</h2>
@@ -516,16 +529,49 @@ window.__host = window.__host || {};
     }
   }
 
+  // Drucker-Pool aus dem lokalen Snapshot, für `mountPrinterPicker` (Druck-
+  // Dialog + Nachfrage-Toast bei feststeckenden Aufträgen) — inkl. `faulty`.
+  function hostPrinterPool() {
+    return (state.printers || []).map(
+      p => ({id: p.id, name: p.name, label: p.label, is_default: p.is_default, faulty: p.faulty})
+    );
+  }
+
   // Öffnet den Druck-Dialog und gibt die gewählte „second_page"-Option + die
-  // ausgewählten Drucker-IDs zurück, oder null wenn Abbrechen gedrückt wurde.
-  // Vorauswahl = erlaubte Drucker der Klasse des Schülers (`None` = alle
-  // Pool-Drucker); kein Klassen-Kontext → leer.
-  function openPrintDialog(studentId) {
+  // ausgewählten Drucker-IDs zurück (`{mode:'print', second_page, printers}`),
+  // oder null wenn Abbrechen gedrückt wurde. Vorauswahl = erlaubte Drucker
+  // der Klasse des Schülers (`None` = alle Pool-Drucker); kein
+  // Klassen-Kontext → leer.
+  // `opts.sheet` = Scan-Station-Zettel statt Leihschein: der Zettel ist
+  // einseitig, deshalb entfällt die „2. Seite"-Option (`second_page` bleibt
+  // dann immer false). Zwei Zettel-Varianten, je nach Aufrufweg:
+  //   - `opts.reprint` falsch (Pairing-Kasten, `renderCtxStationPrint`, nur
+  //     wartende Schüler): DREI Knöpfe — „Erstellen und Drucken" (OK),
+  //     „Erstellen" (nur aktivieren, kein Druck, löst direkt
+  //     `{mode:'activate'}` aus, braucht keine Druckerauswahl), „Abbrechen".
+  //   - `opts.reprint` wahr (Nachdruck-Knopf im „Aktuell in
+  //     Ausgabe"-Kästchen, immer schon aktive Schüler mit Code): NUR
+  //     „Drucken" (OK) + „Abbrechen" — der Zettel-Code existiert ja schon,
+  //     „Erstellen" ohne Druck ergibt hier keinen Sinn. Der Server behält in
+  //     BEIDEN Fällen denselben Zettel-Code (`AppState.allocate_station_
+  //     code` — stabil pro Schüler), holt aber bei jedem Aufruf die
+  //     Bücherliste frisch von IServ, s. `sessions._load_and_activate_
+  //     station_student`.
+  function openPrintDialog(studentId, opts) {
+    const sheet = !!(opts && opts.sheet);
+    const reprint = sheet && !!(opts && opts.reprint);
     return new Promise(resolve => {
       const modal = document.getElementById('print-dialog');
       const box = modal.querySelector('.modal-box');
       const slipCb = document.getElementById('print-dialog-slip');
+      const slipRow = document.getElementById('print-dialog-slip-row');
+      const titleEl = document.getElementById('print-dialog-title');
+      titleEl.textContent = sheet
+        ? (reprint ? 'Zettel für Scan-Station drucken' : 'Zettel für Scan-Station erstellen')
+        : 'Leihschein drucken';
+      slipRow.style.display = sheet ? 'none' : '';
       const okBtn = document.getElementById('print-dialog-ok');
+      const activateBtn = document.getElementById('print-dialog-activate-only');
       const cancelBtn = document.getElementById('print-dialog-cancel');
       const pickerErrEl = document.getElementById('print-dialog-picker-error');
       const pickerEl = document.getElementById('print-dialog-picker');
@@ -533,9 +579,11 @@ window.__host = window.__host || {};
       slipCb.checked = !!document.getElementById('slip-second-page')?.checked;
       pickerErrEl.textContent = '';
       pickerErrEl.style.display = 'none';
+      okBtn.textContent = reprint ? 'Drucken' : (sheet ? 'Erstellen und Drucken' : 'Drucken');
+      activateBtn.hidden = !sheet || reprint;
 
       // Pool + Vorauswahl aus dem lokalen Snapshot.
-      const pool = (state.printers || []).map(p => ({id: p.id, name: p.name, label: p.label, is_default: p.is_default}));
+      const pool = hostPrinterPool();
       const ctxId = findCtxOfStudent(studentId);
       const allowed = ctxId ? (state.contexts[ctxId] || {}).allowed_printers : undefined;
       // ctxId vorhanden, allowed === null (Klasse erlaubt alle) → alle Pool-
@@ -550,7 +598,7 @@ window.__host = window.__host || {};
       };
       const finish = (val) => {
         modal.classList.remove('show');
-        okBtn.onclick = cancelBtn.onclick = null;
+        okBtn.onclick = activateBtn.onclick = cancelBtn.onclick = null;
         modal.removeEventListener('keydown', onKey);
         if (prevFocus) prevFocus.focus();
         resolve(val);
@@ -562,8 +610,9 @@ window.__host = window.__host || {};
           pickerErrEl.style.display = '';
           return;
         }
-        finish({second_page: slipCb.checked, printers: ids});
+        finish({mode: 'print', second_page: !sheet && slipCb.checked, printers: ids});
       };
+      activateBtn.onclick = () => finish({mode: 'activate'});
       cancelBtn.onclick = () => finish(null);
       modal.addEventListener('keydown', onKey);
       modal.classList.add('show');
@@ -779,6 +828,91 @@ window.__host = window.__host || {};
     if (r.ok) { activePdTab = 'queue'; showMsg('Display verboten'); }
     else { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Verbieten fehlgeschlagen'); }
   }
+  // ---- Scan-Station: API-Aufrufe ----
+  // QR/URL für eine neue Station („+"-Reiter, Basis-URL ohne Token) bzw. für
+  // eine konkrete Station (QR-Button im Panel, URL inkl. ?token=…).
+  async function showScanStationQr(stationId) {
+    const q = stationId ? `?station_id=${encodeURIComponent(stationId)}` : '';
+    const r = await fetch(`/api/scan-station/qr${q}`);
+    if (!r.ok) { showMsg('QR für Scan-Station konnte nicht geladen werden'); return; }
+    const d = await r.json();
+    showQr(d.qr, d.url || '');
+  }
+  async function ssPost(path, body, okMsg, failMsg) {
+    const r = await fetch(`/api/scan-station/${path}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (r.ok) { if (okMsg) showMsg(okMsg); return true; }
+    const d = await r.json().catch(() => ({}));
+    showMsg(d.detail || failMsg);
+    return false;
+  }
+  async function enableScanStation(stationId, label, btn) {
+    if (!label || !label.trim()) return;
+    if (btn) await busy(btn, () =>
+      ssPost('enable', { station_id: stationId, label: label.trim() },
+        'Scan-Station freigeschaltet', 'Freischaltung fehlgeschlagen'));
+  }
+  const setSsLabel = (stationId, label) =>
+    ssPost('label', { station_id: stationId, label: label || '' },
+      'Stationsname gespeichert', 'Name konnte nicht gespeichert werden');
+  const setSsTheme = (stationId, dark) =>
+    ssPost('theme', { station_id: stationId, theme: dark ? 'dark' : 'light' },
+      null, 'Theme konnte nicht gesetzt werden');
+  // Eingabeart der Station (wie im Helferclient): Kamera oder Manuell.
+  const setSsInputMode = (stationId, manual) =>
+    ssPost('input-mode', { station_id: stationId, input_mode: manual ? 'manual' : 'camera' },
+      null, 'Eingabeart konnte nicht gesetzt werden');
+  const releaseSsStudent = (stationId) =>
+    ssPost('release', { station_id: stationId }, 'Station freigegeben', 'Freigeben fehlgeschlagen');
+  // Station verbieten (× am Reiter, endgültig — Bestätigungsdialog im Caller).
+  async function forgetScanStation(stationId) {
+    if (await ssPost('forget', { station_id: stationId }, 'Station verboten',
+        'Verbieten fehlgeschlagen')) {
+      activeSsTab = null;
+    }
+  }
+  // Zettel erstellen/(nach-)drucken: gleicher Druck-Dialog wie beim
+  // Leihschein (Druckerauswahl), nur ohne die „2. Seite"-Option (der Zettel
+  // ist einseitig). `reprint = true` (Nachdruck-Knopf im „Aktuell in
+  // Ausgabe"-Kästchen, immer schon aktiver Schüler mit Code) zeigt nur
+  // „Drucken"/„Abbrechen" — dort ergibt ein separates „Erstellen" ohne
+  // Druck keinen Sinn. `reprint = false` (Pairing-Kasten, wartender
+  // Schüler) zeigt zusätzlich „Erstellen" (`choice.mode === 'activate'`):
+  // aktiviert den Schüler (Zettel-Code/Fortschritt) OHNE zu drucken — der
+  // physische Druck kann jederzeit später über den Nachdruck-Knopf
+  // nachgeholt werden. In beiden Fällen behält der Zettel-Code über
+  // beliebig viele Aufrufe hinweg denselben Wert (`AppState.
+  // allocate_station_code` — stabil pro Schüler, ein älterer Zettel bleibt
+  // gültig); nur die Bücherliste wird bei jedem Aufruf frisch geholt.
+  async function printStationSheet(studentId, btn, { reprint = false } = {}) {
+    const choice = await openPrintDialog(studentId, { sheet: true, reprint });
+    if (choice === null) return;
+    await busy(btn, async () => {
+      if (choice.mode === 'activate') {
+        const r = await fetch('/api/scan-station/activate', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ student_id: studentId }),
+        });
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          showMsg(d.detail || 'Erstellen fehlgeschlagen', 'warn');
+        }
+        return;
+      }
+      const r = await fetch('/api/scan-station/print-sheet', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ student_id: studentId, printers: choice.printers }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        showMsg(d.detail || 'Druck fehlgeschlagen', 'warn');
+      }
+      // Bei r.ok liefert der WS das Fortschritts-Popup (wie beim Leihschein).
+    });
+  }
+
   // „+"-Box der Drucker-Boxen: kleines Popover der noch nicht zugewiesenen
   // Pool-Drucker. Auswahl → addPdPrinter. Schließt bei Außenklick/Esc. Liegt
   // auf document.body (überlebt Re-Renders des Panels) und räumt sich selbst.
@@ -946,6 +1080,9 @@ window.__host = window.__host || {};
   function renderCtxPairing(id) {
     const ctx = (state.contexts || {})[id];
     if (!ctx) return;
+    // Zuerst die Scan-Station-Druckzeile — `renderCtxPairing` hat weiter unten
+    // frühe returns (kein Code wartend), die Zeile soll aber immer stehen.
+    renderCtxStationPrint(id);
     const queue = ctx.queue || [];
     const pendingStudents = queue.filter(q => q.status === 'pending');
     // Scharfgestellter Schüler muss noch wartend sein, sonst zurücksetzen.
@@ -999,7 +1136,7 @@ window.__host = window.__host || {};
 
   // Host-Tab (Helfer + Modus-B-Kontrolle) und Klassen-Tab (Now-Serving + Queue
   // + Pairing) getrennt rendern.
-  function renderHostTab() { renderHelpers(); renderModusBControl(); renderPrintQueue(); renderPrinterDisplays(); }
+  function renderHostTab() { renderHelpers(); renderModusBControl(); renderPrintQueue(); renderPrinterDisplays(); renderScanStations(); }
   function renderClassTab(id) {
     if (!(state.contexts || {})[id]) return;
     if (!document.getElementById('panel-ctx-' + id)) return;
@@ -1433,6 +1570,29 @@ window.__host = window.__host || {};
             : '')
           : `<button class="secondary icon-only" data-action="print" data-student-id="${s.student_id}" title="Leihschein drucken" aria-label="Leihschein drucken">${ICON_PRINTER}</button>`;
         const helperLbl = helper ? `<span class="ns-helper">${ICO_HELPER} ${escapeHtml(helper.name)}</span>` : '';
+        // Scan-Station-Zeile unter dem Namen: links Stationsname + Symbol (nur
+        // während der Schüler dort angemeldet ist, inkl. eigenem Trennen-Knopf,
+        // der NUR von der Station abmeldet — Spiegel von /api/scan-station/
+        // release, aber vom Schüler statt der Station aus adressiert), rechts
+        // der Zettel-Code (bleibt sichtbar, solange ein Zettel gedruckt wurde,
+        // auch nach dem Abmelden — der Code steht ja weiter auf dem Papier).
+        // Ein übernehmender Helfer hat beim Stationsnamen Vorrang (leer statt
+        // veraltet); die Zeile selbst entfällt ganz ohne Code.
+        const stationDisconnectBtn = (!helper && s.station_name)
+          ? `<button class="ns-station-disconnect" data-action="station-disconnect" data-student-id="${s.student_id}" title="Von der Scan-Station abmelden" aria-label="Von der Scan-Station abmelden">${ICON_DISCONNECT}</button>`
+          : '';
+        const stationRight = (!helper && s.station_name)
+          ? `<div class="ns-station-name">${ICO_HOST} ${escapeHtml(s.station_name)}${stationDisconnectBtn}</div>` : '';
+        const codeLeft = s.station_code
+          ? `<div class="ns-code">${escapeHtml(s.station_code)}</div>` : '';
+        // Zettel (Barcode + Bücherliste) erneut drucken — nur sinnvoll, wenn
+        // überhaupt schon einer gedruckt wurde (sonst gäbe es keinen Code).
+        // Öffnet denselben Druck-Dialog wie beim ersten Zettel-Druck aus der
+        // Klassen-Queue (`printStationSheet`), nur direkt für diesen bereits
+        // aktiven Schüler statt über die Wartend-Auswahl.
+        const reprintSheetBtn = s.station_code
+          ? `<button class="secondary icon-only" data-action="reprint-station-sheet" data-student-id="${s.student_id}" title="Zettel (Barcode + Bücherliste) erneut drucken" aria-label="Zettel erneut drucken">${ICON_SHEET}</button>`
+          : '';
         const statusLbl = renderActiveStatusText(s);
         const alert = studentAlerts[s.student_id];
         // Schließen-Button nur am Schüler-Client-Modal (Modus B): dort hat der
@@ -1450,12 +1610,22 @@ window.__host = window.__host || {};
         // Verliehen-Alert normal — „verliehen an …" ist das einzige Rot im Text.
         return `<div class="ns-tile${alert ? ' ns-tile-alert' : ''}">
           <div class="ns-name">${escapeHtml(s.lastname)}, ${escapeHtml(s.firstname)}</div>
-          <div class="ns-meta"><span class="ns-class">${escapeHtml(s.form)}</span>${statusLbl}${helperLbl}</div>
+          <div class="ns-info-grid">
+            <div class="ns-info-left">
+              ${codeLeft}
+              <div class="ns-class">${escapeHtml(s.form)}</div>
+            </div>
+            <div class="ns-info-right">
+              ${stationRight}
+              <div class="ns-status">${statusLbl}${helperLbl}</div>
+            </div>
+          </div>
           ${alertLbl}
           <div class="ns-actions">
             <div class="ns-actions-left">
               <button class="success icon-only" data-action="finish" data-student-id="${s.student_id}" title="Abschließen" aria-label="Abschließen">${ICON_ACTION_CHECK}</button>
               <button class="secondary icon-only" data-action="disconnect" data-student-id="${s.student_id}" title="Trennen" aria-label="Trennen">${ICON_DISCONNECT}</button>
+              ${reprintSheetBtn}
             </div>
             <div class="ns-actions-right">
               ${printAction}
@@ -2042,6 +2212,109 @@ window.__host = window.__host || {};
     wirePdBoxesDnD(panelsHost);
   }
 
+  // ---- Scan-Stationen (`/scan-station`) ----
+  // Reiter unten im Live-Ausgabe-Kasten — je verbundene Station einer, plus
+  // „+" für QR/URL. Spiegel von `renderPrinterDisplays()`, nur ohne die
+  // Drucker-Zuweisung: eine Station braucht nur Name, Theme und (falls gerade
+  // jemand angemeldet ist) den Freigeben-Knopf. Die Reiter sind Umschalter —
+  // ein zweiter Klick klappt das Panel wieder zu.
+  function renderScanStations() {
+    const tabList = document.getElementById('ss-tab-list');
+    const panelsHost = document.getElementById('ss-panels');
+    if (!tabList || !panelsHost) return;
+    const stations = state.scan_stations || [];
+    // Aktives Panel aufräumen, wenn seine Station verschwunden ist.
+    if (activeSsTab && !stations.some(s => s.station_id === activeSsTab)) activeSsTab = null;
+
+    tabList.innerHTML = stations.map(s => {
+      const code = s.registration_code || s.station_id.slice(0, 6);
+      const lbl = escapeHtml(s.label && s.label.trim() ? s.label : code);
+      const dotCls = s.connected ? 'pd-dot-green' : 'pd-dot-gray';
+      const title = s.connected ? 'verbunden' : 'nicht verbunden';
+      const active = activeSsTab === s.station_id ? ' active' : '';
+      return `<button class="pd-tab${active}" data-ss-tab="${escapeHtml(s.station_id)}" title="${title}"><span class="pd-tab-dot ${dotCls}" aria-hidden="true"></span>${lbl} <span class="pd-tab-close" data-ss-close="${escapeHtml(s.station_id)}" title="Station verbieten" aria-label="Station verbieten">×</span></button>`;
+    }).join('');
+
+    const s = stations.find(x => x.station_id === activeSsTab);
+    if (!s) { panelsHost.innerHTML = ''; return; }
+    // Fokus-Schutz wie beim Drucker-Display: wird gerade im Namensfeld
+    // getippt, das Panel nicht neu aufbauen (sonst fliegt Fokus + Wert bei
+    // jedem eintreffenden Snapshot).
+    const ae = document.activeElement;
+    if (ae && ae.classList && ae.classList.contains('ssd-name') && panelsHost.contains(ae)) return;
+
+    const sid = escapeHtml(s.station_id);
+    const short = s.station_id.slice(0, 6);
+    const code = s.registration_code || short;
+    if (!s.authorized) {
+      panelsHost.innerHTML = `<div class="pdd-panel" data-station="${sid}">
+        <div class="pdd-row" data-station="${sid}">
+          <span class="pdd-id">Code: ${escapeHtml(code)}</span>
+          <input class="ssd-name ssd-enable-name" type="text" placeholder="Name" autocomplete="off" data-station="${sid}">
+          <button class="secondary ssd-enable" data-station="${sid}">Einschalten</button>
+        </div>
+        <p class="hint">Der Code steht auf dem Bildschirm der Station — so lässt sich der richtige Reiter zuordnen.</p>
+      </div>`;
+      panelsHost.querySelector('.ssd-enable-name')?.focus();
+      return;
+    }
+    // Belegt: wer gerade angemeldet ist + Knopf zum sofortigen Freigeben
+    // (z. B. Schüler ist weggegangen, ohne „Fertig" zu drücken).
+    const busyRow = s.student_id
+      ? `<div class="ssd-busy">
+           <span>Angemeldet: <b>${escapeHtml(s.student_name || '—')}</b>${s.worker_ready ? '' : ' <span class="hint">(lädt…)</span>'}</span>
+           <button class="secondary ssd-release" data-station="${sid}">Freigeben</button>
+         </div>`
+      : '<div class="ssd-busy hint">Wartet auf einen Zettel-Code.</div>';
+    panelsHost.innerHTML = `<div class="pdd-panel" data-station="${sid}">
+      <div class="pdd-field-row">
+        <span class="pdd-field-label">Name</span>
+        <input class="ssd-name" type="text" value="${escapeHtml(s.label || '')}" placeholder="${escapeHtml(short)}" autocomplete="off" data-station="${sid}">
+        <button class="secondary ssd-name-save" data-station="${sid}">Speichern</button>
+        <button class="secondary ssd-qr" data-station="${sid}" title="QR-Code für diese Station (mit Token) anzeigen">QR</button>
+        <label class="switch pdd-theme" title="Eingabeart auf der Station: Kamera-Scanner oder Tastatur-/Handscanner (wie im Helferclient)">
+          <input type="checkbox" class="ssd-mode-toggle" data-station="${sid}"${s.input_mode === 'manual' ? ' checked' : ''}>
+          <span class="track"></span>
+          Manuell
+        </label>
+        <label class="switch pdd-theme" title="Darstellung auf der Station: Hell oder Dunkel">
+          <input type="checkbox" class="ssd-theme-toggle" data-station="${sid}"${s.theme === 'dark' ? ' checked' : ''}>
+          <span class="track"></span>
+          Dunkel
+        </label>
+      </div>
+      ${busyRow}
+    </div>`;
+  }
+
+  // Druckzeile unten im Pairing-Kasten: „Scan-Station: [Schüler] [Erstellen]".
+  // Öffnet den Druck-Dialog für den Zettel (Barcode + Bücherliste zum
+  // Abhaken) eines wartenden Schülers dieser Klasse — die Handy-Alternative
+  // zum Pairing-Code daneben. Knopf heißt bewusst „Erstellen" statt
+  // „Drucken", weil der Dialog dahinter NICHT zwingend druckt (s.
+  // `stationSheetDialog`): „Erstellen und Drucken" aktiviert den Schüler UND
+  // druckt, das reine „Erstellen" nur aktiviert (Zettel-Code/Fortschritt),
+  // der physische Druck kann jederzeit über den Nachdruck-Knopf im „Aktuell
+  // in Ausgabe"-Kästchen nachgeholt werden.
+  function renderCtxStationPrint(id) {
+    const el = document.querySelector(`.ctx-station[data-ctx-id="${id}"]`);
+    if (!el) return;
+    const ctx = (state.contexts || {})[id];
+    const pending = ((ctx && ctx.queue) || []).filter(q => q.status === 'pending');
+    // Auswahl über den Re-Render hinweg halten (Snapshots treffen laufend ein).
+    const prev = el.querySelector('select')?.value || '';
+    const opts = pending
+      .map(q => `<option value="${q.student_id}">${escapeHtml(q.lastname)}, ${escapeHtml(q.firstname)}</option>`)
+      .join('');
+    el.innerHTML = `<div class="ctx-station-row">
+      <span class="ctx-station-label">Scan-Station:</span>
+      <select class="ctx-station-sel" data-ctx-id="${id}" ${pending.length ? '' : 'disabled'}>${opts || '<option value="">keine wartenden Schüler</option>'}</select>
+      <button class="secondary" data-action="print-station-sheet" data-ctx-id="${id}" ${pending.length ? '' : 'disabled'}>Erstellen</button>
+    </div>`;
+    const sel = el.querySelector('select');
+    if (sel && prev && pending.some(q => String(q.student_id) === prev)) sel.value = prev;
+  }
+
   // HTML5-Drag der Drucker-Boxen (Spiegel von wirePrinterTabDrag /
   // onBlDrag*): eine Box auf eine andere ziehen → Reihenfolge im State
   // neu festlegen und an /assign schicken.
@@ -2155,6 +2428,16 @@ window.__host = window.__host || {};
     if (s.slip_status === 'printing') return { content: 'Leihschein druckt' };
     if (s.slip_status === 'waiting') return { content: 'Leihschein wartet' };
     if (s.books_total == null) return { content: 'Lädt' };
+    // Zettel-/Stations-Fluss (Schüler ohne Handy, s. docs/PLAN.md §3.8):
+    // „Bücher sammeln" statt der Zahl, solange NICHT an einer Station
+    // angemeldet und noch nicht alles ausgeliehen — ein übernehmender Helfer
+    // hat Vorrang (dessen Badge/Fortschritt zählt dann). Sobald alles
+    // ausgeliehen ist, bleibt es bei der Zahl stehen (fällt unten durch).
+    const atStation = !!s.station_name;
+    const fullyLent = s.books_total > 0 && s.books_done >= s.books_total;
+    if (s.station_zettel_printed && !s.assigned_helper_name && !atStation && !fullyLent) {
+      return { content: 'Bücher sammeln' };
+    }
     if (s.books_total) {
       const loaned = s.loaned_at_load || 0;
       const sessionX = s.books_done - loaned;
@@ -2165,17 +2448,22 @@ window.__host = window.__host || {};
       // das Buch tatsächlich gescannt wird (s. server/sessions.py::mark_book_done).
       const emptyOut = s.books_empty_outstanding || 0;
       const totalStr = emptyOut > 0 ? `${s.books_total - emptyOut} (${s.books_total})` : `${s.books_total}`;
-      if (loaned > 0 && sessionY > 0) {
-        const sessionYStr = emptyOut > 0 ? `${sessionY - emptyOut} (${sessionY})` : `${sessionY}`;
+      const sessionYStr = emptyOut > 0 ? `${sessionY - emptyOut} (${sessionY})` : `${sessionY}`;
+      const sessionCombined = `${sessionX}/${sessionYStr}`;
+      const totalCombined = `${s.books_done}/${totalStr}`;
+      // Zweizeilig nur, wenn sich session- und gesamt-Zahlen tatsächlich
+      // unterscheiden — bei Gleichstand (kein Vorbestand) reicht die
+      // gesamt-Zeile allein.
+      if (sessionCombined !== totalCombined && (atStation || (loaned > 0 && sessionY > 0))) {
         return {
           progress: true,
           title: `seit Aufrufen ${sessionX}/${sessionY} (offene vorgemerkte) · insgesamt ${s.books_done}/${s.books_total} (ausgeliehene/angemeldete)`,
-          content: `<span class="q-progress-main">${sessionX}/${sessionYStr} ohne Mjb</span><span class="q-progress-sub">${s.books_done}/${totalStr} gesamt</span>`,
+          content: `<span class="q-progress-main">${sessionCombined} ohne Mjb</span><span class="q-progress-sub">${totalCombined} gesamt</span>`,
         };
       }
       return {
         title: 'ausgegebene / angemeldete Bücher',
-        content: `${s.books_done}/${totalStr} gesamt`,
+        content: `${totalCombined} gesamt`,
       };
     }
     return { content: 'Aktiv' }; // geladen, aber ohne Bücher
@@ -2254,7 +2542,14 @@ window.__host = window.__host || {};
       const helperBadge = s.status === 'active' && s.assigned_helper_name
         ? `<span class="badge badge-helper">${ICO_HELPER} ${escapeHtml(s.assigned_helper_name)}</span>`
         : '';
-      const statusCell = `<div class="q-status">${statusBadge}${helperBadge}${trailingHints}</div>`;
+      // Scan-Station-Bearbeitung: gleiche Stelle/Aufbau wie der Helfer-Badge,
+      // Host-Symbol statt Helfer-Symbol (s. ICO_HOST). Ein übernehmender
+      // Helfer hat Vorrang (Stationsname würde ohnehin verschwinden, sobald
+      // der Schüler dort abgemeldet wird).
+      const stationBadge = s.status === 'active' && s.station_name && !s.assigned_helper_name
+        ? `<span class="badge badge-helper">${ICO_HOST} ${escapeHtml(s.station_name)}</span>`
+        : '';
+      const statusCell = `<div class="q-status">${statusBadge}${helperBadge}${stationBadge}${trailingHints}</div>`;
       const pairBtn = (state.modus_b && state.modus_b.open && ctx.live_ausgabe !== false)
         ? `<button class="success" data-action="pair-student" data-student-id="${s.student_id}">Pairing</button> ` : '';
       // Übersprungener Schüler: Helfer scannt die Bücher stellvertretend über
@@ -2323,6 +2618,18 @@ window.__host = window.__host || {};
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ student_id: studentId }),
     });
+  }
+
+  // Schüler NUR von der Scan-Station abmelden (Station fällt sofort auf
+  // „Zettel-Code scannen" zurück) — anders als der allgemeine „Trennen"-
+  // Knopf bleibt der Schüler dabei aktiv/zugewiesen, nur die Stationsbindung
+  // endet. Der Server pusht danach von selbst einen neuen Snapshot.
+  async function disconnectFromStation(studentId) {
+    const r = await fetch('/api/scan-station/release-student', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ student_id: studentId }),
+    });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Abmelden fehlgeschlagen'); }
   }
 
   // ---- Util: Toast-Stack (mehrere Meldungen gleichzeitig) ----
@@ -2437,7 +2744,15 @@ window.__host = window.__host || {};
       t.className = 'toast' + (warn ? ' toast-warn' : '');
       stack.appendChild(t);
       requestAnimationFrame(() => t.classList.add('show'));
-      entry = { el: t, timer: null };
+      // status/allowedPrinters/peerError/jobId: laufend aus print_progress/
+      // print_result gepflegt (renderPrintToast). expanded = UI-Zustand des
+      // eingebetteten Drucker-Nachfrage-Pickers; userToggled merkt sich, ob
+      // der Host das schon manuell umgeschaltet hat (verhindert, dass ein
+      // erneutes Auto-Öffnen eine bewusste Nutzer-Entscheidung überschreibt).
+      entry = {
+        el: t, timer: null, status: null, allowedPrinters: null,
+        peerError: false, expanded: false, userToggled: false, jobId,
+      };
       printToasts[jobId] = entry;
     } else if (warn) {
       entry.el.classList.add('toast-warn');
@@ -2445,14 +2760,95 @@ window.__host = window.__host || {};
     return entry;
   }
 
+  // Baut den Toast-Inhalt aus einer Text-Zeile + (wenn der Auftrag noch
+  // unzugewiesen in der Warteschlange steht, `status === 'queued'`) einer
+  // klickbaren Umschaltfläche zum Drucker-Nachfrage-Picker. Sind ALLE
+  // erlaubten Drucker fehlerhaft (`peer_error`), klappt der Picker beim
+  // ersten Eintreffen automatisch auf; ansonsten öffnet ihn ein Klick auf den
+  // Hinweistext — in beiden Fällen bleibt die Warteschlange unangetastet
+  // (kein Pause-Mechanismus), ein zwischenzeitliches Dispatchen des Auftrags
+  // schließt den Picker beim nächsten Aufruf automatisch wieder (status
+  // wechselt weg von 'queued').
+  function renderPrintToast(entry, msg, finalOk) {
+    entry.status = msg.status;
+    entry.allowedPrinters = (msg.allowed_printers === undefined) ? null : msg.allowed_printers;
+    entry.peerError = !!msg.peer_error;
+    entry.jobId = msg.job_id;
+    const queued = entry.status === 'queued';
+    if (!queued) {
+      entry.expanded = false;
+    } else if (entry.peerError && !entry.userToggled && !entry.expanded) {
+      entry.expanded = true;
+    }
+    entry.el.replaceChildren();
+    const line = document.createElement('div');
+    line.className = 'toast-line';
+    line.textContent = printToastText(msg, finalOk);
+    if (queued) {
+      line.classList.add('toast-line-clickable');
+      line.addEventListener('click', () => {
+        entry.userToggled = true;
+        entry.expanded = !entry.expanded;
+        renderPrintToast(entry, msg, finalOk);
+      });
+    }
+    entry.el.appendChild(line);
+    if (queued && entry.expanded) {
+      const pool = hostPrinterPool();
+      const preselect = entry.allowedPrinters === null
+        ? pool.map(p => p.id) : entry.allowedPrinters;
+      const pickerDiv = document.createElement('div');
+      pickerDiv.className = 'toast-printer-picker';
+      entry.el.appendChild(pickerDiv);
+      const picker = mountPrinterPicker(pickerDiv, pool, preselect);
+      const errEl = document.createElement('p');
+      errEl.className = 'toast-printer-picker-error';
+      errEl.style.display = 'none';
+      entry.el.appendChild(errEl);
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'toast-printer-update-btn';
+      btn.textContent = 'Druckauftrag aktualisieren';
+      btn.addEventListener('click', async () => {
+        const ids = picker.getSelectedIds();
+        if (!ids.length) {
+          errEl.textContent = 'Bitte mindestens einen Drucker auswählen.';
+          errEl.style.display = '';
+          return;
+        }
+        btn.disabled = true;
+        try {
+          const r = await fetch(`/api/print-queue/${encodeURIComponent(entry.jobId)}/printers`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ printers: ids }),
+          });
+          if (!r.ok) {
+            const d = await r.json().catch(() => ({}));
+            errEl.textContent = d.detail || 'Aktualisieren fehlgeschlagen';
+            errEl.style.display = '';
+            btn.disabled = false;
+            return;
+          }
+          // Erfolg: der nächste print_progress-Push baut den Toast anhand
+          // des neuen Status neu auf (Position/Zuweisung).
+        } catch {
+          errEl.textContent = 'Aktualisieren fehlgeschlagen';
+          errEl.style.display = '';
+          btn.disabled = false;
+        }
+      });
+      entry.el.appendChild(btn);
+    }
+  }
+
   function showPrintProgress(msg) {
     const entry = _printToastEl(msg.job_id, !!msg.peer_error);
-    entry.el.textContent = printToastText(msg, null);
+    renderPrintToast(entry, msg, null);
   }
 
   function showPrintResult(msg) {
     const entry = _printToastEl(msg.job_id, !msg.ok);
-    entry.el.textContent = printToastText(msg, msg.ok);
+    renderPrintToast(entry, msg, msg.ok);
     if (entry.timer) clearTimeout(entry.timer);
     // peer_error („Fehler bei vorigem Auftrag") und stalled (Inaktivität)
     // bleiben stehen, bis ein neuer Druck kommt oder die Seite neu lädt —
@@ -3013,6 +3409,66 @@ window.__host = window.__host || {};
       if (save) save.click();
     }
   });
+  // Scan-Stations-Reiter im Live-Ausgabe-Kasten: „+" zeigt QR/URL zum Öffnen
+  // einer neuen Station, ein Reiterklick klappt sein Panel auf/zu, × verbietet
+  // die Station endgültig (mit Bestätigungsdialog).
+  document.getElementById('ss-tab-add').addEventListener('click', () => showScanStationQr());
+  document.getElementById('ss-tabs-bar').addEventListener('click', async (e) => {
+    const closeEl = e.target.closest('[data-ss-close]');
+    if (closeEl) {
+      e.stopPropagation();
+      const id = closeEl.dataset.ssClose;
+      const s = (state.scan_stations || []).find(x => x.station_id === id);
+      const name = s ? (s.label && s.label.trim() ? s.label : s.station_id.slice(0, 6)) : id;
+      if (!await confirmDialog(
+        `Scan-Station „${name}" verbieten? Die Station wird gesperrt und kann nicht wieder aktiviert werden.`,
+        'Verbieten'
+      )) return;
+      forgetScanStation(id);
+      return;
+    }
+    const tab = e.target.closest('[data-ss-tab]');
+    if (!tab) return;
+    // Umschalter: derselbe Reiter erneut → Panel wieder zuklappen.
+    activeSsTab = activeSsTab === tab.dataset.ssTab ? null : tab.dataset.ssTab;
+    renderScanStations();
+  });
+  // Delegierte Handler für die per innerHTML gerenderten Panel-Elemente
+  // (Spiegel der Drucker-Display-Handler oben).
+  const ssBox = document.getElementById('ss-panels');
+  ssBox.addEventListener('click', (e) => {
+    const enableBtn = e.target.closest('.ssd-enable');
+    if (enableBtn) {
+      const row = enableBtn.closest('.pdd-row');
+      enableScanStation(row.dataset.station, row.querySelector('.ssd-enable-name').value, enableBtn);
+      return;
+    }
+    const nameSave = e.target.closest('.ssd-name-save');
+    if (nameSave) {
+      const inp = nameSave.closest('.pdd-panel').querySelector('.ssd-name');
+      inp.blur();  // Fokus raus, damit der nächste Snapshot Panel + Reiter aktualisiert
+      setSsLabel(nameSave.dataset.station, inp.value);
+      return;
+    }
+    const qrBtn = e.target.closest('.ssd-qr');
+    if (qrBtn) { showScanStationQr(qrBtn.dataset.station); return; }
+    const releaseBtn = e.target.closest('.ssd-release');
+    if (releaseBtn) { releaseSsStudent(releaseBtn.dataset.station); }
+  });
+  ssBox.addEventListener('change', (e) => {
+    if (e.target.matches('.ssd-theme-toggle')) setSsTheme(e.target.dataset.station, e.target.checked);
+    else if (e.target.matches('.ssd-mode-toggle')) setSsInputMode(e.target.dataset.station, e.target.checked);
+  });
+  ssBox.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    if (e.target.matches('.ssd-enable-name')) {
+      const row = e.target.closest('.pdd-row');
+      enableScanStation(row.dataset.station, e.target.value, row.querySelector('.ssd-enable'));
+    } else if (e.target.matches('.ssd-name')) {
+      const save = e.target.closest('.pdd-panel').querySelector('.ssd-name-save');
+      if (save) save.click();
+    }
+  });
   document.getElementById('add-helper-btn').addEventListener('click', addHelper);
   document.getElementById('qr-modal').addEventListener('click', closeQr);
   document.getElementById('qr-box').addEventListener('click', (e) => e.stopPropagation());
@@ -3041,6 +3497,8 @@ window.__host = window.__host || {};
       case 'skip': skipStudent(parseInt(el.dataset.studentId)); break;
       case 'disconnect': disconnectStudent(parseInt(el.dataset.studentId)); break;
       case 'clear-book-alert': clearBookAlert(parseInt(el.dataset.studentId)); break;
+      case 'station-disconnect': disconnectFromStation(parseInt(el.dataset.studentId)); break;
+      case 'reprint-station-sheet': printStationSheet(parseInt(el.dataset.studentId), el, { reprint: true }); break;
       case 'ctx-reset': ctxResetQueue(id); break;
       case 'ctx-clear': ctxClearQueue(id); break;
       case 'ctx-disconnect-all': ctxDisconnectAll(id); break;
@@ -3048,6 +3506,14 @@ window.__host = window.__host || {};
       case 'teacher-qr': showTeacherQr(id); break;
       case 'teacher-authorize': authorizeTeacher(id); break;
       case 'teacher-disconnect': disconnectTeacher(id); break;
+      case 'print-station-sheet': {
+        // Schüler aus dem Select derselben Zeile — der Button trägt nur die
+        // Klasse, damit die Auswahl über Re-Renders hinweg erhalten bleibt.
+        const sel = el.closest('.ctx-station-row')?.querySelector('.ctx-station-sel');
+        const sid = sel && sel.value ? parseInt(sel.value) : null;
+        if (sid) printStationSheet(sid, el);
+        break;
+      }
     }
   }
   document.getElementById('class-panels').addEventListener('click', handleDelegatedAction);

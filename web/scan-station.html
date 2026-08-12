@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Ausleihe — Scan-Station</title>
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <script src="/html5-qrcode.min.js"></script>
+  <!-- Gemeinsames Scan-Ansicht-Aussehen (identisch zum Schülerclient) -->
+  <link rel="stylesheet" href="/scan-view.css">
+  <script src="/common.js"></script>
+  <style>
+    /* Nur Stations-Eigenes — alles zur Scan-Ansicht steht in scan-view.css,
+       damit Station und Schülerclient nicht auseinanderdriften. */
+
+    /* Scan-View füllt die Höhe, damit nur die Bücher-Tabelle scrollt
+       (Spiegel von #view-active in student.html). */
+    #view-scan.show { flex: 1 1 auto; min-height: 0; align-items: stretch; }
+    /* Registrierung / Sperre: volle Resthöhe, Inhalt mittig. */
+    #view-register.show, #view-forbidden.show { flex: 1 1 auto; justify-content: center; }
+
+    .reg-hint { opacity: .7; text-align: center; margin-bottom: 12px; }
+    .reg-code {
+      font-size: 4.5rem; font-weight: 700; letter-spacing: .25em;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      background: var(--surface); border-radius: 16px; padding: 16px 28px; margin: 8px 0 16px;
+    }
+    .reg-sub { opacity: .5; font-size: .9rem; text-align: center; max-width: 30rem; }
+
+    /* Namenszeile der Station: statt Zahl-/Anmeldestatus (den ein geteiltes
+       Gerät nicht zeigen soll) stehen rechts Klasse und Restzeit. */
+    #countdown { font-size: .85rem; opacity: .6; }
+    /* Manuelle Code-Eingabe (Fallback, wenn der Barcode nicht lesbar ist). */
+    .manual { display: flex; gap: 8px; align-items: center; margin-top: 14px; }
+    .manual input {
+      font: inherit; font-size: 1.6rem; letter-spacing: .2em; text-align: center;
+      width: 8rem; padding: 10px; border-radius: 8px;
+      border: 1px solid var(--border); background: var(--surface); color: var(--fg);
+    }
+    .manual button { padding: 12px 18px; }
+
+    /* ---- Kamera/Manuell-Umschalter im Dropdown (Aufbau wie scan.html) ---- */
+    .cam-dropdown.open { flex-direction: column; }
+    .cam-dropdown .cam-row { display: flex; gap: 8px; }
+    .mode-toggle { display: flex; gap: 6px; }
+    .mode-toggle button {
+      flex: 1; padding: 9px 10px; font-size: .9rem; font-weight: 600;
+      border-radius: 8px; border: 1px solid var(--border);
+      background: transparent; color: var(--fg); cursor: pointer;
+    }
+    .mode-toggle button:hover { background: var(--surface-2); }
+    .mode-toggle button.active { background: var(--surface-4); }
+    body.manual-mode .cam-only { display: none; }
+    /* Im manuellen Modus tippt man den Zettel-Code direkt ins Lesefeld —
+       das separate Vier-Ziffern-Formular wäre doppelt. */
+    body.manual-mode #manual-form { display: none; }
+    /* Manueller Modus: #reader wird zum Eingabefeld (Html5Qrcode bekommt den
+       Container leer zurück, wenn wieder auf Kamera geschaltet wird). */
+    body.manual-mode #reader { background: var(--surface); }
+    #manual-input {
+      width: 100%; height: 100%; border: none; outline: none;
+      background: transparent; color: var(--fg);
+      font-size: 1.4rem; text-align: center; border-radius: 12px;
+    }
+    /* Enter-Button (= torch-btn im manuellen Modus): kein „an"-State. */
+    body.manual-mode .torch-on { background: var(--surface-2) !important; }
+    /* Fokus-Warnbanner: das Eingabefeld muss den Fokus haben, sonst tippt ein
+       Handscanner ins Leere. Klick fokussiert es wieder. */
+    #focus-banner {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 90;
+      display: none; padding: 10px 14px; text-align: center;
+      background: #f44336; color: #fff; font-weight: 700; font-size: .9rem;
+      cursor: pointer;
+    }
+    #focus-banner.show { display: block; }
+
+    /* ---- Stationsname links, Verbindungsstatus rechts ----
+       Position und Aussehen exakt wie beim Drucker-Display (#dd-name/#conn):
+       zwei einzelne, fixierte Beschriftungen unten in den Ecken — keine
+       Leiste, kein Hintergrund, kein farbiger Punkt (dessen `.dot`-Span hat
+       auch dort keine CSS-Regel und ist damit unsichtbar).
+       Einziger Zusatz: Sie sitzen immer ÜBER dem roten Fokus-Banner, dessen
+       gemessene Höhe in --focus-banner-h steckt (0px, wenn es aus ist). */
+    #station-name, #conn {
+      position: fixed; z-index: 95;
+      bottom: calc(var(--focus-banner-h, 0px) + 14px);
+      font-size: .85rem; opacity: .55;
+    }
+    #station-name { left: 18px; }
+    #conn { right: 16px; }
+    /* Die Bücherliste muss bis zum letzten Buch scrollbar bleiben, obwohl die
+       Beschriftungen (und ggf. das Fokus-Banner) darüber liegen.
+       --station-bar-h misst den GESAMTEN belegten Streifen unten und wird in
+       updateBottomInsets gesetzt — hier also nichts mehr addieren. */
+    #book-wrap { padding-bottom: var(--station-bar-h, 0px); }
+    /* Ausblende-Verlauf zum unteren Rand (wie die Warteschlangen-Karte im
+       Drucker-Display, s. dort applyWaitingOverflow): eine Buchzeile wird
+       transparent, statt beim Herunterscrollen hart mit dem Beschriftungstext
+       zu kollidieren. Bewusst komplett CSS-getrieben relativ zur EIGENEN Höhe
+       (100%) statt über eine von JS gemessene Pixelhöhe: der Browser hält den
+       Verlauf damit automatisch mit jeder tatsächlichen Höhenänderung der
+       Liste Schritt (Flex-Layout, `100dvh`-Nachjustierung auf Mobilgeräten,
+       Kamera-/Layoutwechsel, …) — ganz ohne dass JS das je neu ausmessen und
+       treffen muss (das war die Quelle der „kurz richtig, dann falsch"-Fehler).
+       JS schaltet nur die Klasse `has-inset`, wenn tatsächlich ein Polster
+       reserviert ist (--station-bar-h > 0). Die 7px sind der Standard-Abstand
+       zwischen gestapelten Elementen in diesem Layout (s. .top-bar-gap/
+       #status margin-top in scan-view.css). */
+    #book-wrap.has-inset {
+      mask-image: linear-gradient(to bottom,
+        black 0, black calc(100% - var(--station-bar-h, 0px) - 7px),
+        transparent calc(100% - var(--station-bar-h, 0px)));
+      -webkit-mask-image: linear-gradient(to bottom,
+        black 0, black calc(100% - var(--station-bar-h, 0px) - 7px),
+        transparent calc(100% - var(--station-bar-h, 0px)));
+    }
+  </style>
+</head>
+<body>
+
+<!-- Registrierung: vor der Freischaltung am Host — zeigt NUR den Code. -->
+<div class="view" id="view-register">
+  <h1>Scan-Station</h1>
+  <p class="reg-hint">Diesen Code am Host im Reiter der Station eingeben:</p>
+  <div class="reg-code" id="reg-code">····</div>
+  <p class="reg-sub">Am Host einen Namen eintragen und „Einschalten" drücken.</p>
+</div>
+
+<!-- Gesperrt: Station wurde vom Betreuer per × verboten (endgültig). -->
+<div class="view" id="view-forbidden">
+  <h1>Gesperrt</h1>
+  <p class="reg-hint">Diese Station wurde vom Betreuer gesperrt.</p>
+  <p class="reg-sub">Bitte wende dich an den Betreuer.</p>
+</div>
+
+<!-- Scanmodus — identischer Aufbau wie #view-active im Schülerclient:
+     obere Leiste, Statuszeile, Namenszeile, Bücher-Tabelle. Vor der Anmeldung
+     eines Schülers steht statt der Namenszeile/Tabelle die Aufforderung
+     „Zettel-Code scannen"; die Kamera läuft in beiden Fällen weiter (dasselbe
+     #reader-Element, ein Umhängen im DOM würde den Stream abreißen lassen). -->
+<div class="view" id="view-scan">
+  <div class="top-bar">
+    <div class="gear-wrap">
+      <button id="help-btn" title="Hilfe">?</button>
+      <button id="gear-btn" title="Einstellungen / Kamera"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+      <div class="cam-dropdown" id="cam-dropdown">
+        <div class="mode-toggle">
+          <button id="mode-camera-btn" class="active" type="button">Kamera</button>
+          <button id="mode-manual-btn" type="button">Manuell</button>
+        </div>
+        <div class="cam-row cam-only">
+          <select id="camera-select"><option>Kameras laden…</option></select>
+          <button id="reload-btn" title="Kamera neu laden"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
+        </div>
+      </div>
+    </div>
+    <div id="reader"></div>
+    <div class="right-col">
+      <button id="torch-btn" title="Taschenlampe"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6c0 2-2 2-2 4v10a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2V10c0-2-2-2-2-4V2h12z"/><path d="M6 6h12"/><path d="M12 12h.01"/></svg></button>
+      <button id="sound-btn" title="Scan-Ton"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg></button>
+    </div>
+  </div>
+
+  <div id="status"><span id="status-text">Verbinde…</span></div>
+
+  <!-- Wartet auf den Zettel-Code (kein Schüler angemeldet). -->
+  <div id="ready-block">
+    <p class="reg-hint" style="margin-top:24px">Scanne zuerst deinen Schülerbarcode vom Zettel, danach deine Bücher. Nach 30 s Inaktivität wirst du automatisch abgemeldet.</p>
+    <form class="manual" id="manual-form" style="justify-content:center">
+      <input type="text" id="manual-code" inputmode="numeric" pattern="[0-9]*" maxlength="4"
+             placeholder="0000" autocomplete="off" aria-label="Vierstelliger Code vom Zettel">
+      <button type="submit">Los</button>
+    </form>
+  </div>
+
+  <!-- Angemeldet: Namenszeile + Bücher-Tabelle (wie im Schülerclient). -->
+  <div class="name-row" id="student-row" hidden>
+    <div class="s-name" id="s-name">–</div>
+    <div class="s-meta">
+      <div class="s-form" id="s-form"></div>
+      <div class="s-pay" id="countdown"></div>
+    </div>
+  </div>
+  <div class="book-table-wrap" id="book-wrap" hidden>
+    <div id="book-rows"></div>
+  </div>
+</div>
+
+<!-- Stationsname + Verbindungsstatus unten in den Ecken (wie #dd-name/#conn
+     im Drucker-Display) -->
+<div id="station-name"></div>
+<div id="conn"><span id="conn-text">verbinde…</span></div>
+
+<!-- Fokus-Warnbanner (nur manueller Modus, Eingabefeld nicht fokussiert) -->
+<div id="focus-banner">Eingabefeld nicht aktiv — hier tippen, damit der Scanner ankommt.</div>
+
+<!-- Buch-Hinweis-Modal — identische Struktur wie im Schülerclient, gefüllt
+     von `renderBookAlert` (common.js). An der Station schließt der Schüler
+     jede Meldung selbst: es gibt hier keinen Host-Freigabe-Weg. -->
+<div class="modal-overlay" id="book-alert-modal">
+  <div class="modal-box">
+    <h3 id="book-alert-title">Buch-Hinweis</h3>
+    <p id="book-alert-text" style="opacity:.6;font-size:.85rem"></p>
+    <p id="book-alert-note" hidden></p>
+    <p id="book-alert-hint" hidden></p>
+    <p id="book-alert-support" hidden style="opacity:.6;font-size:.85rem"></p>
+    <div class="modal-actions" id="book-alert-actions" style="display:none">
+      <button id="book-alert-close">Schließen</button>
+    </div>
+  </div>
+</div>
+
+<!-- Hilfe — kurzer Ablauf für den Schüler an der Station. -->
+<div class="modal-overlay" id="help-modal">
+  <div class="modal-box">
+    <h3 id="help-title" style="color:var(--fg)">So funktioniert die Station</h3>
+    <p>1. Scanne den Barcode oben rechts auf deinem Zettel.</p>
+    <p>2. Scanne danach deine Bücher, eines nach dem anderen.</p>
+    <p>3. Bist du fertig, drücke „Fertig" — dann ist die Station für den Nächsten frei.</p>
+    <p style="opacity:.6;font-size:.85rem">Nach 30 Sekunden ohne Scan gibt sich die Station von selbst frei. Den Leihschein bekommst du wie gewohnt beim Betreuer.</p>
+    <div class="modal-actions">
+      <button id="help-close">Schließen</button>
+    </div>
+  </div>
+</div>
+
+<script src="/scan-station.js"></script>
+</body>
+</html>

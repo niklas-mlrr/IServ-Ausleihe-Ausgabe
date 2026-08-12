@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import secrets
 import uuid
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
@@ -151,12 +152,22 @@ class QueueStudent:
     # noch ausstehender alter Druck darf danach keinen aktuellen Leihschein
     # mehr markieren.
     slip_generation: int = 0
+    # Für einen Schüler wurde (mindestens einmal) ein Scan-Station-Zettel
+    # gedruckt (s. `sessions.print_station_sheet_for`) — persistiert über ein
+    # Ab-/Anmelden an der Station hinweg (anders als die transiente Bindung
+    # selbst), damit die Host-Statuszeile zwischen den Anmeldungen bei
+    # „Bücher sammeln" bleibt statt auf „Aktiv"/„Wartend" zurückzufallen.
+    # Nur `sessions.QueueStudent.reset_progress` („Status zurücksetzen"/
+    # „Trennen" am Host) löscht die Markierung wieder.
+    station_zettel_printed: bool = False
 
     def as_dict(
         self,
         *,
         slip_status: str | None = None,
         assigned_helper_name: str | None = None,
+        station_name: str | None = None,
+        station_code: str | None = None,
     ) -> dict:
         return {
             "student_id": self.student_id,
@@ -167,6 +178,18 @@ class QueueStudent:
             "auto_skipped": self.auto_skipped,
             "assigned_helper": self.assigned_helper,
             "assigned_helper_name": assigned_helper_name,
+            # Name der Scan-Station, an der der Schüler GERADE angemeldet ist
+            # (None = nicht/nicht mehr angemeldet) — Pendant zu
+            # `assigned_helper_name`, aufgelöst beim Snapshot-Bau
+            # (`AppState._queue_student_as_dict`).
+            "station_name": station_name,
+            "station_zettel_printed": self.station_zettel_printed,
+            # Vierstelliger Zettel-Code — NUR im Host-Snapshot befüllt
+            # (`include_station_code=True`, s. `AppState._queue_student_as_dict`).
+            # Der Host hat den Zettel selbst gedruckt und kennt den Code
+            # ohnehin; die Helferclient-Queue-Pfade lassen ihn bewusst weg
+            # (Credential, s. PLAN §3.7 — nicht an weniger vertraute Rollen).
+            "station_code": station_code,
             "books_total": self.books_total,
             "books_done": len(self.done_isbns),
             "books_empty_outstanding": self.books_empty_outstanding,
@@ -233,6 +256,7 @@ class QueueStudent:
         self.slip_generation += 1
         self.print_mode = False
         self.slip_signing = False
+        self.station_zettel_printed = False
 
     @classmethod
     def from_iserv(cls, d: dict, *, form: str) -> QueueStudent:
@@ -454,6 +478,93 @@ class PrinterDisplaySession:
                               # scheme); 'light'/'dark' = Host hat überschrieben.
     ws: object | None = None
     created_at: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
+class ScanStationSession:
+    """Scan-Station (`/scan-station`) — festes Gerät für Schüler ohne Handy.
+
+    Pairing-Flow wie `PrinterDisplaySession`: Token in der URL, vorab nur der
+    Registrierungs-Code auf dem Schirm, Freischaltung durch den Host per
+    Namenseingabe (`label`), Darstellung über `theme` umschaltbar.
+
+    Zusätzlich trägt die Station — anders als ein Display — eine **temporäre
+    Schüler-Bindung**: Der Schüler scannt den vierstelligen Code von seinem
+    gedruckten Zettel, woraufhin die Station für ihn dieselben Scan-Felder
+    führt wie eine `HelperSession`/`StudentSessionB` (`expected_isbns`,
+    `vormerk_isbns`, `lent_isbns`, `lent_codes`). Nach 30 s Inaktivität fällt
+    sie auf „Zettel-Code scannen" zurück (s. `sessions.sweep_expired_sessions`).
+
+    `worker_ready` markiert, dass die Kartei geladen und der Playwright-Worker
+    verfügbar ist. Der 30-s-Leerlauf zählt **erst ab diesem Zeitpunkt** —
+    solange die Station auf einen freien Worker wartet oder lädt, darf sie
+    nicht unter dem Schüler weggeräumt werden.
+
+    `owns_worker` unterscheidet, ob diese Station den Worker-Context des
+    Schülers selbst geöffnet hat (dann gibt sie ihn beim Loslassen zurück) oder
+    einen bereits bestehenden mitbenutzt (dann nicht — er gehört einem Helfer
+    bzw. der Handy-Session des Schülers).
+    """
+
+    station_id: str
+    registration_code: str
+    authorized: bool = False
+    label: str = ""
+    theme: str | None = None  # None = folgt System-Einstellung (prefers-color-
+                              # scheme); 'light'/'dark' = Host hat überschrieben.
+    # Eingabeart wie im Helferclient: 'camera' (Kamera-Scanner) oder 'manual'
+    # (Tastatur-/Handscanner tippt in ein Eingabefeld). None = die Station
+    # entscheidet lokal (Default Kamera, im Gerät gemerkt); ein gesetzter Wert
+    # ist die Host-Vorgabe und überschreibt die lokale Wahl — genau wie `theme`.
+    input_mode: str | None = None
+    ws: object | None = None
+    created_at: datetime = field(default_factory=datetime.now)
+    # --- temporäre Schüler-Bindung (nach Zettel-Code-Scan) ---
+    student_id: int | None = None
+    student_lastname: str | None = None
+    student_firstname: str | None = None
+    student_form: str | None = None
+    expected_isbns: set[str] = field(default_factory=set)
+    vormerk_isbns: set[str] = field(default_factory=set)
+    lent_isbns: set[str] = field(default_factory=set)
+    lent_codes: set[str] = field(default_factory=set)
+    last_scan: str | None = None
+    worker_ready: bool = False
+    owns_worker: bool = False
+    last_activity: datetime = field(default_factory=datetime.now)
+    # In-flight Lade-Task (load_station_student); cancel beim Loslassen, sonst
+    # leakt der Worker-Context (s. `HelperSession.load_task`).
+    load_task: object | None = None
+    # Ausgemustertes/anderweitig verliehenes Buch gescannt → blockierendes
+    # Hinweis-Modal, das die Station — anders als bisher — NICHT mehr selbst
+    # schließen kann (Parität zur Modus-B-Handy-Session): nur der Host gibt
+    # per `/api/clear-book-alert` frei. Solange offen: keine weiteren Scans
+    # (Kamera + manuelles Feld gesperrt), s. `routes/ws.py::ws_scan_station`.
+    # Kein `book_alert_payload` nötig (anders als `StudentSessionB`) — ein
+    # Reconnect setzt die Station ohnehin ganz zurück (s. `clear_student`),
+    # es gibt also keinen Wiederherstellungsfall.
+    book_alert_open: bool = False
+
+    def clear_student(self) -> None:
+        """Schüler-Bindung lösen (Rückfall auf „Zettel-Code scannen").
+
+        Setzt ausschließlich die Bindungsfelder zurück — Gerätefelder
+        (`authorized`, `label`, `theme`, `ws`) bleiben unberührt, die Station
+        bleibt also freigeschaltet und verbunden.
+        """
+        self.student_id = None
+        self.student_lastname = None
+        self.student_firstname = None
+        self.student_form = None
+        self.expected_isbns = set()
+        self.vormerk_isbns = set()
+        self.lent_isbns = set()
+        self.lent_codes = set()
+        self.last_scan = None
+        self.worker_ready = False
+        self.owns_worker = False
+        self.load_task = None
+        self.book_alert_open = False
 
 
 @dataclass
@@ -693,6 +804,52 @@ class AppState:
         # lang & zufällig (nie wiederverwendet), ein einfaches „unbekannt"
         # reicht, um einen Reconnect zuverlässig abzuweisen.
         self.teacher_sessions: dict[str, TeacherSession] = {}
+        # Scan-Stationen (`/scan-station`): Key ist der Token in der URL
+        # (= station_id). Aufbau/Lebensdauer wie die Drucker-Displays.
+        self.scan_stations: dict[str, ScanStationSession] = {}
+        self.banned_scan_station_tokens: set[str] = set()
+        # Vierstellige Zettel-Codes der Scan-Station: Code -> student_id und
+        # die Rückrichtung. Ein Schüler behält seinen Code über beliebig viele
+        # Nachdrucke hinweg (derselbe Zettel bleibt gültig) — nur die
+        # Bücherliste auf dem Zettel wird bei jedem Druck frisch von IServ
+        # geholt (s. `sessions._load_and_activate_station_student`).
+        #
+        # Codes werden innerhalb einer Server-Laufzeit NIE recycelt — auch
+        # nicht, wenn der Schüler fertig ist. Sonst könnte ein alter, noch
+        # herumliegender Zettel plötzlich einen anderen Schüler laden. Der
+        # Vorrat (10 000) ist gegenüber einem Ausgabetag reichlich bemessen.
+        self.station_codes: dict[str, int] = {}
+        self.station_code_by_student: dict[int, str] = {}
+
+    # -----------------------------------------------------------------
+    # Scan-Station: Zettel-Codes
+    # -----------------------------------------------------------------
+
+    def allocate_station_code(self, student_id: int) -> str:
+        """Vierstelligen Zettel-Code des Schülers liefern — vorhandenen wieder,
+        sonst einen neuen ziehen. Damit druckt ein Nachdruck garantiert
+        denselben Code (der erste Zettel bleibt gültig).
+
+        Ist der Vorrat erschöpft (theoretisch: 10 000 vergebene Codes in einer
+        Laufzeit), wird `RuntimeError` geworfen statt einen Code doppelt zu
+        vergeben — ein doppelter Code würde den falschen Schüler laden.
+        """
+        existing = self.station_code_by_student.get(student_id)
+        if existing is not None:
+            return existing
+        if len(self.station_codes) >= 10_000:
+            raise RuntimeError("Keine freien Scan-Station-Codes mehr — Server neu starten")
+        while True:
+            code = f"{secrets.randbelow(10_000):04d}"
+            if code not in self.station_codes:
+                break
+        self.station_codes[code] = student_id
+        self.station_code_by_student[student_id] = code
+        return code
+
+    def student_id_for_station_code(self, code: str) -> int | None:
+        """Schüler zu einem gescannten Zettel-Code; `None` = unbekannt."""
+        return self.station_codes.get((code or "").strip())
 
     # -----------------------------------------------------------------
     # Kontext-Verwaltung
@@ -820,30 +977,58 @@ class AppState:
         ]
 
     def _queue_student_as_dict(
-        self, student: QueueStudent, *, slip_status: str | None = None
+        self,
+        student: QueueStudent,
+        *,
+        slip_status: str | None = None,
+        include_station_code: bool = False,
     ) -> dict:
         """Serialize a queue student with the current helper display name.
 
         Queue rows need the human-readable helper name, while the token remains
         an internal routing value. Resolving it at snapshot time keeps the UI
         correct when a helper reconnects or is removed.
+
+        `include_station_code`: nur aus `state_snapshot()` (Host) `True` — der
+        Zettel-Code ist ein Credential (PLAN §3.7) und darf NICHT in die
+        Helferclient-Queue-Pfade (`pending_queue_as_list`/
+        `real_contexts_summary`) durchsickern, die dieselbe Methode nutzen.
         """
         helper = self.helper_sessions.get(student.assigned_helper or "")
+        station = self.find_station_by_student(student.student_id)
+        station_name = None
+        if station is not None:
+            station_name = (
+                station.label.strip() if station.label and station.label.strip()
+                else station.station_id[:6]
+            )
+        station_code = (
+            self.station_code_by_student.get(student.student_id)
+            if include_station_code else None
+        )
         return student.as_dict(
             slip_status=slip_status,
             assigned_helper_name=helper.name if helper is not None else None,
+            station_name=station_name,
+            station_code=station_code,
         )
 
     def queue_as_list(
-        self, context_id: str | None = None, *, slip_states: dict[int, str] | None = None
+        self,
+        context_id: str | None = None,
+        *,
+        slip_states: dict[int, str] | None = None,
+        include_station_code: bool = False,
     ) -> list[dict]:
         ctx = self.ctx_or_active(context_id)
         if ctx is None:
             return []
         return [
-            self._queue_student_as_dict(s, slip_status=slip_states.get(s.student_id))
-            if slip_states is not None
-            else self._queue_student_as_dict(s)
+            self._queue_student_as_dict(
+                s,
+                slip_status=slip_states.get(s.student_id) if slip_states is not None else None,
+                include_station_code=include_station_code,
+            )
             for s in ctx.queue
         ]
 
@@ -905,7 +1090,15 @@ class AppState:
         worker_stats = (
             pool.stats()
             if pool is not None and hasattr(pool, "stats")
-            else {"total": 0, "available": 0, "in_use": 0}
+            # Ohne Pool dieselbe Form wie `WorkerPool.stats()` liefern, damit der
+            # Host-Client nie auf ein fehlendes Feld läuft (`waiting` = Wartende
+            # je Rolle vor dem Pool).
+            else {
+                "total": 0,
+                "available": 0,
+                "in_use": 0,
+                "waiting": {"helper": 0, "station": 0, "student": 0},
+            }
         )
         ctx = self.active_context
         # student_ids mit aktuell laufendem Leihschein-Druck — für die
@@ -920,7 +1113,10 @@ class AppState:
                 "id": c.id,
                 "form": c.form,
                 "queue": [
-                    self._queue_student_as_dict(s, slip_status=slip_states.get(s.student_id))
+                    self._queue_student_as_dict(
+                        s, slip_status=slip_states.get(s.student_id),
+                        include_station_code=True,
+                    )
                     for s in c.queue
                 ],
                 # Drucker-Allowlist dieser Klasse — `None` = alle Pool-Drucker
@@ -956,7 +1152,7 @@ class AppState:
             "active_context_id": self.active_context_id,
             "contexts": contexts,
             "selected_schoolyear": self.selected_schoolyear,
-            "queue": self.queue_as_list(slip_states=slip_states),
+            "queue": self.queue_as_list(slip_states=slip_states, include_station_code=True),
             "helpers": self.helpers_as_dict(),
             "modus_b": self.modus_b_snapshot(),
             "allow_booking": get_config().allow_booking,
@@ -971,6 +1167,7 @@ class AppState:
                 "waiting_list": self.print_queue.waiting_list(self),
             },
             "printer_displays": self.printer_displays_snapshot(),
+            "scan_stations": self.scan_stations_snapshot(),
             "book_order": list(ctx.book_order) if ctx else [],
         }
 
@@ -1026,13 +1223,86 @@ class AppState:
             for d in self.printer_displays.values()
         ]
 
+    # --- Scan-Stationen ---------------------------------------------------
+
+    def scan_stations_snapshot(self) -> list[dict]:
+        """Scan-Stationen für den Host-Snapshot: je Station Kennung,
+        Pairing-Status, Verbindungsstatus, Name (``label``), Registrierungs-Code,
+        Theme, Eingabeart (Kamera/Manuell) und — falls gerade jemand angemeldet
+        ist — der belegende Schüler.
+        Der Host rendert daraus die Reiter im Live-Ausgabe-Kasten.
+
+        Der Zettel-Code des Schülers steht bewusst NICHT drin: er ist der
+        Zugangs-Credential der Station und hat im breit gestreuten Host-Snapshot
+        nichts zu suchen (er wird beim Drucken einmalig zurückgemeldet)."""
+        return [
+            {
+                "station_id": s.station_id,
+                "authorized": s.authorized,
+                "connected": s.ws is not None,
+                "label": s.label,
+                "registration_code": s.registration_code,
+                "theme": s.theme,
+                "input_mode": s.input_mode,
+                "student_id": s.student_id,
+                "student_name": (
+                    ", ".join(
+                        p for p in ((s.student_lastname or ""), (s.student_firstname or "")) if p
+                    )
+                    or None
+                ),
+                "worker_ready": s.worker_ready,
+            }
+            for s in self.scan_stations.values()
+        ]
+
     def printer_display_view(self, display: PrinterDisplaySession) -> dict:
         """Gefilterte Queue-Sicht für ein Drucker-Display: die zugewiesenen
         Pool-Drucker (Live-Status) + die zentrale Warteschlange, gefiltert auf
         Einträge, deren Allowlist die Display-Zuweisung schneidet. Logik liegt
         im ``print_queue``-Modul (dort ist die Job-Allowlist beheimatet), s.
-        ``PrintQueue.display_view``."""
-        return self.print_queue.display_view(self, display.assigned_printer_ids)
+        ``PrintQueue.display_view``. Zusätzlich wird die zentrale Warteschlange
+        auf Schülerauftrag-Einträge eingeschränkt, sobald für dieses Display
+        die Schülerauftrag-Bedingung aktiv ist (s.
+        ``_printer_display_students_only``)."""
+        students_only = self._printer_display_students_only(display.assigned_printer_ids)
+        return self.print_queue.display_view(
+            self, display.assigned_printer_ids, students_only=students_only
+        )
+
+    def _printer_display_students_only(self, assigned_printer_ids: list[str] | None) -> bool:
+        """Ob ein Drucker-Display die zentrale Warteschlange auf Schüler-
+        aufträge einschränken soll: sobald mindestens eine Klasse existiert,
+        deren Liveausgabe offen ist (``live_ausgabe``), deren Druck-Allowlist
+        die Zuweisung dieses Displays schneidet („freigegeben"), und die einen
+        bereits zugeordneten (``paired``) Modus-B-Schüler hat, der in ihrer
+        Queue noch nicht ``done`` ist. Noch nicht zugeordnete Sessions
+        (``pending_pairing``) zählen dafür nicht, da sie keiner Klasse
+        zuordenbar sind. Trifft keine Klasse zu, bleibt die Warteschlange
+        unverändert (alle Rollen, wie bisher)."""
+        all_printer_ids = {p.id for p in self.settings.printers}
+        display_ids = (
+            set(assigned_printer_ids) if assigned_printer_ids is not None else all_printer_ids
+        )
+        if not display_ids:
+            return False
+        for ctx in self.contexts.values():
+            if ctx.loading or not ctx.live_ausgabe:
+                continue
+            class_ids = (
+                set(ctx.allowed_printer_ids)
+                if ctx.allowed_printer_ids is not None
+                else all_printer_ids
+            )
+            if not (display_ids & class_ids):
+                continue
+            active_student_ids = {s.student_id for s in ctx.queue if s.status != "done"}
+            if any(
+                sess.state == "paired" and sess.student_id in active_student_ids
+                for sess in self.student_sessions.values()
+            ):
+                return True
+        return False
 
     # --- Lehrkraft-Statusansicht (`/teacher`) ---
 
@@ -1129,6 +1399,15 @@ class AppState:
     def find_helper_for_student(self, student_id: int) -> HelperSession | None:
         return next(
             (h for h in self.helper_sessions.values() if h.student_id == student_id),
+            None,
+        )
+
+    def find_station_by_student(self, student_id: int) -> ScanStationSession | None:
+        """Die (höchstens eine) Scan-Station, an der dieser Schüler gerade
+        angemeldet ist — für `/api/clear-book-alert` (Host-Freigabe eines
+        blockierenden Buch-Hinweises, s. `ScanStationSession.book_alert_open`)."""
+        return next(
+            (s for s in self.scan_stations.values() if s.student_id == student_id),
             None,
         )
 

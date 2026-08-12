@@ -13,6 +13,7 @@ from fastapi import APIRouter, Cookie, WebSocket, WebSocketDisconnect
 from ..hub import get_hub
 from ..print_queue import PrintJob
 from ..print_queue import slip_name as _slip_name
+from ..ratelimit import SlidingWindowLimiter
 from ..sessions import (
     advance_helper,
     allowed_printers_for,
@@ -23,12 +24,16 @@ from ..sessions import (
     end_student,
     gen_registration_code,
     hydrate_student_info,
+    load_station_student,
     process_scan,
     rebind_helper_to_context,
+    release_station_student,
     release_student_worker,
     repush_for_changed_empty_isbns,
+    resolve_station_code,
     send_display_update,
     send_printer_display_update,
+    send_scan_station_update,
     send_teacher_update,
     slip_trigger_for,
     spectate_student,
@@ -37,6 +42,7 @@ from ..state import (
     DisplaySession,
     PrinterDisplaySession,
     QueueStudent,
+    ScanStationSession,
     get_state,
     own_print_defaults,
     pool_light,
@@ -612,6 +618,31 @@ async def _handle_print(state, hub, helper, websocket, raw) -> None:
     await state.print_queue.enqueue(job)
 
 
+async def _handle_update_print_printers(state, hub, helper, websocket, raw) -> None:
+    """Erlaubte Drucker eines eigenen, noch wartenden (nicht dispatchten)
+    Druckauftrags ändern — Nachfrage-Menü, wenn alle erlaubten Drucker
+    fehlerhaft sind, bzw. proaktives Umbuchen, solange der Auftrag noch
+    unzugewiesen in der zentralen Warteschlange steht. Der Job behält dabei
+    seine Warteposition (`PrintQueue.update_job_printers` mutiert in-place)."""
+    job_id = raw.get("job_id")
+    printers = raw.get("printers")
+    if not isinstance(job_id, str) or not isinstance(printers, list):
+        return
+    result = await state.print_queue.update_job_printers(
+        job_id, ("helper", helper.token), printers
+    )
+    if result == "ok":
+        return
+    msg = {
+        "not_waiting": "Auftrag wurde bereits einem Drucker zugewiesen",
+        "forbidden": "Kein eigener Druckauftrag",
+        "empty": "Bitte mindestens einen Drucker auswählen",
+    }.get(result, "Aktualisieren fehlgeschlagen")
+    await hub.send_websocket(
+        websocket, {"type": "print_printers_update_result", "ok": False, "msg": msg}
+    )
+
+
 async def _handle_print_for_student(state, hub, helper, websocket, raw) -> None:
     """Betreuerauslöser: ein Helfer druckt stellvertretend für einen ANDEREN
     Schüler aus der Klassenliste — anders als `_handle_print` (immer der
@@ -791,6 +822,7 @@ _SCANNER_HANDLERS = {
     "peek_close": _handle_peek_close,
     "clear_book_alert": _handle_clear_book_alert,
     "print": _handle_print,
+    "update_print_printers": _handle_update_print_printers,
     "print_for_student": _handle_print_for_student,
     "finish_signed": _handle_finish_signed,
     "scan": _handle_scan,
@@ -1124,6 +1156,238 @@ async def ws_drucker_display(websocket: WebSocket, token: str | None = None) -> 
             d.ws = None
             if not d.authorized:
                 state.printer_displays.pop(token, None)
+        await safe_broadcast(hub, state)
+
+
+# ---------------------------------------------------------------------------
+# Scan-Station (`/scan-station`)
+# ---------------------------------------------------------------------------
+
+# Drosselung der Zettel-Code-Versuche je Station: 10 pro Minute. Vier Stellen
+# sind 10 000 Möglichkeiten — ohne Deckel wäre ein Durchprobieren an einer
+# freigeschalteten Station denkbar. Zehn Versuche pro Minute reichen für
+# Vertipper bequem aus und machen das Raten unpraktikabel.
+_station_code_limiter = SlidingWindowLimiter(max_hits=10, window_s=60.0)
+
+
+@router.websocket("/ws/scan-station")
+async def ws_scan_station(websocket: WebSocket, token: str | None = None) -> None:
+    """Scan-Station (`/scan-station`) — festes Scan-Gerät für Schüler ohne Handy.
+
+    Unauthentifiziert wie das Drucker-Display (öffentlich im LAN), zeigt aber
+    vorab nur den Registrierungs-Code. Erst nach der Host-Freischaltung nimmt
+    die Station Zettel-Codes an; erst nach einem gültigen Code fließen
+    Schülerdaten.
+
+    Identität = Token in der URL (``?token=<12-hex>``), den die Seite beim
+    Öffnen per Redirect bekommt. Ein Reload liefert denselben Token → dieselbe
+    (freigeschaltete) Station. Ein noch angemeldeter Schüler wird beim
+    Verbindungsaufbau bewusst freigegeben: Ein Reload ist ein Neustart des
+    Geräts, danach steht die Station wieder für den Nächsten bereit.
+    """
+    state = get_state()
+    hub = get_hub()
+
+    await websocket.accept()
+
+    if not token or len(token) != 12 or any(c not in "0123456789abcdef" for c in token.lower()):
+        await websocket.close(code=1008, reason="Token fehlt/ungültig")
+        return
+    token = token.lower()
+
+    if token in state.banned_scan_station_tokens:
+        await hub.send_websocket(websocket, {"type": "forbidden"})
+        await websocket.close(code=4009, reason="Station verboten")
+        return
+
+    station = state.scan_stations.get(token)
+    if station is None:
+        station = ScanStationSession(
+            station_id=token, registration_code=gen_registration_code()
+        )
+        state.scan_stations[token] = station
+    else:
+        # Reload/Reconnect: eine noch offene Schüler-Bindung gehört nicht zur
+        # neuen Sitzung — freigeben, damit kein fremder Worker-Context und
+        # keine fremden Daten an der Station hängen bleiben.
+        await release_station_student(state, station, reason="station reconnected")
+    station.ws = websocket
+    await send_scan_station_update(state, station)
+    await hub.broadcast_host(state.state_snapshot())
+
+    try:
+        while True:
+            try:
+                raw = await websocket.receive_json()
+            except (WebSocketDisconnect, RuntimeError):
+                break
+            except json.JSONDecodeError:
+                log.warning(
+                    "Ungültiges JSON-Frame von Scan-Station (%s) — ignoriert", token[:6]
+                )
+                continue
+            # Besitzprüfung wie im Schüler-WS: ein nach Reconnect/Verbot noch
+            # gepuffertes Frame des alten Sockets darf nichts mehr auslösen.
+            if state.scan_stations.get(token) is not station or station.ws is not websocket:
+                break
+            mtype = raw.get("type")
+
+            if mtype == "student_code":
+                if not station.authorized:
+                    await hub.send_websocket(
+                        websocket,
+                        {"type": "code_error", "msg": "Station noch nicht freigeschaltet."},
+                    )
+                    continue
+                if station.student_id is not None:
+                    continue  # schon belegt — erst freigeben
+                code = str(raw.get("value", "")).strip().strip("*")
+                if not code:
+                    continue
+                if not _station_code_limiter.hit(token):
+                    await hub.send_websocket(
+                        websocket,
+                        {"type": "code_error", "msg": "Zu viele Versuche — bitte kurz warten."},
+                    )
+                    continue
+                student, reason = resolve_station_code(state, code)
+                if student is None:
+                    # Codes NIE loggen (auch nicht abgelehnte) — sie sind der
+                    # Zugangs-Credential des Zettels (PLAN §3.7).
+                    await hub.send_websocket(
+                        websocket, {"type": "code_error", "msg": reason}
+                    )
+                    continue
+                station.student_id = student.student_id
+                station.student_lastname = student.lastname
+                station.student_firstname = student.firstname
+                station.student_form = student.form
+                station.worker_ready = False
+                station.last_activity = datetime.now()
+                station.load_task = asyncio.create_task(
+                    load_station_student(state, hub, station, student)
+                )
+                await hub.broadcast_host(state.state_snapshot())
+
+            elif mtype == "scan":
+                barcode = str(raw.get("value", "")).strip()
+                if not barcode:
+                    continue
+                station.last_activity = datetime.now()
+                if station.student_id is None or not station.worker_ready:
+                    await hub.send_websocket(
+                        websocket,
+                        {
+                            "type": "scan_result",
+                            "barcode": barcode,
+                            "status": "error",
+                            "msg": "Noch nicht bereit",
+                        },
+                    )
+                    continue
+                if station.book_alert_open:
+                    # Blockierendes Hinweis-Modal offen (ausgemustert/anderweitig
+                    # verliehen) — wie am Handy erst der Host per
+                    # `/api/clear-book-alert` freigeben lassen. Scan ignorieren,
+                    # kein eigener Schließen-Weg am Client.
+                    continue
+
+                # Zunächst prüfen, ob der gescannte Wert eigentlich der
+                # Zettel-Code EINES ANDEREN Schülers ist — dann Stationswechsel
+                # statt Buch-Scan-Versuch (ein Schüler scannt an einer gerade
+                # belegten Station seinen eigenen Zettel). Der Treffer-Check
+                # selbst läuft UNABHÄNGIG von Länge/Ziffernform (ein einfacher
+                # Dict-Lookup — billig, und ein Buch-Barcode trifft praktisch
+                # nie zufällig einen der wenigen vergebenen 4-stelligen Codes),
+                # damit ein echter Treffer nie an einer zu strengen Formannahme
+                # über den vom Scanner gelieferten Wert scheitert. Das
+                # Rate-Limit bleibt an die 4-stellige Form gebunden (Buch-
+                # Barcodes sind länger, s. Code.PNG) — es greift für JEDEN
+                # 4-stelligen Versuch (Treffer wie Fehlversuch), sonst liefe
+                # ein Durchprobieren fremder Codes während einer laufenden
+                # Sitzung am Limiter vorbei.
+                stripped = barcode.strip("*")
+                code_shaped = len(stripped) == 4 and stripped.isdigit()
+                if code_shaped and not _station_code_limiter.hit(token):
+                    await hub.send_websocket(
+                        websocket,
+                        {"type": "code_error", "msg": "Zu viele Versuche — bitte kurz warten."},
+                    )
+                    continue
+                other_id = state.student_id_for_station_code(stripped)
+                if other_id is not None and other_id != station.student_id:
+                    other_student, reason = resolve_station_code(state, stripped)
+                    if other_student is None:
+                        # Wechsel abgelehnt (z. B. Zielschüler inzwischen
+                        # fertig) — der aktuell angemeldete Schüler bleibt
+                        # unangetastet, nur die Fehlermeldung wird gezeigt.
+                        await hub.send_websocket(
+                            websocket, {"type": "code_error", "msg": reason}
+                        )
+                        continue
+                    await release_station_student(state, station, reason="switched")
+                    station.student_id = other_student.student_id
+                    station.student_lastname = other_student.lastname
+                    station.student_firstname = other_student.firstname
+                    station.student_form = other_student.form
+                    station.worker_ready = False
+                    station.last_activity = datetime.now()
+                    station.load_task = asyncio.create_task(
+                        load_station_student(state, hub, station, other_student)
+                    )
+                    await hub.broadcast_host(state.state_snapshot())
+                    continue
+                # Kein bekannter FREMDER Code (eigener Code erneut oder
+                # unbekannt) → normal als Buch-Barcode weiterprüfen (landet
+                # unten ggf. bei `unknown_book`).
+
+                station.last_scan = barcode
+                # Identische Verarbeitung wie am Handy (Modus B): Vorabprüfung,
+                # dann stagen bzw. — nur mit ALLOW_BOOKING — buchen.
+                result = await process_scan(
+                    state,
+                    station.student_id,
+                    station.vormerk_isbns,
+                    station.lent_isbns,
+                    station.lent_codes,
+                    barcode,
+                )
+                payload = {"type": "scan_result", "barcode": barcode, **result}
+                # Ausgemustert ODER an jemand anderen verliehen → blockierendes
+                # Hinweis-Modal wie am Handy, nur der Host gibt per
+                # `/api/clear-book-alert` frei (kein eigener Schließen-Weg).
+                if result.get("status") in ("book_deleted", "not_in_stock"):
+                    station.book_alert_open = True
+                await hub.send_websocket(websocket, payload)
+                await hub.broadcast_host(state.state_snapshot())
+
+            elif mtype == "release":
+                # „Fertig"-Knopf bzw. abgelaufener Client-Timer.
+                if await release_station_student(state, station, reason="station"):
+                    await hub.broadcast_host(state.state_snapshot())
+
+            elif mtype == "ping":
+                # Aktivitäts-Signal der Stationsseite (Tippen/Scannen) — hält
+                # das 30-s-TTL offen, ohne selbst etwas auszulösen.
+                station.last_activity = datetime.now()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        # Spiegel des Drucker-Display-`finally`: ws-Referenz lösen, nicht
+        # freigeschaltete Stationen ganz entfernen (Reiter verschwindet am
+        # Host). Ein angemeldeter Schüler wird freigegeben, damit sein
+        # Worker-Context nicht an der toten Station hängen bleibt.
+        st = state.scan_stations.get(token)
+        if st is not None and st.ws is websocket:
+            # ws-Referenz ZUERST lösen: die Verbindung ist bereits weg, und
+            # `release_station_student` würde sonst versuchen, `released`/`ready`
+            # auf den toten Socket zu schicken. Ohne Empfänger ist das im besten
+            # Fall verschwendet und im schlechtesten ein Hänger im ASGI-Layer,
+            # der das Aufräumen (Schüler + Worker!) verzögert.
+            st.ws = None
+            await release_station_student(state, st, reason="station disconnected")
+            if not st.authorized:
+                state.scan_stations.pop(token, None)
         await safe_broadcast(hub, state)
 
 

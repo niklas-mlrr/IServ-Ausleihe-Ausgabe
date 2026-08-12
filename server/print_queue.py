@@ -62,6 +62,9 @@ JobStatus = Literal[
     "queued", "dispatching", "spooled", "printing", "done", "failed", "stalled", "peer_error"
 ]
 JobState = Literal["absent", "spooled", "printing"]
+# Was ein Auftrag druckt: den IServ-Leihschein oder den lokal gebauten
+# Scan-Station-Zettel (s. `PrintJob.kind`).
+JobKind = Literal["slip", "station_sheet"]
 
 # Rangfolge für die Einfügung in die zentrale Warteschlange (`waiting`):
 # niedrigerer Wert = höherer Vorrang. Bereits gespoolte/druckende Aufträge sind
@@ -110,6 +113,12 @@ class PrintJob:
     student_id: int
     pages: str | None
     name: str  # „Nachname, Vorname (Form)" fürs Host-Popup
+    # Was gedruckt wird: der IServ-Leihschein (Default) oder der lokal gebaute
+    # Scan-Station-Zettel (Barcode + Bücherliste, s. server/scan_station.py).
+    # Der Zettel läuft bewusst durch dieselbe Warteschlange — er soll auf dem
+    # Drucker-Display genauso erscheinen wie ein Host-Leihschein. Er ist aber
+    # KEIN Leihschein: `_mark_slip_printed_after_completion` überspringt ihn.
+    kind: JobKind = "slip"
     helper_token: str | None = None  # Urheber ist ein Helfer (WS-Ziel)
     host_sid: str | None = None  # Urheber ist ein Host-Browser (sid-Ziel)
     # Urheber ist ein Schülerclient (Modus B, Druckmodus): Session-Token als
@@ -243,6 +252,48 @@ class PrintQueue:
         """Scheduler wecken — aufrufen, wenn ein Drucker hinzugefügt wurde
         (wartende Aufträge können jetzt verteilt werden)."""
         self._wake.set()
+
+    async def update_job_printers(
+        self, job_id: str, requester: tuple[str, str], printer_ids: list | None,
+    ) -> str:
+        """Erlaubte Drucker eines noch **wartenden** (`self.waiting`, nicht
+        dispatchten) Auftrags ändern — für das Nachfrage-Menü, wenn alle
+        erlaubten Drucker fehlerhaft sind (oder der Nutzer proaktiv umbuchen
+        will, solange der Auftrag noch unzugewiesen ist).
+
+        `requester` = ``("helper", token)`` oder ``("host", sid)`` — nur der
+        Urheber des Auftrags darf ihn umbuchen. Der Job wird **in-place**
+        mutiert (nicht aus `self.waiting` entfernt/neu eingefügt), damit er
+        seine bestehende Warteposition behält.
+
+        Rückgabe: ``"ok"``, ``"not_waiting"`` (Job nicht (mehr) in `waiting`),
+        ``"forbidden"`` (falscher Urheber) oder ``"empty"`` (keine gültige
+        Drucker-ID im Pool ausgewählt). Bei ``"ok"`` weckt es den Scheduler
+        und pusht sofort aktualisierte Positionen/Status (gleiches Muster wie
+        `enqueue`)."""
+        req_kind, req_id = requester
+        async with self._lock:
+            job = next((j for j in self.waiting if j.id == job_id), None)
+            if job is None:
+                return "not_waiting"
+            if req_kind == "helper":
+                if job.helper_token != req_id:
+                    return "forbidden"
+            elif req_kind == "host":
+                if job.host_sid != req_id:
+                    return "forbidden"
+            else:
+                return "forbidden"
+            from .state import get_state
+
+            pool_ids = {p.id for p in get_state().settings.printers}
+            valid_ids = {pid for pid in (printer_ids or []) if pid in pool_ids}
+            if not valid_ids:
+                return "empty"
+            job.allowed_printers = valid_ids
+        self._wake.set()
+        await self._notify_all()
+        return "ok"
 
     def invalidate_student(self, student_id: int) -> bool:
         """Mark non-final print jobs for a student as stale after a new scan.
@@ -530,6 +581,11 @@ class PrintQueue:
         Ende (`absent`) und darf deshalb den Leihschein-Marker setzen bzw. die
         Schüler-Session schließen.
         """
+        if job.kind != "slip":
+            # Der Scan-Station-Zettel ist kein Leihschein — er darf weder den
+            # „Leihschein gedruckt"-Marker setzen noch eine Modus-B-Session
+            # abschließen.
+            return
         from .state import get_state
 
         student = get_state().find_student(job.student_id)
@@ -769,6 +825,12 @@ class PrintQueue:
         from .state import get_state
 
         try:
+            if job.kind == "station_sheet":
+                from .sessions import print_station_sheet_for
+
+                return await print_station_sheet_for(
+                    get_state(), job.student_id, printer_name=printer_name
+                )
             return await print_loan_slip_for(
                 get_state(), job.student_id, pages=job.pages, printer_name=printer_name
             )
@@ -1006,7 +1068,9 @@ class PrintQueue:
             )
         return out
 
-    def display_view(self, state, assigned_printer_ids: list[str] | None) -> dict:
+    def display_view(
+        self, state, assigned_printer_ids: list[str] | None, *, students_only: bool = False
+    ) -> dict:
         """Gefilterte Queue-Sicht für ein Drucker-Display (`/drucker-display`):
         die zugewiesenen Pool-Drucker (Live-Status) + die zentrale Warteschlange,
         gefiltert auf Einträge, deren Allowlist die Display-Zuweisung schneidet.
@@ -1020,7 +1084,14 @@ class PrintQueue:
         Ein Wartelisten-Eintrag ist relevant, wenn seine Allowlist die Display-
         Zuweisung schneidet: ``allowed=None`` (alle Pool-Drucker) → relevant,
         sobald das Display mindestens einen Drucker zeigt; explizite Menge →
-        relevant bei nicht-leerem Schnitt."""
+        relevant bei nicht-leerem Schnitt.
+
+        ``students_only``: schränkt die zentrale Warteschlange zusätzlich auf
+        Schülerauftrag-Einträge ein (``originator_info.type == "student"``,
+        s. `AppState._printer_display_students_only`). Betrifft nur die
+        zentrale Warteschlange (``waiting``/``waiting_list``) — die „druckt"/
+        „als nächstes"-Anzeige je Drucker (``printers[*].orders`` etc.) bleibt
+        rollenunabhängig."""
         printers = state.settings.printers
         pool = self.pool_printers(printers, state)
         if assigned_printer_ids is None:
@@ -1045,6 +1116,10 @@ class PrintQueue:
                 return bool(set(ids) & assigned)
 
             view_waiting = [w for w in full_waiting if _relevant(w)]
+        if students_only:
+            view_waiting = [
+                w for w in view_waiting if w.get("originator_info", {}).get("type") == "student"
+            ]
         # Pro Drucker den „zuletzt gedruckten" Auftrag für die Display-Kategorie
         # „Gedruckt" anreichern: Name + Auftraggeber + Rest-TTL (Sekunden). Nach
         # 30s bzw. beim Fertig-Werden des nächsten Auftrags (Überschreiben in
@@ -1074,6 +1149,13 @@ class PrintQueue:
             "printers": view_printers,
             "waiting": len(view_waiting),
             "waiting_list": view_waiting,
+            # Ob die zentrale Warteschlange oben auf Schülerauftrag-Einträge
+            # eingeschränkt ist (s. `AppState._printer_display_students_only`).
+            # Der Client nutzt das, um einen Host-/Helferauftrag in der
+            # „Nächster"-Kategorie einer Drucker-Karte als „<Name> - Vorrang"
+            # hervorzuheben (dieser Auftrag ist trotz ausgeblendeter Host-/
+            # Helferaufträge in der zentralen Warteschlange real vorgezogen).
+            "students_only": students_only,
         }
 
     @staticmethod
@@ -1284,6 +1366,11 @@ class PrintQueue:
             # Systemname bleibt in `printer` (u. a. testgefriert).
             "printer_label": self._printer_display_by_id(job.assigned_printer_id),
             "peer_error": peer_error,
+            # Aktuell erlaubte Drucker-IDs des Jobs (None = alle Pool-Drucker)
+            # — zum Vorbefüllen des Drucker-Nachfrage-Menüs beim Client.
+            "allowed_printers": (
+                sorted(job.allowed_printers) if job.allowed_printers is not None else None
+            ),
         }
         if text is not None:
             msg["msg"] = text

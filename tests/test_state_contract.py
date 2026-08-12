@@ -41,12 +41,16 @@ EXPECTED_SNAPSHOT_KEYS = {
     "printers",
     "print_queue_summary",
     "printer_displays",
+    # Scan-Stationen (`/scan-station`) — Reiter im Live-Ausgabe-Kasten des Hosts.
+    "scan_stations",
     "book_order",
 }
 
 EXPECTED_MODUS_B_KEYS = {"open", "paused", "join_url", "pending", "pending_count", "displays"}
 
-EXPECTED_WORKER_POOL_KEYS = {"total", "available", "in_use"}
+# `waiting` = Wartende je Rolle vor dem Worker-Pool (helper/station/student),
+# s. automation/worker.py::WorkerPool.waiting_counts.
+EXPECTED_WORKER_POOL_KEYS = {"total", "available", "in_use", "waiting"}
 
 
 def test_state_snapshot_key_set_is_stable():

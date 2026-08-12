@@ -232,8 +232,10 @@ function connectWebSocket(urlOrFn, opts) {
 // Pool-Drucker. Aufrufer hält `pool`/`selectedIds` selbst (common.js speichert
 // keinen modulweiten State); Änderungen via setPool/setSelectedIds.
 //
-// pool: [{id, name, label, is_default}] — name/label optional (None →
-//   Standarddrucker); selectedIds: id[] (Vorauswahl).
+// pool: [{id, name, label, is_default, faulty}] — name/label optional (None →
+//   Standarddrucker); faulty optional (fehlerhaft/deaktiviert — Zeile wird
+//   ausgegraut mit „(deaktiviert)"-Hinweis, bleibt aber anwählbar);
+//   selectedIds: id[] (Vorauswahl).
 // Rückgabe: {getSelectedIds, setPool, setSelectedIds, setEnabled, close}.
 function mountPrinterPicker(mountEl, pool, selectedIds) {
   const ppool = Array.isArray(pool) ? pool : [];
@@ -261,7 +263,9 @@ function mountPrinterPicker(mountEl, pool, selectedIds) {
     panel.innerHTML = ppool.length
       ? ppool.map(p => {
           const chk = selected.has(p.id) ? ' checked' : '';
-          return `<label class="pp-row"><input type="checkbox" data-pid="${escapeHtml(p.id)}"${chk}><span>${escapeHtml(display(p))}</span></label>`;
+          const faultyCls = p.faulty ? ' pp-row-faulty' : '';
+          const hint = p.faulty ? ' <span class="pp-faulty-hint">(deaktiviert)</span>' : '';
+          return `<label class="pp-row${faultyCls}"><input type="checkbox" data-pid="${escapeHtml(p.id)}"${chk}><span>${escapeHtml(display(p))}${hint}</span></label>`;
         }).join('')
       : '<div class="pp-empty">Kein Drucker konfiguriert</div>';
     panel.querySelectorAll('input[data-pid]').forEach(cb => {
@@ -339,3 +343,182 @@ function mountPrinterPicker(mountEl, pool, selectedIds) {
     close() { setOpen(false); },
   };
 }
+
+
+// ---------------------------------------------------------------------------
+// Scan-Ansicht: Bücher-Tabelle, Statusfarben und Buch-Hinweis-Modal.
+//
+// Gemeinsam vom Schülerclient (`student.js`) und der Scan-Station
+// (`scan-station.js`) genutzt — beide zeigen denselben Scanmodus, also darf es
+// dafür nur EINE Implementierung geben (Aussehen: `web/scan-view.css`).
+// ---------------------------------------------------------------------------
+
+const ALERT_META = {
+  book_deleted:        { title: 'Ausgemustertes Buch gescannt',   color: '#f44336' },
+  not_in_stock:        { title: 'Buch bereits verliehen',         color: '#f44336' },
+  book_already_lent:   { title: 'Buch bereits an dich verliehen', color: '#e69500' },
+  series_already_lent: { title: 'Buchreihe bereits an dich verliehen', color: '#e69500' },
+  not_enrolled:        { title: 'Buch nicht bestellt',            color: '#e69500' },
+  unknown_book:        { title: 'Buch unbekannt',                 color: '#e69500' },
+  not_ready:           { title: 'Buchliste noch nicht geladen',   color: '#e69500' },
+  error:               { title: 'Fehler bei der Prüfung',         color: '#f44336' },
+};
+// Status, die NICHT verbucht werden können und die der Schüler selbst
+// schließen darf (alle nicht-OK Status außer den Host-geschlossenen).
+const OK_SCAN_STATUSES = new Set(['staged', 'booked']);
+// Host-geschlossen: ausgemustert (mit/ohne Ersatzanspruch) + an andere
+// Person verliehen → blockierendes Modal, nur der Betreuer gibt frei.
+const BLOCKING_SCAN_STATUSES = new Set(['book_deleted', 'not_in_stock']);
+// Statuszeilen-Farbklasse — abgeleitet aus ALERT_META.color, damit
+// Statuszeile und Fenster-Überschrift IMMER dieselbe Farbe haben. Rot ist
+// reserviert für Status, bei denen der Host schließen/freigeben muss
+// (book_deleted, not_in_stock) sowie error; alle anderen Alert-Status
+// (inkl. unbekannter Code) sind orange (selbst schließbar).
+function statusAlertClass(status) {
+  if (status === 'booked') return 'status-book-issued';
+  if (OK_SCAN_STATUSES.has(status)) return null;
+  const meta = ALERT_META[status];
+  return meta && meta.color === '#e69500' ? 'status-alert-orange' : 'status-alert-red';
+}
+function renderBookAlert(els, msg, dismissible) {
+  const meta = ALERT_META[msg.status] || { title: 'Buch-Hinweis', color: '#f44336' };
+  // Ausgemustert OHNE Ersatzanspruch: eigene, kürzere Überschrift/Meldung.
+  // loaned_to ist am Schüler-Client aus Privatheitsgründen ohnehin immer
+  // null (s. process_scan) — dieser Fall greift hier also immer.
+  const deletedNoReplacement = msg.status === 'book_deleted' && !msg.loaned_to;
+  els.title.textContent = deletedNoReplacement ? 'Buch ausgemustert' : meta.title;
+  els.title.style.color = meta.color;
+  if (msg.status === 'book_already_lent') {
+    els.text.textContent = `${msg.barcode || ''} — ${msg.title || meta.title}`;
+    els.note.textContent = 'Dieses Buch ist bereits an dich verliehen. Du musstest es nicht noch einmal scannen.';
+    els.note.hidden = false;
+  } else if (msg.status === 'series_already_lent') {
+    els.text.textContent = `${msg.barcode || ''} — ${msg.title || meta.title}`;
+    els.note.textContent = 'Ein Buch dieser Buchreihe ist bereits an dich verliehen. Leg es einfach wieder zurück.';
+    els.note.hidden = false;
+  } else if (deletedNoReplacement) {
+    els.text.textContent = `${msg.barcode || ''} — ${msg.title || meta.title}`;
+    els.note.textContent = 'Dieses Buch ist ausgemustert. Es kann nicht mehr verliehen werden.';
+    els.note.hidden = false;
+  } else if (msg.status === 'not_in_stock') {
+    els.text.textContent = `${msg.barcode || ''} — ${msg.title || meta.title}`;
+    els.note.textContent = 'Dieses Buch ist bereits an jemand anders verliehen. Es kann derzeit nicht an dich verliehen werden.';
+    els.note.hidden = false;
+  } else if (msg.status === 'unknown_book') {
+    // Kein Titel bekannt (Buch existiert laut API nicht) — nur der
+    // gescannte Code, kein Bindestrich/Titel dahinter.
+    els.text.textContent = `${msg.barcode || ''}`;
+    els.note.textContent = 'Dieser Code ist unbekannt. Bitte nochmal scannen.';
+    els.note.hidden = false;
+  } else {
+    els.text.textContent = `${msg.barcode || ''} — ${msg.msg || meta.title}`;
+    els.note.textContent = '';
+    els.note.hidden = true;
+  }
+  // Gedämpfte Notiz-Schrift NUR bei blockierenden Meldungen (dort steht
+  // darunter die „Bitte warte…"-Hinweiszeile) — bei selbst schließbaren
+  // Meldungen gibt es keine Hinweiszeile mehr, die Notiz bleibt normal.
+  els.note.classList.toggle('book-alert-dim', !dismissible);
+  if (dismissible) {
+    // „Du kannst diese Meldung selbst schließen." existiert bewusst nicht
+    // mehr — der Schließen-Button spricht für sich.
+    els.hint.textContent = '';
+    els.hint.hidden = true;
+    els.actions.style.display = '';
+    // Zusätzlich, in unscheinbarer Schrift (wie Code/Titel oben), ein
+    // Hinweis auf den Betreuer, falls der Fehler unerwartet wiederholt auftritt.
+    els.support.textContent = 'Falls dieser Fehler unerwartet weiterhin auftritt, melde dich bitte beim Betreuer.';
+    els.support.hidden = false;
+  } else {
+    els.hint.textContent = 'Bitte warte, bis ein Helfer dieses Buch einsammelt und dich freigibt.';
+    els.hint.hidden = false;
+    els.actions.style.display = 'none';
+    els.support.textContent = '';
+    els.support.hidden = true;
+  }
+  els.modal.classList.add('show');
+}
+
+// Buch-Hinweis-Modal schließen (Gegenstück zu `renderBookAlert`).
+function hideBookAlert(els) { els.modal.classList.remove('show'); }
+
+// Bücher-Tabelle in `rows` rendern. `opts`:
+//   bookOrder     — klassenweite ISBN-Reihenfolge für die offenen Bücher
+//   scannedIsbns  — in dieser Sitzung erfolgreich gescannte ISBNs (Set)
+//   scanOrder     — ISBN -> laufende Scan-Nummer (Map), für die Sortierung
+//                   der erledigten Zeilen (zuletzt gescanntes oben)
+//   animate       — FLIP-Animation nach einem erfolgreichen Scan
+function renderBookRows(rows, books, opts) {
+  const { bookOrder = [], scannedIsbns = new Set(), scanOrder = new Map(), animate = false } = opts || {};
+  if (!books || !books.length) {
+    rows.innerHTML = '<div class="book-empty">Keine Bücher hinterlegt</div>';
+    return;
+  }
+  // Erledigte (gescannt/ausgeliehen) nach unten. Offene nach der klassenweit
+  // konfigurierten Reihenfolge (bookOrder; Rest ans Ende). Erledigte nach
+  // Ausgabedatum (jüngstes oben); ohne Datum oben. Original-Index als Tiebreak.
+  const orderIndex = isbn => {
+    const i = bookOrder.indexOf(isbn);
+    return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+  };
+  // „Erledigt"-Rang: gerade gescannte zuerst (Scan-Reihenfolge, zuletzt oben),
+  // darunter schon ausgeliehene nach Ausgabedatum (jüngstes oben).
+  const SCAN_BASE = 1e15;
+  const doneRank = b => {
+    if (b.isbn && scanOrder.has(b.isbn)) return SCAN_BASE + scanOrder.get(b.isbn);
+    const t = b.distributed_at ? Date.parse(b.distributed_at) : NaN;
+    return Number.isNaN(t) ? -1 : t;
+  };
+  // FLIP-Vorbereitung: alte Positionen je Buch (Original-Index als stabiler
+  // Schlüssel) merken, BEVOR innerHTML ausgetauscht wird. Nur bei
+  // animate=true (erfolgreicher Scan) — nicht beim initialen Laden.
+  const oldRects = new Map();
+  if (animate) {
+    rows.querySelectorAll('.book-row[data-book-idx]').forEach(row => {
+      oldRects.set(row.dataset.bookIdx, row.getBoundingClientRect());
+    });
+  }
+  const ordered = books
+    .map((b, i) => [b, i])
+    .sort((a, b) => {
+      const da = isBookDone(a[0], scannedIsbns) ? 1 : 0, db = isBookDone(b[0], scannedIsbns) ? 1 : 0;
+      if (da !== db) return da - db;
+      if (da === 1) {
+        const diff = doneRank(b[0]) - doneRank(a[0]);
+        if (diff) return diff;
+      } else {
+        const diff = orderIndex(a[0].isbn) - orderIndex(b[0].isbn);
+        if (diff) return diff;
+      }
+      return a[1] - b[1];
+    });
+  rows.innerHTML = ordered.map(([b, idx]) => {
+    const done = isBookDone(b, scannedIsbns);
+    const icon = done
+      ? '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>'
+      : '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
+    const cls = done ? 'ausgeliehen' : 'vorgemerkt';
+    return `<div class="book-row row-${cls}" data-book-idx="${idx}">`
+      + `<div class="b-fach">${escapeHtml(b.subject)}</div>`
+      + `<div class="b-title">${escapeHtml(b.title)}</div>`
+      + `<div class="b-icon">${icon}</div></div>`;
+  }).join('');
+  // FLIP-Animation: jede Zeile, die schon da war, startet an ihrer alten
+  // Position und fährt zur neuen. Neue Zeilen erscheinen sofort.
+  if (animate && oldRects.size) {
+    rows.querySelectorAll('.book-row[data-book-idx]').forEach(row => {
+      const old = oldRects.get(row.dataset.bookIdx);
+      if (!old) return;  // neue Zeile — keine alte Position
+      const cur = row.getBoundingClientRect();
+      const dx = old.left - cur.left;
+      const dy = old.top - cur.top;
+      if (!dx && !dy) return;
+      row.style.transition = 'none';
+      row.style.transform = `translate(${dx}px, ${dy}px)`;
+      row.offsetWidth;  // Reflow erzwingen, damit die Startposition greift
+      row.style.transition = '';
+      row.style.transform = '';
+    });
+  }
+}
+

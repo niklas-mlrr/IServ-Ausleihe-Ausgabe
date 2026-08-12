@@ -18,11 +18,35 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from dataclasses import dataclass, field
 
 from playwright.async_api import Page, async_playwright
 from playwright.async_api import TimeoutError as PlaywrightTimeout
 
 log = logging.getLogger(__name__)
+
+# Rangfolge der Bewerber um einen freien Worker-Context — kleiner = zuerst
+# bedient. Analog zur Rollen-Rangfolge der Druckerwarteschlange (`_RANK` in
+# server/print_queue.py): Der Helfer bedient eine ganze Warteschlange und darf
+# nie hinter Einzelgeräten anstehen; die Scan-Station bedient wechselnde
+# Schüler ohne Handy und geht deshalb vor dem einzelnen Handy-Client.
+_WORKER_RANK: dict[str, int] = {"helper": 0, "station": 1, "student": 2}
+
+# Wie lange ein Bewerber je Rolle auf einen freien Context wartet, bevor der
+# Mangel als echt gilt. Der Helfer sitzt vor einer Queue und soll schnell einen
+# Fehler sehen; Station und Handy-Client stehen physisch am Gerät und warten
+# lieber, als nach 12 s eine Fehlermeldung zu bekommen.
+_WORKER_WAIT_S: dict[str, float] = {"helper": 12.0, "station": 60.0, "student": 60.0}
+
+
+@dataclass
+class _Waiter:
+    """Ein wartender `open_student`-Aufruf in der Pool-Warteschlange."""
+
+    rank: int
+    seq: int
+    priority: str
+    future: asyncio.Future = field(repr=False)
 
 
 class StudentSession:
@@ -319,11 +343,68 @@ class WorkerPool:
         self._browser = None
         self._contexts: list = []
         self._total = 0  # erfolgreich eingeloggte Contexts (für stats())
-        # Condition (wrapt ein Lock) — open_student kann damit kurz auf einen
-        # freigewordenen Context warten, wenn eine release()-Task noch läuft.
-        # Verhindert das „Kein freier Worker-Context"-Rennen, wenn am Helfer
-        # schnell hintereinander Schüler abgeschlossen werden (PLAN-Stabilität).
+        # Condition (wrapt ein Lock) — schützt `_contexts` und `_waiters`.
+        # `open_student` kann damit auf einen freigewordenen Context warten,
+        # wenn eine release()-Task noch läuft. Verhindert das „Kein freier
+        # Worker-Context"-Rennen, wenn am Helfer schnell hintereinander Schüler
+        # abgeschlossen werden (PLAN-Stabilität).
         self._cond = asyncio.Condition()
+        # Warteschlange der Bewerber um einen freien Context, nach Rangfolge
+        # (`_WORKER_RANK`) und innerhalb einer Rolle FIFO (`seq`). Ein
+        # freiwerdender Context wird dem ranghöchsten Wartenden DIREKT
+        # zugeteilt (s. `_put_context`) — kein „wer den Lock zuerst erwischt".
+        self._waiters: list[_Waiter] = []
+        self._waiter_seq = 0
+
+    # ---- Context-Vergabe (immer unter `self._cond` aufrufen) -------------
+
+    def _put_context(self, context) -> None:
+        """Einen freien Context vergeben: an den ranghöchsten Wartenden, sonst
+        zurück in den Pool. Bereits abgebrochene Wartende werden übersprungen."""
+        while self._waiters:
+            waiter = min(self._waiters, key=lambda w: (w.rank, w.seq))
+            self._waiters.remove(waiter)
+            if waiter.future.done():
+                continue  # Timeout/Cancel kam zuvor — nächster Wartender
+            waiter.future.set_result(context)
+            return
+        self._contexts.append(context)
+        self._cond.notify_all()
+
+    def _add_waiter(self, priority: str) -> _Waiter:
+        """Aufrufer in die Warteschlange einreihen und seinen Platzhalter geben."""
+        self._waiter_seq += 1
+        waiter = _Waiter(
+            rank=_WORKER_RANK.get(priority, _WORKER_RANK["student"]),
+            seq=self._waiter_seq,
+            priority=priority,
+            future=asyncio.get_running_loop().create_future(),
+        )
+        self._waiters.append(waiter)
+        return waiter
+
+    def _drop_waiter(self, waiter: _Waiter) -> None:
+        """Wartenden nach Timeout/Cancel entfernen. Wurde ihm im selben Tick
+        schon ein Context zugeteilt, wandert dieser zum nächsten Wartenden —
+        sonst würde er aus dem Pool verschwinden."""
+        if waiter in self._waiters:
+            self._waiters.remove(waiter)
+        if waiter.future.done() and not waiter.future.cancelled():
+            exc = waiter.future.exception()
+            if exc is None:
+                self._put_context(waiter.future.result())
+
+    def waiting_counts(self) -> dict[str, int]:
+        """Anzahl Wartender je Rolle — für den Host-Statusbalken."""
+        counts = dict.fromkeys(_WORKER_RANK, 0)
+        for w in self._waiters:
+            counts[w.priority] = counts.get(w.priority, 0) + 1
+        return counts
+
+    def waiting_position(self, waiter: _Waiter) -> int:
+        """1-basierte Position eines Wartenden in der Rangfolge."""
+        ordered = sorted(self._waiters, key=lambda w: (w.rank, w.seq))
+        return ordered.index(waiter) + 1 if waiter in ordered else 1
 
     async def _make_logged_in_context(self, label: str):
         """Einen frischen Context anlegen und einloggen. Bei Fehler Context
@@ -426,6 +507,9 @@ class WorkerPool:
             "total": self._total,
             "available": available,
             "in_use": max(0, self._total - available),
+            # Wartende je Rolle (helper/station/student) — der Host-
+            # Statusbalken zeigt daraus den Stau vor dem Pool.
+            "waiting": self.waiting_counts(),
         }
 
     async def check_selectors(self) -> dict:
@@ -446,8 +530,7 @@ class WorkerPool:
             page = await context.new_page()
         except BaseException:  # noqa: BLE001 — inkl. CancelledError
             async with self._cond:
-                self._contexts.append(context)
-                self._cond.notify_all()
+                self._put_context(context)
             raise
         sel = 'input.tt-input[name="input"]'
         try:
@@ -474,8 +557,7 @@ class WorkerPool:
             except Exception:
                 pass
             async with self._cond:
-                self._contexts.append(context)
-                self._cond.notify_all()
+                self._put_context(context)
 
     async def stop(self) -> None:
         # Defensiv: bei Ctrl+C / Treiber-Abbruch ist der Transport evtl. schon
@@ -492,31 +574,60 @@ class WorkerPool:
                 log.warning("Playwright.stop beim Shutdown fehlgeschlagen: %s", e)
 
     async def open_student(
-        self, student_id: int, student_name: str, *, wait_timeout: float = 12.0
+        self,
+        student_id: int,
+        student_name: str,
+        *,
+        priority: str = "student",
+        wait_timeout: float | None = None,
+        on_wait=None,
     ) -> StudentSession:
         """Einen freien Context holen und Schülerkartei laden.
 
         Ist der Pool gerade leer (z. B. weil eine release()-Task nach einem
-        schnellen „Weiter/ Abschließen" noch läuft), warten wir bis zu
-        `wait_timeout` Sekunden auf einen freigewordenen Context, statt sofort
-        „Kein freier Worker-Context verfügbar" zu werfen. Erst nach Ablauf der
-        Frist gilt der Mangel als echt und wird als Fehler gemeldet.
+        schnellen „Weiter/ Abschließen" noch läuft), reiht sich der Aufruf in
+        die Pool-Warteschlange ein, statt sofort „Kein freier Worker-Context
+        verfügbar" zu werfen. Erst nach Ablauf der Frist gilt der Mangel als
+        echt und wird als Fehler gemeldet.
+
+        `priority` bestimmt die Rangfolge unter mehreren Wartenden
+        (`_WORKER_RANK`: helper → station → student); innerhalb einer Rolle
+        wird FIFO bedient. `wait_timeout=None` nimmt die Rollen-Vorgabe aus
+        `_WORKER_WAIT_S`. `on_wait(position)` wird — sofern übergeben — einmal
+        aufgerufen, wenn tatsächlich gewartet werden muss, damit der Aufrufer
+        seinem Client „Warten auf freien Platz (Position n)" melden kann.
         """
+        timeout = _WORKER_WAIT_S.get(priority, 60.0) if wait_timeout is None else wait_timeout
         async with self._cond:
-            if not self._contexts:
-                log.info(
-                    "Worker-Pool leer für Schüler %d — warte bis %.1fs auf freien Context",
-                    student_id,
-                    wait_timeout,
-                )
+            # Nur direkt bedienen, wenn niemand wartet — sonst würde ein
+            # frisch eintreffender Aufruf die Warteschlange überholen.
+            if self._contexts and not self._waiters:
+                context = self._contexts.pop(0)
+                waiter = None
+            else:
+                waiter = self._add_waiter(priority)
+                position = self.waiting_position(waiter)
+                context = None
+        if waiter is not None:
+            log.info(
+                "Worker-Pool belegt für Schüler %d (%s, Position %d) — warte bis %.1fs",
+                student_id, priority, position, timeout,
+            )
+            if on_wait is not None:
                 try:
-                    await asyncio.wait_for(
-                        self._cond.wait_for(lambda: bool(self._contexts)),
-                        timeout=wait_timeout,
-                    )
-                except TimeoutError:
-                    raise RuntimeError("Kein freier Worker-Context verfügbar") from None
-            context = self._contexts.pop(0)
+                    on_wait(position)
+                except Exception:  # noqa: BLE001 — Callback darf den Pool nie killen
+                    log.exception("on_wait-Callback fehlgeschlagen")
+            try:
+                context = await asyncio.wait_for(waiter.future, timeout=timeout)
+            except TimeoutError:
+                async with self._cond:
+                    self._drop_waiter(waiter)
+                raise RuntimeError("Kein freier Worker-Context verfügbar") from None
+            except BaseException:  # noqa: BLE001 — inkl. CancelledError
+                async with self._cond:
+                    self._drop_waiter(waiter)
+                raise
 
         # new_page() kann werfen (auch CancelledError, daher BaseException) —
         # Context in jedem Fall zurückgeben, sonst leakt er aus dem Pool.
@@ -525,8 +636,7 @@ class WorkerPool:
             page = await context.new_page()
         except BaseException:  # noqa: BLE001 — inkl. CancelledError!
             async with self._cond:
-                self._contexts.append(context)
-                self._cond.notify_all()
+                self._put_context(context)
             raise
         session = StudentSession(
             context, page, self._domain, student_id, student_name, relogin=self._login
@@ -543,8 +653,7 @@ class WorkerPool:
             except Exception:
                 pass
             async with self._cond:
-                self._contexts.append(context)
-                self._cond.notify_all()
+                self._put_context(context)
             raise
         return session
 
@@ -560,8 +669,7 @@ class WorkerPool:
         if ctx is None:
             return  # bereits released — nichts tun (Double-Release-Schutz)
         async with self._cond:
-            self._contexts.append(ctx)
-            self._cond.notify_all()
+            self._put_context(ctx)
 
     async def _login(self, page: Page, label: str) -> None:
         domain = self._domain

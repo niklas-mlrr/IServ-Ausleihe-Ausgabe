@@ -14,6 +14,7 @@ from ..hub import get_hub
 from ..sessions import (
     apply_hidden_books,
     booking_isbn_sets_from_info,
+    broadcast_printer_displays,
     end_student,
     revoke_all_teacher_sessions,
     revoke_teacher_sessions_for_context,
@@ -209,6 +210,9 @@ async def select_schoolyear(body: SelectSchoolyearRequest) -> dict:
     # die ISBNs jahresspezifisch sind.
     state.caches.form_catalog_cache.clear()
     await hub.broadcast_host(state.state_snapshot())
+    # Alle Klassen-Kontexte weg → Drucker-Displays live nachziehen (die
+    # Schülerauftrag-Bedingung entfällt für jedes Display).
+    await broadcast_printer_displays(state)
     return {"ok": True, "selected": schoolyear}
 
 
@@ -270,6 +274,9 @@ async def open_class(body: OpenClassRequest) -> dict:
         await hub.broadcast_host(state.state_snapshot())
         # Druck-Allowlist dieser Klasse geändert → Helfer-Vorauswahl neu pushen.
         await hub.broadcast_settings(state)
+        # Freigegebene Drucker/Liveausgabe können sich geändert haben → die
+        # Schülerauftrag-Bedingung eines Drucker-Displays live nachziehen.
+        await broadcast_printer_displays(state)
         return {"ok": True, "context_id": existing.id, "count": len(existing.queue), "reused": True}
 
     try:
@@ -311,6 +318,9 @@ async def open_class(body: OpenClassRequest) -> dict:
     ctx.loading = False
     await hub.broadcast_host(state.state_snapshot())
     await hub.broadcast_settings(state)
+    # Neue Klasse mit Liveausgabe/Druck-Allowlist kann die Schülerauftrag-
+    # Bedingung eines Drucker-Displays aktivieren — live nachziehen.
+    await broadcast_printer_displays(state)
     return {"ok": True, "context_id": ctx.id, "count": len(ctx.queue)}
 
 
@@ -351,6 +361,9 @@ async def close_class(body: CloseClassRequest) -> dict:
 
     state.close_context(context_id)
     await hub.broadcast_host(state.state_snapshot())
+    # Klasse (samt Liveausgabe/Druck-Allowlist) weg → Drucker-Displays live
+    # nachziehen (die Schülerauftrag-Bedingung kann jetzt entfallen).
+    await broadcast_printer_displays(state)
     return {"ok": True, "context_id": context_id}
 
 
@@ -397,6 +410,9 @@ async def set_context_printers(body: ContextPrintersRequest) -> dict:
     await hub.broadcast_host(state.state_snapshot())
     # Druck-Allowlist dieser Klasse geändert → Helfer-Vorauswahl neu pushen.
     await hub.broadcast_settings(state)
+    # Freigegebene Drucker geändert → die Schülerauftrag-Bedingung eines
+    # Drucker-Displays live nachziehen.
+    await broadcast_printer_displays(state)
     return {"ok": True, "context_id": context_id, "allowed_printers": (
         None if ctx.allowed_printer_ids is None else sorted(ctx.allowed_printer_ids)
     )}
@@ -426,6 +442,9 @@ async def set_context_live_ausgabe(body: ContextLiveAusgabeRequest) -> dict:
         _require_printer_for_live(ctx.allowed_printer_ids)
     ctx.live_ausgabe = bool(body.live_ausgabe)
     await hub.broadcast_host(state.state_snapshot())
+    # Liveausgabe-Schalter kann die Schülerauftrag-Bedingung eines Drucker-
+    # Displays kippen (s. `AppState._printer_display_students_only`).
+    await broadcast_printer_displays(state)
     return {"ok": True, "context_id": context_id, "live_ausgabe": ctx.live_ausgabe}
 
 

@@ -537,7 +537,7 @@ nextModal.addEventListener('click', (e) => { if (e.target === nextModal) closeNe
 // Bei blockierenden Hinweisen bleibt der Scanner bis zum Schließen gesperrt;
 // clear_book_alert räumt ggfls. die Host-Meldung auf.
 function showBookAlertModal(msg) {
-  const meta = ALERT_META[msg.status] || { title: 'Buch-Hinweis', color: '#f44336' };
+  const meta = HELPER_ALERT_META[msg.status] || { title: 'Buch-Hinweis', color: '#f44336' };
   // book_deleted zerfällt in zwei Fälle (server-seitig per loaned_to
   // unterschieden), beide mit eigener kürzerer Überschrift/Meldung statt der
   // generischen „Ausgemustertes Buch gescannt" + technischen msg:
@@ -750,6 +750,7 @@ function sendPrint(thenNext) {
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random()}`;
   printBtn.disabled = true;
+  currentPrintJob = null;  // neuer Auftrag ersetzt einen etwaigen alten (job_id ändert sich)
   // Druck beginn: aktive `print`-Meldung (Drucker-Status bleibt stehen, bis
   // das Ergebnis/ein neuer Druck ihn ersetzt). Ein aktives wait („Warten …")
   // bleibt parallel sichtbar; ein terminales wait („Scanner bereit") wird
@@ -763,7 +764,55 @@ function sendPrint(thenNext) {
   closePrintModal();
 }
 
-printBtn.addEventListener('click', () => openPrintDialog());
+// ---- Drucker-Nachfrage-Fenster ----
+// Öffnet sich automatisch, wenn der eigene Druckauftrag noch unzugewiesen in
+// der Warteschlange steckt und alle erlaubten Drucker fehlerhaft sind
+// (s. scan-ws.js print_progress); manuell erreichbar über den Druckenbutton,
+// solange der Auftrag noch 'queued' ist (unabhängig von peer_error).
+function closePrinterChangeModal() {
+  printerChangeModal.classList.remove('show');
+  printerChangePicker = null;
+  updateFocusBanner();
+}
+
+function openPrinterChangeModal() {
+  if (!currentPrintJob) return;
+  printerChangeErrEl.textContent = '';
+  printerChangeErrEl.style.display = 'none';
+  printerChangeHintEl.textContent = currentPrintJob.peer_error
+    ? 'Alle erlaubten Drucker sind aktuell fehlerhaft. Bitte einen anderen Drucker wählen.'
+    : 'Auftrag steht noch in der Warteschlange. Drucker ändern?';
+  const preselect = currentPrintJob.allowed === null
+    ? printerPool.map(p => p.id) : (currentPrintJob.allowed || []);
+  printerChangePicker = mountPrinterPicker(printerChangePickerEl, printerPool, preselect);
+  printerChangeModal.classList.add('show');
+  updateFocusBanner();
+}
+
+function sendPrinterChangeUpdate() {
+  if (!ws || ws.readyState !== WebSocket.OPEN || !currentPrintJob) return;
+  const ids = printerChangePicker ? printerChangePicker.getSelectedIds() : [];
+  if (!ids.length) {
+    printerChangeErrEl.textContent = 'Bitte mindestens einen Drucker auswählen.';
+    printerChangeErrEl.style.display = '';
+    return;
+  }
+  ws.send(JSON.stringify({
+    type: 'update_print_printers', job_id: currentPrintJob.job_id, printers: ids,
+  }));
+  closePrinterChangeModal();
+}
+
+printerChangeUpdateBtn.addEventListener('click', sendPrinterChangeUpdate);
+printerChangeCancelBtn.addEventListener('click', closePrinterChangeModal);
+printerChangeModal.addEventListener('click', (e) => {
+  if (e.target === printerChangeModal) closePrinterChangeModal();
+});
+
+printBtn.addEventListener('click', () => {
+  if (currentPrintJob && currentPrintJob.status === 'queued') openPrinterChangeModal();
+  else openPrintDialog();
+});
 modalPrintBtn.addEventListener('click', () => sendPrint(false));
 modalPrintNextBtn.addEventListener('click', () => sendPrint(true));
 modalCancelBtn.addEventListener('click', closePrintModal);
@@ -1448,7 +1497,7 @@ async function setInputMode(mode) {
     inp.id = 'manual-input';
     inp.type = 'text';
     inp.autocomplete = 'off';
-    inp.placeholder = 'Barcode eintippen …';
+    inp.placeholder = 'Barcode scannen …';
     inp.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
@@ -1630,6 +1679,9 @@ window.__scan.closePrintModal = closePrintModal;
 window.__scan.openPrintDialog = openPrintDialog;
 window.__scan.renderOpenWarning = renderOpenWarning;
 window.__scan.sendPrint = sendPrint;
+window.__scan.openPrinterChangeModal = openPrinterChangeModal;
+window.__scan.closePrinterChangeModal = closePrinterChangeModal;
+window.__scan.sendPrinterChangeUpdate = sendPrinterChangeUpdate;
 window.__scan.renderLendWarning = renderLendWarning;
 window.__scan.closeLendModal = closeLendModal;
 window.__scan.sendScan = sendScan;

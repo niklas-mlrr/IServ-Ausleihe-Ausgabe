@@ -44,7 +44,7 @@ function statusSlotEl(slot) {
 // Statustext setzt automatisch wieder normale Schrift. `alertClass` ist eine
 // der drei Farb-CSS-Klassen (`status-alert-red`/`status-alert-orange`/
 // `status-book-issued`) oder `null` für normale Schrift — s. `statusAlertClass()`
-// weiter unten, das sie aus DEMSELBEN `ALERT_META` ableitet, das auch die
+// weiter unten, das sie aus DEMSELBEN `HELPER_ALERT_META` ableitet, das auch die
 // Fenster-Überschrift einfärbt (Statuszeile und Fenster können dadurch nicht
 // mehr auseinanderlaufen). Nimmt PLAIN TEXT entgegen (kein HTML) — schreibt
 // auf textContent, das Entities nicht interpretiert; escapeHtml()-te Strings
@@ -320,6 +320,19 @@ const slipCheck = document.getElementById('slip-second-page');
 const modalPrintBtn = document.getElementById('modal-print');
 const modalPrintNextBtn = document.getElementById('modal-print-next');
 const modalCancelBtn = document.getElementById('modal-cancel');
+const printerChangeModal = document.getElementById('printer-change-modal');
+const printerChangeHintEl = document.getElementById('printer-change-hint');
+const printerChangePickerEl = document.getElementById('printer-change-picker');
+const printerChangeErrEl = document.getElementById('printer-change-error');
+const printerChangeUpdateBtn = document.getElementById('printer-change-update');
+const printerChangeCancelBtn = document.getElementById('printer-change-cancel');
+// Live-Status des eigenen zuletzt gestarteten Druckauftrags (aus
+// 'print_progress' gepflegt, s. scan-ws.js) — {job_id, status, allowed,
+// peer_error} oder null. Treibt die Druckenbutton-Umschaltung (normaler
+// Start-Dialog vs. Drucker-Nachfrage-Fenster) sowie das automatische
+// Öffnen/Schließen des Nachfrage-Fensters.
+let currentPrintJob = null;
+let printerChangePicker = null;
 const nextModal = document.getElementById('next-modal');
 const nextWarnEl = document.getElementById('next-warn');
 const modalNextConfirmBtn = document.getElementById('modal-next-confirm');
@@ -345,8 +358,12 @@ const OK_STATUSES = new Set(['staged', 'booked']);
 // Bei diesen Ergebnissen bleibt der Helfer-Scan bis zum bewussten Schließen
 // des Hinweises gesperrt; dabei wird auch die Host-Meldung aufgeräumt.
 const BLOCKING_STATUSES = new Set(['book_deleted', 'not_in_stock']);
-// status → {title, color} für das Hinweis-Modal.
-const ALERT_META = {
+// status → {title, color} für das Hinweis-Modal. Eigener Name (nicht
+// `ALERT_META`), weil `common.js` bereits eine gleichnamige Konstante für
+// Schülerclient/Scan-Station deklariert (dritte statt zweite Person: „an den
+// Schüler" statt „an dich") — beide Skripte teilen sich in scan.html dieselbe
+// Top-Level-Scope, ein Namensgleichlauf wäre ein `SyntaxError` (Redeclaration).
+const HELPER_ALERT_META = {
   book_deleted:        { title: 'Ausgemustertes Buch gescannt',  color: '#f44336' },
   not_in_stock:        { title: 'Buch bereits verliehen',        color: '#f44336' },
   book_already_lent:   { title: 'Buch bereits an den Schüler verliehen', color: '#e69500' },
@@ -357,7 +374,7 @@ const ALERT_META = {
   error:               { title: 'Fehler bei der Prüfung',         color: '#f44336' },
 };
 // Statuszeilen-Farbklasse für einen scan_result-Status — abgeleitet aus
-// ALERT_META.color, damit Statuszeile und Fenster-Überschrift IMMER
+// HELPER_ALERT_META.color, damit Statuszeile und Fenster-Überschrift IMMER
 // dieselbe Farbe haben. Rot ist reserviert für Status, die am Schüler-
 // Client ein Schließen durch den Host erfordern (book_deleted, not_in_stock)
 // — sowie error (technisches Problem, keine sichere Aussage möglich); alle
@@ -367,7 +384,7 @@ const ALERT_META = {
 function statusAlertClass(status) {
   if (status === 'booked') return 'status-book-issued';
   if (OK_STATUSES.has(status)) return null;
-  const meta = ALERT_META[status];
+  const meta = HELPER_ALERT_META[status];
   return meta && meta.color === '#e69500' ? 'status-alert-orange' : 'status-alert-red';
 }
 function computeOpenBooks() {

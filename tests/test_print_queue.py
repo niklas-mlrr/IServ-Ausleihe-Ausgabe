@@ -305,7 +305,7 @@ def test_confirm_slip_received_pushes_own_slip_before_closed_when_no_signature(
     assert types.index("own_slip_download") < types.index("closed")
     own_slip = next(m for m in student_ws.sent if m["type"] == "own_slip_download")
     assert base64.b64decode(own_slip["data_b64"]) == b"%PDF-own-slip"
-    assert own_slip["filename"] == "Schülerleihschein Test, Schüler.pdf"
+    assert own_slip["filename"] == "Schülerleihschein Test, Schüler, 10a.pdf"
 
 
 def test_confirm_slip_received_completion_survives_own_slip_fetch_failure(monkeypatch):
@@ -387,7 +387,7 @@ def test_prefetch_own_slip_caches_and_send_uses_cache(monkeypatch):
     asyncio.run(sessions._prefetch_own_slip(st, 46))
     assert calls == [(46, "student", "3months")]
     assert session.own_slip_data_b64 is not None
-    assert session.own_slip_filename == "Schülerleihschein Test, Schüler.pdf"
+    assert session.own_slip_filename == "Schülerleihschein Test, Schüler, 10a.pdf"
 
     # Abschluss nutzt den Cache — kein weiterer IServ-Fetch (get_student_info
     # würde sonst werfen), `own_slip_download` kommt an.
@@ -395,7 +395,7 @@ def test_prefetch_own_slip_caches_and_send_uses_cache(monkeypatch):
     assert calls == [(46, "student", "3months")]  # unverändert
     own_slip = next(m for m in student_ws.sent if m["type"] == "own_slip_download")
     assert base64.b64decode(own_slip["data_b64"]) == b"%PDF-own-slip"
-    assert own_slip["filename"] == "Schülerleihschein Test, Schüler.pdf"
+    assert own_slip["filename"] == "Schülerleihschein Test, Schüler, 10a.pdf"
 
 
 @pytest.mark.parametrize(
@@ -1744,3 +1744,118 @@ def test_print_job_states_waiting_then_printing(monkeypatch):
     # Nach Fertigstellung: nicht mehr in-flight, slip_status None.
     assert pq.print_job_states() == {}
     assert slip_status_flag() is None
+
+
+# ---- update_job_printers (Drucker-Nachfrage bei feststeckendem Auftrag) --
+
+
+def test_update_job_printers_ok_preserves_position_and_redispatches(monkeypatch):
+    """Erfolgreicher Wechsel mutiert `allowed_printers` in-place (Job bleibt an
+    seinem Platz in `waiting`, also unveränderte Warteposition) und weckt den
+    Scheduler — mit einem jetzt erlaubten, gesunden Drucker dispatcht der
+    nächste `_step()` den Auftrag dorthin."""
+    st = AppState()
+    st.settings.printers = _two_printers()
+    _patch(monkeypatch, st)
+    pq = st.print_queue
+    p1, p2 = st.settings.printers
+    pq.faulty_printers.add("p1")
+    pq.faulty_printers.add("p2")
+    ha = HelperSession(token="tok-a", name="T")
+    ha.ws = _FakeWS()
+    st.helper_sessions["tok-a"] = ha
+    stuck = _job("helper", 1, helper_token="tok-a", name="A", allowed={"p1"})
+    # `other` erlaubt nur p1 — bleibt stecken, konkurriert nicht um das
+    # gleich reaktivierte p2, damit der Test isoliert nur `stuck` beobachtet.
+    other = _job("helper", 2, name="B", allowed={"p1"})
+    pq.waiting.extend([other, stuck])
+    idx_before = pq.waiting.index(stuck)
+
+    async def run():
+        result = await pq.update_job_printers(stuck.id, ("helper", "tok-a"), ["p2"])
+        assert result == "ok"
+        assert stuck.allowed_printers == {"p2"}
+        # Position in `waiting` unverändert (kein Pop/Insert).
+        assert pq.waiting.index(stuck) == idx_before
+        assert stuck in pq.waiting
+        # Nachfrage-Payload informiert über die neue Auswahl.
+        prog = [m for m in ha.ws.sent if m["type"] == "print_progress"]
+        assert prog and prog[-1]["allowed_printers"] == ["p2"]
+        # p2 reaktivieren → nächster Scheduler-Schritt dispatcht den Auftrag dorthin.
+        pq.reactivate("p2")
+        claims = await _claim(pq, st.settings.printers)
+        assert [c[0] for c in claims] == ["p2"]
+        assert stuck not in pq.waiting
+
+    asyncio.run(run())
+
+
+def test_update_job_printers_forbidden_for_non_owner(monkeypatch):
+    """Ein anderer Helfer (nicht der Urheber) darf den Auftrag nicht umbuchen."""
+    st = AppState()
+    st.settings.printers = _two_printers()
+    _patch(monkeypatch, st)
+    pq = st.print_queue
+    job = _job("helper", 1, helper_token="tok-owner", name="A", allowed={"p1"})
+    pq.waiting.append(job)
+
+    async def run():
+        result = await pq.update_job_printers(job.id, ("helper", "tok-other"), ["p2"])
+        assert result == "forbidden"
+        assert job.allowed_printers == {"p1"}
+
+    asyncio.run(run())
+
+
+def test_update_job_printers_forbidden_for_wrong_host_sid(monkeypatch):
+    """Host-Urheberschaft wird über `host_sid` geprüft, nicht generisch."""
+    st = AppState()
+    st.settings.printers = _two_printers()
+    _patch(monkeypatch, st)
+    pq = st.print_queue
+    job = _job("host", 1, host_sid="sid-a", name="A", allowed={"p1"})
+    pq.waiting.append(job)
+
+    async def run():
+        result = await pq.update_job_printers(job.id, ("host", "sid-b"), ["p2"])
+        assert result == "forbidden"
+
+    asyncio.run(run())
+
+
+def test_update_job_printers_not_waiting_once_dispatched(monkeypatch):
+    """Ein bereits dispatchter (nicht mehr in `waiting` stehender) Auftrag darf
+    laut Spezifikation nicht mehr umgebucht werden."""
+    st = AppState()
+    st.settings.printers = _two_printers()
+    _patch(monkeypatch, st)
+    pq = st.print_queue
+    job = _job("helper", 1, helper_token="tok-a", name="A")
+    job.status = "spooled"
+    pq.slots["p1"] = print_queue._Slots(jobs=[job])
+
+    async def run():
+        result = await pq.update_job_printers(job.id, ("helper", "tok-a"), ["p2"])
+        assert result == "not_waiting"
+
+    asyncio.run(run())
+
+
+def test_update_job_printers_empty_selection_rejected(monkeypatch):
+    """Leere/ungültige Drucker-Auswahl (keine ID im aktuellen Pool) wird
+    abgelehnt — der Auftrag bleibt unverändert stecken."""
+    st = AppState()
+    st.settings.printers = _two_printers()
+    _patch(monkeypatch, st)
+    pq = st.print_queue
+    job = _job("helper", 1, helper_token="tok-a", name="A", allowed={"p1"})
+    pq.waiting.append(job)
+
+    async def run():
+        assert await pq.update_job_printers(job.id, ("helper", "tok-a"), []) == "empty"
+        assert await pq.update_job_printers(
+            job.id, ("helper", "tok-a"), ["not-in-pool"]
+        ) == "empty"
+        assert job.allowed_printers == {"p1"}
+
+    asyncio.run(run())

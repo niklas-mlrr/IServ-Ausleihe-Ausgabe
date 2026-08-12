@@ -14,6 +14,7 @@ from ..hub import get_hub
 from ..ratelimit import join_limiter
 from ..sessions import (
     broadcast_displays,
+    broadcast_printer_displays,
     create_student_session,
     gen_join_secret,
     invalidate_session,
@@ -331,6 +332,10 @@ async def student_pair(body: StudentPairRequest) -> dict:
     # Der QR bleibt unverändert; bereits angezeigte Displays brauchen kein Update.
 
     await hub.broadcast_host(state.state_snapshot())
+    # Frisch zugeordneter Modus-B-Schüler kann die Schülerauftrag-Bedingung
+    # eines Drucker-Displays aktivieren (s.
+    # `AppState._printer_display_students_only`) — Displays live nachziehen.
+    await broadcast_printer_displays(state)
     session.load_task = asyncio.create_task(
         load_and_push_paired_student(state, hub, session, student, info)
     )
@@ -441,6 +446,10 @@ async def student_helper_join(body: HelperJoinRequest) -> dict:
     student.status = "active"
 
     await hub.broadcast_host(state.state_snapshot())
+    # Frisch zugeordneter Modus-B-Schüler kann die Schülerauftrag-Bedingung
+    # eines Drucker-Displays aktivieren (s.
+    # `AppState._printer_display_students_only`) — Displays live nachziehen.
+    await broadcast_printer_displays(state)
     session.load_task = asyncio.create_task(
         load_and_push_paired_student(state, hub, session, student, info)
     )

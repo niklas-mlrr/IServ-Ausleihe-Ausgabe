@@ -193,7 +193,7 @@
     /* Die dynamischen Display-Reiter liegen in einem <span>-Wrapper; display:
        contents lässt sie direkt am Flex der .pd-tabs-Leiste teilnehmen, damit
        Höhen + Border mit dem statischen Queue-Reiter ausrichten. */
-    #pd-tab-list { display: contents; }
+    #pd-tab-list, #ss-tab-list { display: contents; }
     .pd-tabs .pd-tab, .pd-tabs .pd-tab-add {
       background: transparent; color: var(--text-muted);
       padding: 6px 12px; font-size: .85rem; cursor: pointer;
@@ -228,6 +228,16 @@
       margin-left: auto; }
     .pdd-section-label { font-size: .8rem; font-weight: 700; text-transform: uppercase;
       letter-spacing: .04em; opacity: .7; margin: 16px 0 8px; }
+    /* Scan-Station-Druckzeile unten im Pairing-Kasten: „Scan-Station: [Schüler]
+       [Drucken]". Nutzt die Reiter-/Panel-Styles der Drucker-Displays mit. */
+    .ctx-station-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+      border-top: 1px solid var(--border); margin-top: 12px; padding-top: 12px; }
+    .ctx-station-row .ctx-station-label { font-size: .8rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .04em; opacity: .7; }
+    .ctx-station-row select { flex: 1; min-width: 160px; margin-bottom: 0; }
+    /* Station-Panel: belegter Schüler als Hinweiszeile + Freigeben-Knopf. */
+    .ssd-busy { display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+      font-size: .9rem; margin-top: 10px; }
     /* Drucker-Boxen: Kästchen pro zugewiesenen Drucker, Drag umsortierbar,
        × entfernt; ganz rechts eine gestrichelte „+"-Box zum Hinzufügen. */
     .pd-box-grid { display: flex; flex-wrap: wrap; gap: 10px; }
@@ -513,11 +523,32 @@
     }
     .ns-tile {
       background: var(--info-tint); border-radius: 10px; padding: 14px;
-      display: flex; flex-direction: column; gap: 8px;
+      display: flex; flex-direction: column; gap: 4px;
     }
     .ns-name { font-size: 1.35rem; font-weight: 700; line-height: 1.15; }
-    .ns-meta { font-size: .85rem; color: var(--text-muted); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-    .ns-class { margin-right: auto; }
+    /* Info-Block direkt unter dem Namen: zwei Spalten, links bündig der
+       Schülercode (1. Zeile) und die Klasse (2. Zeile), rechts bündig der
+       Stationsname (+ Symbol + Trennen-Knopf, 1. Zeile) und der Status
+       (2. Zeile). Zeilen dicht beieinander (gap: 1px). */
+    .ns-info-grid {
+      font-size: .85rem; display: flex; justify-content: space-between;
+      align-items: flex-start; gap: 10px; line-height: 1.3;
+    }
+    .ns-info-left { display: flex; flex-direction: column; gap: 1px; text-align: left; }
+    .ns-info-right { display: flex; flex-direction: column; gap: 1px; align-items: flex-end; text-align: right; }
+    .ns-code { color: var(--info); font-weight: 600; letter-spacing: .04em; }
+    .ns-class { color: var(--text-muted); }
+    .ns-station-name { color: var(--text-muted); display: flex; align-items: center; gap: 4px; min-height: 1.4em; }
+    /* Kleiner Trennen-Knopf direkt neben dem Stationsnamen — nur sichtbar,
+       solange der Schüler tatsächlich an einer Station angemeldet ist
+       (separat vom allgemeinen „Trennen" unten, meldet NUR von der Station
+       ab). Kompakter als die regulären Icon-Buttons, daher eigene Maße. */
+    .ns-station-disconnect {
+      width: 20px; height: 20px; padding: 0; border: none; background: transparent;
+      color: inherit; opacity: .65; display: inline-flex; align-items: center; justify-content: center;
+    }
+    .ns-station-disconnect:hover { opacity: 1; color: var(--danger); }
+    .ns-station-disconnect .ico { width: 14px; height: 14px; }
     .ns-status, .ns-helper { color: var(--info); }
     .ns-status-progress {
       display: inline-flex; flex-direction: column; align-items: flex-end;
@@ -553,9 +584,27 @@
       box-shadow: 0 6px 24px rgba(0, 0, 0, .5);
       opacity: 0; transform: translateY(8px);
       transition: opacity .2s, transform .2s;
+      pointer-events: auto;
     }
     .toast.show { opacity: 1; transform: translateY(0); }
     .toast-warn { background: #c0392b; color: #fff; font-weight: 600; }
+    /* Drucker-Nachfrage im Toast (nur solange der Auftrag 'queued' ist, s.
+       renderPrintToast in host-render.js): Hinweiszeile klickbar (öffnet/
+       schließt den eingebetteten Picker), Picker + Button möglichst kompakt
+       (nur Text-Höhe + etwas Puffer), damit der Toast nicht unnötig hoch wird. */
+    .toast-line-clickable { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
+    .toast-printer-picker { margin-top: 6px; }
+    .toast-printer-picker .pp-trigger { padding: 3px 8px; font-size: .82rem; border-radius: 6px; }
+    .toast-printer-picker .pp-panel { padding: 4px; font-size: .85rem; }
+    .toast-printer-picker .pp-row { padding: 3px 4px; }
+    .toast-printer-picker-error { margin: 4px 0 0; color: #ffb3b3; font-weight: 700; font-size: .8rem; }
+    .toast-printer-update-btn {
+      margin-top: 6px; width: 100%; padding: 4px 8px; border-radius: 6px;
+      border: none; background: var(--accent, #2e7d32); color: #fff;
+      font-size: .82rem; font-weight: 600; cursor: pointer; line-height: 1.3;
+    }
+    .toast-printer-update-btn:hover { filter: brightness(1.08); }
+    .toast-printer-update-btn:disabled { opacity: .6; cursor: not-allowed; }
     /* Sticky Tabellenkopf — klebt am oberen Rand des .table-scroll-Containers.
        border-collapse:separate, sonst bleibt der th-Hintergrund nicht deckend (Chrome-Bug). */
     .queue-table { border-collapse: separate; border-spacing: 0; }
@@ -631,6 +680,9 @@
     .pp-row:hover { background: var(--surface-3); border-radius: 4px; }
     .pp-row input { flex: none; width: 16px; height: 16px; margin: 0; accent-color: var(--accent); cursor: pointer; }
     .pp-empty { padding: 8px; color: var(--text-muted); font-size: .85rem; }
+    /* Fehlerhafter/deaktivierter Drucker: ausgegraut mit Hinweis, aber weiterhin anwählbar (nicht disabled). */
+    .pp-row-faulty { opacity: .55; font-style: italic; }
+    .pp-faulty-hint { opacity: .85; font-style: normal; font-size: .8em; }
     /* Druck-Dialog-Hinweis (Leer-Auswahl): eigene Zeile direkt unter dem Dropdown,
        rot wie die Statuszeile (.txt-danger = --danger-text). */
     #print-dialog-picker-error { color: var(--danger-text); font-weight: 700; font-size: .9rem; }
