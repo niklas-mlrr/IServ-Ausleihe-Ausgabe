@@ -1,7 +1,7 @@
 """Tests für die Lehrkraft-Statusansicht (`/teacher`, docs/teacher_status_page_plan.md).
 
 Pairing-Flow (QR minten/ersetzen, Autorisieren, Trennen), den token-
-authentifizierten Statuswechsel-Endpunkten (`pending <-> skipped`), die
+authentifizierten Statuswechsel-Endpunkten (`pending <-> absent`), die
 `teacher_snapshot`-Privacy (keine anderen Klassen/Bücher/Zahldaten/Drucker/
 Host-Einstellungen), Klassen-Isolation, WebSocket-Pairing/Reconnect/
 Entwertung sowie die Teardown-Pfade (Klasse schließen, Schuljahreswechsel).
@@ -545,6 +545,12 @@ def test_undo_skip_only_from_absent(client, ctx):
         token="tok", context_id=c.id, registration_code="AAAA", authorized=True
     )
     # Noch pending -> 409
+    r = client.post("/api/teacher/undo-skip", json={"token": "tok", "student_id": 100})
+    assert r.status_code == 409
+
+    # Ein vom Host übersprungener Schüler ist kein Lehrer-Abwesenheitsstatus
+    # und darf über diesen Endpunkt ebenfalls nicht zurückgesetzt werden.
+    c.queue[0].status = "skipped"
     r = client.post("/api/teacher/undo-skip", json={"token": "tok", "student_id": 100})
     assert r.status_code == 409
 

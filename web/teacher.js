@@ -5,7 +5,7 @@
 // s. server/state.py::AppState.teacher_snapshot). Der Lehrkraft sind zwei
 // Aktionen erlaubt: ein wartender Schüler wird per Wisch-Geste (nach links,
 // Touch-first via Pointer Events) als abwesend markiert bzw. per Button
-// zurückgesetzt (`pending <-> skipped`); zusätzlich kann sie je abgeschlossenem
+// zurückgesetzt (`pending <-> absent`); zusätzlich kann sie je abgeschlossenem
 // Schüler den unterschriebenen Leihschein einmalig als entgegengenommen
 // markieren kann (`slip_collected`, rein informativ; nur bei aktivem
 // `done_collected`).
@@ -119,7 +119,10 @@
       const currentSlipState = slipActionState.get(s.student_id);
       const name = `${escapeHtml(s.lastname)}, ${escapeHtml(s.firstname)}`;
       let extra = '';
-      if ((s.status === 'skipped' || s.status === 'absent') && !s.auto_skipped) {
+      // Nur die Lehrkraft-Aktion erzeugt `absent` und darf hier zurückgenommen
+      // werden. Host-übersprungene Schüler (`skipped`) bleiben ebenso wie
+      // `done + auto_skipped` reine Anzeige.
+      if (s.status === 'absent') {
         extra = `<button class="act" data-undo="${s.student_id}">Nicht abwesend</button>`;
       } else if (s.status === 'done' && data.done_collected === true && s.slip_printed) {
         // Abwesender, dessen Bücher ein Helfer eingescant hat: die Lehrkraft

@@ -9,7 +9,7 @@
 Eine Lehrkraft einer laufenden Modus-B-Klasse kann auf einem eigenen Gerät den
 Fortschritt **ausschließlich dieser Klasse** live verfolgen. Die Ansicht zeigt
 alle Schüler mit ihrem aktuellen Ausgabestatus und erlaubt nur, wartende Schüler
-als abwesend zu überspringen bzw. diese Aktion rückgängig zu machen. Bei
+als abwesend zu markieren bzw. diese Aktion rückgängig zu machen. Bei
 abgeschlossenen Schülern kann ein gedruckter Leihschein einmalig als
 entgegengenommen markiert werden.
 
@@ -85,12 +85,16 @@ versehentlicher QR-Klick keine laufende Ansicht unterbricht.
 - `/teacher` ist mobil lesbar, hat keine Host-/Buchungs-/Druck-Steuerung und
   zeigt Klasse sowie die fünf getrennten Summen `abgeschlossen / aktiv / offen /
   übersprungen / abwesend`.
-- Bei `pending` darf die Lehrkraft „Als abwesend überspringen" auswählen;
-  ein Bestätigungsdialog verhindert Fehlklicks.
-- Bei `skipped` darf sie „Wieder auf wartend setzen" wählen.
-- Der Server erlaubt nur `pending -> skipped` und `skipped -> pending`.
-  `active` und `done` bleiben vollständig hostgesteuert, damit eine Lehrkraft
-  weder eine laufende Ausgabe beendet noch einen Abschluss vortäuscht.
+- Bei `pending` darf die Lehrkraft „Als abwesend markieren" auswählen; die
+  Wischweite dient als Bestätigung.
+- Bei `absent` darf sie „Nicht abwesend" wählen; ein Bestätigungsdialog schützt
+  die Rücknahme.
+- Bei `skipped` zeigt die Ansicht nur „Übersprungen" an. Host-übersprungene
+  Schüler — einschließlich `done + auto_skipped` — haben keine Lehreraktion.
+- Der Server erlaubt nur `pending -> absent` und `absent -> pending`.
+  `skipped` bleibt der Host-/Auto-Skip-Status; `active` und `done` bleiben
+  vollständig hostgesteuert, damit eine Lehrkraft weder eine laufende Ausgabe
+  beendet noch einen Abschluss vortäuscht.
 - Bei aktiviertem `done_collected` und gedrucktem Leihschein setzt der Button
   „Leihschein entgegengenommen" den Marker einmalig. Die Aktion ist für die
   Lehrkraft nicht rücknehmbar und bei erneutem Aufruf idempotent. Der globale
@@ -115,7 +119,8 @@ versehentlicher QR-Klick keine laufende Ansicht unterbricht.
    Trennen im konkreten Klassen-Tab.
 5. Teacher-UI: neue `web/teacher.html`/`web/teacher.js` und Clean-Route
    `/teacher`; responsive Statusliste, fünf getrennte Zähler,
-   Leer-/Offline-/Sperrstatus, Skip/Undo-Dialoge, irreversible
+   Leer-/Offline-/Sperrstatus, Abwesenheits-Wisch-Geste und Rücknahme-Dialog,
+   irreversible
    Leihschein-Aktion und Sortierung.
 6. Tests: Token-/Autorisierungs-/Klassen-Isolation, Snapshot-Privacy,
    erlaubte und verbotene Statusübergänge, WebSocket-Pairing, Live-Updates,
@@ -132,7 +137,9 @@ versehentlicher QR-Klick keine laufende Ansicht unterbricht.
   und Rücknahme ohne Reload live.
 - Die fünf Lehrerzähler sind getrennt und summieren sich exakt auf die Zahl der
   Schüler in der Liste, einschließlich der `auto_skipped`-Abbildung.
-- Ein Lehrer kann nur `pending <-> skipped` für Schüler seiner Klasse ändern.
+- Ein Lehrer kann nur `pending <-> absent` für Schüler seiner Klasse ändern;
+  `skipped` und `done + auto_skipped` bleiben in der Lehreransicht
+  aktionslos sichtbar.
 - Die Leihschein-Aktion setzt nur `false -> true` (idempotent bei `true`);
   ein Zurücknehmen durch die Lehrkraft wird abgewiesen. `reset_progress()` darf
   den Marker für einen neuen Durchlauf löschen.

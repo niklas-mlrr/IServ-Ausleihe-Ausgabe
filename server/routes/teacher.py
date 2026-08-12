@@ -1,7 +1,7 @@
 """Lehrkraft-Statusansicht (`/teacher`) — Live-Fortschritt genau einer
 Modus-B-Klasse für ein eigenes Lehrkraft-Gerät. Host-Endpunkte für QR-Minten,
 Autorisieren und Trennen; öffentliche, token-authentifizierte Endpunkte für
-die der Lehrkraft erlaubten Aktionen (`pending <-> skipped` sowie die
+die der Lehrkraft erlaubten Aktionen (`pending <-> absent` sowie die
 einmalige Setz-Aktion „Leihschein entgegengenommen"). Die Lehrkraft selbst
 verbindet sich unauthentifiziert (per Cookie) via `/ws/teacher?token=...`
 (s. routes/ws.py) und sieht vor der Host-Freischaltung ausschließlich den

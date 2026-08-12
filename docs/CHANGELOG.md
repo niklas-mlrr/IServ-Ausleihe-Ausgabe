@@ -8,6 +8,18 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-12 — Lehreransicht: Host-Übersprungen und Abwesend getrennt behandeln
+
+- Die Lehreransicht rendert den Rücknahme-Button „Nicht abwesend" nur noch
+  für `status == "absent"`. Host-übersprungene Schüler (`skipped`) erscheinen
+  als „Übersprungen" und bleiben ohne Lehreraktion.
+- Die bestehende `auto_skipped`-Semantik bleibt erhalten: automatisch beim
+  Klassen-Laden fertig gesetzte Schüler werden in der Lehreransicht als
+  `skipped` dargestellt und bleiben aktionslos.
+- Modul-/Plantexte und der Teacher-Test für das Rücknahme-Gate verwenden nun
+  den tatsächlichen Lehrer-Übergang `pending <-> absent`; `skipped` bleibt der
+  Host-/Auto-Skip-Status.
+
 ## 2026-08-12 — Lehreransicht: fünf Statuszähler, irreversible Leihschein-Aktion und Sortierung
 
 - Die fünf Lehrerzähler bleiben getrennt: **abgeschlossen**, **aktiv**,
