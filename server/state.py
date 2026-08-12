@@ -168,6 +168,7 @@ class QueueStudent:
         assigned_helper_name: str | None = None,
         station_name: str | None = None,
         station_code: str | None = None,
+        station_reactivate_code: str | None = None,
     ) -> dict:
         return {
             "student_id": self.student_id,
@@ -190,6 +191,12 @@ class QueueStudent:
             # ohnehin; die Helferclient-Queue-Pfade lassen ihn bewusst weg
             # (Credential, s. PLAN §3.7 — nicht an weniger vertraute Rollen).
             "station_code": station_code,
+            # Entwerteter Zettel-Code, der bei einem erneuten „Erstellen" per
+            # Checkbox reaktiviert werden kann (`AppState.
+            # station_reactivate_code`) — NUR im Host-Snapshot befüllt, gleiche
+            # Begründung wie bei `station_code`. `None` = kein Vorschlag (noch
+            # nie entwertet, oder der Code ist gerade aktiv).
+            "station_reactivate_code": station_reactivate_code,
             "books_total": self.books_total,
             "books_done": len(self.done_isbns),
             "books_empty_outstanding": self.books_empty_outstanding,
@@ -820,15 +827,29 @@ class AppState:
         # Vorrat (10 000) ist gegenüber einem Ausgabetag reichlich bemessen.
         self.station_codes: dict[str, int] = {}
         self.station_code_by_student: dict[int, str] = {}
+        # Letzter (auch entwerteter) Zettel-Code je Schüler — überlebt eine
+        # Entwertung (`invalidate_station_code`, s. „Trennen" am Host) und
+        # dient dort als Vorschlag zur Reaktivierung beim nächsten „Erstellen"
+        # (`allocate_station_code(reactivate_old=True)`). Wird bei jeder
+        # Neuvergabe überschrieben, zeigt also immer auf den zuletzt
+        # vergebenen Code, egal ob reaktiviert oder frisch gezogen.
+        self.station_last_code_by_student: dict[int, str] = {}
 
     # -----------------------------------------------------------------
     # Scan-Station: Zettel-Codes
     # -----------------------------------------------------------------
 
-    def allocate_station_code(self, student_id: int) -> str:
+    def allocate_station_code(self, student_id: int, *, reactivate_old: bool = True) -> str:
         """Vierstelligen Zettel-Code des Schülers liefern — vorhandenen wieder,
         sonst einen neuen ziehen. Damit druckt ein Nachdruck garantiert
         denselben Code (der erste Zettel bleibt gültig).
+
+        Wurde der Code des Schülers zuvor entwertet (`invalidate_station_code`,
+        „Trennen" am Host) und `reactivate_old` ist wahr (Default — Checkbox
+        „Alten Code reaktivieren" im Host-Druckdialog), lebt genau dieser alte
+        Code wieder auf, statt einen neuen zu ziehen — ein bereits gedruckter
+        Zettel bleibt dann gültig. Bei `reactivate_old=False` (Checkbox
+        abgewählt) wird immer ein frischer Code gezogen.
 
         Ist der Vorrat erschöpft (theoretisch: 10 000 vergebene Codes in einer
         Laufzeit), wird `RuntimeError` geworfen statt einen Code doppelt zu
@@ -837,6 +858,12 @@ class AppState:
         existing = self.station_code_by_student.get(student_id)
         if existing is not None:
             return existing
+        if reactivate_old:
+            old = self.station_last_code_by_student.get(student_id)
+            if old is not None and old not in self.station_codes:
+                self.station_codes[old] = student_id
+                self.station_code_by_student[student_id] = old
+                return old
         if len(self.station_codes) >= 10_000:
             raise RuntimeError("Keine freien Scan-Station-Codes mehr — Server neu starten")
         while True:
@@ -845,7 +872,26 @@ class AppState:
                 break
         self.station_codes[code] = student_id
         self.station_code_by_student[student_id] = code
+        self.station_last_code_by_student[student_id] = code
         return code
+
+    def invalidate_station_code(self, student_id: int) -> None:
+        """Aktiven Zettel-Code eines Schülers entwerten („Trennen" am Host) —
+        die Station nimmt ihn danach nicht mehr an. Bleibt in
+        `station_last_code_by_student` als Vorschlag für eine Reaktivierung
+        beim nächsten „Erstellen" gemerkt. Idempotent (kein aktiver Code =
+        No-op)."""
+        code = self.station_code_by_student.pop(student_id, None)
+        if code is not None:
+            self.station_codes.pop(code, None)
+
+    def station_reactivate_code(self, student_id: int) -> str | None:
+        """Zuletzt entwerteter Zettel-Code eines Schülers, den ein „Erstellen"
+        reaktivieren könnte — nur solange gerade KEIN Code aktiv ist (sonst ist
+        er ohnehin schon gültig, s. `_queue_student_as_dict`)."""
+        if student_id in self.station_code_by_student:
+            return None
+        return self.station_last_code_by_student.get(student_id)
 
     def student_id_for_station_code(self, code: str) -> int | None:
         """Schüler zu einem gescannten Zettel-Code; `None` = unbekannt."""
@@ -1006,11 +1052,16 @@ class AppState:
             self.station_code_by_student.get(student.student_id)
             if include_station_code else None
         )
+        station_reactivate_code = (
+            self.station_reactivate_code(student.student_id)
+            if include_station_code else None
+        )
         return student.as_dict(
             slip_status=slip_status,
             assigned_helper_name=helper.name if helper is not None else None,
             station_name=station_name,
             station_code=station_code,
+            station_reactivate_code=station_reactivate_code,
         )
 
     def queue_as_list(

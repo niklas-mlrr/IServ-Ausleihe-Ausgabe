@@ -119,6 +119,10 @@ class PrintJob:
     # Drucker-Display genauso erscheinen wie ein Host-Leihschein. Er ist aber
     # KEIN Leihschein: `_mark_slip_printed_after_completion` überspringt ihn.
     kind: JobKind = "slip"
+    # Nur für `kind="station_sheet"`: Checkbox „Alten Code reaktivieren" aus
+    # dem Host-Druckdialog — s. `sessions.print_station_sheet_for`/
+    # `AppState.allocate_station_code`. Für `kind="slip"` ungenutzt.
+    reactivate_station_code: bool = True
     helper_token: str | None = None  # Urheber ist ein Helfer (WS-Ziel)
     host_sid: str | None = None  # Urheber ist ein Host-Browser (sid-Ziel)
     # Urheber ist ein Schülerclient (Modus B, Druckmodus): Session-Token als
@@ -829,7 +833,10 @@ class PrintQueue:
                 from .sessions import print_station_sheet_for
 
                 return await print_station_sheet_for(
-                    get_state(), job.student_id, printer_name=printer_name
+                    get_state(),
+                    job.student_id,
+                    printer_name=printer_name,
+                    reactivate_old_code=job.reactivate_station_code,
                 )
             return await print_loan_slip_for(
                 get_state(), job.student_id, pages=job.pages, printer_name=printer_name

@@ -592,7 +592,7 @@
        renderPrintToast in host-render.js): Hinweiszeile klickbar (öffnet/
        schließt den eingebetteten Picker), Picker + Button möglichst kompakt
        (nur Text-Höhe + etwas Puffer), damit der Toast nicht unnötig hoch wird. */
-    .toast-line-clickable { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
+    .toast-line-clickable { cursor: pointer; }
     .toast-printer-picker { margin-top: 6px; }
     .toast-printer-picker .pp-trigger { padding: 3px 8px; font-size: .82rem; border-radius: 6px; }
     .toast-printer-picker .pp-panel { padding: 4px; font-size: .85rem; }
@@ -665,7 +665,11 @@
     :root[data-theme="light"] #print-dialog .modal-check { color: var(--text); }
     @media (prefers-color-scheme: light) { :root:not([data-theme]) #print-dialog .modal-check { color: var(--text); } }
     /* Druckerauswahl-Dropdown (common.js mountPrinterPicker, überm Leihschein-Checkbox) */
-    .printer-picker { position: relative; }
+    /* color explizit (nicht vom Elternelement geerbt) — sonst würde der Picker
+       innerhalb eines .toast-warn (roter Hintergrund, weißer Text) dessen
+       Textfarbe übernehmen, obwohl sein eigener Hintergrund (--surface-2)
+       unverändert dunkel bleibt. */
+    .printer-picker { position: relative; color: var(--text); }
     .pp-trigger { display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 12px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: .9rem; cursor: pointer; }
     .pp-trigger:hover { background: var(--surface-3); }
     .pp-trigger:disabled { cursor: not-allowed; opacity: .5; }

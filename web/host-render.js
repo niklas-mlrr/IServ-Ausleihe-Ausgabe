@@ -565,11 +565,25 @@ window.__host = window.__host || {};
       const box = modal.querySelector('.modal-box');
       const slipCb = document.getElementById('print-dialog-slip');
       const slipRow = document.getElementById('print-dialog-slip-row');
+      const reactivateCb = document.getElementById('print-dialog-reactivate');
+      const reactivateRow = document.getElementById('print-dialog-reactivate-row');
+      const reactivateText = document.getElementById('print-dialog-reactivate-text');
       const titleEl = document.getElementById('print-dialog-title');
       titleEl.textContent = sheet
         ? (reprint ? 'Zettel für Scan-Station drucken' : 'Zettel für Scan-Station erstellen')
         : 'Leihschein drucken';
       slipRow.style.display = sheet ? 'none' : '';
+      // Checkbox „Alten Code reaktivieren": nur beim ersten Erstellen nach
+      // einem „Trennen" relevant — der Schüler hatte einen entwerteten
+      // Zettel-Code (`station_reactivate_code`, s. `AppState.
+      // station_reactivate_code`). Beim Nachdruck (reprint) ist der Code
+      // ohnehin schon aktiv, dort erscheint die Checkbox nicht.
+      const reactivateCode = sheet && !reprint
+        ? (findStudentInState(studentId) || {}).station_reactivate_code
+        : null;
+      reactivateRow.style.display = reactivateCode ? '' : 'none';
+      reactivateCb.checked = true;
+      if (reactivateCode) reactivateText.textContent = `Alten Code (${reactivateCode}) reaktivieren`;
       const okBtn = document.getElementById('print-dialog-ok');
       const activateBtn = document.getElementById('print-dialog-activate-only');
       const cancelBtn = document.getElementById('print-dialog-cancel');
@@ -610,9 +624,12 @@ window.__host = window.__host || {};
           pickerErrEl.style.display = '';
           return;
         }
-        finish({mode: 'print', second_page: !sheet && slipCb.checked, printers: ids});
+        finish({
+          mode: 'print', second_page: !sheet && slipCb.checked, printers: ids,
+          reactivate_old_code: reactivateCb.checked,
+        });
       };
-      activateBtn.onclick = () => finish({mode: 'activate'});
+      activateBtn.onclick = () => finish({mode: 'activate', reactivate_old_code: reactivateCb.checked});
       cancelBtn.onclick = () => finish(null);
       modal.addEventListener('keydown', onKey);
       modal.classList.add('show');
@@ -893,7 +910,7 @@ window.__host = window.__host || {};
       if (choice.mode === 'activate') {
         const r = await fetch('/api/scan-station/activate', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ student_id: studentId }),
+          body: JSON.stringify({ student_id: studentId, reactivate_old_code: choice.reactivate_old_code !== false }),
         });
         if (!r.ok) {
           const d = await r.json().catch(() => ({}));
@@ -903,7 +920,10 @@ window.__host = window.__host || {};
       }
       const r = await fetch('/api/scan-station/print-sheet', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ student_id: studentId, printers: choice.printers }),
+        body: JSON.stringify({
+          student_id: studentId, printers: choice.printers,
+          reactivate_old_code: choice.reactivate_old_code !== false,
+        }),
       });
       if (!r.ok) {
         const d = await r.json().catch(() => ({}));

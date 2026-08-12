@@ -410,10 +410,22 @@ class ScanStationReleaseRequest(BaseModel):
 class ScanStationPrintRequest(BaseModel):
     """Body für `POST /api/scan-station/print-sheet` — Zettel mit Barcode und
     Bücherliste für einen Schüler drucken. `printers` = im Druck-Dialog
-    gewählte Drucker-IDs (`None` = Klassen-Allowlist wie beim Leihschein)."""
+    gewählte Drucker-IDs (`None` = Klassen-Allowlist wie beim Leihschein).
+    `reactivate_old_code`: Checkbox im Druck-Dialog (Default an) — reaktiviert
+    den zuletzt entwerteten Zettel-Code des Schülers (s. `AppState.
+    allocate_station_code`), statt einen neuen zu ziehen."""
 
     student_id: int | None = None
     printers: list[str] | None = None
+    reactivate_old_code: bool = True
+
+
+class ScanStationActivateRequest(StudentRef):
+    """Body für `POST /api/scan-station/activate` — Schüler für den Zettel-/
+    Stations-Fluss aktivieren, ohne zu drucken. `reactivate_old_code` wie bei
+    `ScanStationPrintRequest`."""
+
+    reactivate_old_code: bool = True
 
 
 class TeacherAuthorizeRequest(BaseModel):

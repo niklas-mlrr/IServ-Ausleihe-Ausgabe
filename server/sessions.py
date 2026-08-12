@@ -1338,6 +1338,18 @@ async def end_student(
             # done/skipped bleiben sie stehen (Host sieht, wie weit es kam).
             if queue_status == "pending":
                 student.reset_progress()
+                # Trennen (Einzeln/Alle/Reset) entwertet auch eine etwaige
+                # Scan-Station-Bindung: an der Station angemeldet → dort
+                # abmelden (fällt auf „Zettel-Code scannen" zurück), UND der
+                # bisherige Zettel-Code wird an der Station nicht mehr
+                # angenommen (`invalidate_station_code`). Der Code bleibt als
+                # Vorschlag für eine Reaktivierung beim nächsten „Erstellen"
+                # gemerkt (Checkbox im Host-Druckdialog, s. `AppState.
+                # allocate_station_code`).
+                station = state.find_station_by_student(student_id)
+                if station is not None:
+                    await release_station_student(state, station, reason="host disconnected")
+                state.invalidate_station_code(student_id)
         if old_helper and old_helper in state.helper_sessions:
             h = state.helper_sessions[old_helper]
             await _detach_helper(state, hub, h, helper_notify)
@@ -2243,13 +2255,21 @@ async def release_station_student(state: AppState, station, *, reason: str) -> b
     return True
 
 
-async def _load_and_activate_station_student(state: AppState, student_id: int):
+async def _load_and_activate_station_student(
+    state: AppState, student_id: int, *, reactivate_old_code: bool = True
+):
     """Gemeinsamer Kern von `print_station_sheet_for` und
     `activate_station_student`: IServ-Stand holen (bei JEDEM Aufruf frisch —
     die Bücherliste auf dem Zettel ist also immer aktuell), Zettel-Code
     vergeben (stabil pro Schüler, `AppState.allocate_station_code` — derselbe
     Code über beliebig viele Nachdrucke hinweg, damit ein alter Zettel gültig
     bleibt), Schüler in den Zettel-/Stations-Fluss aktivieren.
+
+    `reactivate_old_code`: nur relevant, wenn der Schüler gerade KEINEN
+    aktiven Code hat (z. B. nach „Trennen" am Host, s. `end_student`) — dann
+    reaktiviert `True` (Checkbox im Host-Druckdialog, Default an) den zuletzt
+    entwerteten Code, `False` zieht einen frischen (s. `AppState.
+    allocate_station_code`).
     `get_student_info` ist ein reiner GET (CLAUDE.md / PLAN §6) — kein
     Schreibzugriff auf IServ.
 
@@ -2277,7 +2297,7 @@ async def _load_and_activate_station_student(state: AppState, student_id: int):
     form = _student_form(state, student_id) or ""
     info = await state.iserv.get_student_info(student_id, state.selected_schoolyear)
     apply_hidden_books(info, await get_hidden_isbns_for_form(state, form))
-    code = state.allocate_station_code(student_id)
+    code = state.allocate_station_code(student_id, reactivate_old=reactivate_old_code)
 
     if student is not None:
         is_first_call = student.status == "pending"
@@ -2290,7 +2310,9 @@ async def _load_and_activate_station_student(state: AppState, student_id: int):
     return student, form, info, code
 
 
-async def activate_station_student(state: AppState, student_id: int) -> dict:
+async def activate_station_student(
+    state: AppState, student_id: int, *, reactivate_old_code: bool = True
+) -> dict:
     """Schüler für den Zettel-/Stations-Fluss aktivieren OHNE einen Zettel zu
     drucken — Gegenstück zu `print_station_sheet_for` für den Host-Knopf
     „Erstellen" (im Pairing-Kasten, ohne „und Drucken"). Status/Code/
@@ -2298,25 +2320,35 @@ async def activate_station_student(state: AppState, student_id: int) -> dict:
     jederzeit über den Zettel-Nachdruck-Knopf im „Aktuell in
     Ausgabe"-Kästchen nachgeholt werden (`printStationSheet` im Host,
     `/api/scan-station/print-sheet`) — der Zettel-Code bleibt dabei
-    unverändert (stabil pro Schüler)."""
-    _student, _form, _info, code = await _load_and_activate_station_student(state, student_id)
+    unverändert (stabil pro Schüler). `reactivate_old_code` s.
+    `_load_and_activate_station_student`."""
+    _student, _form, _info, code = await _load_and_activate_station_student(
+        state, student_id, reactivate_old_code=reactivate_old_code
+    )
     return {"ok": True, "code": code}
 
 
 async def print_station_sheet_for(
-    state: AppState, student_id: int, *, printer_name: str | None = None
+    state: AppState,
+    student_id: int,
+    *,
+    printer_name: str | None = None,
+    reactivate_old_code: bool = True,
 ) -> dict:
     """Zettel für die Scan-Station bauen und lokal drucken.
 
     Spiegel von `print_loan_slip_for`, nur mit selbst gebautem PDF statt des
     IServ-Leihscheins. Aktivierung (Status/Code/Fortschritt) läuft über
-    `_load_and_activate_station_student` — s. dort für Details.
+    `_load_and_activate_station_student` — s. dort für Details, auch zu
+    `reactivate_old_code`.
     """
     from .printing import print_pdf
     from .scan_station import build_sheet_pdf
 
     cfg = get_config()
-    student, form, info, code = await _load_and_activate_station_student(state, student_id)
+    student, form, info, code = await _load_and_activate_station_student(
+        state, student_id, reactivate_old_code=reactivate_old_code
+    )
     books = info.get("books", [])
     pending = [b for b in books if b.get("status") == "vorgemerkt"]
     lent = [b for b in books if b.get("status") == "ausgeliehen"]

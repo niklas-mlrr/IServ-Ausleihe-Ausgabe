@@ -32,6 +32,7 @@ from ..sessions import (
 )
 from ..state import get_state
 from ._deps import (
+    ScanStationActivateRequest,
     ScanStationEnableRequest,
     ScanStationForgetRequest,
     ScanStationInputModeRequest,
@@ -278,13 +279,14 @@ async def scan_station_print_sheet(
         name=slip_name(student.lastname, student.firstname, student.form),
         host_sid=sid,
         allowed_printers=allowed,
+        reactivate_station_code=body.reactivate_old_code,
     )
     await state.print_queue.enqueue(job)
     return {"ok": True, "queued": True, "job_id": job.id}
 
 
 @host_router.post("/api/scan-station/activate")
-async def scan_station_activate(body: StudentRef) -> dict:
+async def scan_station_activate(body: ScanStationActivateRequest) -> dict:
     """Schüler für den Zettel-/Stations-Fluss aktivieren OHNE einen Zettel zu
     drucken (Knopf „Erstellen" im Pairing-Kasten, Gegenstück zu „Erstellen
     und Drucken" im Druck-Dialog). Status/Code/Fortschritt identisch zu
@@ -292,6 +294,7 @@ async def scan_station_activate(body: StudentRef) -> dict:
     die Logik mit `print_station_sheet_for`), aber synchron und ohne
     Druckauftrag — der physische Zettel kann jederzeit später über den
     Nachdruck-Knopf im „Aktuell in Ausgabe"-Kästchen gedruckt werden.
+    `reactivate_old_code` s. `ScanStationActivateRequest`.
     """
     if body.student_id is None:
         raise HTTPException(400, "student_id fehlt")
@@ -299,4 +302,6 @@ async def scan_station_activate(body: StudentRef) -> dict:
     student = state.find_student(body.student_id)
     if student is None:
         raise HTTPException(404, "Schüler nicht in einer geöffneten Klasse")
-    return await activate_station_student(state, body.student_id)
+    return await activate_station_student(
+        state, body.student_id, reactivate_old_code=body.reactivate_old_code
+    )
