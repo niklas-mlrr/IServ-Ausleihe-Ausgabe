@@ -101,9 +101,11 @@ versehentlicher QR-Klick keine laufende Ansicht unterbricht.
   Host-Befehl `reset_progress()` darf den Marker für einen neuen Durchlauf
   weiterhin löschen. Bei `helper_scanned` bleibt der Text „Leihschein &
   Bücherstapel entgegengenommen" erhalten.
-- Die Schülerliste kann alphabetisch oder nach Status sortiert werden. Die
-  Statusreihenfolge lautet `active -> pending -> absent -> done -> skipped`;
-  innerhalb einer Gruppe gilt Nachname, Vorname, stabile Schüler-ID.
+- Die Schülerliste ist standardmäßig nach Status sortiert; alternativ kann sie
+  alphabetisch sortiert werden. Die Statusreihenfolge lautet
+  `active -> pending -> absent -> done -> skipped`; innerhalb einer Gruppe
+  stehen bei `done` zuerst Schüler mit offenem „Leihschein entgegengenommen"-
+  Button; danach gilt Nachname, Vorname, stabile Schüler-ID.
 - Der Statuswechsel erfolgt lokal im Runtime-State; kein IServ-API-Write und
   keine Playwright-Aktion.
 
@@ -143,8 +145,10 @@ versehentlicher QR-Klick keine laufende Ansicht unterbricht.
 - Die Leihschein-Aktion setzt nur `false -> true` (idempotent bei `true`);
   ein Zurücknehmen durch die Lehrkraft wird abgewiesen. `reset_progress()` darf
   den Marker für einen neuen Durchlauf löschen.
-- Die Liste ist alphabetisch oder nach `active -> pending -> absent -> done ->
-  skipped` sortierbar; WebSocket-Updates behalten die Auswahl.
+- Die Liste ist standardmäßig nach `active -> pending -> absent -> done ->
+  skipped` sortiert und alternativ alphabetisch sortierbar; WebSocket-Updates
+  behalten die Auswahl. Innerhalb von `done` stehen offene Leihschein-
+  Eingänge vor bereits angeklickten/erledigten Eingängen.
 - Token-Entwertung stoppt sofort weitere Datenupdates und ein Reload kann den
   Zugang nicht wiederherstellen.
 - Die komplette Änderung bleibt ohne IServ-API-Write; der bestehende

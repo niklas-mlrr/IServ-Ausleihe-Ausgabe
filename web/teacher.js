@@ -75,13 +75,28 @@
     return NAME_COLLATOR.compare(String(a.student_id), String(b.student_id));
   }
 
-  function sortedStudents(students) {
+  function hasOpenSlipCollection(s, data) {
+    const localState = slipActionState.get(s.student_id);
+    return s.status === 'done'
+      && data.done_collected === true
+      && s.slip_printed
+      && !s.slip_collected
+      && localState !== 'pending'
+      && localState !== 'done';
+  }
+
+  function sortedStudents(students, data) {
     const copy = [...students];
     copy.sort((a, b) => {
       if (sortMode === 'status') {
         const statusDifference = (STATUS_ORDER[a.status] ?? Number.MAX_SAFE_INTEGER)
           - (STATUS_ORDER[b.status] ?? Number.MAX_SAFE_INTEGER);
         if (statusDifference !== 0) return statusDifference;
+        if (a.status === 'done') {
+          const slipDifference = Number(hasOpenSlipCollection(b, data))
+            - Number(hasOpenSlipCollection(a, data));
+          if (slipDifference !== 0) return slipDifference;
+        }
       }
       return compareNames(a, b);
     });
@@ -107,7 +122,7 @@
     document.getElementById('swipe-tip').classList.toggle('show', (c.pending || 0) > 0);
     sortSelect.value = sortMode;
 
-    const students = sortedStudents(data.students || []);
+    const students = sortedStudents(data.students || [], data);
     document.getElementById('stud-list').innerHTML = students.map(s => {
       if (s.slip_collected) {
         slipActionState.set(s.student_id, 'done');

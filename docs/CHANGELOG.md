@@ -8,6 +8,21 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-12 — Lehreransicht: Offene Leihschein-Eingänge zuerst
+
+- Innerhalb der Statusgruppe „Ausgabe abgeschlossen" stehen Schüler mit
+  aktivem, noch nicht angeklicktem Button „Leihschein entgegengenommen" jetzt
+  zuerst. Danach folgt die alphabetische Sortierung nach Nachname, Vorname und
+  stabiler Schüler-ID. Bereits angeklickte oder erledigte Eingänge stehen
+  dahinter.
+
+## 2026-08-12 — Lehreransicht: Standardsortierung nach Status
+
+- Die Schülerliste startet jetzt standardmäßig mit „Nach Status".
+- Die Reihenfolge lautet: **aktiv → offen → abwesend → abgeschlossen →
+  übersprungen**. Innerhalb jeder Statusgruppe gilt **Nachname → Vorname →
+  stabile Schüler-ID**. Die alphabetische Sortierung bleibt auswählbar.
+
 ## 2026-08-12 — Lehreransicht: Host-Übersprungen und Abwesend getrennt behandeln
 
 - Die Lehreransicht rendert den Rücknahme-Button „Nicht abwesend" nur noch
