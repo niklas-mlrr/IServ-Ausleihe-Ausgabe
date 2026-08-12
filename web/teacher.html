@@ -72,8 +72,8 @@
       font: inherit; cursor: pointer;
     }
     .swipe-hint {
-      flex: none; margin-left: auto; color: var(--muted); opacity: .45; font-size: 1rem;
-      letter-spacing: -2px; line-height: 1;
+      position: absolute; top: 50%; right: 12px; transform: translateY(-50%);
+      color: var(--muted); opacity: .45; font-size: 1rem; letter-spacing: -2px; line-height: 1;
     }
     .stud-list { display: flex; flex-direction: column; gap: 8px; }
     /* Swipe-Container: hält die (verdeckte) rote „Abwesend"-Fläche hinter der
@@ -95,7 +95,7 @@
     }
     .stud-row.swipeable { cursor: grab; }
     .stud-row.swiping { transition: none; }
-    .stud-row-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .stud-row-head { display: flex; align-items: center; gap: 10px; min-width: 0; padding-right: 24px; }
     .stud-row-status {
       display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px;
       min-width: 0; padding-left: 19px;
