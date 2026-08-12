@@ -220,6 +220,12 @@ function handleServerMessage(msg) {
       allowed: (msg.allowed_printers === undefined) ? null : msg.allowed_printers,
       peer_error: !!msg.peer_error,
     };
+    // Solange der Auftrag noch unzugewiesen in der Warteschlange steht, muss
+    // der Druckenbutton klickbar bleiben — sonst kommt man (z. B. bei einem
+    // feststeckenden Auftrag, der NIE ein 'print_result' bekommt) nie ins
+    // Drucker-Nachfrage-Fenster. Sobald der Auftrag einem Drucker zugewiesen
+    // ist, wieder wie bisher gesperrt, bis 'print_result' eintrifft.
+    printBtn.disabled = msg.status !== 'queued';
     const stuck = msg.status === 'queued' && msg.peer_error;
     if (stuck && !printerChangeModal.classList.contains('show')) {
       openPrinterChangeModal();
