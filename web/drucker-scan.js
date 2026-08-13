@@ -32,6 +32,15 @@ function applyLabel(label) {
   if (el) el.textContent = (label && label.trim()) ? label : '';
 }
 
+// Läuft oft ohne weitere Interaktion. Der Ladeversuch ist deshalb best
+// effort; die erste Pointer-/Tastaturgeste kann einen vom Browser gesperrten
+// AudioContext nachträglich freischalten (Autoplay-Regel) — Mirror
+// drucker-display.js::primePrinterAudio.
+function primeScanAudio() { void Beeper.initAudio(); }
+primeScanAudio();
+document.addEventListener('pointerdown', primeScanAudio, { once: true, passive: true });
+document.addEventListener('keydown', primeScanAudio, { once: true });
+
 // --- Scan-Eingabe: eine Kamera ODER ein manuelles Feld, nie beides. ---------
 let html5QrCode = null;
 let manualInput = null;
@@ -57,6 +66,10 @@ function onScanSuccess(value) {
   cooldown = true;
   clearTimeout(scanCooldownTimer);
   scanCooldownTimer = setTimeout(() => { cooldown = false; lastValue = ''; }, 2000);
+  // Sofortiges akustisches Feedback, sobald ein Code erkannt wurde — der
+  // Scanner zeigt sonst nichts an (s. Modul-Kommentar), der Ton bestätigt
+  // dem Schüler, dass der Scan angekommen ist.
+  void Beeper.initAudio().then(() => Beeper.playBeep());
   send({ type: 'scan', code });
 }
 

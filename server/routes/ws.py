@@ -1304,12 +1304,16 @@ async def _handle_drucker_scan(state, hub, scanner: PrinterScannerSession, code:
     if qs is None or qs.status == "done":
         status, payload = "unknown", None
     else:
+        # Klassen-Präfix „Klasse " abschneiden — wie `slip_name` es für die
+        # Druckerwarteschlange schon tut (IServ liefert teils „Klasse 5a",
+        # gezeigt wird nur „5a"); `qs.form` selbst bleibt unverändert.
+        form_clean = (qs.form or "").removeprefix("Klasse ").strip()
         job_states = state.print_queue.print_job_states()
         job_status = job_states.get(student_id)
         if job_status is not None or qs.slip_printed:
             status = "already"
             payload = {
-                "form": qs.form,
+                "form": form_clean,
                 "lastname": qs.lastname,
                 "firstname": qs.firstname,
                 "job_status": job_status or "printed",
@@ -1325,7 +1329,7 @@ async def _handle_drucker_scan(state, hub, scanner: PrinterScannerSession, code:
             vormerk = await pending_vormerk_isbns_for(state, student_id)
             if vormerk is None or vormerk:
                 status = "pending_books"
-                payload = {"form": qs.form, "lastname": qs.lastname, "firstname": qs.firstname}
+                payload = {"form": form_clean, "lastname": qs.lastname, "firstname": qs.firstname}
             else:
                 allowed = allowed_printers_for(state, student_id)
                 done_signed, done_collected = slip_signature_options_for(state, student_id)
@@ -1345,7 +1349,7 @@ async def _handle_drucker_scan(state, hub, scanner: PrinterScannerSession, code:
                 await hub.broadcast_host(state.state_snapshot())
                 status = "ready"
                 payload = {
-                    "form": qs.form,
+                    "form": form_clean,
                     "lastname": qs.lastname,
                     "firstname": qs.firstname,
                     "done_signed": done_signed,

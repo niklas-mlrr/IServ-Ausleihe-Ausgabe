@@ -131,6 +131,9 @@ def test_ready_scan_enqueues_job_and_sets_print_mode(client, scan_env):
         assert _wait_until(lambda: state.printer_scanners[_TOKEN].last_scan_status == "ready")
         scanner = state.printer_scanners[_TOKEN]
         assert scanner.last_scan_payload["lastname"] == "Muster"
+        # Klassen-Präfix „Klasse " abgeschnitten (Mirror print_queue.slip_name)
+        # — die Scanner-Karte zeigt nur „10a", nicht „Klasse 10a".
+        assert scanner.last_scan_payload["form"] == "10a"
         assert student.print_mode is True
         job_states = state.print_queue.print_job_states()
         assert job_states.get(1) == "waiting"
