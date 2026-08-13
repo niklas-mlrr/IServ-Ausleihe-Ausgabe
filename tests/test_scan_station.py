@@ -647,6 +647,36 @@ def test_release_is_idempotent(ctx):
     ) is False
 
 
+def test_end_student_done_releases_station(ctx):
+    """Wird ein Schüler vom Host abgeschlossen (`end_student` mit `done`),
+    muss die Scan-Station den Schüler abmelden — wie beim Trennen, nur ohne
+    den Zettel-Code zu entwerten (Re-Scan wird am `done`-Status ohnehin
+    abgelehnt, s. `resolve_station_code`). Sonst bliebe der beendete Schüler
+    stale auf der Station stehen."""
+    state, _, _ = ctx
+    _queue_student(state, student_id=1, status="active")
+    state.allocate_station_code(1)
+    station = _station(state, authorized=True)
+    station.student_id = 1
+    station.worker_ready = True
+    station.owns_worker = True
+
+    hub = _FakeHub()
+    asyncio.run(
+        sessions.end_student(state, hub, 1, queue_status="done", session_state="completed")
+    )
+
+    # Station ist abgemeldet …
+    assert station.student_id is None
+    # … und bekommt wie beim Trennen `released` gefolgt von `ready`.
+    types = [m["type"] for m in station.ws.sent]
+    assert "released" in types and types[-1] == "ready"
+    # Zettel-Code bleibt (im Gegensatz zum Trennen) bestehen — Re-Scan wird
+    # via `resolve_station_code` am `done`-Status abgelehnt, nicht am Code.
+    assert state.student_id_for_station_code(state.station_code_by_student[1]) == 1
+    assert state.find_student(1).status == "done"
+
+
 # ---- Druck über die Druckerwarteschlange -----------------------------------
 
 

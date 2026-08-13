@@ -18,6 +18,10 @@ window.__host = window.__host || {};
   let ignoredDisplayIds = new Set();
   let armedStudentId = null;  // Schüler, der per "Pairing"-Button scharfgestellt ist (Code-Klick ordnet zu)
   let studentAlerts = {};  // student_id -> {text} — ausgemustert/verliehen-Meldung fürs Now-Serving-Kästchen
+  // student_id -> mountPrinterPicker()-Instanz des "Druckauftrag aktualisieren"-
+  // Menüs im gelben Scan-Station-Gate-Hinweis (s. renderCtxNowServing) — wird
+  // bei jedem Rendern neu gemountet, da die Kachel per innerHTML neu aufgebaut wird.
+  let stationGatePickers = {};
   let prevPendingCount = null;  // letzter mb.pending_count — Anstieg => neuer Code (Beep+Blink)
 
   // ---- Tab-Modell ----
@@ -29,11 +33,13 @@ window.__host = window.__host || {};
   // leben ohnehin serverseitig im Speicher.
   let tabOrder = [];
   let activeTab = 'host';
-  // Aktiver Sub-Reiter innerhalb der „Druckerwarteschlange"-Karte: 'queue'
-  // (Pool-/Warteschlangen-Ansicht) oder <display_id> (ein Reiter pro
-  // verbundenem Drucker-Display). Rein pro Browser (wie activeTab), nicht
-  // persistiert. Fällt auf 'queue' zurück, wenn das Display verschwindet.
-  let activePdTab = 'queue';
+  // Aktiver Hauptreiter der „Drucker"-Karte: 'queue' | 'displays' | 'scanner'.
+  // Rein pro Browser, nicht persistiert.
+  let activePrinterMainTab = 'queue';
+  // Aktiver Unter-Reiter im „Displays"-Hauptreiter: <display_id> oder null
+  // (kein Panel offen). Rein pro Browser (wie activeTab), nicht persistiert.
+  // Fällt auf null zurück, wenn das Display verschwindet.
+  let activePdTab = null;
   // Drag-Zustand für die Drucker-Boxen eines Display-Reiters (HTML5 DnD),
   // analog blDragIndex für die Bücherlisten. PID des gezogenen Druckers.
   let pdDragPid = null;
@@ -41,6 +47,10 @@ window.__host = window.__host || {};
   // oder null = kein Panel offen. Anders als bei den Drucker-Displays gibt es
   // hier keinen statischen ersten Reiter — die Reiter sind Umschalter.
   let activeSsTab = null;
+  // Aufgeklappter Drucker-Scanner-Reiter im „Scanner"-Hauptreiter der
+  // „Drucker"-Karte (<scanner_id>) oder null = kein Panel offen. Umschalter
+  // wie bei den Scan-Stationen (activeSsTab).
+  let activePscTab = null;
   let classList = [];                 // Klassen-Liste aus /api/classes (für Wähler + Single-Selects)
   let ctxSingleStudents = {};         // context_id -> [students] für den Einzelne-Schüler-Select
   // SVG-Icons für die Queue-Steuer-Buttons (pro Klassen-Tab neu gerendert).

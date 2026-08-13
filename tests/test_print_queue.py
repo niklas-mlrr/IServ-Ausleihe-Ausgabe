@@ -22,7 +22,13 @@ import server.printing as printing
 import server.sessions as sessions
 import server.state as state_mod
 from server.print_queue import PrintJob
-from server.state import AppState, HelperSession, QueueStudent, StudentSessionB
+from server.state import (
+    AppState,
+    HelperSession,
+    PrinterDisplaySession,
+    QueueStudent,
+    StudentSessionB,
+)
 
 # ---- Helfer ------------------------------------------------------------
 
@@ -1746,6 +1752,32 @@ def test_print_job_states_waiting_then_printing(monkeypatch):
     assert slip_status_flag() is None
 
 
+def test_active_job_id_for_student(monkeypatch):
+    """`active_job_id_for_student` liefert die ID des laufenden Auftrags
+    (wartend oder druckend), sonst None — Mirror von `print_job_states`, nur
+    mit der ID statt dem Status (für den Drucker-Scanner-Doppel-Scan-Hinweis
+    am Drucker-Display)."""
+    st = AppState()
+    _patch(monkeypatch, st)
+    pq = st.print_queue
+
+    assert pq.active_job_id_for_student(7) is None
+
+    async def run():
+        pq.start()
+        job = _job("host", 7, host_sid="s1", name="X, Y (Klasse 5a)")
+        await pq.enqueue(job)
+        assert pq.active_job_id_for_student(7) == job.id
+        await asyncio.wait_for(job.done.wait(), timeout=5)
+        await pq.stop()
+        return job
+
+    job = asyncio.run(run())
+    # Fertig + finalisiert → kein laufender Auftrag mehr.
+    assert pq.active_job_id_for_student(7) is None
+    assert job.id  # sanity: id wurde tatsächlich vergeben
+
+
 # ---- update_job_printers (Drucker-Nachfrage bei feststeckendem Auftrag) --
 
 
@@ -1857,5 +1889,185 @@ def test_update_job_printers_empty_selection_rejected(monkeypatch):
             job.id, ("helper", "tok-a"), ["not-in-pool"]
         ) == "empty"
         assert job.allowed_printers == {"p1"}
+
+
+# ---- Scan-Station-Druckermodus-Gate (station_display_gate) -------------
+
+
+def _station_job(student_id, *, allowed=None, name="x"):
+    return PrintJob.create(
+        role="student", student_id=student_id, pages="1", name=name,
+        allowed_printers=allowed, station_display_gate=True,
+    )
+
+
+def test_claim_fills_skips_station_gated_job_when_not_displayed():
+    """Ein Scan-Station-Auftrag ohne sichtbaren erlaubten Drucker bleibt
+    pausiert in `waiting` stehen, obwohl der Drucker idle ist."""
+    pq = print_queue.PrintQueue()
+    printers = _two_printers()
+    pq.slots = {"p1": print_queue._Slots(), "p2": print_queue._Slots()}
+    job = _station_job(1, allowed={"p1"})
+    pq.waiting.append(job)
+
+    claims = pq._claim_fills(printers, displayed_ids=set())
+    assert claims == []
+    assert pq.waiting == [job]
+
+
+def test_claim_fills_claims_station_gated_job_once_displayed():
+    """Sobald der erlaubte Drucker auf einem Display sichtbar ist, wird der
+    pausierte Auftrag ganz normal geclaimt — keine explizite Fortsetz-Aktion
+    nötig (rein dynamische Prüfung bei jedem Scheduler-Tick)."""
+    pq = print_queue.PrintQueue()
+    printers = _two_printers()
+    pq.slots = {"p1": print_queue._Slots(), "p2": print_queue._Slots()}
+    job = _station_job(1, allowed={"p1"})
+    pq.waiting.append(job)
+
+    claims = pq._claim_fills(printers, displayed_ids={"p1"})
+    assert [c[0] for c in claims] == ["p1"]
+    assert claims[0][2] is job
+    assert pq.waiting == []
+
+
+def test_claim_fills_station_gate_yields_printer_to_next_job():
+    """Ein blockierter Scan-Station-Auftrag hält seinen Drucker nicht fest —
+    ein nachfolgender normaler Auftrag für denselben Drucker wird trotzdem
+    geclaimt."""
+    pq = print_queue.PrintQueue()
+    printers = _two_printers()
+    pq.slots = {"p1": print_queue._Slots(), "p2": print_queue._Slots()}
+    gated = _station_job(1, allowed={"p1"})
+    normal = _job("helper", 2, allowed={"p1"})
+    pq.waiting.extend([gated, normal])
+
+    claims = pq._claim_fills(printers, displayed_ids=set())
+    assert len(claims) == 1
+    assert claims[0][2] is normal
+    assert pq.waiting == [gated]
+
+
+def test_claim_fills_station_gate_none_allowed_needs_any_displayed():
+    """`allowed_printers=None` (alle Pool-Drucker erlaubt) braucht trotzdem
+    mindestens einen sichtbaren Drucker — ohne Display bleibt der Auftrag
+    stehen, mit Display wird er geclaimt."""
+    pq = print_queue.PrintQueue()
+    printers = _two_printers()
+    pq.slots = {"p1": print_queue._Slots(), "p2": print_queue._Slots()}
+    job = _station_job(1, allowed=None)
+    pq.waiting.append(job)
+
+    assert pq._claim_fills(printers, displayed_ids=set()) == []
+    assert pq.waiting == [job]
+
+    claims = pq._claim_fills(printers, displayed_ids={"p2"})
+    assert len(claims) == 1 and claims[0][2] is job
+
+
+def test_waiting_list_station_gate_fields():
+    """`waiting_list` liefert `student_id`/`station_display_gate`/
+    `blocked_no_display` für einen Scan-Station-Auftrag."""
+    st = AppState()
+    st.settings.printers = _two_printers()
+    blocked = _station_job(1, allowed={"p1"}, name="Blocked, Student")
+    free = _station_job(2, allowed={"p2"}, name="Free, Student")
+    st.print_queue.waiting.extend([blocked, free])
+    st.printer_displays["d1"] = PrinterDisplaySession(
+        display_id="d1", registration_code="0000", authorized=True,
+        assigned_printer_ids=["p2"],
+    )
+    st.printer_displays["d1"].ws = object()
+
+    out = {e["job_id"]: e for e in st.print_queue.waiting_list(st)}
+    assert out[blocked.id]["student_id"] == 1
+    assert out[blocked.id]["station_display_gate"] is True
+    assert out[blocked.id]["blocked_no_display"] is True
+    assert out[free.id]["blocked_no_display"] is False
+
+
+def test_station_gate_snapshot_waiting_and_dispatched():
+    """`station_gate_snapshot` erfasst sowohl noch wartende als auch bereits
+    an einen Drucker gesendete Scan-Station-Aufträge, mit `dispatched`
+    entsprechend gesetzt; normale (nicht gegatete) Aufträge tauchen nicht auf."""
+    st = AppState()
+    st.settings.printers = _two_printers()
+    waiting_job = _station_job(1, allowed={"p1"})
+    st.print_queue.waiting.append(waiting_job)
+    dispatched_job = _station_job(2, allowed={"p2"})
+    dispatched_job.status = "printing"
+    dispatched_job.assigned_printer_id = "p2"
+    st.print_queue.slots["p2"] = print_queue._Slots(jobs=[dispatched_job])
+    normal_job = _job("student", 3)
+    st.print_queue.waiting.append(normal_job)
+
+    snap = st.print_queue.station_gate_snapshot(st)
+    assert set(snap.keys()) == {1, 2}
+    assert snap[1]["dispatched"] is False
+    assert snap[1]["blocked"] is True  # kein Display verbunden
+    assert snap[2]["dispatched"] is True
+    assert snap[2]["printer"] == "P2"
+
+
+def test_host_adopt_station_job_promotes_role_and_reorders(monkeypatch):
+    """Der Host übernimmt einen pausierten Scan-Station-Auftrag: Rolle wird
+    zu `host`, `station_display_gate` fällt weg, der Auftrag springt vor
+    bestehende Helfer-/Schüleraufträge (Host-Rang), und die neue Drucker-
+    Auswahl wird übernommen."""
+    st = AppState()
+    st.settings.printers = _two_printers()
+    _patch(monkeypatch, st)
+    pq = st.print_queue
+    helper_job = _job("helper", 9)
+    station_job = _station_job(1, allowed={"p1"})
+    pq.waiting.extend([helper_job, station_job])
+
+    async def run():
+        result = await pq.host_adopt_station_job(station_job.id, "sid-1", ["p2"])
+        assert result == "ok"
+        assert station_job.role == "host"
+        assert station_job.host_sid == "sid-1"
+        assert station_job.station_display_gate is False
+        assert station_job.allowed_printers == {"p2"}
+        # Host-Rang → vor dem bestehenden Helfer-Auftrag.
+        assert pq.waiting == [station_job, helper_job]
+
+    asyncio.run(run())
+
+
+def test_host_adopt_station_job_rejects_dispatched_or_non_gated(monkeypatch):
+    st = AppState()
+    st.settings.printers = _two_printers()
+    _patch(monkeypatch, st)
+    pq = st.print_queue
+
+    normal_job = _job("student", 1)
+    pq.waiting.append(normal_job)
+    dispatched = _station_job(2, allowed={"p1"})
+    dispatched.status = "printing"
+    pq.slots["p1"] = print_queue._Slots(jobs=[dispatched])
+
+    async def run():
+        assert await pq.host_adopt_station_job(normal_job.id, "sid-1", ["p1"]) == "not_waiting"
+        assert await pq.host_adopt_station_job(dispatched.id, "sid-1", ["p1"]) == "not_waiting"
+        assert await pq.host_adopt_station_job("unknown", "sid-1", ["p1"]) == "not_waiting"
+
+    asyncio.run(run())
+
+
+def test_host_adopt_station_job_empty_selection_rejected(monkeypatch):
+    st = AppState()
+    st.settings.printers = _two_printers()
+    _patch(monkeypatch, st)
+    pq = st.print_queue
+    job = _station_job(1, allowed={"p1"})
+    pq.waiting.append(job)
+
+    async def run():
+        assert await pq.host_adopt_station_job(job.id, "sid-1", []) == "empty"
+        assert await pq.host_adopt_station_job(job.id, "sid-1", ["nope"]) == "empty"
+        assert job.role == "student" and job.station_display_gate is True
+
+    asyncio.run(run())
 
     asyncio.run(run())

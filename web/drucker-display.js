@@ -67,6 +67,36 @@ function finishedFeedbackFor(printer) {
   };
 }
 
+// Doppel-Scan am Drucker-Scanner ("already"): dasselbe, bereits existierende
+// Kästchen in Warteschlange/Drucker-Karte einmalig gelb umranden statt ein
+// zweites zu zeigen — Mirror von markFinishedJob/finishedFeedbackFor, nur
+// direkt nach job_id (nicht printerId+jobKey) geschlüsselt, da der Auftrag in
+// der Warteschlange ODER auf einem Drucker stehen kann.
+const flaggedHighlights = new Map();
+
+function markFlaggedJob(jobId) {
+  if (!jobId) return;
+  const startedAt = Date.now();
+  flaggedHighlights.set(jobId, startedAt);
+  setTimeout(() => {
+    if (flaggedHighlights.get(jobId) === startedAt) flaggedHighlights.delete(jobId);
+  }, FINISHED_FEEDBACK_MS + 100);
+}
+
+function flaggedFeedbackFor(jobId) {
+  const startedAt = jobId ? flaggedHighlights.get(jobId) : undefined;
+  if (startedAt == null) return { className: '', inlineStyle: '' };
+  const age = Date.now() - startedAt;
+  if (age >= FINISHED_FEEDBACK_MS) {
+    flaggedHighlights.delete(jobId);
+    return { className: '', inlineStyle: '' };
+  }
+  return {
+    className: 'dd-order-flagged',
+    inlineStyle: `animation-delay: -${Math.max(0, age)}ms;`,
+  };
+}
+
 // Drucker-Displays laufen oft ohne weitere Interaktion. Der Ladeversuch ist
 // deshalb best effort; die erste Pointer-/Tastaturgeste kann einen vom Browser
 // gesperrten AudioContext nachträglich freischalten (Autoplay-Regel).
@@ -94,12 +124,27 @@ let forbidden = false;
 const FLIP_MS = 500;
 let flipAnimating = false;
 let pendingQueueMsg = null;
+// Seed-Rect für einen aufgeschobenen Scanner-„Reise"-Übergang (s.
+// revertScannerAndFlip) — zieht mit pendingQueueMsg mit, damit ein während
+// einer laufenden Animation ausgelöster Revert nicht verloren geht.
+let pendingQueueSeed = null;
 // Aufgeschobene „Gedruckt"-TTL-Entfernung: trifft der TTL-Timer während einer
 // laufenden FLIP-Animation, wird die Entfernung zurückgestellt und nach
 // Ablauf von flushPendingQueue nachgezogen (s. Nutzer-Vorgabe: beim
 // Verschwinden soll der Rest gleiten, nicht springen — und keine Bewegung
 // darf eine andere abbrechen).
 let pendingTtlPid = null;
+// Letzter vollständiger Server-Snapshot — Grundlage für den erzwungenen
+// Re-Render, wenn eine Scanner-Karte lokal nach 5s abläuft, ohne dass der
+// Server von sich aus einen neuen Snapshot pusht (s. revertScannerAndFlip).
+let lastQueueMsg = null;
+// Ein Scanner, dessen lokaler 5s-Timer abgelaufen ist, wird clientseitig auf
+// „leer" erzwungen (der Server berechnet `expires_in` zwar korrekt nach,
+// pusht aber nicht von sich aus einen Snapshot GENAU beim Ablauf) — bis ein
+// GENUIN NEUER Scan-Event vom Server eintrifft (anderer status/code als beim
+// letzten Mal verarbeitet, s. resolveScanners).
+let locallyExpiredScanners = new Set();
+let scannerEventSeen = new Map();
 
 function show(name) {
   viewRegister.classList.toggle('show', name === 'register');
@@ -149,10 +194,10 @@ function originatorHtml(o) {
 // `name`/`form` kommen direkt (Warteschlange: w.student/w.form) oder werden
 // aus dem kombinierten String „Name (Form)" gesplittet (Druckeraufträge:
 // j.name, printed_name) — letzteres via parseOrder.
-function orderBox(key, name, form, extraClass, originator, inlineStyle = '') {
+function orderBox(key, name, form, extraClass, originator, inlineStyle = '', extraAttrs = '') {
   const cls = extraClass ? ` ${extraClass}` : '';
   const style = inlineStyle ? ` style="${escapeHtml(inlineStyle)}"` : '';
-  return `<div class="dd-order${cls}"${style} data-order-key="${escapeHtml(key)}">`
+  return `<div class="dd-order${cls}"${style} data-order-key="${escapeHtml(key)}"${extraAttrs}>`
     + `<span class="dd-form">${escapeHtml(form || '')}</span>`
     + `<span class="dd-stname">${escapeHtml(name)}</span>`
     + `<span class="dd-origin">${originatorHtml(originator)}</span>`
@@ -282,10 +327,172 @@ function applyWaitingOverflow() {
   }
 }
 
-function renderQueue(msg) {
-  const pool = Array.isArray(msg.printers) ? msg.printers : [];
+// ---- Drucker-Scanner-Karten -------------------------------------------
+// Zustände (s. server/routes/ws.py::_handle_drucker_scan):
+//   null/abgelaufen → „Schülercode scannen", keine Bewegung, kein Label.
+//   'checking'      → „<code> wird geprüft", gleiche Position.
+//   'ready'         → Schritt-Label „Wartet jetzt auf Druck", Kästchen
+//                      (Klasse+Name) fährt nach unten, ggf. Unterschreiben-
+//                      Hinweis + „Zettel entsorgen"-Hinweis darunter. Nach
+//                      Ablauf der 5s „reist" dasselbe Kästchen (kein neues)
+//                      weiter an seine echte Position in der Warteschlange
+//                      oder auf einem Drucker — s. revertScannerAndFlip.
+//   'already'       → Schritt-Label je nach Job-Status, Kästchen fährt nach
+//                      unten, Hinweis „bereits aufgegeben" darunter. Das
+//                      ECHTE, bereits existierende Kästchen in Warteschlange/
+//                      Drucker-Karte wird zusätzlich einmalig gelb umrandet
+//                      (s. markFlaggedJob) — hier entsteht KEIN Reise-Effekt.
+//   'pending_books' → keine Bewegung/Label, Kästchen zeigt Klasse+Name,
+//                      Hinweis „noch nicht alle Bücher" darunter.
+//   'unknown'       → keine Bewegung/Label, Kästchen zeigt „Code unbekannt",
+//                      Hinweis „beim Betreuer melden" darunter.
+// Die Positionsänderung („Kästchen fährt nach unten") innerhalb der Scanner-
+// Karte entsteht rein aus der DOM-Reihenfolge (Kästchen steht bei 'ready'/
+// 'already' NACH dem Schritt-Label statt direkt nach dem Hinweistext) — der
+// bestehende FLIP-Mechanismus (gleiche Klassen/Datenattribute wie bei den
+// Druckerkarten) übernimmt die Animation automatisch, ohne eigenen Code.
+function scannerStepLabel(s) {
+  if (s.status === 'ready') return 'Wartet jetzt auf Druck';
+  if (s.status === 'already') {
+    const js = (s.payload || {}).job_status;
+    if (js === 'waiting') return 'Wartet bereits';
+    if (js === 'printing') return 'Wird bereits gedruckt';
+    return 'Ist bereits gedruckt';
+  }
+  return null;
+}
 
-  if (!pool.length) {
+function scannerBoxLine(s) {
+  if (s.status === 'checking') return { name: `${s.code || ''} wird geprüft`, form: '' };
+  if (s.status === 'ready' || s.status === 'already' || s.status === 'pending_books') {
+    const p = s.payload || {};
+    const name = [p.lastname, p.firstname].filter(Boolean).join(', ') || '–';
+    return { name, form: p.form || '' };
+  }
+  if (s.status === 'unknown') return { name: 'Code unbekannt', form: '' };
+  return { name: 'Schülercode scannen', form: '' };
+}
+
+// Mehrzeiliger Hinweistext unter dem Kästchen — jede Zeile ein eigenes
+// `.dd-scan-below`-Element (kein `<br>`, damit jede Zeile für sich lesbar
+// bleibt, Mirror der Bücherliste).
+function scannerBelowLines(s) {
+  if (s.status === 'ready') {
+    const p = s.payload || {};
+    const lines = [];
+    if (p.done_signed) {
+      const who = p.recipient === 'teacher' ? 'Lehrer' : 'Betreuer';
+      lines.push(`Bitte den Leihschein anschließend unterschreiben und beim ${who} abgeben.`);
+    }
+    lines.push('Du kannst den Zettel mit dem Schülercode jetzt entsorgen.');
+    return lines;
+  }
+  if (s.status === 'already') {
+    return ['Der Druckauftrag für diesen Leihschein ist bereits aufgegeben worden.'];
+  }
+  if (s.status === 'pending_books') {
+    return ['Du hast noch nicht alle Bücher ausgeliehen. Bitte schaue nochmal an einer Scan-Station nach und hole es nach.'];
+  }
+  if (s.status === 'unknown') {
+    return ['Falls dies eigentlich doch ein gültiger Code sein sollte, bitte beim Betreuer melden.'];
+  }
+  return [];
+}
+
+function scanCardHtml(s) {
+  const sid = escapeHtml(s.scanner_id);
+  const stepLabel = scannerStepLabel(s);
+  const line = scannerBoxLine(s);
+  const belowLines = scannerBelowLines(s);
+  const stepHtml = stepLabel
+    ? `<div class="dd-cat-label" data-flip-id="scan-step::${sid}">${escapeHtml(stepLabel)}</div>`
+    : '';
+  // `data-travel-job-id`: nur im 'ready'-Fall gesetzt — der Reise-Übergang
+  // (s. revertScannerAndFlip) betrifft ausschließlich frisch erzeugte
+  // Aufträge, nicht den 'already'-Fall (der bekommt stattdessen den gelben
+  // Umrandungs-Blitzer am bereits existierenden Kästchen).
+  const travelJobId = s.status === 'ready' && s.payload && s.payload.job_id ? s.payload.job_id : null;
+  const travelAttr = travelJobId ? ` data-travel-job-id="${escapeHtml(travelJobId)}"` : '';
+  const boxHtml = orderBox(`scan-box::${s.scanner_id}`, line.name, line.form, '', null, '', travelAttr);
+  const belowHtml = belowLines.map(t => `<div class="dd-scan-below">${escapeHtml(t)}</div>`).join('');
+  const name = escapeHtml(s.label && s.label.trim() ? s.label : 'Scanner');
+  return `<div class="printer-card dd-scan-card" data-flip-id="scan::${sid}" data-scanner="${sid}">
+    <div class="printer-name">${name}</div>
+    <div class="dd-scan-hint">Bitte scanne deinen Schülercode ein, um deinen Leihschein zu drucken.</div>
+    ${stepHtml}
+    ${boxHtml}
+    ${belowHtml}
+  </div>`;
+}
+
+// Scan-Ergebnis-Events je Scanner tracken: der Client erzwingt den Rückfall
+// auf den Default-Zustand exakt nach Ablauf der lokalen 5s (s.
+// revertScannerAndFlip), unabhängig davon, ob der Server von sich aus einen
+// neuen Snapshot pusht (er berechnet `expires_in` zwar korrekt nach, pusht
+// aber nicht proaktiv bei reinem Ablauf). `locallyExpiredScanners`
+// überschreibt den Status dieses einen Scanners auf „leer", bis ein GENUIN
+// NEUER Scan-Event vom Server eintrifft (anderer status/code als beim
+// letzten Mal verarbeitet) — der hebt die lokale Sperre wieder auf. Ein
+// frischer 'already'-Event löst hier zusätzlich den gelben Umrandungs-
+// Blitzer am echten Kästchen aus (s. markFlaggedJob).
+function resolveScanners(rawScanners) {
+  return rawScanners.map(s => {
+    const eventKey = `${s.status || ''}::${s.code || ''}`;
+    const prevKey = scannerEventSeen.get(s.scanner_id);
+    if (s.status != null && eventKey !== prevKey) {
+      locallyExpiredScanners.delete(s.scanner_id);
+      if (s.status === 'already' && s.payload && s.payload.job_id) {
+        markFlaggedJob(s.payload.job_id);
+      }
+    }
+    scannerEventSeen.set(s.scanner_id, eventKey);
+    if (locallyExpiredScanners.has(s.scanner_id)) {
+      return { ...s, status: null, code: null, payload: null, expires_in: null };
+    }
+    return s;
+  });
+}
+
+// Scanner-Karte nach Ablauf der 5s lokal auf den Default-Zustand zurückfallen
+// lassen. War der Zustand 'ready' (Kästchen trägt `data-travel-job-id`), wird
+// dessen AKTUELLE Position gesichert und als Startpunkt für den FLIP an die
+// renderQueue()-Neuberechnung übergeben (`seed`) — dasselbe Kästchen „reist"
+// dadurch sichtbar von der Scanner-Karte an seine echte Position in der
+// Warteschlange oder auf einem Drucker (kein neues Kästchen, s. Modul-
+// Kommentar oben). Ein voller Re-Render (statt einer gezielten DOM-Mutation
+// wie bei removePrintedAndFlip) ist hier nötig, weil das Ziel — wo genau der
+// Auftrag inzwischen steht — nur der Server kennt.
+function revertScannerAndFlip(scannerId) {
+  const card = content.querySelector(`.dd-scan-card[data-scanner="${CSS.escape(scannerId)}"]`);
+  const box = card ? card.querySelector('.dd-order[data-travel-job-id]') : null;
+  const seed = box
+    ? { jobId: box.dataset.travelJobId, rect: box.getBoundingClientRect() }
+    : null;
+  locallyExpiredScanners.add(scannerId);
+  if (!lastQueueMsg) return;
+  scheduleQueueRender(lastQueueMsg, seed);
+}
+
+function renderQueue(msg, seed) {
+  lastQueueMsg = msg;
+  const pool = Array.isArray(msg.printers) ? msg.printers : [];
+  // Nur aktuell verbundene Scanner rendern — ein zugewiesener, aber gerade
+  // getrennter Scanner soll keine „scanne hier"-Karte zeigen, an der gerade
+  // nichts ankommt.
+  const scanners = resolveScanners(
+    (Array.isArray(msg.scanners) ? msg.scanners : []).filter(s => s.connected)
+  );
+  // Aufträge, die GERADE als 'ready' an einer Scanner-Karte gezeigt werden
+  // (Kästchen „reist" erst nach Ablauf der 5s dorthin, s. revertScannerAndFlip):
+  // an ihrer echten Position (Warteschlange/Drucker) so lange unterdrückt,
+  // damit dasselbe Kästchen nicht doppelt erscheint.
+  const readyTravelJobIds = new Set(
+    scanners
+      .filter(s => s.status === 'ready' && s.payload && s.payload.job_id)
+      .map(s => s.payload.job_id)
+  );
+
+  if (!pool.length && !scanners.length) {
     content.innerHTML =
       '<p class="hint">Kein Drucker zugewiesen — am Host Druckerkapazitäten für dieses Display einstellen.</p>';
     return;
@@ -321,11 +528,19 @@ function renderQueue(msg) {
     oldLabelRects.set(el.dataset.flipId, el.getBoundingClientRect());
   });
 
-  const rows = pool.map(p => {
+  // Je eine Karten-HTML pro Drucker/Scanner, zunächst nach ID gemappt (nicht
+  // direkt zusammengefügt) — die tatsächliche Spaltenreihenfolge kommt erst
+  // unten aus `msg.card_order` (gemeinsame Drucker+Scanner-Reihenfolge, s.
+  // AppState._ordered_display_items), damit Drucker- und Scanner-Karten
+  // beliebig nebeneinander stehen können.
+  const printerCardHtml = new Map();
+  pool.forEach(p => {
     // Strukturierte Aufträge (mit Auftraggeber) aus p.orders; Status gruppiert
     // in die drei Kategorien. Fallback auf flache Namen-Felder, falls `orders`
     // fehlt (sollte nicht vorkommen — display_view reicht es immer durch).
-    const orders = Array.isArray(p.orders) ? p.orders : [];
+    const orders = (Array.isArray(p.orders) ? p.orders : []).filter(
+      o => !readyTravelJobIds.has(o.id)
+    );
     // Beim Druckwechsel überlappt sich der Status kurz: der vorige Job ist im
     // OS-Poll noch „printing" (erst beim nächsten Poll „absent"/finalisiert),
     // während der nächste schon physisch druckt und ebenfalls „printing" wird.
@@ -360,9 +575,19 @@ function renderQueue(msg) {
         finishedFeedback.inlineStyle,
       )
       : '';
+    // Gelber Doppel-Scan-Blitzer (s. markFlaggedJob) kann auf jede der drei
+    // Kategorien treffen, je nachdem wo der Auftrag gerade steht.
+    const printingFlag = printingOrd ? flaggedFeedbackFor(printingOrd.id) : null;
     const printingBox = printingOrd
-      ? orderBoxFromRaw(printingOrd.id, printingOrd.name, '', printingOrd.originator) : '';
-    const nextBoxes = nextOrds.map(o => orderBoxFromRaw(o.id, o.name, '', o.originator)).join('')
+      ? orderBoxFromRaw(
+        printingOrd.id, printingOrd.name, printingFlag.className, printingOrd.originator,
+        printingFlag.inlineStyle,
+      )
+      : '';
+    const nextBoxes = nextOrds.map(o => {
+      const flag = flaggedFeedbackFor(o.id);
+      return orderBoxFromRaw(o.id, o.name, flag.className, o.originator, flag.inlineStyle);
+    }).join('')
       + blockedOrds.map(o => orderBoxFromRaw(o.id, o.name, 'dd-order-blocked', o.originator)).join('');
     // Bei Fehler: Name + „ - Fehler" in rot, gleicher Schriftgröße wie der Name;
     // darunter der Betreuer-Hinweis. Die Kategorien (Aufträge) bleiben sichtbar.
@@ -383,7 +608,7 @@ function renderQueue(msg) {
         ? `<div class="dd-priority-msg">Ein Betreuer druckt etwas. Dieser Druckauftrag hat Vorrang.</div>`
         : '';
     const nameClass = faulty ? ' dd-fault-name' : (vorrang ? ' dd-priority-name' : '');
-    return `<div class="printer-card" data-flip-id="${escapeHtml(p.id)}" data-printer="${escapeHtml(p.id)}">
+    printerCardHtml.set(p.id, `<div class="printer-card" data-flip-id="${escapeHtml(p.id)}" data-printer="${escapeHtml(p.id)}">
       <div class="printer-name${nameClass}">${escapeHtml(printerLabel(p))}${nameSuffix}</div>
       ${faultMsg}
       <div class="dd-cat dd-printed" data-printed-for="${escapeHtml(p.id)}">
@@ -398,7 +623,27 @@ function renderQueue(msg) {
         <div class="dd-cat-label" data-flip-id="${escapeHtml(p.id)}::next">Nächster</div>
         ${nextBoxes}
       </div>
-    </div>`;
+    </div>`);
+  });
+
+  const scannerCardHtml = new Map();
+  scanners.forEach(s => { scannerCardHtml.set(s.scanner_id, scanCardHtml(s)); });
+
+  // Kartenreihenfolge: die vom Host gewählte gemeinsame Drucker+Scanner-
+  // Reihenfolge (`msg.card_order`, s. AppState._ordered_display_items) —
+  // Drucker- und Scanner-Karten können darin beliebig nebeneinander stehen.
+  // Fällt (ältere/gecachte Nachrichten ohne das Feld) auf die natürliche
+  // Reihenfolge zurück: erst alle Drucker, dann alle Scanner.
+  const cardOrder = Array.isArray(msg.card_order) && msg.card_order.length
+    ? msg.card_order
+    : [...pool.map(p => `printer:${p.id}`), ...scanners.map(s => `scanner:${s.scanner_id}`)];
+  const rows = cardOrder.map(key => {
+    const sep = key.indexOf(':');
+    const kind = key.slice(0, sep);
+    const id = key.slice(sep + 1);
+    if (kind === 'printer') return printerCardHtml.get(id) || '';
+    if (kind === 'scanner') return scannerCardHtml.get(id) || '';
+    return '';
   }).join('');
 
   // Allgemeine Warteschlange (zentrale Queue) unter den Druckern: nur Aufträge,
@@ -409,10 +654,16 @@ function renderQueue(msg) {
   // Drucker fährt (und dabei schrumpft, weil die Drucker-Spalte schmaler ist).
   // `w.student` (ohne Klasse, slip_name bekommt form=None) + `w.form` getrennt
   // an orderBox — die Klasse steht damit zuverlässig in der eigenen Spalte.
-  const waiting = Array.isArray(msg.waiting_list) ? msg.waiting_list : [];
-  const waitingRows = waiting.map(w =>
-    orderBox(w.job_id || `queue::${w.student}`, w.student || '', w.form || '', '', w.originator_info)
-  ).join('');
+  const waiting = (Array.isArray(msg.waiting_list) ? msg.waiting_list : []).filter(
+    w => !readyTravelJobIds.has(w.job_id)
+  );
+  const waitingRows = waiting.map(w => {
+    const flag = flaggedFeedbackFor(w.job_id);
+    return orderBox(
+      w.job_id || `queue::${w.student}`, w.student || '', w.form || '', flag.className,
+      w.originator_info, flag.inlineStyle,
+    );
+  }).join('');
   // Leere Warteschlange: kein „(0)" im Label und kein Hinweistext darunter —
   // die Karte zeigt nur das Label. Nicht leer: „Warteschlange (N)" + Namen.
   const waitingLabel = waiting.length ? `Warteschlange (${waiting.length})` : 'Warteschlange';
@@ -421,8 +672,10 @@ function renderQueue(msg) {
     ${waitingRows}
   </div>`;
 
+  const colCount = pool.length + scanners.length;
+
   content.innerHTML = `<div class="dd-layout">
-    <div class="grid" style="grid-template-columns:repeat(${pool.length},minmax(0,1fr))">${rows}</div>
+    <div class="grid" style="grid-template-columns:repeat(${colCount},minmax(0,1fr))">${rows}</div>
     ${waitingCard}
   </div>`;
 
@@ -431,6 +684,16 @@ function renderQueue(msg) {
   // Warteschlangen-Karte, nicht die Drucker-Karten). Vor dem FLIP anwenden,
   // damit die Höhenkappe während der Animation bereits steht.
   applyWaitingOverflow();
+
+  // Reise-Seed (s. revertScannerAndFlip): die zuletzt gemessene Position des
+  // Namens-Kästchens an der Scanner-Karte wird als „alte" Position desselben
+  // Auftrags (job_id) eingetragen — dieser Auftrag existiert jetzt zum ersten
+  // Mal an seiner echten Stelle (Warteschlange/Drucker) im DOM, aber
+  // `flipFromOldRects` sieht dank des Seeds trotzdem eine Bewegung statt eines
+  // Neu-Erscheinens (kein neues Kästchen, s. Modul-Kommentar oben).
+  if (seed && seed.jobId && seed.rect) {
+    oldRects.set(seed.jobId, seed.rect);
+  }
 
   // FLIP: Karten, Auftrags-Kästchen UND Kategorie-Labels von ihren alten an
   // ihre neuen Positionen gleiten lassen. Innere Elemente (Kästchen, Labels)
@@ -451,6 +714,19 @@ function renderQueue(msg) {
       if (flipAnimating) { pendingTtlPid = pid; return; }
       removePrintedAndFlip(pid);
     }, ms);
+    printedTimers.push(t);
+  });
+
+  // Ebenso pro Scanner-Karte mit aktivem (nicht-Default-)Status: nach Ablauf
+  // der 5s zurückfallen (s. revertScannerAndFlip) bzw. „reisen", falls kein
+  // neuer Scan vorher nachzieht. `revertScannerAndFlip` geht selbst über
+  // `scheduleQueueRender` — eine laufende Animation wird darüber bereits
+  // koalesziert, kein eigener flipAnimating-Check hier nötig.
+  scanners.forEach(s => {
+    if (s.status == null || s.expires_in == null) return;
+    const sid = s.scanner_id;
+    const ms = Math.max(0, s.expires_in) * 1000;
+    const t = setTimeout(() => revertScannerAndFlip(sid), ms);
     printedTimers.push(t);
   });
 }
@@ -475,11 +751,17 @@ function applyLabel(label) {
 
 // Queue-Snapshot geordnet anwenden: während einer FLIP-Animation (FLIP_MS)
 // eintreffende Snapshots poolen und nach Ablauf einmalig (als aktuellster)
-// nachziehen. Siehe Block am Dateianfang (Snapshot-Koalescing).
-function scheduleQueueRender(msg) {
+// nachziehen. Siehe Block am Dateianfang (Snapshot-Koalescing). `seed` (s.
+// revertScannerAndFlip) reicht eine zusätzliche „alte Position" für einen
+// Reise-Übergang durch, der sonst kein passendes altes Rect im DOM hätte.
+function scheduleQueueRender(msg, seed) {
   show('queue');
-  if (flipAnimating) { pendingQueueMsg = msg; return; }
-  renderQueue(msg);
+  if (flipAnimating) {
+    pendingQueueMsg = msg;
+    if (seed) pendingQueueSeed = seed;
+    return;
+  }
+  renderQueue(msg, seed);
   flipAnimating = true;
   // Bei reduzierter Bewegung ist die FLIP-Animation instant (.01ms) — dann
   // nur kurzes Pooling gegen Flackern, kein 500ms-Lag.
@@ -531,7 +813,8 @@ function flushPendingQueue() {
     // Entfernung ist damit hinfällig (das Kästchen ist im Snapshot eh weg).
     pendingTtlPid = null;
     const m = pendingQueueMsg; pendingQueueMsg = null;
-    scheduleQueueRender(m);
+    const s = pendingQueueSeed; pendingQueueSeed = null;
+    scheduleQueueRender(m, s);
   } else if (pendingTtlPid) {
     const pid = pendingTtlPid; pendingTtlPid = null;
     removePrintedAndFlip(pid);

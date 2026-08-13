@@ -93,22 +93,41 @@
           </table>
         </div>
 
-        <!-- Druckerwarteschlange — Live-Status des Drucker-Pools + zentrale
-             Warteschlange. Drucker-Displays (Bildschirme neben den Druckern,
-             per Pairing-Code zugeordnet + pro Display zugewiesene Drucker-
-             Teilmenge) erscheinen als eigene Reiter — je einer pro verbundenes
-             Display; beim ersten Öffnen Code-Eingabe, danach Zuweisung. -->
+        <!-- Drucker — drei feste Reiter: Warteschlange (Live-Status des
+             Drucker-Pools + zentrale Warteschlange), Displays (Bildschirme
+             neben den Druckern, per Pairing-Code zugeordnet + pro Display
+             zugewiesene Drucker- UND Scanner-Teilmenge — je ein Unter-Reiter
+             pro verbundenes Display) und Scanner (Drucker-Scanner-Geräte:
+             Scan-Station-Schüler lösen dort bei Schülerauslöser ihren
+             Leihschein-Druck selbst aus — NICHT die Scan-Stationen selbst,
+             die bleiben im Live-Ausgabe-Kasten). -->
         <div class="card">
-          <h2>Druckerwarteschlange</h2>
-          <div class="pd-tabs" id="pd-tabs-bar">
-            <button class="pd-tab active" id="pd-tab-queue" data-pd-tab="queue">Druckerwarteschlange</button>
-            <span id="pd-tab-list"></span>
-            <button class="pd-tab-add" id="pd-tab-add" title="Drucker-Display verbinden">+</button>
+          <h2>Drucker</h2>
+          <div class="tabs" id="printer-main-tabs">
+            <button class="tab active" id="pmt-tab-queue" data-pmt-tab="queue">Warteschlange</button>
+            <button class="tab" id="pmt-tab-displays" data-pmt-tab="displays">Displays</button>
+            <button class="tab" id="pmt-tab-scanner" data-pmt-tab="scanner">Scanner</button>
           </div>
-          <div class="tab-panel active" id="pd-panel-queue">
+
+          <div class="tab-panel active" id="pmt-panel-queue">
             <div id="print-queue-box"></div>
           </div>
-          <div class="tab-panel" id="pd-panels-displays"></div>
+
+          <div class="tab-panel" id="pmt-panel-displays">
+            <div class="pd-tabs" id="pd-tabs-bar">
+              <span id="pd-tab-list"></span>
+              <button class="pd-tab-add" id="pd-tab-add" title="Drucker-Display verbinden">+</button>
+            </div>
+            <div id="pd-panels-displays"></div>
+          </div>
+
+          <div class="tab-panel" id="pmt-panel-scanner">
+            <div class="pd-tabs" id="psc-tabs-bar">
+              <span id="psc-tab-list"></span>
+              <button class="pd-tab-add" id="psc-tab-add" title="Drucker-Scanner verbinden">+</button>
+            </div>
+            <div id="psc-panels"></div>
+          </div>
         </div>
       </div>
     </div>

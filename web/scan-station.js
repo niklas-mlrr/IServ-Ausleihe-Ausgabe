@@ -62,6 +62,16 @@ try {
 let inputModeApplied = null;  // zuletzt tatsächlich aufgebauter Modus
 let manualInput = null;
 let modeFromHost = false;
+// ---- Druckermodus (analog student.js) --------------------------------
+// `true`, sobald beim Laden der Bücherliste tatsächlich Bücher da waren —
+// verhindert, dass eine (noch) leere Liste fälschlich als "alles erledigt"
+// gilt.
+let bookListHadBooks = false;
+let druckmodusEntered = false;
+// Fester 30-s-Abmelde-Timer nach Eintritt in den Druckermodus — kein Reset
+// (die Station ist ein Gemeinschaftsgerät, kein persönliches Handy wie beim
+// Schülerclient). Läuft unabhängig vom normalen 30-s-Leerlauftimer weiter.
+let printLogoutTimer = null;
 
 const $ = (id) => document.getElementById(id);
 
@@ -74,9 +84,38 @@ function setStatusText(text, alertClass = null) {
 }
 
 function show(view) {
-  ['register', 'forbidden', 'scan'].forEach(v => {
+  ['register', 'forbidden', 'print', 'scan'].forEach(v => {
     $('view-' + v).classList.toggle('show', v === view);
   });
+}
+
+// --- Druckermodus-Zentrierung (Port von student.js::positionScrollCenter) --
+// Der Inhalt (.scroll-center) steht mittig bezogen auf die GESAMTE View-Höhe,
+// außer das würde mit dem fix oben stehenden Namen (.print-name-row)
+// kollidieren, dann direkt darunter. Ist der Inhalt selbst zu groß, scrollt
+// nur dieser Bereich statt über den Bildschirmrand zu laufen.
+function positionScrollCenter(view) {
+  const nameRow = view.querySelector('.print-name-row');
+  const wrap = view.querySelector('.scroll-center');
+  const inner = wrap && wrap.firstElementChild;
+  if (!wrap || !inner) return;
+  const containerH = view.clientHeight;
+  if (!containerH) return;  // View gerade nicht sichtbar (display:none)
+  const minTop = nameRow ? nameRow.offsetTop + nameRow.offsetHeight : 0;
+  const desiredTop = (containerH - inner.scrollHeight) / 2;
+  const top = Math.max(desiredTop, minTop);
+  wrap.style.top = `${top}px`;
+  wrap.style.maxHeight = `${Math.max(0, containerH - top)}px`;
+}
+
+if (typeof ResizeObserver !== 'undefined') {
+  const printView = $('view-print');
+  const scrollCenterObserver = new ResizeObserver(() => positionScrollCenter(printView));
+  scrollCenterObserver.observe(printView);
+  const printBigMsg = printView.querySelector('.big-msg');
+  if (printBigMsg) scrollCenterObserver.observe(printBigMsg);
+} else {
+  window.addEventListener('resize', () => positionScrollCenter($('view-print')));
 }
 
 // Schüler angemeldet ja/nein: Namenszeile + Tabelle gegen die Aufforderung
@@ -100,6 +139,43 @@ function renderBooks(animate = false) {
   // #book-wrap wird hier ggf. erstmals mit echtem Inhalt sichtbar (bzw.
   // seine Höhe ändert sich mit der neuen Zeilenzahl) — neu berechnen.
   updateBottomInsets();
+}
+
+// --- Druckermodus (Port von student.js::allVorgemerkteDone/maybeEnterDruckmodus) ---
+// `true`, wenn alle aktuell sichtbaren Bücher erledigt sind (ausgeliehen oder
+// in dieser Anmeldung gescannt). Ausgeblendete Reihen fallen aus
+// `currentBooks` heraus und gelten daher nicht als offen.
+function allVorgemerkteDone() {
+  const relevantBooks = currentBooks.filter(
+    b => b.status === 'vorgemerkt' || b.status === 'ausgeliehen',
+  );
+  return bookListHadBooks
+    && relevantBooks.length === currentBooks.length
+    && relevantBooks.every(b => isBookDone(b, scannedIsbns));
+}
+
+// Einmaliger Eintritt in den Druckermodus pro Anmeldung. Wird nach
+// worker_ready, jedem erfolgreichen Scan und jeder booklist_update geprüft
+// (dieselben drei Aufrufstellen wie in student.js).
+function maybeEnterDruckmodus() {
+  if (druckmodusEntered || !student) return;
+  if (!allVorgemerkteDone()) return;
+  druckmodusEntered = true;
+  enterDruckmodus();
+}
+
+function enterDruckmodus() {
+  stopIdle();  // ab hier zählt nur noch der feste 30-s-Abmelde-Timer unten
+  $('print-name').textContent =
+    [student.lastname, student.firstname].filter(Boolean).join(', ') || '–';
+  $('print-form').textContent = (student.form || '').replace(/^Klasse\s+/i, '');
+  $('print-title').textContent = 'Leihschein drucken';
+  $('print-text').textContent = 'Wird geprüft…';
+  $('print-countdown').textContent = '';
+  show('print');
+  updateFocusBanner();  // kein Eingabefeld im Druckermodus — Banner ggf. verbergen
+  positionScrollCenter($('view-print'));
+  send({ type: 'print_mode' });
 }
 
 // --- Buch-Hinweis-Modal (gemeinsame Implementierung, s. common.js) ---------
@@ -193,10 +269,19 @@ function resetToReady(msg, alertClass) {
   workerPending = false;
   scanInFlight = false;
   bookAlertOpen = false;
+  bookListHadBooks = false;
+  druckmodusEntered = false;
+  clearInterval(printLogoutTimer);
   lastValue = '';
   stopIdle();
   closeBookAlert();
   renderBinding();
+  show('scan');
+  // Nach der Abmeldung (Timer/„Fertig"/Trennen) soll im manuellen Modus
+  // sofort wieder ins Eingabefeld getippt werden können, ohne erst per Klick
+  // fokussieren zu müssen — ein Handscanner tippt sonst ins Leere.
+  if (inputMode === 'manual' && manualInput) manualInput.focus();
+  updateFocusBanner();
   setStatusText(msg || READY_STATUS, alertClass);
 }
 
@@ -223,15 +308,21 @@ function handleServerMessage(msg) {
     resetToReady();
   } else if (msg.type === 'code_error') {
     scanInFlight = false;
+    // `kind === 'book'`: ein Buch-Barcode wurde vor der Anmeldung gescannt
+    // (egal welches Buch, der Server prüft nur, ob IServ den Code überhaupt
+    // kennt) — gelb, der Schüler soll zuerst seinen Schülercode scannen.
+    // Alles andere (unbekannter/ungültiger Code, abgelehnter Wechselversuch
+    // während einer laufenden Sitzung) bleibt rot wie bisher.
+    const alertClass = msg.kind === 'book' ? 'status-alert-orange' : 'status-alert-red';
     if (!student) {
       // Ungültiger/abgelehnter Zettel-Code vor der Anmeldung — zurück auf
       // „Zettel-Code scannen".
-      resetToReady(msg.msg || 'Code ungültig.', 'status-alert-red');
+      resetToReady(msg.msg || 'Code ungültig.', alertClass);
     } else {
       // Fehlgeschlagener Wechselversuch (Code eines anderen Schülers während
       // einer laufenden Sitzung, z. B. der Zielschüler ist inzwischen fertig)
       // — der aktuell angemeldete Schüler bleibt unangetastet.
-      setStatusText(msg.msg || 'Code ungültig.', 'status-alert-red');
+      setStatusText(msg.msg || 'Code ungültig.', alertClass);
     }
   } else if (msg.type === 'student_info') {
     student = msg.student || {};
@@ -242,6 +333,9 @@ function handleServerMessage(msg) {
     workerPending = true;
     scanInFlight = false;
     bookAlertOpen = false;
+    bookListHadBooks = false;
+    druckmodusEntered = false;
+    clearInterval(printLogoutTimer);
     closeBookAlert();
     renderBinding();
     $('book-rows').innerHTML = '<div class="book-empty">Bücher werden geladen…</div>';
@@ -251,19 +345,21 @@ function handleServerMessage(msg) {
   } else if (msg.type === 'worker_ready') {
     workerPending = false;
     currentBooks = msg.books || [];
+    bookListHadBooks = currentBooks.length > 0;
     if (Array.isArray(msg.book_order)) bookOrder = msg.book_order;
     renderBooks();
     setStatusText('Scanner bereit — Buch scannen');
     startIdle();
+    maybeEnterDruckmodus();
   } else if (msg.type === 'booklist_update') {
     // Live-Nachzug der Bücherliste nach einer Ausblendungs-/Bestand-leer-
     // Änderung im Einstellungen-Dialog (Gegenstück zum Schülerclient, s.
     // `student.js`) — ersetzt nur die Liste + Reihenfolge, lässt den
-    // Scan-Fortschritt (scannedIsbns/scanOrder) unangetastet. Kein
-    // Druckmodus an der Station, daher kein `maybeEnterDruckmodus()`-Äquivalent.
+    // Scan-Fortschritt (scannedIsbns/scanOrder) unangetastet.
     if (Array.isArray(msg.book_order)) bookOrder = msg.book_order;
     if (Array.isArray(msg.books)) currentBooks = msg.books;
     renderBooks();
+    maybeEnterDruckmodus();
   } else if (msg.type === 'scan_result') {
     // Blockierende Meldungen (ausgemustert/anderweitig verliehen) halten
     // `scanInFlight` bewusst offen — wie am Handy endet die Sperre erst mit
@@ -278,7 +374,59 @@ function handleServerMessage(msg) {
       scannedIsbns.add(msg.isbn);
       scanOrder.set(msg.isbn, ++scanSeq);
       renderBooks(true);   // FLIP: Zeilen an neue Position fahren
+      maybeEnterDruckmodus();
     }
+  } else if (msg.type === 'print_mode_result') {
+    // Antwort auf `{type:'print_mode'}` — s. `enterDruckmodus()`. Die Station
+    // zeigt nur einen einmaligen Hinweis, keinen laufenden Fortschritt (die
+    // Sichtbarkeit danach läuft ausschließlich über den Host). "Barcode"
+    // bleibt ein eigener Platzhalter; alle anderen Fälle, in denen der
+    // Auftrag NICHT sauber in der Warteschlange wartet (Betreuerauslöser
+    // ODER kein erlaubter Drucker auf einem Display sichtbar — dann wurde gar
+    // kein Auftrag erzeugt, s. server/routes/ws.py), zeigen denselben
+    // Betreuer-Hinweis: der Host druckt in diesem Fall ganz normal über den
+    // Druckbutton in "Aktuell in Ausgabe" (`station_print_needs_host`).
+    let text;
+    if (msg.trigger === 'barcode') {
+      text = 'Druckmodus (Barcode) — folgt.';
+    } else if (Array.isArray(msg.scanner_names) && msg.scanner_names.length) {
+      // Schülerauslöser MIT erreichbarem Drucker-Scanner: kein Auftrag jetzt
+      // — der Schüler muss dort seinen Schülercode scannen (s.
+      // server/routes/ws.py::ws_drucker_scan). Namen kommasepariert, letzter
+      // Name mit „oder" statt Komma.
+      const names = msg.scanner_names;
+      const list = names.length === 1
+        ? names[0]
+        : `${names.slice(0, -1).join(', ')} oder ${names[names.length - 1]}`;
+      text = `Bitte scanne deinen Schülercode an ${list}, um deinen Leihschein zu drucken.`;
+    } else if (msg.printer_available) {
+      // Singular/Plural je nachdem, wie viele Drucker-Displays gerade
+      // mindestens einen für diese Klasse erlaubten Drucker zeigen.
+      const label = msg.display_count === 1 ? 'Druckeranzeige' : 'Druckeranzeigen';
+      text = `Der Leihschein wartet in der Druckerwarteschlange. Bitte achte auf die ${label}.`;
+    } else {
+      text = 'Bitte wende dich an einen Betreuer, damit dein Leihschein gedruckt werden kann.';
+    }
+    // "Leihschein unterschreiben" ist eine Klassenoption, unabhängig davon,
+    // wer letztlich druckt — nach einer Leerzeile angehängt (nicht beim
+    // Barcode-Platzhalter, der ohnehin noch kein echter Ablauf ist).
+    // #print-text nutzt white-space:pre-line, damit die Leerzeile wirkt.
+    if (msg.done_signed && msg.trigger !== 'barcode') {
+      const who = msg.recipient === 'teacher' ? 'Lehrer' : 'Betreuer';
+      text += `\n\nNach dem Druck den Leihschein bitte unterschreiben und beim ${who} abgeben.`;
+    }
+    $('print-text').textContent = text;
+    // Fester Abmelde-Timer, KEIN Reset — unabhängig davon, wie es mit dem
+    // Druckauftrag (falls einer läuft) weitergeht; der bleibt am Host
+    // sichtbar (s. PrintQueue.station_gate_snapshot).
+    clearTimeout(printLogoutTimer);
+    let left = 30;
+    $('print-countdown').textContent = `Abmeldung in ${left}s`;
+    printLogoutTimer = setInterval(() => {
+      left -= 1;
+      $('print-countdown').textContent = left > 0 ? `Abmeldung in ${left}s` : '';
+      if (left <= 0) { clearInterval(printLogoutTimer); release(); }
+    }, 1000);
   } else if (msg.type === 'book_alert_clear') {
     // Der Host gibt frei — nur das Modal schließt, die Statuszeile behält
     // Text UND Farbe bis zum nächsten Scan (wie im Schülerclient).
@@ -334,7 +482,11 @@ function flashReader() {
 
 // Ein Kameralauf für beide Zustände: vier Ziffern gelten als Zettel-Code,
 // alles andere als Buch-Barcode. Die Buch-Barcodes im Bestand sind länger
-// (s. Code.PNG), eine Verwechslung ist damit ausgeschlossen.
+// (s. Code.PNG), eine Verwechslung ist damit ausgeschlossen. Vor der Anmeldung
+// (`!student`) entscheidet NICHT mehr die Form allein — jeder gescannte Wert
+// geht an den Server, der zwischen bekanntem Zettel-Code, Buch-Barcode
+// (`code_error.kind === 'book'`, egal welches Buch) und wirklich unbekanntem
+// Code (`kind === 'invalid'`) unterscheidet (s. `code_error`-Handler unten).
 function onScanSuccess(value) {
   const code = String(value || '').trim().replace(/\*/g, '');
   if (!code || !authorized || forbidden) return;
@@ -361,11 +513,6 @@ function onScanSuccess(value) {
   touchIdle();
 
   if (!student) {
-    if (!/^\d{4}$/.test(code)) {
-      setStatusText('Das ist kein Zettel-Code — bitte den Barcode oben rechts scannen.',
-                    'status-alert-orange');
-      return;
-    }
     // Auch während der Code-Prüfung: kein weiterer Scan/keine Eingabe, bis
     // die Antwort da ist (`student_info`/`code_error` löscht das wieder).
     scanInFlight = true;
@@ -388,11 +535,15 @@ const modeCameraBtn = $('mode-camera-btn');
 const modeManualBtn = $('mode-manual-btn');
 
 // Warnbanner, solange im manuellen Modus das Eingabefeld NICHT den Fokus hat —
-// ein Handscanner tippt sonst ins Leere. Klick fokussiert es wieder.
+// ein Handscanner tippt sonst ins Leere. Klick fokussiert es wieder. Im
+// Druckermodus (view-print) gibt es kein Eingabefeld zu fokussieren (das
+// manuelle Feld steckt in #reader, das dort verborgen ist) — der Banner
+// bliebe sonst fälschlich stehen, bis die Station sich abmeldet.
 function updateFocusBanner() {
   const show = inputMode === 'manual' && !!manualInput
     && document.activeElement !== manualInput
-    && !document.querySelector('.modal-overlay.show');
+    && !document.querySelector('.modal-overlay.show')
+    && !$('view-print').classList.contains('show');
   focusBanner.classList.toggle('show', show);
   // (Größenänderung des Banners fängt der ResizeObserver ab.)
 }

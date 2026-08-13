@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from .sessions import (
     gen_registration_code,
     persist_helpers,
     persist_printer_displays,
+    persist_printer_scanners,
     persist_scan_stations,
     server_lan_ip,
     sweep_expired_sessions,
@@ -38,6 +40,12 @@ async def lifespan(app: FastAPI):
     with runtime.activate():
         cfg = get_config()
         state = get_state()
+
+        # Startzeit DIESES Laufs — Basis für die Persistenz-Regel „nie
+        # verbundene Geräte erst nach >5 min Laufzeit verwerfen"
+        # (s. sessions.persist_*). Hier gesetzt, nicht erst im AppState-
+        # Konstruktor, damit ein früh erzeugter State die Uhr nicht vorzieht.
+        state.started_at_monotonic = time.monotonic()
 
         state.iserv = IsServClient(
             cfg.iserv_domain,
@@ -127,6 +135,18 @@ async def lifespan(app: FastAPI):
                     if names is None
                     else [printer_ids_by_name[n] for n in names if n in printer_ids_by_name]
                 )
+                # Gemeinsame Drucker+Scanner-Reihenfolge zurück auf IDs
+                # auflösen: Drucker über den Namen (wie oben), Scanner über
+                # ihre (stabile) `scanner_id` direkt — unbekannte Namen/IDs
+                # fallen einfach weg (AppState._ordered_display_items hängt
+                # tatsächlich zugewiesene, aber nicht gelistete Items ohnehin
+                # stabil ans Ende an).
+                item_order = []
+                for item in entry.get("item_order", []):
+                    if item["kind"] == "printer" and item["name"] in printer_ids_by_name:
+                        item_order.append(f"printer:{printer_ids_by_name[item['name']]}")
+                    elif item["kind"] == "scanner":
+                        item_order.append(f"scanner:{item['id']}")
                 state.printer_displays[entry["display_id"]] = PrinterDisplaySession(
                     display_id=entry["display_id"],
                     registration_code=gen_registration_code(),
@@ -134,6 +154,11 @@ async def lifespan(app: FastAPI):
                     label=entry["label"],
                     theme=entry["theme"],
                     assigned_printer_ids=assigned_printer_ids,
+                    # `assigned_scanner_ids` referenziert Scanner über ihren
+                    # (stabilen) Token direkt — kein Namens-Remapping nötig,
+                    # s. sessions.persist_printer_displays.
+                    assigned_scanner_ids=entry.get("assigned_scanner_ids"),
+                    item_order=item_order,
                 )
             log.info("Drucker-Displays geladen: %d", len(state.printer_displays))
         except Exception:
@@ -157,6 +182,25 @@ async def lifespan(app: FastAPI):
             log.info("Scan-Stationen geladen: %d", len(state.scan_stations))
         except Exception:
             log.exception("Laden der Scan-Station-Persistenz fehlgeschlagen (non-fatal)")
+
+    # Freigeschaltete Drucker-Scanner aus letzter Sitzung laden. Non-fatal,
+    # reine Datei-IO.
+        from .printer_scanner_store import load as load_printer_scanner_state
+        from .state import PrinterScannerSession
+
+        try:
+            for entry in load_printer_scanner_state(current_ip):
+                state.printer_scanners[entry["scanner_id"]] = PrinterScannerSession(
+                    scanner_id=entry["scanner_id"],
+                    registration_code=gen_registration_code(),
+                    authorized=True,
+                    label=entry["label"],
+                    theme=entry["theme"],
+                    input_mode=entry["input_mode"],
+                )
+            log.info("Drucker-Scanner geladen: %d", len(state.printer_scanners))
+        except Exception:
+            log.exception("Laden der Drucker-Scanner-Persistenz fehlgeschlagen (non-fatal)")
 
         from automation.worker import WorkerPool
 
@@ -199,10 +243,13 @@ async def lifespan(app: FastAPI):
         # Letzter Persistenz-Stand vor dem Beenden: entfernt Einträge, die in
         # diesem kompletten Lauf nie verbunden waren (s. sessions.persist_*),
         # auch wenn seit ihrem Laden kein anderes Ereignis mehr geschrieben
-        # hat — sonst würden sie beim nächsten Start erneut geladen.
+        # hat — sonst würden sie beim nächsten Start erneut geladen. Lief der
+        # Server kürzer als 5 min, wird nichts verworfen (zu kurz für einen
+        # verlässlichen Reconnect).
         persist_helpers(state)
         persist_printer_displays(state)
         persist_scan_stations(state)
+        persist_printer_scanners(state)
 
         sweeper.cancel()
         station_sweeper.cancel()

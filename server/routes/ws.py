@@ -6,7 +6,7 @@ import hashlib
 import json
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Cookie, WebSocket, WebSocketDisconnect
 
@@ -19,31 +19,40 @@ from ..sessions import (
     allowed_printers_for,
     assign_student_to_helper,
     broadcast_printer_displays,
+    broadcast_scanner_result,
     broadcast_student_info_to_spectators,
     confirm_slip_received,
+    displayed_printer_ids,
+    eligible_drucker_scanners_for,
     end_student,
     gen_registration_code,
     hydrate_student_info,
     load_station_student,
+    pending_vormerk_isbns_for,
     persist_helpers,
     persist_printer_displays,
+    persist_printer_scanners,
     persist_scan_stations,
     process_scan,
     rebind_helper_to_context,
     release_station_student,
     release_student_worker,
+    relevant_display_count,
     repush_for_changed_empty_isbns,
     resolve_station_code,
     send_display_update,
     send_printer_display_update,
+    send_printer_scanner_update,
     send_scan_station_update,
     send_teacher_update,
+    slip_signature_options_for,
     slip_trigger_for,
     spectate_student,
 )
 from ..state import (
     DisplaySession,
     PrinterDisplaySession,
+    PrinterScannerSession,
     QueueStudent,
     ScanStationSession,
     get_state,
@@ -1144,6 +1153,11 @@ async def ws_drucker_display(websocket: WebSocket, token: str | None = None) -> 
         display.connected_since_start = True
         persist_printer_displays(state)
     await send_printer_display_update(state, display)  # Code bzw. Queue-Sicht
+    # Ein (wieder) verbundenes Display kann vorher unsichtbare erlaubte
+    # Drucker zurückbringen — Scheduler wecken, damit ein pausierter
+    # Scan-Station-Druckermodus-Auftrag (`PrintJob.station_display_gate`)
+    # sofort geclaimt werden kann, statt auf den nächsten Trigger zu warten.
+    state.print_queue.wake()
     await hub.broadcast_host(state.state_snapshot())
 
     try:
@@ -1174,6 +1188,180 @@ async def ws_drucker_display(websocket: WebSocket, token: str | None = None) -> 
             if not d.authorized:
                 state.printer_displays.pop(token, None)
         await safe_broadcast(hub, state)
+
+
+# ---------------------------------------------------------------------------
+# Drucker-Scanner (`/drucker-scan`)
+# ---------------------------------------------------------------------------
+
+# Scan-Ergebnis gilt 5s (s. PLAN-Absprache mit dem Nutzer) — dieselbe Frist,
+# die die Scanner-Karte am Drucker-Display für ihre Rückfall-Animation nutzt.
+_SCANNER_RESULT_TTL_S = 5.0
+
+
+@router.websocket("/ws/drucker-scan")
+async def ws_drucker_scan(websocket: WebSocket, token: str | None = None) -> None:
+    """Drucker-Scanner (`/drucker-scan`). Pairing-Lebenszyklus identisch zu
+    `ws_drucker_display`. Empfängt `{"type": "scan", "code": "..."}` (Kamera
+    und manuelle Eingabe münden client-seitig in dieselbe Nachricht) und wertet
+    den Code aus (s. `_handle_drucker_scan`) — das Ergebnis geht NICHT an den
+    Scanner selbst zurück, sondern an die Drucker-Display(s), denen er
+    zugeordnet ist (s. `broadcast_scanner_result`)."""
+    state = get_state()
+    hub = get_hub()
+
+    await websocket.accept()
+
+    if not token or len(token) != 12 or any(c not in "0123456789abcdef" for c in token.lower()):
+        await websocket.close(code=1008, reason="Token fehlt/ungültig")
+        return
+    token = token.lower()
+
+    if token in state.banned_printer_scanner_tokens:
+        await hub.send_websocket(websocket, {"type": "forbidden"})
+        await websocket.close(code=4009, reason="Scanner verboten")
+        return
+
+    scanner = state.printer_scanners.get(token)
+    if scanner is None:
+        scanner = PrinterScannerSession(scanner_id=token, registration_code=gen_registration_code())
+        state.printer_scanners[token] = scanner
+    scanner.ws = websocket
+    if not scanner.connected_since_start:
+        scanner.connected_since_start = True
+        persist_printer_scanners(state)
+    await send_printer_scanner_update(state, scanner)
+    await hub.broadcast_host(state.state_snapshot())
+
+    try:
+        while True:
+            try:
+                raw = await websocket.receive_json()
+            except (WebSocketDisconnect, RuntimeError):
+                break
+            except json.JSONDecodeError:
+                log.warning(
+                    "Ungültiges JSON-Frame von Drucker-Scanner (%s) — ignoriert", token[:6]
+                )
+                continue
+            if state.printer_scanners.get(token) is not scanner or scanner.ws is not websocket:
+                break
+            if raw.get("type") != "scan" or not scanner.authorized:
+                continue
+            code = str(raw.get("code", "")).strip().strip("*")
+            if not code:
+                continue
+            await _handle_drucker_scan(state, hub, scanner, code)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        s = state.printer_scanners.get(token)
+        if s is not None and s.ws is websocket:
+            s.ws = None
+            if not s.authorized:
+                state.printer_scanners.pop(token, None)
+        await safe_broadcast(hub, state)
+
+
+async def _handle_drucker_scan(state, hub, scanner: PrinterScannerSession, code: str) -> None:
+    """Einen am Drucker-Scanner gescannten Code auswerten und klassifizieren.
+
+    Reihenfolge (s. Absprache mit dem Nutzer):
+      1. Code auflösen — erst Zettel-Code (`student_id_for_station_code`),
+         sonst Buchcode (`get_book_by_code`, read-only) → `loaned_to_id`, falls
+         dieser selbst einen Zettel-Code hat.
+      2. Unaufgelöst / Schüler unbekannt / Status „fertig" → "unknown".
+      3. Bereits ein Druckauftrag (wartet/druckt) oder Leihschein schon gedruckt
+         → "already" (Sub-Status im Payload).
+      4. Noch offene vorgemerkte Bücher (ohne ausgeblendete/Bestand-leer-Reihen)
+         → "pending_books".
+      5. Sonst → "ready": Druckauftrag anlegen (Mirror Auto-Pfad in
+         `print_mode`-Handler oben), `station_display_gate=True`.
+
+    Setzt das Ergebnis (5s TTL) auf der Scanner-Session und pusht es an die
+    zugeordneten Drucker-Display(s) — der Scanner selbst bleibt stumm."""
+    scanner.last_scan_status = "checking"
+    scanner.last_scan_code = code
+    scanner.last_scan_payload = None
+    scanner.last_scan_expires_at = datetime.now() + timedelta(seconds=_SCANNER_RESULT_TTL_S)
+    await broadcast_scanner_result(state, scanner)
+
+    student_id = state.student_id_for_station_code(code)
+    if student_id is None and state.iserv is not None:
+        try:
+            book = await state.iserv.get_book_by_code(code)
+        except Exception:  # noqa: BLE001 — Lookup darf den Scanner nicht stören
+            book = None
+        if book is not None:
+            loaned_to_id = book.get("loaned_to_id")
+            if loaned_to_id is not None and loaned_to_id in state.station_code_by_student:
+                student_id = loaned_to_id
+
+    qs = state.find_student(student_id) if student_id is not None else None
+    status: str
+    payload: dict | None
+
+    if qs is None or qs.status == "done":
+        status, payload = "unknown", None
+    else:
+        job_states = state.print_queue.print_job_states()
+        job_status = job_states.get(student_id)
+        if job_status is not None or qs.slip_printed:
+            status = "already"
+            payload = {
+                "form": qs.form,
+                "lastname": qs.lastname,
+                "firstname": qs.firstname,
+                "job_status": job_status or "printed",
+                # Für den Doppel-Scan-Hinweis am Drucker-Display: das schon
+                # bestehende Kästchen in Warteschlange/Drucker-Karte einmalig
+                # gelb umranden (Mirror des grünen „fertig"-Blitzers), statt
+                # ein zweites Kästchen zu zeigen. `None`, wenn der Auftrag
+                # bereits fertig gedruckt UND aus der Warteschlange
+                # verschwunden ist (kein Kästchen mehr zum Markieren).
+                "job_id": state.print_queue.active_job_id_for_student(student_id),
+            }
+        else:
+            vormerk = await pending_vormerk_isbns_for(state, student_id)
+            if vormerk is None or vormerk:
+                status = "pending_books"
+                payload = {"form": qs.form, "lastname": qs.lastname, "firstname": qs.firstname}
+            else:
+                allowed = allowed_printers_for(state, student_id)
+                done_signed, done_collected = slip_signature_options_for(state, student_id)
+                if not qs.print_mode:
+                    qs.print_mode = True
+                name = _slip_name(qs.lastname, qs.firstname, qs.form)
+                pages = None if state.settings.slip_second_page_default else "1"
+                job = PrintJob.create(
+                    role="student",
+                    student_id=student_id,
+                    pages=pages,
+                    name=name,
+                    allowed_printers=allowed,
+                    station_display_gate=True,
+                )
+                await state.print_queue.enqueue(job)
+                await hub.broadcast_host(state.state_snapshot())
+                status = "ready"
+                payload = {
+                    "form": qs.form,
+                    "lastname": qs.lastname,
+                    "firstname": qs.firstname,
+                    "done_signed": done_signed,
+                    "recipient": "teacher" if done_collected else "helper",
+                    # Für den Drucker-Display-Client: das Namens-Kästchen
+                    # „reist" nach Ablauf der Anzeigezeit von der Scanner-
+                    # Karte an die echte Position dieses Auftrags in der
+                    # Warteschlange/auf einem Drucker (derselbe FLIP-
+                    # Mechanismus, kein zweites Kästchen).
+                    "job_id": job.id,
+                }
+
+    scanner.last_scan_status = status
+    scanner.last_scan_payload = payload
+    scanner.last_scan_expires_at = datetime.now() + timedelta(seconds=_SCANNER_RESULT_TTL_S)
+    await broadcast_scanner_result(state, scanner)
 
 
 # ---------------------------------------------------------------------------
@@ -1272,6 +1460,38 @@ async def ws_scan_station(websocket: WebSocket, token: str | None = None) -> Non
                         websocket,
                         {"type": "code_error", "msg": "Zu viele Versuche — bitte kurz warten."},
                     )
+                    continue
+                if state.student_id_for_station_code(code) is None:
+                    # Der Wert passt zu KEINEM aktuell vergebenen Zettel-Code
+                    # (Client sendet inzwischen jeden gescannten Wert hierher,
+                    # nicht mehr nur 4-stellige — s. scan-station.js). Bevor
+                    # pauschal "ungültig" gemeldet wird: rein lesend prüfen,
+                    # ob es sich überhaupt um einen Buch-Barcode handelt (GET
+                    # /books/{code}, PLAN §6 read-only) — egal welches Buch,
+                    # nur ob IServ den Code kennt. Dann gezielt "erst
+                    # Schülercode scannen" statt "ungültig". Codes NIE loggen
+                    # (auch nicht abgelehnte) — sie sind der Zugangs-
+                    # Credential des Zettels (PLAN §3.7).
+                    book = None
+                    if state.iserv is not None:
+                        try:
+                            book = await state.iserv.get_book_by_code(code)
+                        except Exception:  # noqa: BLE001 — Lookup darf die Station nicht stören
+                            book = None
+                    if book is not None:
+                        await hub.send_websocket(
+                            websocket,
+                            {
+                                "type": "code_error",
+                                "msg": "Bitte zunächst Schülercode scannen",
+                                "kind": "book",
+                            },
+                        )
+                    else:
+                        await hub.send_websocket(
+                            websocket,
+                            {"type": "code_error", "msg": "Ungültiger Code", "kind": "invalid"},
+                        )
                     continue
                 student, reason = resolve_station_code(state, code)
                 if student is None:
@@ -1383,6 +1603,150 @@ async def ws_scan_station(websocket: WebSocket, token: str | None = None) -> Non
                     station.book_alert_open = True
                 await hub.send_websocket(websocket, payload)
                 await hub.broadcast_host(state.state_snapshot())
+
+            elif mtype == "print_mode":
+                # Druckermodus an der Scan-Station: alle vorgemerkten Bücher
+                # des angemeldeten Schülers sind erledigt (Client-seitig via
+                # `maybeEnterDruckmodus()` erkannt, analog `ws_student`s
+                # `print_mode`/`print_request`). „Automatisch" druckt sofort
+                # (unten). „Selbstauslöser" (`trigger == "student"`) zeigt
+                # stattdessen — sofern mindestens ein Drucker-Scanner
+                # erreichbar ist (s. `eligible_drucker_scanners_for`) — den
+                # Hinweis, dort den Schülercode zu scannen; der Druckauftrag
+                # entsteht erst dort (s. `routes/ws.py::ws_drucker_scan`).
+                # Ohne erreichbaren Scanner fällt „Selbstauslöser" auf das
+                # Auto-Verhalten zurück (derselbe Code-Pfad unten). Die
+                # Station meldet sich nach der Antwort unconditional nach 15 s
+                # ab (Client-Timer); es gibt daher keinen laufenden
+                # Progress-Kanal zur Station — die Sichtbarkeit danach läuft
+                # ausschließlich über den Host (`PrintQueue.
+                # station_gate_snapshot`, state_snapshot).
+                if station.student_id is None or not station.worker_ready:
+                    continue
+                if release_student_worker(state, station.student_id):
+                    await hub.broadcast_host(state.state_snapshot())
+                qs = state.find_student(station.student_id)
+                if qs is not None and not qs.print_mode:
+                    qs.print_mode = True
+                    await hub.broadcast_host(state.state_snapshot())
+                    if state.helper_sessions:
+                        await hub.broadcast_queue_size(state)
+
+                trigger = slip_trigger_for(state, station.student_id)
+                # "Leihschein unterschreiben" ist eine Klassenoption
+                # (ClassContext.done_signed/done_collected), unabhängig vom
+                # `slip_trigger` — die Station hängt den Hinweis an JEDEN
+                # Statustext an (außer beim Barcode-Platzhalter, s. unten),
+                # da so oder so irgendwann physisch gedruckt wird, egal wer
+                # den Auftrag letztlich auslöst.
+                done_signed, done_collected = slip_signature_options_for(
+                    state, station.student_id
+                )
+                signing_fields = {
+                    "done_signed": done_signed,
+                    "recipient": "teacher" if done_collected else "helper",
+                }
+                if trigger not in ("auto", "student"):
+                    # "helper" → der Host-/Helfer-Druckbutton wird durch
+                    # `qs.print_mode` oben sichtbar (studentClientPrint,
+                    # host-render.js) — die Station zeigt nur den Hinweis.
+                    # "barcode" → Platzhalter, kein Verhalten.
+                    await hub.send_websocket(
+                        websocket,
+                        {"type": "print_mode_result", "trigger": trigger, **signing_fields},
+                    )
+                    continue
+
+                if trigger == "student":
+                    eligible = eligible_drucker_scanners_for(state, station.student_id)
+                    if eligible:
+                        # Kein Auftrag jetzt — der entsteht erst beim Scan am
+                        # Drucker-Scanner (s. ws_drucker_scan unten).
+                        await hub.send_websocket(
+                            websocket,
+                            {
+                                "type": "print_mode_result",
+                                "trigger": trigger,
+                                "printer_available": True,
+                                "scanner_names": [
+                                    (e["label"] or e["scanner_id"][:6]) for e in eligible
+                                ],
+                                **signing_fields,
+                            },
+                        )
+                        continue
+                    # Kein erreichbarer Scanner → wie "auto" verfahren
+                    # (derselbe Code-Pfad unten, inkl. `station_print_needs_host`
+                    # als Fallback, falls auch kein Drucker sichtbar ist).
+
+                # Verfügbarkeit VOR dem Erzeugen eines Auftrags prüfen: ist zu
+                # Beginn schon kein erlaubter Drucker auf einem Display
+                # sichtbar, wird bewusst KEIN Druckauftrag angelegt (kein
+                # "kein erlaubter Drucker verfügbar"-Hinweis am Host für
+                # diesen Fall — der gelbe Hinweis samt Übernahme-Menü ist nur
+                # für einen bereits WARTENDEN Auftrag gedacht, s. `PrintQueue.
+                # station_gate_snapshot`/`web/host-render.js`). Die Station
+                # zeigt stattdessen "bitte beim Host melden"; der Host druckt
+                # ganz normal über den Druckbutton in "Aktuell in Ausgabe"
+                # (`station_print_needs_host` schaltet ihn frei, unabhängig
+                # vom Klassen-`slip_trigger`).
+                allowed = allowed_printers_for(state, station.student_id)
+                pool_ids = {p.id for p in state.settings.printers}
+                printer_available = bool(state.settings.printers) and (
+                    allowed is None or bool(allowed & pool_ids)
+                )
+                if printer_available:
+                    shown = displayed_printer_ids(state)
+                    printer_available = bool(shown if allowed is None else (allowed & shown))
+
+                if not printer_available:
+                    if qs is not None:
+                        qs.station_print_needs_host = True
+                        await hub.broadcast_host(state.state_snapshot())
+                    await hub.send_websocket(
+                        websocket,
+                        {
+                            "type": "print_mode_result",
+                            "trigger": trigger,
+                            "printer_available": False,
+                            **signing_fields,
+                        },
+                    )
+                    continue
+
+                if qs is not None:
+                    qs.station_print_needs_host = False
+                    name = _slip_name(qs.lastname, qs.firstname, qs.form)
+                else:
+                    name = _slip_name(
+                        station.student_lastname, station.student_firstname,
+                        station.student_form,
+                    )
+                pages = None if state.settings.slip_second_page_default else "1"
+                job = PrintJob.create(
+                    role="student",
+                    student_id=station.student_id,
+                    pages=pages,
+                    name=name,
+                    allowed_printers=allowed,
+                    station_display_gate=True,
+                )
+                await state.print_queue.enqueue(job)
+                await hub.broadcast_host(state.state_snapshot())
+                # Singular/Plural für den Stationstext ("Bitte achte auf die
+                # Druckeranzeige(n)."): wie viele Displays zeigen gerade
+                # mindestens einen für diesen Auftrag erlaubten Drucker?
+                display_count = relevant_display_count(state, allowed)
+                await hub.send_websocket(
+                    websocket,
+                    {
+                        "type": "print_mode_result",
+                        "trigger": trigger,
+                        "printer_available": True,
+                        "display_count": display_count,
+                        **signing_fields,
+                    },
+                )
 
             elif mtype == "release":
                 # „Fertig"-Knopf bzw. abgelaufener Client-Timer.

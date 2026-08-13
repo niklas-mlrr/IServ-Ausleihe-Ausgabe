@@ -231,13 +231,33 @@ def test_code_with_star_delimiters_is_accepted(client, ss_env):
 
 
 def test_unknown_code_is_rejected_without_binding(client, ss_env):
+    """Ein Code, der weder ein vergebener Zettel-Code noch (laut
+    `_FakeIServ.get_book_by_code`) ein Buch ist, gilt als "ungültig" (rot) —
+    nicht mehr die alte "Code unbekannt"-Meldung."""
     state, _student, code = ss_env
     ws = _connect_authorized(client, state)
     try:
         wrong = "0001" if code != "0001" else "0002"
         ws.send_json({"type": "student_code", "value": wrong})
         msg = _recv_until(ws, "code_error")
-        assert "unbekannt" in msg["msg"].lower()
+        assert "ungültig" in msg["msg"].lower()
+        assert msg.get("kind") == "invalid"
+        assert state.scan_stations[_TOKEN].student_id is None
+    finally:
+        ws.__exit__(None, None, None)
+
+
+def test_book_code_before_login_asks_for_student_code(client, ss_env):
+    """Wird vor der Anmeldung ein (irgendein) Buch-Barcode gescannt, soll die
+    Meldung gezielt zum Schülercode zurückschicken (`kind == "book"`), nicht
+    pauschal "ungültig"."""
+    state, _student, _code = ss_env
+    ws = _connect_authorized(client, state)
+    try:
+        ws.send_json({"type": "student_code", "value": "0015166"})
+        msg = _recv_until(ws, "code_error")
+        assert msg["kind"] == "book"
+        assert "schülercode" in msg["msg"].lower()
         assert state.scan_stations[_TOKEN].student_id is None
     finally:
         ws.__exit__(None, None, None)

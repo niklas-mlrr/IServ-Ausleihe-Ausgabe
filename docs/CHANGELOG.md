@@ -8,6 +8,263 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-13 — Drucker-Scanner-Nachbesserungen: Reise-Animation, Doppel-Scan-Blitzer, kombinierte Reihenfolge
+
+Drei Nachbesserungen zum Drucker-Scanner (s. Eintrag darunter):
+
+- **„Zettel entsorgen"-Hinweis**: im `ready`-Fall (Auftrag erfolgreich
+  gesendet) steht am Drucker-Scanner-Kästchen jetzt immer zusätzlich (eigene
+  Zeile, auch ohne aktives „Leihschein unterschreiben") „Du kannst den Zettel
+  mit dem Schülercode jetzt entsorgen." (`scannerBelowLines` in
+  `web/drucker-display.js`).
+- **Reise-Animation für frisch erzeugte Aufträge**: das Namens-Kästchen an der
+  Scanner-Karte ist jetzt dasselbe Kästchen, das nach Ablauf der 5s-Anzeige
+  an seiner echten Position in der zentralen Warteschlange oder auf einem
+  Drucker weiterlebt — kein zweites Kästchen. Serverseitig liefert
+  `_handle_drucker_scan` (`server/routes/ws.py`) die `job_id` im `ready`-
+  Payload (neue `PrintQueue.active_job_id_for_student`); clientseitig wird der
+  Auftrag so lange aus Warteschlange/Drucker-Karte unterdrückt
+  (`readyTravelJobIds` in `renderQueue`), bis `revertScannerAndFlip` nach
+  Ablauf einen erzwungenen Re-Render mit einem „Seed-Rect" auslöst — der
+  bestehende FLIP-Mechanismus interpoliert dank des geteilten `job_id`-
+  Schlüssels automatisch von der alten (Scanner) zur neuen (Warteschlange/
+  Drucker) Position.
+- **Doppel-Scan-Blitzer**: im `already`-Fall (Auftrag existiert schon) bleibt
+  die Scanner-Karte unverändert (kein Reise-Effekt), stattdessen wird das
+  bereits existierende Kästchen in Warteschlange/Drucker-Karte einmalig gelb
+  umrandet (`markFlaggedJob`/`.dd-order-flagged`, Mirror des grünen „fertig"-
+  Blitzers `markFinishedJob`).
+- **Kombinierte Drucker+Scanner-Reihenfolge**: die Host-Einstellungen eines
+  Drucker-Displays zeigen Drucker und Scanner jetzt in EINER Box-Reihe
+  („Drucker und Scanner (N)"), frei durcheinander verschiebbar (Drag zwischen
+  beiden Arten). Neues `PrinterDisplaySession.item_order` (Schlüssel
+  `"printer:<id>"`/`"scanner:<id>"`, `AppState._ordered_display_items` löst
+  gegen die aktuelle Zuweisung auf, nicht gelistete Items hängen stabil ans
+  Ende), neuer Endpunkt `/api/drucker-display/reorder-items`. Dieselbe
+  Reihenfolge bestimmt jetzt auch die Spaltenreihenfolge am physischen
+  Drucker-Display (`view["card_order"]`, `web/drucker-display.js` baut die
+  Kartenreihe daraus statt „erst alle Drucker, dann alle Scanner"). Drucker
+  werden dabei über den (laufzeitstabilen) Namen persistiert (wie
+  `assigned_printer_names`), Scanner über die stabile `scanner_id` direkt.
+- Tests: `tests/test_print_queue.py::test_active_job_id_for_student`,
+  `tests/test_ws_drucker_scan.py` (job_id-Payload-Assertions ergänzt),
+  `tests/test_drucker_display.py` (reorder-items-Endpunkt,
+  `card_order`-Interleaving, stabiles Anhängen ungelisteter Items),
+  `tests/test_device_persistence.py` (item_order-Roundtrip). `uv run pytest`
+  (632 Tests grün) + `uvx ruff check server/ automation/ tests/` sauber.
+  **Kein Browser-/Hardware-Livecheck** für die visuellen Effekte (Reise-
+  Animation, Blitzer, Drag zwischen Drucker/Scanner-Boxen) — s.
+  `docs/test_status.md`.
+
+## 2026-08-13 — Drucker-Scanner: Schülerauslöser-Druck an der Scan-Station
+
+Neues persistentes Gerät **Drucker-Scanner** (`/drucker-scan`, wie Drucker-
+Display/Scan-Station/QR-Display: Token-Pairing, Host-Freischaltung per Name,
+Theme, Kamera/Manuell-Eingabeart vom Host vorgegeben). Steht physisch an
+einem oder mehreren Druckern und löst dort den Leihschein-Druck für Scan-
+Station-Schüler (Kiosk ohne Handy) mit `slip_trigger == "student"` aus —
+bisher verhielt sich „Selbstauslöser" für sie provisorisch wie „Automatisch"
+(sofortiger Druck ohne eigenes Zutun).
+
+- **State/Persistenz** (`server/state.py`, `server/printer_scanner_store.py`):
+  neue `PrinterScannerSession` (Pairing-Felder + transientes Scan-Ergebnis mit
+  5s-TTL: `last_scan_status/code/payload/expires_at`), `AppState.
+  printer_scanners`. `PrinterDisplaySession.assigned_scanner_ids` (Mirror
+  `assigned_printer_ids`, ein Scanner kann mehreren Displays zugeordnet sein,
+  referenziert über den stabilen Token — kein Namens-Remapping wie bei
+  Druckern nötig). `AppState.printer_display_view` hängt die zugeordneten
+  Scanner-Karten an die Display-Push-Nachricht.
+- **Routen** (`server/routes/drucker_scan.py` neu, `drucker_display.py`
+  erweitert): Seite + `qr/enable/label/theme/input-mode/forget`-Endpunkte,
+  plus `/api/drucker-display/assign-scanners`.
+- **WS-Handler** `ws_drucker_scan` (`server/routes/ws.py`): Pairing-
+  Lebenszyklus wie `ws_drucker_display`. Ein Scan (`{"type":"scan","code":…}`)
+  löst zuerst den Zettel-Code auf (`student_id_for_station_code`), ersatzweise
+  einen Buchcode (`get_book_by_code`, read-only) über dessen `loaned_to_id`,
+  klassifiziert dann: unbekannt (Code/Schüler nicht auflösbar oder Status
+  „fertig") → `already` (Job wartet/druckt/bereits gedruckt) → offene
+  vorgemerkte Bücher (`sessions.pending_vormerk_isbns_for`, inkl. Ausblenden-/
+  Bestand-leer-Filter) → `ready` (Job anlegen, `station_display_gate=True`,
+  Mirror des Auto-Pfads). Ergebnis geht NICHT an den Scanner selbst, sondern
+  per `broadcast_scanner_result` an die zugeordneten Drucker-Display(s) — der
+  Scanner-Bildschirm bleibt bewusst stumm (nur Kamera/Eingabefeld).
+- `ws_scan_station`s `print_mode`-Handler: `"student"` prüft jetzt
+  `sessions.eligible_drucker_scanners_for` (autorisiertes, verbundenes
+  Display mit erlaubtem, sichtbarem Drucker UND zugeordnetem, verbundenem
+  Scanner). Gibt es welche, wird **kein** Auftrag erzeugt — die Station zeigt
+  „Bitte scanne deinen Schülercode an X, Y oder Z" (`web/scan-station.js`,
+  Namen kommasepariert, letzter mit „oder"). Sonst identischer Fallback wie
+  „Automatisch" (inkl. `station_print_needs_host`, jetzt zusätzlich mit
+  sichtbarem Hinweistext in der Schülerkartei, `web/host-render.js::
+  renderCtxNowServing`).
+- **Drucker-Display** (`web/drucker-display.js`/`.html`): neue Scanner-Karte
+  im selben Grid wie die Drucker-Karten, sechs Zustände (Default/„wird
+  geprüft"/bereit/bereits im System/offene Bücher/unbekannt) mit Schritt-Label
+  + Namens-Kästchen, das je nach Zustand die Position wechselt — läuft
+  vollständig über den bestehenden FLIP-Mechanismus (`flipFromOldRects`,
+  gleiche Klassen/Datenattribute wie die Drucker-Karten), kein eigener
+  Animationscode. Client-seitiger 5s-Revert-Timer (Mirror `printedTimers`).
+- **Host-UI**: dritter fester Reiter „Scanner" in der „Drucker"-Karte
+  (Geräteverwaltung, Mirror Scan-Stations-Reiter), zweiter Box-Grid-Abschnitt
+  „Scanner" im „Displays"-Reiter (Zuordnung, Mirror Drucker-Box-Grid inkl.
+  Drag-Umsortieren, `kind`-Parameter unterscheidet Drucker-/Scanner-Boxen).
+- Neues `web/drucker-scan.html`/`.js`: Registrierungs-/Gesperrt-Views wie
+  Drucker-Display, Kamera (html5-qrcode) oder manuelles Feld je nach
+  gepushtem `input_mode`, sendet nur `{"type":"scan"}` — kein eigenes
+  Feedback.
+- Test: `tests/test_ws_drucker_scan.py` (Pairing-Lebenszyklus, alle sechs
+  Klassifikationszweige inkl. Buchcode-Auflösung, `print_mode`-Aufteilung
+  student/eligible vs. Fallback-auto) + `tests/test_device_persistence.py`
+  (Roundtrip `printer_scanners`, `assigned_scanner_ids`) + angepasster
+  `tests/test_state_contract.py` (neues `printer_scanners`-Feld im
+  Snapshot-Vertrag). `uv run pytest` (626 Tests grün) + `uvx ruff check
+  server/ automation/ tests/` sauber. **Kein Browser-/Hardware-Livecheck**
+  (s. `docs/test_status.md`).
+
+## 2026-08-13 — Scan-Station meldet Schüler auch beim Abschließen ab
+
+- `end_student` (`server/sessions.py`): Bisher wurde die Scan-Station-Bindung
+  nur beim **Trennen/Reset** (`queue_status == "pending"`) gelöst — der Zettel-
+  Code zusätzlich entwertet. Beim **Abschließen/Überspringen** (`done`/`skipped`/
+  `absent`) blieb der Schüler stale auf der Station stehen. Jetzt löst jeder
+  finale Durchlauf die Station-Bindung via `release_station_student` (gleicher
+  Pfad wie beim Trennen → `released`-Event → Station fällt auf „Zettel-Code
+  scannen" zurück). Der Zettel-Code bleibt dabei unangetastet: ein Re-Scan wird
+  via `resolve_station_code` am `done`-Status ohnehin abgelehnt, und nach einem
+  Reset-Queue (`done → pending`) ist der alte Zettel ohne Neudruck wieder
+  nutzbar. Grund: Host-Abschluss soll die Station genauso abmelden wie Trennen.
+- Test: `tests/test_scan_station.py::test_end_student_done_releases_station`
+  (Suite: 610 Tests, 608 grün — 2 vorbestehende, unabhängige Failures aus der
+  laufenden `printer_scanners`-Arbeit in `state.py`/Persistenz, nicht durch
+  diesen Eintrag verursacht).
+
+## 2026-08-13 — Host: Druckbutton bleibt ab Druckermodus sichtbar + Nachdruck
+
+- Druckbutton in der Schüler-Kachel „Aktuell in Ausgabe" (`renderCtxNowServing`,
+  `studentClientPrint`): Der Button erscheint weiter erst mit Erreichen des
+  Druckmodus, bleibt danach aber bis zum Abschluss sichtbar — auch während/
+  nach dem Druck und im Unterschriften-Modus (links neben dem rechtsbündigen
+  Unterschrift-Button). Bisher wurde er bei `slip_printing`/`slip_printed`
+  ausgeblendet. gilt für Schülerclients wie Scan-Station-Schüler (Pfad via
+  `slip_trigger == 'helper'` bzw. `station_print_needs_host`).
+- Nachdruck möglich: Ein Klick NACH dem ersten erfolgreichen Druck legt den
+  Auftrag immer als Host-Auftrag an (`role="host"`, `host_sid`, kein
+  `student_token`), unabhängig davon, wer den ersten Druck ausgelöst hat
+  (Host-Betreuerauslöser, Schüler-Selbstauslöser oder Scan-Station) und
+  unabhängig vom `slip_trigger`. Umgesetzt in `routes/slips.py::
+  print_loan_slip` über `is_reprint` (`slip_printed`) — `student_client`
+  greift nur noch für den Erstdruck. `_mark_slip_printed` ist idempotent,
+  der Leihschein-Marker verändert sich durch den Nachdruck nicht. Ein
+  laufender Erstdruck bleibt über `in_flight_student_ids()` doppelt blockiert.
+- Tests: `test_print_loan_slip_route.py` — alter „rejects when already
+  printed"-Test ersetzt durch Reprint-als-Host-Job-Tests (helper + auto
+  trigger) plus In-Flight-Block-Test.
+
+## 2026-08-13 — Scan-Station: Druckermodus
+
+- Sind für den angemeldeten Schüler alle vorgemerkten Bücher gescannt,
+  wechselt die Scan-Station jetzt (wie der Schülerclient) in einen
+  Druckermodus — dieselbe `#view-print`-Ansicht (Name/Klasse fix oben,
+  Icon/Titel/Statustext vertikal zentriert per `positionScrollCenter`-Port,
+  Info-Kasten), aber ohne Auslöser-/„Leihschein erhalten"-Buttons: die
+  Station löst automatisch aus und meldet sich nach einem festen 30-s-Timer
+  (kein Reset) ab, statt auf eine Bestätigung zu warten.
+- Bei `slip_trigger` „Automatisch"/„Selbstauslöser" (Selbstauslöser verhält
+  sich vorübergehend wie Automatisch — noch kein eigener Button) wird der
+  Leihschein-Druckauftrag nur erzeugt, wenn mindestens ein für die Klasse
+  erlaubter Drucker gerade auf einem verbundenen Drucker-Display sichtbar
+  ist. Neues `PrintJob.station_display_gate`-Feld + `sessions.
+  displayed_printer_ids()`: `PrintQueue._claim_fills` dispatcht einen
+  solchen Auftrag nur an einen gerade sichtbaren Drucker, ohne dabei andere
+  wartende Aufträge zu blockieren (die Suche geht zum nächsten Auftrag in
+  der Warteschlange weiter).
+- Verschwindet die Sichtbarkeit, während der Auftrag noch **wartet**
+  (`status == "queued"`), pausiert er automatisch — die dynamische Prüfung
+  läuft bei jedem Scheduler-Tick neu, ein zurückkehrender Drucker nimmt ihn
+  ohne Zutun wieder auf (`wake()` zusätzlich explizit bei Display-
+  Freischaltung/-Zuweisung/-Reconnect, damit nicht auf den nächsten
+  zufälligen Trigger gewartet wird). Der Host sieht in der Schüler-Kachel
+  „Aktuell in Ausgabe" währenddessen einen gelben Hinweis „Kein erlaubter
+  freigegebener Drucker verfügbar" samt eingebettetem Drucker-Auswahlmenü
+  (`PrintQueue.station_gate_snapshot`, neuer Endpoint `POST
+  /api/print-queue/{job_id}/adopt-station` → `PrintQueue.
+  host_adopt_station_job`): Klick befördert den Auftrag zu `role="host"`
+  und reiht ihn an der Host-Rangposition neu ein. Bereits dispatchte
+  Aufträge zeigen keinen Hinweis mehr (nicht mehr umbuchbar).
+- War von Anfang an — bevor überhaupt ein Auftrag erzeugt wurde — kein
+  erlaubter Drucker sichtbar, entsteht **kein** Auftrag und **kein** gelber
+  Host-Hinweis. Die Station schickt den Schüler stattdessen zum Host; dessen
+  normaler Druckbutton in „Aktuell in Ausgabe" wird dafür unabhängig vom
+  Klassen-`slip_trigger` freigeschaltet (neues `QueueStudent.
+  station_print_needs_host`-Feld, zurückgesetzt bei `reset_progress`/sobald
+  wieder ein Auftrag erzeugt wird).
+- Statustexte: „Der Leihschein wartet in der Druckerwarteschlange. Bitte
+  achte auf die Druckeranzeige(n)." (Singular/Plural über die neue
+  `sessions.relevant_display_count()` — wie viele Displays zeigen gerade
+  mindestens einen erlaubten Drucker) bei erfolgreichem Enqueue; „Bitte
+  wende dich an einen Betreuer, damit dein Leihschein gedruckt werden
+  kann." einheitlich für Betreuerauslöser UND den „kein Drucker"-Fall
+  (kein Auftrag). Ist an der Klasse „Leihschein unterschreiben" aktiv, hängt
+  der Server `done_signed`/`recipient` an jede Statusmeldung an (außer beim
+  Barcode-Platzhalter); die Station zeigt dann nach einer Leerzeile „Nach
+  dem Druck den Leihschein bitte unterschreiben und beim Betreuer/Lehrer
+  abgeben." (`#print-text` nutzt jetzt `white-space: pre-line`).
+- Nutzer-Korrekturen im Feinschliff: der 30-s-Countdown läuft jetzt wie der
+  Leerlauf-Countdown im Scanmodus unter der Klasse (gleiche Position,
+  gleiche Schrifteigenschaften — `#countdown, #print-countdown` teilen sich
+  dieselbe CSS-Regel); der Fokus-Warnbanner (manueller Eingabemodus) bleibt
+  im Druckermodus verborgen; nach der Abmeldung springt der Fokus im
+  manuellen Modus automatisch zurück ins Eingabefeld.
+- Vor der Anmeldung unterscheidet die Station jetzt drei Fälle statt nur
+  „ist es ein 4-stelliger Code": ein gescannter Buch-Barcode (irgendein
+  Buch, geprüft rein lesend über `get_book_by_code` — nicht mehr nur an der
+  Zeichenform erkannt) zeigt gelb „Bitte zunächst Schülercode scannen"; ein
+  weder als Zettel-Code noch als Buch erkannter Wert zeigt rot „Ungültiger
+  Code" (`code_error.kind` = `"book"`/`"invalid"`). Der Client sendet dafür
+  jeden gescannten Wert an den Server, nicht mehr nur 4-stellige lokal
+  gefilterte Codes — die bestehende 10/min-Rate-Begrenzung des
+  `student_code`-Kanals deckt das bereits ab.
+- 607 Offline-Tests grün (neu u. a. `_claim_fills`-Gating/-Wiederaufnahme,
+  `host_adopt_station_job`, `displayed_printer_ids`/
+  `relevant_display_count`, Buch-vs-ungültig-Unterscheidung vor der
+  Anmeldung). Echter Live-Check (mehrere Drucker-Displays, Drucker kommt/
+  geht während ein Auftrag wartet, Unterschreiben-Hinweis am echten
+  Drucker) steht noch aus.
+
+## 2026-08-13 — Scan-Station-Zettel: Layout, Sortierung, Dateiname
+
+- Abhak-Kästchen vor „Noch vorgemerkt" jetzt bündig mit Ober-/Unterkante der
+  zugehörigen Textzeile (Rect-Offset in `build_sheet_pdf` nachjustiert).
+- „Bereits ausgeliehen" erscheint auf dem Zettel nur noch, wenn der Schüler
+  tatsächlich schon etwas ausgeliehen hat (`section(..., hide_if_empty=True)`);
+  „Noch vorgemerkt" zeigt bei leerer Liste weiterhin „—".
+- „Noch vorgemerkt" wird jetzt nach der klassenweit konfigurierten
+  Bücherliste-Reihenfolge sortiert (`get_book_order_for_form`, wie im Client),
+  statt alphabetisch. „Bereits ausgeliehen" (Ausgabezeitpunkt absteigend) und
+  die Bestand-leer-/Ausgeblendet-Filterung waren bereits korrekt.
+- Unter den Bücherlisten steht jetzt eine nummerierte 4-Schritt-Anleitung
+  „So gehst du vor:" (Bücher holen → zur Scan-Station gehen → eigenen Barcode
+  scannen → Bücher einzeln scannen) mit mehr Abstand zu den Listen.
+- Neuer PDF-/Download-Dateiname `Scanstation <Klasse> <Nachname>, <Vorname>`
+  (`_station_sheet_filename`/`_station_sheet_label` in `server/sessions.py`,
+  analog zu den bestehenden Leihschein-Helfern) statt des generischen
+  `scan_station_<student_id>`.
+
+## 2026-08-12 — Geräte-Persistenz: Aufräumen erst nach 5 min Serverlaufzeit
+
+- Helfer, Drucker-Displays und Scan-Stationen, die in einem Serverlauf nie
+  per WebSocket verbunden waren, wurden bisher immer aus der Persistenz
+  entfernt. Nach einem kurzen Lauf (Neustart kurz nach dem Start, Fehlstart,
+  schnelles Durchstarten beim Aufbau) waren die Geräte dadurch beim
+  übernächsten Start endgültig weg, obwohl sie gar keine Zeit zum Reconnect
+  hatten.
+- Die Verwerfungsregel greift jetzt nur noch, wenn der Lauf mindestens
+  `sessions.PRUNE_MIN_UPTIME_S` (5 min) gedauert hat; bei kürzeren Läufen
+  werden alle Einträge weitergeschrieben. Basis ist die neue monotone
+  Startzeit `AppState.started_at_monotonic` (in `app.lifespan` gesetzt).
+- Unverändert: der IP-Fingerprint (Regel 1) und die `authorized`-Bedingung
+  bei Displays/Stationen.
+
 ## 2026-08-12 — Drucker-Display: Fertigmeldung mit Ton und Highlight
 
 - Ein neu fertig gedruckter Auftrag löst am Drucker-Display einmalig den

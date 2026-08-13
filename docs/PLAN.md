@@ -290,6 +290,28 @@ stagen ohne `ALLOW_BOOKING` nur (§ 6.1). Der Zetteldruck läuft durch dieselbe
 Druckerwarteschlange wie ein Host-Leihschein (`kind="station_sheet"`,
 `role="host"`), setzt aber **keinen** Leihschein-Status.
 
+**Druckermodus (2026-08-13).** Sind für den angemeldeten Schüler alle
+vorgemerkten Bücher gescannt, wechselt die Station — wie der Schülerclient —
+in einen Druckermodus (dieselbe `#view-print`-Ansicht/Optik, ohne Buttons).
+Bei `slip_trigger` „Automatisch"/„Selbstauslöser" (Selbstauslöser verhält
+sich hier vorübergehend wie Automatisch) wird der Leihschein-Druckauftrag
+NUR erzeugt, wenn mindestens ein für die Klasse erlaubter Drucker gerade auf
+einem verbundenen Drucker-Display sichtbar ist (`PrintJob.
+station_display_gate`, `sessions.displayed_printer_ids`); dispatcht wird er
+ebenfalls nur auf einem gerade sichtbaren Drucker (`PrintQueue._claim_fills`).
+Verschwindet die Sichtbarkeit, während der Auftrag noch **wartet**, pausiert
+er automatisch und der Host bekommt in der Schüler-Kachel „Aktuell in
+Ausgabe" einen gelben Hinweis samt Drucker-Auswahlmenü, um ihn manuell als
+Host-Auftrag zu übernehmen (`PrintQueue.host_adopt_station_job`, Endpoint
+`POST /api/print-queue/{id}/adopt-station`). War von Anfang an kein
+erlaubter Drucker sichtbar, wird **gar kein** Auftrag erzeugt (kein
+Host-Hinweis) — die Station schickt den Schüler zum Host, dessen normaler
+Druckbutton dafür unabhängig vom `slip_trigger` freigeschaltet wird
+(`QueueStudent.station_print_needs_host`). Bei `slip_trigger` „Betreuer"
+zeigt die Station nur den Hinweis, bei „Barcode" bleibt es beim Platzhalter.
+Fester 30-s-Abmelde-Timer ohne Reset nach Eintritt in den Druckermodus (die
+Station bleibt ein Gemeinschaftsgerät). Details: `docs/CHANGELOG.md`.
+
 ## 4. Offene Punkte
 
 | # | Frage | Vorschlag / nächster Schritt |

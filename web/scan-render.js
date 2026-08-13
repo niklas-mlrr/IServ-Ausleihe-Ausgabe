@@ -66,6 +66,18 @@ function renderBooks(books, animate = false) {
       oldRects.set(row.dataset.bookIdx, row.getBoundingClientRect());
     });
   }
+  // Bestand-leer-Bücher, deren nächstes Buch in der Host-Reihenfolge bereits
+  // gescannt wurde, wandern hinter alle noch offenen Bücher (aber weiterhin
+  // untereinander in Host-Reihenfolge sortiert) — sie blockieren sonst den
+  // Fluss, weil sie selbst nicht scanbar sind.
+  const byOrder = books.slice().sort((x, y) => orderIndex(x.isbn) - orderIndex(y.isbn));
+  const demoted = new Set();
+  byOrder.forEach((b, i) => {
+    if (!isBookDone(b, scannedIsbns) && b.bestand_leer) {
+      const next = byOrder[i + 1];
+      if (next && isBookDone(next, scannedIsbns)) demoted.add(b.isbn);
+    }
+  });
   const ordered = books
     .map((b, i) => [b, i])
     .sort((a, b) => {
@@ -74,7 +86,9 @@ function renderBooks(books, animate = false) {
       if (da === 1) {                                      // beide erledigt → nach Rang
         const diff = doneRank(b[0]) - doneRank(a[0]);      // absteigend (jüngstes oben)
         if (diff) return diff;
-      } else {                                             // beide offen → Klassen-Reihenfolge
+      } else {                                             // beide offen → erst Demotion, dann Klassen-Reihenfolge
+        const ra = demoted.has(a[0].isbn) ? 1 : 0, rb = demoted.has(b[0].isbn) ? 1 : 0;
+        if (ra !== rb) return ra - rb;
         const diff = orderIndex(a[0].isbn) - orderIndex(b[0].isbn);
         if (diff) return diff;
       }
@@ -86,7 +100,7 @@ function renderBooks(books, animate = false) {
     const icon = done
       ? '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>'
       : bestandLeer
-      ? '<span class="empty-stock-badge">−</span>'
+      ? '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>'
       : '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
     const rowClass = `row-${done ? 'ausgeliehen' : 'vorgemerkt'}${bestandLeer ? ' row-bestand-leer' : ''}`;
     return `<div class="book-row ${rowClass}" data-book-idx="${idx}">`

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import secrets
+import time
 import uuid
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
@@ -131,6 +132,18 @@ class QueueStudent:
     # `real_contexts_summary`). Bleibt bei anderen `slip_trigger`-Werten
     # ungenutzt (dort läuft der Druck über den Schülerclient selbst).
     print_mode: bool = False
+    # Scan-Station-Druckermodus (Automatisch/Selbstauslöser) hat beim Eintritt
+    # KEINEN erlaubten, auf einem Display sichtbaren Drucker gefunden — es
+    # wurde bewusst KEIN Druckauftrag erzeugt (kein "kein erlaubter Drucker
+    # verfügbar"-Hinweis am Host, s. PLAN.md § Scan-Station-Druckermodus). Die
+    # Station zeigt "bitte beim Host melden"; der Host druckt stattdessen ganz
+    # normal über den Druckbutton in "Aktuell in Ausgabe" — dieses Flag
+    # schaltet den Button für diesen Schüler frei, unabhängig vom
+    # Klassen-`slip_trigger` (der für den regulären Automatisch-/
+    # Selbstauslöser-Fluss den Button sonst ausblendet, s. `real_contexts_
+    # summary`/`renderCtxNowServing`). Wird bei jedem neuen Eintritt in den
+    # Druckermodus neu gesetzt (True/False) und bei `reset_progress` gelöscht.
+    station_print_needs_host: bool = False
     # Leihschein wurde gedruckt UND die Klasse hat „Leihschein unterschreiben"
     # aktiv (`ClassContext.done_signed`) → der Schülerclient zeigt den
     # Unterschriften-Modus (`sessions.confirm_slip_received`, setzt zugleich
@@ -169,6 +182,7 @@ class QueueStudent:
         station_name: str | None = None,
         station_code: str | None = None,
         station_reactivate_code: str | None = None,
+        station_gate: dict | None = None,
     ) -> dict:
         return {
             "student_id": self.student_id,
@@ -197,6 +211,12 @@ class QueueStudent:
             # Begründung wie bei `station_code`. `None` = kein Vorschlag (noch
             # nie entwertet, oder der Code ist gerade aktiv).
             "station_reactivate_code": station_reactivate_code,
+            # Zustand eines laufenden Scan-Station-Druckermodus-Auftrags
+            # (`PrintQueue.station_gate_snapshot`) — `None` = kein solcher
+            # Auftrag aktiv. NUR im Host-Snapshot befüllt, gleiche Begründung
+            # wie bei `station_code` (host-only Sichtbarkeit reicht hier aus,
+            # da nur der Host das "Druckauftrag aktualisieren"-Menü zeigt).
+            "station_gate": station_gate,
             "books_total": self.books_total,
             "books_done": len(self.done_isbns),
             "books_empty_outstanding": self.books_empty_outstanding,
@@ -213,6 +233,10 @@ class QueueStudent:
             "slip_printing": slip_status is not None,
             "slip_status": slip_status,
             "print_mode": self.print_mode,
+            # S. Feld-Kommentar oben — schaltet den Host-Druckbutton frei,
+            # wenn der Scan-Station-Druckermodus keinen Auftrag erzeugen
+            # konnte (kein Display zeigt einen erlaubten Drucker).
+            "station_print_needs_host": self.station_print_needs_host,
             "slip_signing": self.slip_signing,
             "slip_collected": self.slip_collected,
             "helper_scanned": self.helper_scanned,
@@ -262,6 +286,7 @@ class QueueStudent:
         self.slip_printer_label = None
         self.slip_generation += 1
         self.print_mode = False
+        self.station_print_needs_host = False
         self.slip_signing = False
         self.station_zettel_printed = False
 
@@ -487,6 +512,18 @@ class PrinterDisplaySession:
     registration_code: str
     authorized: bool = False
     assigned_printer_ids: list[str] | None = None
+    # Zugewiesene Drucker-Scanner (`/drucker-scan`) — analoge Semantik zu
+    # `assigned_printer_ids` (None = alle autorisierten Scanner, geordnete
+    # Liste = explizite Teilmenge). Ein Scanner kann mehreren Displays
+    # gleichzeitig zugewiesen sein (wie ein Drucker), s. PrinterScannerSession.
+    assigned_scanner_ids: list[str] | None = None
+    # Gemeinsame Drucker+Scanner-Reihenfolge (Host: eine Box-Reihe statt zwei
+    # getrennter Abschnitte; Display: dieselbe Spaltenreihenfolge). Einträge
+    # sind Schlüssel ``"printer:<id>"``/``"scanner:<id>"``; nicht gelistete,
+    # aber zugewiesene Items hängen stabil ans Ende an (s. AppState.
+    # _ordered_display_items). ``None``/leer = natürliche Reihenfolge
+    # (Drucker in Pool-, Scanner in Zuweisungsreihenfolge).
+    item_order: list[str] | None = None
     label: str = ""
     theme: str | None = None  # None = folgt System-Einstellung (prefers-color-
                               # scheme); 'light'/'dark' = Host hat überschrieben.
@@ -591,6 +628,42 @@ class ScanStationSession:
         self.owns_worker = False
         self.load_task = None
         self.book_alert_open = False
+
+
+@dataclass
+class PrinterScannerSession:
+    """Drucker-Scanner (`/drucker-scan`) — festes Scan-Gerät neben einem oder
+    mehreren Druckern, mit dem ein Scan-Station-Schüler (Schülerauslöser)
+    seinen Leihschein-Druckauftrag selbst auslöst. Pairing-Flow wie
+    `PrinterDisplaySession`/`ScanStationSession` (Registrierungs-Code, Host-
+    Freischaltung per Name). `input_mode` wie bei der Scan-Station vom Host
+    vorgegeben (kein lokaler Umschalter am Gerät).
+
+    Der Scanner selbst zeigt kein Ergebnis an — Rückmeldung läuft über die
+    Drucker-Display(s), denen er zugewiesen ist (s. `assigned_scanner_ids`
+    auf `PrinterDisplaySession`). Deshalb trägt diese Session das jeweils
+    letzte Scan-Ergebnis als transienten, 5s gültigen Zustand, den
+    `AppState.printer_display_view` in die Display-Push-Nachricht mischt.
+    """
+
+    scanner_id: str
+    registration_code: str
+    authorized: bool = False
+    label: str = ""
+    theme: str | None = None
+    input_mode: str | None = None
+    ws: object | None = None
+    created_at: datetime = field(default_factory=datetime.now)
+    connected_since_start: bool = False
+    # --- letztes Scan-Ergebnis (transient, 5s TTL) ---
+    # 'checking' | 'ready' | 'already' | 'pending_books' | 'unknown' | None
+    last_scan_status: str | None = None
+    last_scan_code: str | None = None
+    # Status-abhängige Zusatzfelder für die Display-Karte, z.B. form/lastname/
+    # firstname, bei "already" zusätzlich job_status, bei "ready" done_signed/
+    # recipient (s. routes/ws.py::ws_drucker_scan).
+    last_scan_payload: dict | None = None
+    last_scan_expires_at: datetime | None = None
 
 
 @dataclass
@@ -834,6 +907,10 @@ class AppState:
         # (= station_id). Aufbau/Lebensdauer wie die Drucker-Displays.
         self.scan_stations: dict[str, ScanStationSession] = {}
         self.banned_scan_station_tokens: set[str] = set()
+        # Drucker-Scanner (`/drucker-scan`): Key ist der Token in der URL
+        # (= scanner_id). Aufbau/Lebensdauer wie die Drucker-Displays.
+        self.printer_scanners: dict[str, PrinterScannerSession] = {}
+        self.banned_printer_scanner_tokens: set[str] = set()
         # Vierstellige Zettel-Codes der Scan-Station: Code -> student_id und
         # die Rückrichtung. Ein Schüler behält seinen Code über beliebig viele
         # Nachdrucke hinweg (derselbe Zettel bleibt gültig) — nur die
@@ -853,6 +930,14 @@ class AppState:
         # Neuvergabe überschrieben, zeigt also immer auf den zuletzt
         # vergebenen Code, egal ob reaktiviert oder frisch gezogen.
         self.station_last_code_by_student: dict[int, str] = {}
+        # Monotone Startzeit DIESES Serverlaufs. Einzige Verwendung: die
+        # Persistenz-Verwerfungsregel für Helfer/Drucker-Displays/Scan-
+        # Stationen (s. `sessions.persist_*`) — ein nie verbundener Eintrag
+        # wird nur dann verworfen, wenn der Lauf lang genug war, dass ein
+        # Reconnect realistisch möglich gewesen wäre. In `app.lifespan` beim
+        # Start neu gesetzt, damit ein früh erzeugter `AppState` die Uhr nicht
+        # vorzieht.
+        self.started_at_monotonic: float = time.monotonic()
 
     # -----------------------------------------------------------------
     # Scan-Station: Zettel-Codes
@@ -1047,6 +1132,7 @@ class AppState:
         *,
         slip_status: str | None = None,
         include_station_code: bool = False,
+        station_gate: dict | None = None,
     ) -> dict:
         """Serialize a queue student with the current helper display name.
 
@@ -1081,6 +1167,7 @@ class AppState:
             station_name=station_name,
             station_code=station_code,
             station_reactivate_code=station_reactivate_code,
+            station_gate=station_gate if include_station_code else None,
         )
 
     def queue_as_list(
@@ -1089,6 +1176,7 @@ class AppState:
         *,
         slip_states: dict[int, str] | None = None,
         include_station_code: bool = False,
+        station_gate_states: dict[int, dict] | None = None,
     ) -> list[dict]:
         ctx = self.ctx_or_active(context_id)
         if ctx is None:
@@ -1098,6 +1186,10 @@ class AppState:
                 s,
                 slip_status=slip_states.get(s.student_id) if slip_states is not None else None,
                 include_station_code=include_station_code,
+                station_gate=(
+                    station_gate_states.get(s.student_id)
+                    if station_gate_states is not None else None
+                ),
             )
             for s in ctx.queue
         ]
@@ -1178,6 +1270,10 @@ class AppState:
         # broadcastet den Snapshot bei jedem Druck-Übergang, sodass der Host
         # live folgt.
         slip_states = self.print_queue.print_job_states()
+        # student_id -> Zustand eines laufenden Scan-Station-Druckermodus-
+        # Auftrags (s. `PrintQueue.station_gate_snapshot`) — für den gelben
+        # Hinweis + "Druckauftrag aktualisieren" in der Schüler-Kachel.
+        station_gate_states = self.print_queue.station_gate_snapshot(self)
         contexts = {
             c.id: {
                 "id": c.id,
@@ -1186,6 +1282,7 @@ class AppState:
                     self._queue_student_as_dict(
                         s, slip_status=slip_states.get(s.student_id),
                         include_station_code=True,
+                        station_gate=station_gate_states.get(s.student_id),
                     )
                     for s in c.queue
                 ],
@@ -1222,7 +1319,10 @@ class AppState:
             "active_context_id": self.active_context_id,
             "contexts": contexts,
             "selected_schoolyear": self.selected_schoolyear,
-            "queue": self.queue_as_list(slip_states=slip_states, include_station_code=True),
+            "queue": self.queue_as_list(
+                slip_states=slip_states, include_station_code=True,
+                station_gate_states=station_gate_states,
+            ),
             "helpers": self.helpers_as_dict(),
             "modus_b": self.modus_b_snapshot(),
             "allow_booking": get_config().allow_booking,
@@ -1238,6 +1338,7 @@ class AppState:
             },
             "printer_displays": self.printer_displays_snapshot(),
             "scan_stations": self.scan_stations_snapshot(),
+            "printer_scanners": self.printer_scanners_snapshot(),
             "book_order": list(ctx.book_order) if ctx else [],
         }
 
@@ -1289,6 +1390,10 @@ class AppState:
                 "assigned_printer_ids": (
                     None if d.assigned_printer_ids is None else list(d.assigned_printer_ids)
                 ),
+                "assigned_scanner_ids": (
+                    None if d.assigned_scanner_ids is None else list(d.assigned_scanner_ids)
+                ),
+                "item_order": None if d.item_order is None else list(d.item_order),
             }
             for d in self.printer_displays.values()
         ]
@@ -1326,6 +1431,97 @@ class AppState:
             for s in self.scan_stations.values()
         ]
 
+    # --- Drucker-Scanner ----------------------------------------------------
+
+    def printer_scanners_snapshot(self) -> list[dict]:
+        """Drucker-Scanner für den Host-Snapshot: je Scanner Kennung,
+        Pairing-/Verbindungsstatus, Name, Registrierungs-Code, Theme und
+        Eingabeart. Der Host rendert daraus die Reiter im „Scanner"-Reiter der
+        „Drucker"-Karte. Das letzte Scan-Ergebnis ist bewusst NICHT enthalten
+        — das ist reine Drucker-Display-Anzeige, s. `printer_display_view`."""
+        return [
+            {
+                "scanner_id": s.scanner_id,
+                "authorized": s.authorized,
+                "connected": s.ws is not None,
+                "label": s.label,
+                "registration_code": s.registration_code,
+                "theme": s.theme,
+                "input_mode": s.input_mode,
+            }
+            for s in self.printer_scanners.values()
+        ]
+
+    def _ordered_display_items(self, display: PrinterDisplaySession) -> list[str]:
+        """Kombinierte Drucker+Scanner-Reihenfolge eines Displays als Liste
+        von Schlüsseln ``"printer:<id>"``/``"scanner:<id>"`` — bestimmt sowohl
+        die Host-Box-Reihenfolge (eine gemeinsame Reihe statt zweier
+        getrennter Abschnitte) als auch die Spaltenreihenfolge am physischen
+        Drucker-Display. Nur AKTUELL zugewiesene Items; nicht (mehr) gelistete
+        `item_order`-Einträge fallen weg, neu zugewiesene, noch nicht
+        gelistete Items hängen stabil ans Ende (in ihrer natürlichen
+        Zuweisungsreihenfolge: erst Drucker, dann Scanner)."""
+        all_printer_ids = [p.id for p in self.settings.printers]
+        printer_ids = (
+            all_printer_ids
+            if display.assigned_printer_ids is None
+            else [pid for pid in display.assigned_printer_ids if pid in set(all_printer_ids)]
+        )
+        scanner_ids = (
+            list(self.printer_scanners.keys())
+            if display.assigned_scanner_ids is None
+            else [sid for sid in display.assigned_scanner_ids if sid in self.printer_scanners]
+        )
+        keys = [f"printer:{pid}" for pid in printer_ids] + [f"scanner:{sid}" for sid in scanner_ids]
+        order = display.item_order or []
+        index = {k: i for i, k in enumerate(order)}
+        fallback = len(order)
+        return sorted(keys, key=lambda k: index.get(k, fallback))
+
+    def _scanners_for_display(
+        self, display: PrinterDisplaySession, ordered_keys: list[str]
+    ) -> list[dict]:
+        """Scan-Karten-Einträge für die Push-Nachricht eines Drucker-Displays,
+        in der gemeinsamen Drucker+Scanner-Reihenfolge (`ordered_keys`, s.
+        `_ordered_display_items`): je zugewiesenem, autorisiertem Scanner Name
+        + Verbindungsstatus + das zuletzt gemeldete Scan-Ergebnis (falls noch
+        innerhalb der 5s-TTL, s. `PrinterScannerSession.last_scan_expires_at`)
+        — der Client übernimmt den Rest-Countdown selbst (Muster wie
+        `printed_expires_in`)."""
+        scanner_ids = [k.split(":", 1)[1] for k in ordered_keys if k.startswith("scanner:")]
+        scanners = [
+            self.printer_scanners[sid]
+            for sid in scanner_ids
+            if self.printer_scanners.get(sid) is not None and self.printer_scanners[sid].authorized
+        ]
+        now = datetime.now()
+        out = []
+        for s in scanners:
+            expires_in = None
+            status = s.last_scan_status
+            payload = s.last_scan_payload
+            code = s.last_scan_code
+            if status is not None and s.last_scan_expires_at is not None:
+                remaining = (s.last_scan_expires_at - now).total_seconds()
+                if remaining <= 0:
+                    status = None
+                    payload = None
+                    code = None
+                else:
+                    expires_in = remaining
+            out.append(
+                {
+                    "scanner_id": s.scanner_id,
+                    "label": s.label,
+                    "connected": s.ws is not None,
+                    "status": status,
+                    "code": code,
+                    "payload": payload,
+                    "expires_in": expires_in,
+                }
+            )
+        return out
+
     def printer_display_view(self, display: PrinterDisplaySession) -> dict:
         """Gefilterte Queue-Sicht für ein Drucker-Display: die zugewiesenen
         Pool-Drucker (Live-Status) + die zentrale Warteschlange, gefiltert auf
@@ -1334,11 +1530,17 @@ class AppState:
         ``PrintQueue.display_view``. Zusätzlich wird die zentrale Warteschlange
         auf Schülerauftrag-Einträge eingeschränkt, sobald für dieses Display
         die Schülerauftrag-Bedingung aktiv ist (s.
-        ``_printer_display_students_only``)."""
+        ``_printer_display_students_only``). ``scanners`` hängt die zugewiesenen
+        Drucker-Scanner-Karten an (s. `_scanners_for_display`); ``card_order``
+        die gemeinsame Drucker+Scanner-Reihenfolge (s. `_ordered_display_items`)
+        — der Client baut die Kartenreihe genau in dieser Reihenfolge."""
         students_only = self._printer_display_students_only(display.assigned_printer_ids)
-        return self.print_queue.display_view(
-            self, display.assigned_printer_ids, students_only=students_only
-        )
+        ordered_keys = self._ordered_display_items(display)
+        ordered_printer_ids = [k.split(":", 1)[1] for k in ordered_keys if k.startswith("printer:")]
+        view = self.print_queue.display_view(self, ordered_printer_ids, students_only=students_only)
+        view["scanners"] = self._scanners_for_display(display, ordered_keys)
+        view["card_order"] = ordered_keys
+        return view
 
     def _printer_display_students_only(self, assigned_printer_ids: list[str] | None) -> bool:
         """Ob ein Drucker-Display die zentrale Warteschlange auf Schüler-

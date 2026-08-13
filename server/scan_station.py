@@ -188,8 +188,12 @@ def build_sheet_pdf(
     text_x = _MARGIN + box + 10
     max_width = _PAGE_W - _MARGIN - text_x
 
-    def section(title: str, books: list[dict], *, checkbox: bool) -> None:
+    def section(
+        title: str, books: list[dict], *, checkbox: bool, hide_if_empty: bool = False
+    ) -> None:
         nonlocal y
+        if not books and hide_if_empty:
+            return
         page.insert_text((_MARGIN, y), title, fontname="hebo", fontsize=13, color=0)
         y += 22
         if not books:
@@ -201,7 +205,7 @@ def build_sheet_pdf(
             if checkbox:
                 # Kästchen auf Höhe der ersten Zeile (Grundlinie ist `y`).
                 page.draw_rect(
-                    fitz.Rect(_MARGIN, y - box + 2, _MARGIN + box, y + 2),
+                    fitz.Rect(_MARGIN, y - box + 1, _MARGIN + box, y + 1),
                     color=(0, 0, 0),
                     width=0.9,
                 )
@@ -217,7 +221,39 @@ def build_sheet_pdf(
         y += 12
 
     section("Noch vorgemerkt", pending_books, checkbox=True)
-    section("Bereits ausgeliehen", lent_books, checkbox=False)
+    section("Bereits ausgeliehen", lent_books, checkbox=False, hide_if_empty=True)
+
+    # --- Ablauf-Erklärung als nummerierte Schritte ---
+    steps = [
+        "Hole alle Bücher aus der Liste 'Noch vorgemerkt' oben ab.",
+        "Gehe mit den Büchern zu einer freien Scan-Station.",
+        "Scanne dort zuerst deinen Barcode oben auf diesem Zettel ein, "
+        "um dich an der Station anzumelden.",
+        "Scanne anschließend jedes deiner Bücher einzeln ein, bis alle "
+        "abgehakt sind.",
+    ]
+    step_size = 11
+    step_line_height = step_size * 1.5
+    step_gap = step_line_height  # eine Leerzeile zwischen den Schritten
+    step_width = _PAGE_W - 2 * _MARGIN
+    number_width = max(helv.text_length(f"{i}. ", step_size) for i in range(1, len(steps) + 1))
+    step_text_width = step_width - number_width
+
+    y += 34  # etwas mehr Abstand zu den Bücherlisten
+    page.insert_text((_MARGIN, y), "So gehst du vor:", fontname="hebo", fontsize=13, color=0)
+    y += 24
+    for i, step in enumerate(steps, start=1):
+        lines = _wrap_text(helv, step, step_size, step_text_width) or [""]
+        page.insert_text((_MARGIN, y), f"{i}.", fontname="hebo", fontsize=step_size, color=0)
+        for j, line in enumerate(lines):
+            page.insert_text(
+                (_MARGIN + number_width, y + j * step_line_height),
+                line,
+                fontname="helv",
+                fontsize=step_size,
+                color=0,
+            )
+        y += len(lines) * step_line_height + step_gap
 
     out = doc.tobytes()
     doc.close()

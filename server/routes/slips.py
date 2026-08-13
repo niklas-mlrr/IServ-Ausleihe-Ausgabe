@@ -63,23 +63,36 @@ async def print_loan_slip(body: PrintLoanSlipRequest, sid: str = Depends(require
         raise HTTPException(400, "Kein Drucker konfiguriert")
     # Betreuerauslöser: ist der Ziel-Schüler ein live Schülerclient (Modus B,
     # kein Helfer zugewiesen) einer Klasse mit slip_trigger "helper", wird der
-    # Auftrag IMMER wie ein Schüler-Auftrag behandelt — serverseitig aus dem
-    # State abgeleitet, nicht aus einem Client-Flag übernommen (der Host-Client
+    # Auftrag wie ein Schüler-Auftrag behandelt — serverseitig aus dem State
+    # abgeleitet, nicht aus einem Client-Flag übernommen (der Host-Client
     # sendet hierfür kein eigenes Feld mehr; so kann ein clientseitiger Fehler
     # den Auftrag nie fälschlich als Host-Auftrag ohne `student_token`
     # anlegen). Sonst identisches Verhalten zum Betreuerauslöser-Pfad im
     # Helferclient (`_handle_print_for_student` in routes/ws.py).
+    # Ausnahme: ist der Leihschein bereits gedruckt (`slip_printed`), ist dies
+    # ein Nachdruck und wird immer als Host-Auftrag angelegt (s. `is_reprint`).
     found = state.find_student_with_ctx(student_id)
     session = state.find_session_by_student(student_id)
+    target = found[1] if found else None
+    # Nachdruck: ist der Leihschein bereits gedruckt (`slip_printed`), wird
+    # jeder weitere Druck über den Host-Button als Host-Auftrag angelegt
+    # (role="host", `host_sid`, kein `student_token`) — unabhängig davon, wer
+    # den ersten Druck ausgelöst hat (Host-Betreuerauslöser, Schüler-Selbst-
+    # auslöser oder Scan-Station) und unabhängig vom `slip_trigger`. So bleibt
+    # der Wiederholungsdruck (z. B. verlorener/zerstörter Leihschein) explizit
+    # eine vom Host geprüfte Aktion und ist nicht an die Modus-B-Session
+    # gekoppelt. `_mark_slip_printed` ist idempotent, der Leihschein-Marker
+    # wird durch den Nachdruck nicht erneut verändert.
+    is_reprint = target is not None and target.slip_printed
     student_client = bool(
         found is not None
         and found[1].assigned_helper is None
         and found[0].slip_trigger == "helper"
+        and not is_reprint
     )
     if student_client and (
         found[1].status != "active"
         or not found[1].print_mode
-        or found[1].slip_printed
         or session is None
         or session.state != "paired"
         or student_id in state.print_queue.in_flight_student_ids()
@@ -304,6 +317,28 @@ async def update_print_job_printers(
         raise HTTPException(400, "Auftrag wurde bereits einem Drucker zugewiesen")
     if result == "forbidden":
         raise HTTPException(403, "Kein eigener Druckauftrag")
+    if result == "empty":
+        raise HTTPException(400, "Bitte mindestens einen Drucker auswählen")
+    return {"ok": True}
+
+
+@host_router.post("/api/print-queue/{job_id}/adopt-station")
+async def adopt_station_print_job(
+    job_id: str, body: UpdatePrintJobPrintersRequest, sid: str = Depends(require_host),
+) -> dict:
+    """Host übernimmt einen noch wartenden Scan-Station-Druckermodus-Auftrag
+    manuell (gelber Hinweis + "Druckauftrag aktualisieren" in der
+    Schüler-Kachel, wenn kein erlaubter Drucker mehr auf einem Display
+    sichtbar ist). Anders als `update_print_job_printers` wird der Auftrag
+    dabei zu einem regulären Host-Auftrag befördert (Rolle + Warteschlangen-
+    Position ändern sich, `PrintQueue.host_adopt_station_job`)."""
+    result = await get_state().print_queue.host_adopt_station_job(
+        job_id, sid, body.printers
+    )
+    if result == "not_waiting":
+        raise HTTPException(
+            400, "Kein wartender Scan-Station-Druckauftrag mit dieser ID"
+        )
     if result == "empty":
         raise HTTPException(400, "Bitte mindestens einen Drucker auswählen")
     return {"ok": True}

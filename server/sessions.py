@@ -18,6 +18,7 @@ import io
 import logging
 import re
 import secrets
+import time
 from datetime import datetime
 
 import qrcode
@@ -733,6 +734,21 @@ def _slip_print_label(state: AppState, student_id: int) -> str:
     return "Leihschein_" + "_".join(safe_parts)
 
 
+def _station_sheet_label(state: AppState, student_id: int, form: str | None) -> str:
+    """Analog zu `_slip_print_label`, für den Scan-Stations-Zettel: `Scanstation_
+    <Klasse>_<Nachname>_<Vorname>` als Druckjob-/Dateiname (file-Backend/Temp-PDF).
+    Fallback auf `scan_station_<student_id>` ohne bekannte Schülerdaten."""
+    student = state.find_student(student_id)
+    lastname = getattr(student, "lastname", None) if student else None
+    firstname = getattr(student, "firstname", None) if student else None
+    safe_parts = [
+        _UNSAFE_LABEL_CHARS.sub("_", p).strip("_") for p in (form, lastname, firstname) if p
+    ]
+    if not safe_parts:
+        return f"scan_station_{student_id}"
+    return "Scanstation_" + "_".join(safe_parts)
+
+
 def allowed_printers_for(state: AppState, student_id: int) -> set[str] | None:
     """Drucker-Allowlist der Klasse eines Schülers — für den Druckauftrag
     (`PrintJob.allowed_printers`). Sucht den besitzenden Klassen-Kontext via
@@ -746,6 +762,109 @@ def allowed_printers_for(state: AppState, student_id: int) -> set[str] | None:
     # None bleibt None (alle); kopieren, damit der Snapshot im Job stabil ist,
     # auch wenn die Klasse nach dem Enqueue umkonfiguriert wird.
     return None if ctx.allowed_printer_ids is None else set(ctx.allowed_printer_ids)
+
+
+def displayed_printer_ids(state: AppState) -> set[str]:
+    """Pool-Drucker-IDs, die gerade auf mindestens einem angemeldeten
+    Drucker-Display (authorisiert + per WS verbunden) sichtbar sind. Für ein
+    Display ohne explizite Zuweisung (`assigned_printer_ids is None`) zählen
+    alle aktuellen Pool-Drucker als sichtbar. Grundlage für das
+    Scan-Station-Druckermodus-Gate (`PrintJob.station_display_gate`) — ein
+    solcher Auftrag darf nur auf einem Drucker aus dieser Menge gedruckt
+    werden. Rein lesend, kein Lock nötig (Anzeige-Konsistenz reicht, analog
+    `PrintQueue.pool_printers`)."""
+    all_pool_ids = {p.id for p in state.settings.printers}
+    shown: set[str] = set()
+    for d in state.printer_displays.values():
+        if not d.authorized or d.ws is None:
+            continue
+        if d.assigned_printer_ids is None:
+            shown |= all_pool_ids
+        else:
+            shown |= set(d.assigned_printer_ids) & all_pool_ids
+    return shown
+
+
+def relevant_display_count(state: AppState, allowed: set[str] | None) -> int:
+    """Anzahl der aktuell angemeldeten, verbundenen Drucker-Displays, die
+    mindestens einen für `allowed` erlaubten Drucker zeigen (`allowed=None` =
+    jeder gezeigte Drucker zählt als erlaubt). Für den Scan-Station-
+    Druckermodus-Hinweis "Bitte achte auf die Druckeranzeige(n)" — Singular
+    bei genau einem in Frage kommenden Display, sonst Plural."""
+    all_pool_ids = {p.id for p in state.settings.printers}
+    count = 0
+    for d in state.printer_displays.values():
+        if not d.authorized or d.ws is None:
+            continue
+        shown = all_pool_ids if d.assigned_printer_ids is None else (
+            set(d.assigned_printer_ids) & all_pool_ids
+        )
+        if not shown:
+            continue
+        if allowed is None or (shown & allowed):
+            count += 1
+    return count
+
+
+def eligible_drucker_scanners_for(state: AppState, student_id: int) -> list[dict]:
+    """Drucker-Scanner, an denen dieser Schüler gerade seinen Leihschein-Druck
+    selbst auslösen könnte: autorisierte, verbundene Scanner, die einem
+    autorisierten, verbundenen Drucker-Display zugeordnet sind, das seinerseits
+    mindestens einen für die Klasse dieses Schülers erlaubten Drucker zeigt
+    (dieselbe „shown"-Berechnung wie in `displayed_printer_ids`, hier pro
+    Display statt aggregiert). Liefert `[{"scanner_id", "label"}, ...]`,
+    dedupliziert über mehrere qualifizierende Displays. Rein lesend."""
+    allowed = allowed_printers_for(state, student_id)
+    all_pool_ids = {p.id for p in state.settings.printers}
+    seen: set[str] = set()
+    out: list[dict] = []
+    for d in state.printer_displays.values():
+        if not d.authorized or d.ws is None:
+            continue
+        shown = all_pool_ids if d.assigned_printer_ids is None else (
+            set(d.assigned_printer_ids) & all_pool_ids
+        )
+        if not shown or (allowed is not None and not (shown & allowed)):
+            continue
+        scanner_ids = (
+            list(state.printer_scanners.keys())
+            if d.assigned_scanner_ids is None
+            else d.assigned_scanner_ids
+        )
+        for sid in scanner_ids:
+            if sid in seen:
+                continue
+            scanner = state.printer_scanners.get(sid)
+            if scanner is None or not scanner.authorized or scanner.ws is None:
+                continue
+            seen.add(sid)
+            out.append({"scanner_id": scanner.scanner_id, "label": scanner.label})
+    return out
+
+
+async def pending_vormerk_isbns_for(state: AppState, student_id: int) -> set[str] | None:
+    """Noch offene vorgemerkte Bücher eines Schülers — ausgeblendete Reihen
+    (Einstellungen-Dialog) und Reihen mit leerem Bestand (solange nicht
+    ausgeliehen) zählen NICHT mit (Mirror `routes/classes.py::
+    _load_student_flags`, dortiger `"all_lent"`-Zweig, hier zusätzlich um
+    `apply_empty_stock_visibility` ergänzt). `None` = Status konnte nicht
+    sicher ermittelt werden (IServ-Lookup fehlgeschlagen) — vom Aufrufer wie
+    „noch nicht bereit" zu behandeln, NICHT wie „keine offenen Bücher".
+    Rein lesend."""
+    from .book_order import get_hidden_isbns_for_form
+
+    qs = state.find_student(student_id)
+    if qs is None or state.iserv is None:
+        return None
+    try:
+        info = await state.iserv.get_student_info(student_id, state.selected_schoolyear)
+    except Exception:
+        log.exception("Bücherstatus für Schüler %s konnte nicht geladen werden", student_id)
+        return None
+    apply_hidden_books(info, await get_hidden_isbns_for_form(state, qs.form))
+    apply_empty_stock_visibility(info, state.caches.empty_isbns)
+    vormerk, _lent, _lent_codes = booking_isbn_sets_from_info(info)
+    return vormerk
 
 
 def slip_trigger_for(state: AppState, student_id: int) -> str:
@@ -1025,18 +1144,22 @@ async def confirm_slip_received(state: AppState, student_id: int) -> None:
 
 
 async def _download_slip_to_host(
-    state: AppState, student_id: int, pdf: bytes, *, pages: str | None
+    state: AppState, student_id: int, pdf: bytes, *, pages: str | None, filename: str | None = None
 ) -> int:
     """Leihschein-PDF an alle verbundenen Host-Browser zum Download pushen.
 
     Beschränkt das PDF auf denselben Seitenbereich, der sonst gedruckt würde,
     und schickt es base64-kodiert über die Host-WebSocket. Gibt die Anzahl der
-    erreichten Host-Browser zurück (0 = keiner verbunden)."""
+    erreichten Host-Browser zurück (0 = keiner verbunden).
+
+    `filename`: Download-Dateiname; ohne Angabe der bisherige generische
+    Leihschein-Name (Fallback für Aufrufer ohne Klasse-/Namens-Kontext)."""
     from .loan_slip import select_pages
 
     pdf = await asyncio.to_thread(select_pages, pdf, pages)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"leihschein_{student_id}_{ts}.pdf"
+    if filename is None:
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"leihschein_{student_id}_{ts}.pdf"
     msg = {
         "type": "loan_slip_download",
         "filename": filename,
@@ -1073,6 +1196,17 @@ async def _prefetch_own_slip(state: AppState, student_id: int) -> None:
     form = _student_form(state, student_id)
     session.own_slip_data_b64 = base64.b64encode(pdf).decode("ascii")
     session.own_slip_filename = _own_slip_filename(lastname, firstname, form)
+
+
+def _station_sheet_filename(lastname: str | None, firstname: str | None, form: str | None) -> str:
+    """Dateiname für den Scan-Stations-Zettel (Download bzw. `save_pdf_locally`):
+    `Scanstation <Klasse> <Nachname>, <Vorname>` — Klasse vorneweg (wie auf dem
+    Zettel selbst), analog zu `_own_slip_filename`. Fehlende Teile fallen
+    einfach weg, statt eine leere Lücke zu hinterlassen."""
+    form_clean = (form or "").removeprefix("Klasse ").strip()
+    name_part = ", ".join(p for p in ((lastname or "").strip(), (firstname or "").strip()) if p)
+    parts = [p for p in (form_clean, name_part) if p]
+    return "Scanstation " + " ".join(parts) + ".pdf" if parts else "Scanstation.pdf"
 
 
 def _own_slip_filename(lastname: str, firstname: str, form: str | None) -> str:
@@ -1376,6 +1510,17 @@ async def end_student(
                 if station is not None:
                     await release_station_student(state, station, reason="host disconnected")
                 state.invalidate_station_code(student_id)
+            elif queue_status in ("done", "skipped", "absent"):
+                # Abschließen/Überspringen beendet den Durchlauf final — die
+                # Station wird (wie beim Trennen) abgemeldet und fällt auf
+                # „Zettel-Code scannen" zurück, statt den beendeten Schüler
+                # weiter stale anzuzeigen. Der Zettel-Code bleibt hier
+                # unangetastet: ein Re-Scan wird via `resolve_station_code` am
+                # `done`-Status ohnehin abgelehnt, und nach einem Reset-Queue
+                # (done → pending) ist der Code ohne Neudruck wieder nutzbar.
+                station = state.find_station_by_student(student_id)
+                if station is not None:
+                    await release_station_student(state, station, reason="student finished")
         if old_helper and old_helper in state.helper_sessions:
             h = state.helper_sessions[old_helper]
             await _detach_helper(state, hub, h, helper_notify)
@@ -1990,6 +2135,50 @@ async def broadcast_printer_displays(state: AppState) -> None:
         await send_printer_display_update(state, display)
 
 
+async def send_printer_scanner_update(state: AppState, scanner) -> None:
+    """Gerätezustand an einen Drucker-Scanner schicken: vor der Freischaltung
+    nur den Registrierungs-Code, danach Name/Theme/Eingabeart. Der Scanner
+    selbst zeigt kein Scan-Ergebnis — das läuft ausschließlich über die
+    Drucker-Display(s), denen er zugewiesen ist (s. ``broadcast_scanner_result``)."""
+    if scanner.ws is None:
+        return
+    if not scanner.authorized:
+        msg = {
+            "type": "registration",
+            "code": scanner.registration_code,
+            "scanner_id": scanner.scanner_id,
+            "theme": scanner.theme,
+            "input_mode": scanner.input_mode,
+        }
+    else:
+        msg = {
+            "type": "ready",
+            "label": scanner.label,
+            "theme": scanner.theme,
+            "input_mode": scanner.input_mode,
+        }
+    if not await get_hub().send_websocket(scanner.ws, msg):
+        scanner.ws = None
+
+
+async def broadcast_printer_scanners(state: AppState) -> None:
+    """Gerätezustand an alle Drucker-Scanner pushen (Theme/Name/Eingabeart/
+    Freischaltung)."""
+    for scanner in list(state.printer_scanners.values()):
+        await send_printer_scanner_update(state, scanner)
+
+
+async def broadcast_scanner_result(state: AppState, scanner) -> None:
+    """Nach jeder Scan-Auswertung (s. ``routes/ws.py::ws_drucker_scan``) an
+    ALLE Drucker-Displays pushen, denen dieser Scanner zugewiesen ist — das
+    Ergebnis lebt auf der Scanner-Session, gerendert wird es aber auf der/den
+    Display-Seite(n) (s. ``AppState._scanners_for_display``)."""
+    for display in state.printer_displays.values():
+        ids = display.assigned_scanner_ids
+        if ids is None or scanner.scanner_id in ids:
+            await send_printer_display_update(state, display)
+
+
 # ---------------------------------------------------------------------------
 # Lehrkraft-Statusansicht (`/teacher`)
 # ---------------------------------------------------------------------------
@@ -2393,6 +2582,13 @@ async def print_station_sheet_for(
     )
     books = info.get("books", [])
     pending = [b for b in books if b.get("status") == "vorgemerkt"]
+    # Wie in den Clients (`web/common.js::renderBookRows`): nach der
+    # klassenweit konfigurierten Reihenfolge, unbekannte ISBNs ans Ende.
+    book_order = await get_book_order_for_form(state, form)
+    order_index = {isbn: i for i, isbn in enumerate(book_order)}
+    pending.sort(key=lambda b: order_index.get(b.get("isbn"), len(book_order)))
+    # `books` liegt bereits nach Ausgabezeit absteigend sortiert vor
+    # (`IservClient.get_student_info`), Filtern erhält diese Reihenfolge.
     lent = [b for b in books if b.get("status") == "ausgeliehen"]
 
     pdf = await asyncio.to_thread(
@@ -2405,10 +2601,17 @@ async def print_station_sheet_for(
         pending_books=pending,
     )
 
+    sheet_label = _station_sheet_label(state, student_id, form)
+
     # Entwickler-Toggle „PDF lokal speichern": in den Host-Browser laden statt
     # drucken (identisch zum Leihschein-Pfad).
     if state.settings.save_pdf_locally:
-        delivered = await _download_slip_to_host(state, student_id, pdf, pages=None)
+        filename = _station_sheet_filename(
+            student.lastname if student else None, student.firstname if student else None, form
+        )
+        delivered = await _download_slip_to_host(
+            state, student_id, pdf, pages=None, filename=filename
+        )
         if delivered:
             log.info("Stations-Zettel an %d Host-Browser gesendet: student_id=%s",
                      delivered, student_id)
@@ -2420,7 +2623,7 @@ async def print_station_sheet_for(
         )
         result = await print_pdf(
             pdf, backend="file", output_dir=cfg.print_output_dir,
-            label=f"scan_station_{student_id}",
+            label=sheet_label,
         )
         result["detail"] = "kein Host-Browser verbunden — " + result.get("detail", "")
         result["code"] = code
@@ -2432,7 +2635,7 @@ async def print_station_sheet_for(
         printer_name=printer_name or cfg.printer_name,
         sumatra_path=cfg.sumatra_path,
         output_dir=cfg.print_output_dir,
-        label=f"scan_station_{student_id}",
+        label=sheet_label,
     )
     log.info(
         "Stations-Zettel gedruckt: student_id=%s backend=%s", student_id, result.get("backend")
@@ -2503,6 +2706,13 @@ async def sweep_scan_stations() -> None:
 #     die Platte geschrieben — Karteileichen (z. B. ein wiederhergestellter,
 #     nie wieder angeschlossener Helfer) fallen so beim übernächsten Neustart
 #     automatisch raus, spätestens beim Shutdown-Aufruf in `app.py`.
+#     ABER: Diese Regel greift erst, wenn der Lauf länger als
+#     `PRUNE_MIN_UPTIME_S` (5 min) gedauert hat. Ein kurzer Lauf (Neustart
+#     direkt nach dem Start, Fehlstart, schnelles Durchstarten beim Aufbau)
+#     ist kein Beleg dafür, dass ein Gerät weg ist — die Handys/Displays
+#     hätten in der Zeit gar nicht zuverlässig reconnecten können. Solange
+#     der Lauf jünger ist, werden alle Einträge weitergeschrieben, damit sie
+#     beim nächsten Start wieder da sind.
 
 
 def server_lan_ip() -> str | None:
@@ -2516,15 +2726,32 @@ def server_lan_ip() -> str | None:
     return primary_lan_ip()
 
 
+# Mindestlaufzeit eines Serverlaufs, ab der „war nie verbunden" als Beleg für
+# ein verschwundenes Gerät gilt (s. Verwerfungsregel 2 oben).
+PRUNE_MIN_UPTIME_S = 300.0
+
+
+def _prunes_unconnected(state: AppState) -> bool:
+    """True, wenn dieser Serverlauf lang genug lief, um nie verbundene
+    Einträge aus der Persistenz zu entfernen. Bei kürzeren Läufen bleibt alles
+    erhalten."""
+    return (time.monotonic() - state.started_at_monotonic) >= PRUNE_MIN_UPTIME_S
+
+
 def persist_helpers(state: AppState) -> None:
     """Helfer, die in DIESEM Serverlauf mindestens einmal verbunden waren, auf
     die Server-Persistenz (`data/helpers.json`) wegschreiben. Non-fatal —
     Schreibfehler werden geloggt, der In-Memory-State bleibt Leading."""
     from .helper_store import save as save_helpers
 
+    prune = _prunes_unconnected(state)
     try:
         save_helpers(
-            [h for h in state.helper_sessions.values() if h.connected_since_start],
+            [
+                h
+                for h in state.helper_sessions.values()
+                if h.connected_since_start or not prune
+            ],
             server_lan_ip(),
         )
     except Exception:
@@ -2539,29 +2766,77 @@ def persist_printer_displays(state: AppState) -> None:
     s. `printer_store.py`)."""
     from .printer_display_store import save as save_printer_displays
 
+    prune = _prunes_unconnected(state)
     try:
         printer_names_by_id = {p.id: p.name for p in state.settings.printers}
-        entries = [
-            {
-                "display_id": d.display_id,
-                "label": d.label,
-                "theme": d.theme,
-                "assigned_printer_names": (
-                    None
-                    if d.assigned_printer_ids is None
-                    else [
-                        printer_names_by_id[pid]
-                        for pid in d.assigned_printer_ids
-                        if pid in printer_names_by_id
-                    ]
-                ),
-            }
-            for d in state.printer_displays.values()
-            if d.authorized and d.connected_since_start
-        ]
+        entries = []
+        for d in state.printer_displays.values():
+            if not (d.authorized and (d.connected_since_start or not prune)):
+                continue
+            # Gemeinsame Drucker+Scanner-Reihenfolge (`item_order`, s.
+            # AppState._ordered_display_items): Drucker über `name` remappen
+            # (wie `assigned_printer_names`), Scanner über die stabile
+            # `scanner_id` direkt. Verwaiste Drucker-Einträge (Name nicht mehr
+            # im Pool) fallen weg — beim nächsten Laden hängen sie ohnehin
+            # stabil ans Ende, kein Datenverlust.
+            item_order = []
+            for key in d.item_order or []:
+                kind, _, ident = key.partition(":")
+                if kind == "printer" and ident in printer_names_by_id:
+                    item_order.append({"kind": "printer", "name": printer_names_by_id[ident]})
+                elif kind == "scanner":
+                    item_order.append({"kind": "scanner", "id": ident})
+            entries.append(
+                {
+                    "display_id": d.display_id,
+                    "label": d.label,
+                    "theme": d.theme,
+                    "assigned_printer_names": (
+                        None
+                        if d.assigned_printer_ids is None
+                        else [
+                            printer_names_by_id[pid]
+                            for pid in d.assigned_printer_ids
+                            if pid in printer_names_by_id
+                        ]
+                    ),
+                    # Scanner-Zuordnung braucht KEIN Namens-Remapping wie bei
+                    # Druckern: `scanner_id` ist — wie `display_id`/`station_id`
+                    # — der persistierte URL-Token selbst, über Neustarts hinweg
+                    # stabil (anders als die laufzeitstabilen, aber pro Lauf neu
+                    # vergebenen Pool-`id`s der Drucker).
+                    "assigned_scanner_ids": (
+                        None if d.assigned_scanner_ids is None else list(d.assigned_scanner_ids)
+                    ),
+                    "item_order": item_order,
+                }
+            )
         save_printer_displays(entries, server_lan_ip())
     except Exception:
         log.exception("Speichern der Drucker-Display-Persistenz fehlgeschlagen (non-fatal)")
+
+
+def persist_printer_scanners(state: AppState) -> None:
+    """Freigeschaltete Drucker-Scanner, die in DIESEM Serverlauf mindestens
+    einmal verbunden waren, auf die Server-Persistenz
+    (`data/printer_scanners.json`) wegschreiben. Non-fatal."""
+    from .printer_scanner_store import save as save_printer_scanners
+
+    prune = _prunes_unconnected(state)
+    try:
+        entries = [
+            {
+                "scanner_id": s.scanner_id,
+                "label": s.label,
+                "theme": s.theme,
+                "input_mode": s.input_mode,
+            }
+            for s in state.printer_scanners.values()
+            if s.authorized and (s.connected_since_start or not prune)
+        ]
+        save_printer_scanners(entries, server_lan_ip())
+    except Exception:
+        log.exception("Speichern der Drucker-Scanner-Persistenz fehlgeschlagen (non-fatal)")
 
 
 def persist_scan_stations(state: AppState) -> None:
@@ -2570,6 +2845,7 @@ def persist_scan_stations(state: AppState) -> None:
     (`data/scan_stations.json`) wegschreiben. Non-fatal."""
     from .scan_station_store import save as save_scan_stations
 
+    prune = _prunes_unconnected(state)
     try:
         entries = [
             {
@@ -2579,7 +2855,7 @@ def persist_scan_stations(state: AppState) -> None:
                 "input_mode": s.input_mode,
             }
             for s in state.scan_stations.values()
-            if s.authorized and s.connected_since_start
+            if s.authorized and (s.connected_since_start or not prune)
         ]
         save_scan_stations(entries, server_lan_ip())
     except Exception:

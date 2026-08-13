@@ -19,6 +19,44 @@
     /* Registrierung / Sperre: volle Resthöhe, Inhalt mittig. */
     #view-register.show, #view-forbidden.show { flex: 1 1 auto; justify-content: center; }
 
+    /* Druckermodus — 1:1 aus student.html übernommen (dieselben Klassen/IDs,
+       gleiches Aussehen), nur ohne die Auslöser-/Empfangen-Buttons (die
+       Station löst automatisch aus und meldet sich nach fester Zeit ab statt
+       auf eine Bestätigung zu warten). Name bleibt oben fix stehen
+       (.print-name-row außerhalb von .scroll-center), der Rest wird bezogen
+       auf die GESAMTE View-Höhe vertikal zentriert (`positionScrollCenter`
+       in scan-station.js, Port von student.js). */
+    #view-print.show { flex: 1 1 auto; min-height: 0; position: relative; }
+    .scroll-center {
+      position: absolute; left: 0; right: 0; width: 100%;
+      display: flex; flex-direction: column; align-items: center;
+      overflow-y: auto;
+    }
+    .big-msg { text-align: center; margin-top: 60px; }
+    .big-msg .icon { font-size: 3rem; margin-bottom: 12px; }
+    .big-msg .title { font-size: 1.4rem; font-weight: 600; margin-bottom: 8px; }
+    #view-print .print-name-row { margin-top: 12px; }
+    #view-print .big-msg { margin-top: 0; }
+    #print-intro { max-width: 520px; margin: 0 auto 18px; line-height: 1.45; }
+    #print-status {
+      width: 100%; max-width: 520px; margin: 0 auto; padding: 14px 18px;
+      border: 2px solid var(--border); border-radius: 12px;
+      background: var(--surface); text-align: center;
+    }
+    #print-text {
+      font-size: 1rem; font-weight: 600; line-height: 1.4;
+      /* pre-line statt normal: erlaubt eine Leerzeile vor dem Unterschreiben-
+         Hinweis (s. scan-station.js), normale Zeilenumbrüche wrappen wie
+         gehabt. */
+      white-space: pre-line;
+    }
+    .info-box {
+      width: 100%; max-width: 520px; margin: 32px auto 0; padding: 14px 18px;
+      border: 2px solid var(--border); background: var(--surface); text-align: left;
+    }
+    .info-box h4 { font-size: .95rem; font-weight: 700; margin-bottom: 6px; }
+    .info-box p { font-size: .85rem; line-height: 1.45; opacity: .8; }
+
     .reg-hint { opacity: .7; text-align: center; margin-bottom: 12px; }
     .reg-code {
       font-size: 4.5rem; font-weight: 700; letter-spacing: .25em;
@@ -28,8 +66,11 @@
     .reg-sub { opacity: .5; font-size: .9rem; text-align: center; max-width: 30rem; }
 
     /* Namenszeile der Station: statt Zahl-/Anmeldestatus (den ein geteiltes
-       Gerät nicht zeigen soll) stehen rechts Klasse und Restzeit. */
-    #countdown { font-size: .85rem; opacity: .6; }
+       Gerät nicht zeigen soll) stehen rechts Klasse und Restzeit. Gleiche
+       Schrifteigenschaften für den Druckermodus-Countdown (#print-countdown,
+       s. dort) — sonst würde `.s-pay` allein eine höhere Deckkraft (.9 statt
+       .6) ergeben. */
+    #countdown, #print-countdown { font-size: .85rem; opacity: .6; }
     /* Manuelle Code-Eingabe (Fallback, wenn der Barcode nicht lesbar ist). */
     .manual { display: flex; gap: 8px; align-items: center; margin-top: 14px; }
     .manual input {
@@ -131,6 +172,39 @@
   <h1>Gesperrt</h1>
   <p class="reg-hint">Diese Station wurde vom Betreuer gesperrt.</p>
   <p class="reg-sub">Bitte wende dich an den Betreuer.</p>
+</div>
+
+<!-- Druckermodus: alle vorgemerkten Bücher des angemeldeten Schülers sind
+     erledigt — 1:1 dieselbe Ansicht wie #view-print in student.html (Name
+     fix oben, Icon/Titel/Text vertikal zentriert, Info-Kasten), nur OHNE die
+     Auslöser-/"Leihschein erhalten"-Buttons: die Station löst automatisch
+     aus (Selbstauslöser verhält sich vorübergehend wie Automatisch) und
+     meldet sich nach fester Zeit unconditional ab (`enterDruckmodus`/
+     30-s-Timer, s. scan-station.js), statt auf eine Bestätigung zu warten. -->
+<div class="view" id="view-print">
+  <div class="name-row print-name-row">
+    <div class="s-name" id="print-name">–</div>
+    <div class="s-meta">
+      <div class="s-form" id="print-form"></div>
+      <!-- Läuft wie #countdown im Scanmodus unter der Klasse weiter (s.
+           #student-row oben) — gleiche Position, gleiche Klasse (.s-pay). -->
+      <div class="s-pay" id="print-countdown"></div>
+    </div>
+  </div>
+  <div class="scroll-center">
+    <div class="big-msg">
+      <div class="icon"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg></div>
+      <div class="title" id="print-title">Leihschein drucken</div>
+      <div id="print-intro">Alle Bücher wurden gescannt.<br>Als nächstes muss der Leihschein gedruckt werden.</div>
+      <div id="print-status" role="status" aria-live="polite">
+        <div id="print-text"></div>
+      </div>
+      <div class="info-box">
+        <h4>Leihschein</h4>
+        <p>Mit der Unterschrift auf dem Leihschein bestätigst du der Schule den Erhalt der aufgeführten Bücher.</p>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- Scanmodus — identischer Aufbau wie #view-active im Schülerclient:

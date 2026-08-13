@@ -178,10 +178,60 @@ def test_host_print_for_auto_trigger_student_stays_host_job(client, ctx):
     assert job.student_token is None
 
 
-def test_host_print_for_helper_trigger_student_rejects_when_already_printed(client, ctx):
+def test_host_print_for_helper_trigger_student_reprint_is_host_job(client, ctx):
+    """Nachdruck: ist der Leihschein bereits gedruckt (`slip_printed`), wird
+    jeder weitere Druck über den Host-Button als Host-Auftrag angelegt — auch
+    bei `slip_trigger == 'helper'` und ohne Helfer (sonst Erstdruck =
+    Schüler-Auftrag). So bleibt der Wiederholungsdruck (verlorener/
+    zerstörter Leihschein) eine vom Host geprüfte Aktion, unabhängig davon,
+    wer den ersten Druck ausgelöst hat."""
     state, _, _ = ctx
     student, _ = _live_student(state, slip_trigger="helper")
     student.slip_printed = True
+    r = client.post(
+        "/api/print-loan-slip",
+        json={"student_id": 42, "second_page": False},
+        cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 200
+    job = state.print_queue.waiting[0]
+    assert job.role == "host"
+    assert job.host_sid == "sid"
+    assert job.student_token is None
+
+
+def test_host_print_for_auto_trigger_student_reprint_is_host_job(client, ctx):
+    """Nachdruck nach Schüler-Selbstauslöser (`slip_trigger == 'auto'`): auch
+    hier wird der zweite Druck als Host-Auftrag angelegt — der erste Druck
+    lief damals automatisch als Schüler-Auftrag, der Wiederholungsdruck
+    läuft aber vom Host aus."""
+    state, _, _ = ctx
+    student, _ = _live_student(state, slip_trigger="auto")
+    student.slip_printed = True
+    r = client.post(
+        "/api/print-loan-slip",
+        json={"student_id": 42, "second_page": False},
+        cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 200
+    job = state.print_queue.waiting[0]
+    assert job.role == "host"
+    assert job.host_sid == "sid"
+    assert job.student_token is None
+
+
+def test_host_print_for_helper_trigger_student_rejects_while_in_flight(client, ctx):
+    """Ein laufender Erstdruck blockiert einen zweiten Druck (Doppel-Schutz
+    via `in_flight_student_ids`) — der Button bleibt zwar sichtbar, der
+    Server weist den zweiten Auftrag ab, solange der erste noch läuft."""
+    from server.print_queue import PrintJob
+
+    state, _, _ = ctx
+    _live_student(state, slip_trigger="helper")
+    # Simuliert einen bereits laufenden Druckauftrag für diesen Schüler.
+    state.print_queue.waiting.append(
+        PrintJob.create(role="student", student_id=42, pages="1", name="Test, Schueler (10a)")
+    )
     r = client.post(
         "/api/print-loan-slip",
         json={"student_id": 42, "second_page": False},

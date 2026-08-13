@@ -358,6 +358,69 @@ class PrinterDisplayThemeRequest(BaseModel):
     theme: str = "dark"
 
 
+class PrinterDisplayAssignScannersRequest(BaseModel):
+    """Body für `POST /api/drucker-display/assign-scanners` — zugewiesene
+    Drucker-Scanner für ein Drucker-Display setzen. Spiegel von
+    `PrinterDisplayAssignRequest`, nur für Scanner statt Drucker: ``None`` =
+    alle autorisierten Scanner (Default), explizite (auch leere) Liste =
+    geordnete Teilmenge."""
+
+    display_id: str = ""
+    scanner_ids: list[str] | None = None
+
+
+class PrinterDisplayReorderItemsRequest(BaseModel):
+    """Body für `POST /api/drucker-display/reorder-items` — gemeinsame
+    Drucker+Scanner-Reihenfolge eines Displays setzen (eine Box-Reihe statt
+    zweier getrennter Abschnitte, s. `PrinterDisplaySession.item_order`).
+    `item_order` = geordnete Liste von Schlüsseln ``"printer:<id>"``/
+    ``"scanner:<id>"``."""
+
+    display_id: str = ""
+    item_order: list[str] = []
+
+
+class PrinterScannerEnableRequest(BaseModel):
+    """Body für `POST /api/drucker-scan/enable` — Drucker-Scanner durch
+    Eingabe eines Namens freischalten. Spiegel von `PrinterDisplayEnableRequest`."""
+
+    scanner_id: str = ""
+    label: str = ""
+
+
+class PrinterScannerLabelRequest(BaseModel):
+    """Body für `POST /api/drucker-scan/label` — Scanner-Name setzen. Leer =
+    kein Name (Reiter zeigt den Registrierungs-Code)."""
+
+    scanner_id: str = ""
+    label: str = ""
+
+
+class PrinterScannerThemeRequest(BaseModel):
+    """Body für `POST /api/drucker-scan/theme` — Darstellung auf dem Scanner
+    setzen. ``theme`` = ``'light'`` oder ``'dark'``."""
+
+    scanner_id: str = ""
+    theme: str = "dark"
+
+
+class PrinterScannerInputModeRequest(BaseModel):
+    """Body für `POST /api/drucker-scan/input-mode` — Eingabeart auf dem
+    Scanner setzen (wie bei der Scan-Station, vom Host vorgegeben).
+    ``input_mode`` = ``'camera'`` oder ``'manual'``."""
+
+    scanner_id: str = ""
+    input_mode: str = "camera"
+
+
+class PrinterScannerForgetRequest(BaseModel):
+    """Body für `POST /api/drucker-scan/forget` — einen Drucker-Scanner
+    verbieten (Token auf die Bannliste, Session entfernen, WS wird
+    geschlossen)."""
+
+    scanner_id: str = ""
+
+
 class ScanStationEnableRequest(BaseModel):
     """Body für `POST /api/scan-station/enable` — Scan-Station durch Eingabe
     eines Namens freischalten (autorisieren). Der Registrierungs-Code dient nur

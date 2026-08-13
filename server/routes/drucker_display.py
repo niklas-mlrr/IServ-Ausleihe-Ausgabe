@@ -17,9 +17,11 @@ from ..sessions import make_qr_data_url, persist_printer_displays, send_printer_
 from ..state import get_state
 from ._deps import (
     PrinterDisplayAssignRequest,
+    PrinterDisplayAssignScannersRequest,
     PrinterDisplayEnableRequest,
     PrinterDisplayForgetRequest,
     PrinterDisplayLabelRequest,
+    PrinterDisplayReorderItemsRequest,
     PrinterDisplayThemeRequest,
     _base_url,
     host_router,
@@ -115,6 +117,11 @@ async def printer_display_enable(body: PrinterDisplayEnableRequest) -> dict:
     display.label = (body.label or "").strip()
     persist_printer_displays(state)
     await send_printer_display_update(state, display)
+    # Ein neu freigeschaltetes Display kann Drucker zeigen, auf die ein
+    # pausierter Scan-Station-Druckermodus-Auftrag wartet (s.
+    # PrintJob.station_display_gate) — Scheduler direkt wecken statt auf den
+    # nächsten zufälligen Trigger zu warten.
+    state.print_queue.wake()
     from ..hub import get_hub
 
     await get_hub().broadcast_host(state.state_snapshot())
@@ -145,10 +152,69 @@ async def printer_display_assign(body: PrinterDisplayAssignRequest) -> dict:
         display.assigned_printer_ids = ordered
     persist_printer_displays(state)
     await send_printer_display_update(state, display)
+    # Zuweisung kann einen bisher nicht sichtbaren, erlaubten Drucker neu
+    # zeigen — Scheduler wecken (s. printer_display_enable oben).
+    state.print_queue.wake()
     from ..hub import get_hub
 
     await get_hub().broadcast_host(state.state_snapshot())
     return {"ok": True, "assigned_printer_ids": display.assigned_printer_ids}
+
+
+@host_router.post("/api/drucker-display/assign-scanners")
+async def printer_display_assign_scanners(body: PrinterDisplayAssignScannersRequest) -> dict:
+    """Zugewiesene Drucker-Scanner für ein Drucker-Display setzen. Spiegel von
+    `printer_display_assign`, nur für Scanner statt Drucker: `scanner_ids=None`
+    = alle autorisierten Scanner, explizite (auch leere) Liste = geordnete
+    Teilmenge. Verwaiste IDs werden herausgefiltert, Duplikate entfernt."""
+    state = get_state()
+    display = state.printer_displays.get(body.display_id)
+    if not display:
+        raise HTTPException(404, "Drucker-Display nicht gefunden")
+    if body.scanner_ids is None:
+        display.assigned_scanner_ids = None
+    else:
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for sid in body.scanner_ids:
+            if sid in state.printer_scanners and sid not in seen:
+                seen.add(sid)
+                ordered.append(sid)
+        display.assigned_scanner_ids = ordered
+    persist_printer_displays(state)
+    await send_printer_display_update(state, display)
+    from ..hub import get_hub
+
+    await get_hub().broadcast_host(state.state_snapshot())
+    return {"ok": True, "assigned_scanner_ids": display.assigned_scanner_ids}
+
+
+@host_router.post("/api/drucker-display/reorder-items")
+async def printer_display_reorder_items(body: PrinterDisplayReorderItemsRequest) -> dict:
+    """Gemeinsame Drucker+Scanner-Reihenfolge eines Displays setzen (eine
+    Box-Reihe statt zweier getrennter Abschnitte im Host, dieselbe
+    Spaltenreihenfolge am physischen Display, s. `AppState.
+    _ordered_display_items`). Unbekannte/fremde Schlüssel werden ignoriert
+    (der Server löst die tatsächliche Reihenfolge ohnehin gegen die aktuelle
+    Zuweisung auf — ein Schlüssel, der zu keinem zugewiesenen Item mehr
+    passt, hat schlicht keine Wirkung)."""
+    state = get_state()
+    display = state.printer_displays.get(body.display_id)
+    if not display:
+        raise HTTPException(404, "Drucker-Display nicht gefunden")
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for key in body.item_order:
+        if key not in seen and (key.startswith("printer:") or key.startswith("scanner:")):
+            seen.add(key)
+            ordered.append(key)
+    display.item_order = ordered
+    persist_printer_displays(state)
+    await send_printer_display_update(state, display)
+    from ..hub import get_hub
+
+    await get_hub().broadcast_host(state.state_snapshot())
+    return {"ok": True, "item_order": display.item_order}
 
 
 @host_router.post("/api/drucker-display/label")

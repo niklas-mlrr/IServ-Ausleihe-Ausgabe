@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 
 import server.sessions as sessions
-from server.state import AppState, DisplaySession
+from server.state import AppState, DisplaySession, PrinterConfig, PrinterDisplaySession
 
 
 class _FakeDisplayWS:
@@ -201,3 +201,77 @@ def test_helper_scanned_serialized_and_reset():
 
     s.reset_progress()
     assert s.helper_scanned is False
+
+
+# ---- displayed_printer_ids (Scan-Station-Druckermodus-Gate) --------------
+
+
+def _display(display_id, *, authorized=True, connected=True, assigned=None):
+    d = PrinterDisplaySession(
+        display_id=display_id, registration_code="0000",
+        authorized=authorized, assigned_printer_ids=assigned,
+    )
+    if connected:
+        d.ws = object()
+    return d
+
+
+def test_displayed_printer_ids_none_without_connected_display():
+    st = AppState()
+    st.settings.printers = [PrinterConfig(id="p1", name="P1")]
+    assert sessions.displayed_printer_ids(st) == set()
+
+
+def test_displayed_printer_ids_unauthorized_or_disconnected_ignored():
+    st = AppState()
+    st.settings.printers = [PrinterConfig(id="p1", name="P1")]
+    st.printer_displays["d1"] = _display("d1", authorized=False)
+    st.printer_displays["d2"] = _display("d2", connected=False)
+    assert sessions.displayed_printer_ids(st) == set()
+
+
+def test_displayed_printer_ids_none_assignment_means_all_pool():
+    st = AppState()
+    st.settings.printers = [PrinterConfig(id="p1", name="P1"), PrinterConfig(id="p2", name="P2")]
+    st.printer_displays["d1"] = _display("d1", assigned=None)
+    assert sessions.displayed_printer_ids(st) == {"p1", "p2"}
+
+
+def test_displayed_printer_ids_union_of_explicit_assignments():
+    st = AppState()
+    st.settings.printers = [
+        PrinterConfig(id="p1", name="P1"), PrinterConfig(id="p2", name="P2"),
+        PrinterConfig(id="p3", name="P3"),
+    ]
+    st.printer_displays["d1"] = _display("d1", assigned=["p1"])
+    st.printer_displays["d2"] = _display("d2", assigned=["p2"])
+    assert sessions.displayed_printer_ids(st) == {"p1", "p2"}
+
+
+# ---- relevant_display_count (Singular/Plural am Scan-Station-Druckertext) --
+
+
+def test_relevant_display_count_counts_displays_not_printers():
+    """Zwei Displays zeigen zusammen denselben einen erlaubten Drucker →
+    Anzahl 2 (Displays), nicht 1 (Drucker)."""
+    st = AppState()
+    st.settings.printers = [PrinterConfig(id="p1", name="P1")]
+    st.printer_displays["d1"] = _display("d1", assigned=["p1"])
+    st.printer_displays["d2"] = _display("d2", assigned=["p1"])
+    assert sessions.relevant_display_count(st, {"p1"}) == 2
+
+
+def test_relevant_display_count_ignores_irrelevant_and_disconnected():
+    st = AppState()
+    st.settings.printers = [PrinterConfig(id="p1", name="P1"), PrinterConfig(id="p2", name="P2")]
+    st.printer_displays["shows_other"] = _display("shows_other", assigned=["p2"])
+    st.printer_displays["disconnected"] = _display("disconnected", assigned=["p1"], connected=False)
+    st.printer_displays["matches"] = _display("matches", assigned=["p1"])
+    assert sessions.relevant_display_count(st, {"p1"}) == 1
+
+
+def test_relevant_display_count_none_allowed_counts_any_shown():
+    st = AppState()
+    st.settings.printers = [PrinterConfig(id="p1", name="P1")]
+    st.printer_displays["d1"] = _display("d1", assigned=["p1"])
+    assert sessions.relevant_display_count(st, None) == 1

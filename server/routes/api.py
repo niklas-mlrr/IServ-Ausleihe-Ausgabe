@@ -21,6 +21,7 @@ from . import (  # noqa: F401 — Import NUR wegen Seiteneffekt (Routen-Registri
     booklists,
     classes,
     drucker_display,
+    drucker_scan,
     helpers,
     modus_b,
     queue,

@@ -193,7 +193,7 @@
     /* Die dynamischen Display-Reiter liegen in einem <span>-Wrapper; display:
        contents lässt sie direkt am Flex der .pd-tabs-Leiste teilnehmen, damit
        Höhen + Border mit dem statischen Queue-Reiter ausrichten. */
-    #pd-tab-list, #ss-tab-list { display: contents; }
+    #pd-tab-list, #ss-tab-list, #psc-tab-list { display: contents; }
     .pd-tabs .pd-tab, .pd-tabs .pd-tab-add {
       background: transparent; color: var(--text-muted);
       padding: 6px 12px; font-size: .85rem; cursor: pointer;
@@ -526,6 +526,10 @@
       display: flex; flex-direction: column; gap: 4px;
     }
     .ns-name { font-size: 1.35rem; font-weight: 700; line-height: 1.15; }
+    /* Wächst mit der Kachel (falls eine Nachbarkachel in derselben Grid-Zeile
+       höher ist) und zentriert Info/Alert in der übrigen Höhe, damit Name
+       oben und Aktionen unten bündig bleiben. */
+    .ns-tile-mid { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 4px; }
     /* Info-Block direkt unter dem Namen: zwei Spalten, links bündig der
        Schülercode (1. Zeile) und die Klasse (2. Zeile), rechts bündig der
        Stationsname (+ Symbol + Trennen-Knopf, 1. Zeile) und der Status
@@ -564,6 +568,20 @@
     /* Verliehen-an-Alert: Meldungstext normal (nur „verliehen an …" ist rot). */
     .ns-alert.ns-alert-muted { color: var(--text); font-weight: 500; }
     .ns-borrower { font-size: .8rem; font-weight: 600; color: var(--danger); margin-top: 2px; }
+    /* Scan-Station-Druckermodus-Gate (kein erlaubter Drucker auf einem
+       Display sichtbar, s. PrintQueue.station_gate_snapshot) — gleiche Farbe
+       wie die Statuszeile im Helferclient (.status-alert-orange, #e69500). */
+    .ns-station-gate { margin-top: 4px; }
+    .ns-station-gate-text { font-size: .85rem; font-weight: 700; color: #e69500; }
+    .ns-station-gate-picker { margin-top: 6px; }
+    .ns-station-gate-picker .pp-trigger { padding: 3px 8px; font-size: .82rem; border-radius: 6px; }
+    .ns-station-gate-picker .pp-panel { padding: 4px; font-size: .85rem; }
+    .ns-station-gate-picker .pp-row { padding: 3px 4px; }
+    .ns-station-gate-err { margin: 4px 0 0; color: #ffb3b3; font-weight: 700; font-size: .8rem; }
+    .ns-station-gate-btn {
+      margin-top: 6px; width: 100%; padding: 4px 8px; border-radius: 6px;
+      font-size: .82rem; font-weight: 600; line-height: 1.3;
+    }
     .ns-actions { display: flex; justify-content: space-between; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
     .ns-actions-left, .ns-actions-right { display: flex; gap: 6px; flex-wrap: wrap; }
     .ns-actions-right { margin-left: auto; }

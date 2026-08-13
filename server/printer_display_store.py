@@ -88,12 +88,36 @@ def load(current_ip: str | None) -> list[dict]:
             assigned_printer_names = [n for n in names if n is None or isinstance(n, str)]
         else:
             assigned_printer_names = None
+        scanner_ids = entry.get("assigned_scanner_ids", None)
+        assigned_scanner_ids: list[str] | None
+        if isinstance(scanner_ids, list):
+            assigned_scanner_ids = [sid for sid in scanner_ids if isinstance(sid, str)]
+        else:
+            assigned_scanner_ids = None
+        # Gemeinsame Drucker+Scanner-Reihenfolge: Drucker über `name` (wie
+        # `assigned_printer_names` oben, laufzeitstabile Identität), Scanner
+        # über die (stabile) `scanner_id` direkt. `{"kind":"printer","name":...}`
+        # bzw. `{"kind":"scanner","id":...}`; alles andere wird verworfen.
+        raw_item_order = entry.get("item_order", None)
+        item_order: list[dict] = []
+        if isinstance(raw_item_order, list):
+            for item in raw_item_order:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("kind") == "printer" and (
+                    item.get("name") is None or isinstance(item.get("name"), str)
+                ):
+                    item_order.append({"kind": "printer", "name": item.get("name")})
+                elif item.get("kind") == "scanner" and isinstance(item.get("id"), str):
+                    item_order.append({"kind": "scanner", "id": item["id"]})
         result.append(
             {
                 "display_id": display_id,
                 "label": label,
                 "theme": theme,
                 "assigned_printer_names": assigned_printer_names,
+                "assigned_scanner_ids": assigned_scanner_ids,
+                "item_order": item_order,
             }
         )
     return result

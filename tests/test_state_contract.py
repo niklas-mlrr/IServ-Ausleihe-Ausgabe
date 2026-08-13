@@ -43,6 +43,9 @@ EXPECTED_SNAPSHOT_KEYS = {
     "printer_displays",
     # Scan-Stationen (`/scan-station`) — Reiter im Live-Ausgabe-Kasten des Hosts.
     "scan_stations",
+    # Drucker-Scanner (`/drucker-scan`) — Reiter im „Scanner"-Reiter der
+    # „Drucker"-Karte des Hosts.
+    "printer_scanners",
     "book_order",
 }
 

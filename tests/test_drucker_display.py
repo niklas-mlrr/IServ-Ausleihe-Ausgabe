@@ -332,6 +332,80 @@ def test_assign_preserves_order_and_dedupes(client, ctx):
     assert snap["printer_displays"][0]["assigned_printer_ids"] == ["p2", "p1"]
 
 
+# ---- Gemeinsame Drucker+Scanner-Reihenfolge (item_order) ------------------
+
+
+def test_reorder_items_sets_combined_order(client, ctx):
+    state, _, _ = ctx
+    from server.state import PrinterConfig, PrinterScannerSession
+
+    state.settings.printers = [PrinterConfig(id="p1", name="P1")]
+    state.printer_scanners["sc1"] = PrinterScannerSession(
+        scanner_id="sc1", registration_code="ZZZZ", authorized=True, label="Scanner 1",
+    )
+    _connected_display(state, code="ABCD", authorized=True)
+    state.printer_displays["disp1"].assigned_scanner_ids = ["sc1"]
+
+    r = client.post(
+        "/api/drucker-display/reorder-items",
+        json={"display_id": "disp1", "item_order": ["scanner:sc1", "printer:p1", "bogus:x"]},
+        cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 200
+    # Unbekannte Schlüssel (falsches Präfix) werden verworfen.
+    assert state.printer_displays["disp1"].item_order == ["scanner:sc1", "printer:p1"]
+
+
+def test_reorder_items_unknown_display_404(client, ctx):
+    r = client.post(
+        "/api/drucker-display/reorder-items",
+        json={"display_id": "bogus", "item_order": []},
+        cookies={"session_id": "sid"},
+    )
+    assert r.status_code == 404
+
+
+def test_printer_display_view_card_order_interleaves_printer_and_scanner(ctx):
+    """`AppState.printer_display_view` liefert `card_order` in der vom Host
+    gewählten gemeinsamen Reihenfolge — Drucker-Karten UND Scanner-Karten
+    können am physischen Drucker-Display beliebig nebeneinander stehen."""
+    state, _, _ = ctx
+    from server.state import PrinterConfig, PrinterScannerSession
+
+    state.settings.printers = [PrinterConfig(id="p1", name="P1")]
+    state.printer_scanners["sc1"] = PrinterScannerSession(
+        scanner_id="sc1", registration_code="ZZZZ", authorized=True, label="Scanner 1",
+    )
+    _connected_display(state, code="ABCD", authorized=True)
+    display = state.printer_displays["disp1"]
+    display.assigned_scanner_ids = ["sc1"]
+    display.item_order = ["scanner:sc1", "printer:p1"]
+
+    view = state.printer_display_view(display)
+    assert view["card_order"] == ["scanner:sc1", "printer:p1"]
+    assert [p["id"] for p in view["printers"]] == ["p1"]
+    assert [s["scanner_id"] for s in view["scanners"]] == ["sc1"]
+
+
+def test_printer_display_view_unlisted_items_append_stably(ctx):
+    """Neu zugewiesene Items ohne Eintrag in `item_order` hängen stabil ans
+    Ende an (erst Drucker, dann Scanner, in ihrer natürlichen Reihenfolge)."""
+    state, _, _ = ctx
+    from server.state import PrinterConfig, PrinterScannerSession
+
+    state.settings.printers = [PrinterConfig(id="p1", name="P1"), PrinterConfig(id="p2", name="P2")]
+    state.printer_scanners["sc1"] = PrinterScannerSession(
+        scanner_id="sc1", registration_code="ZZZZ", authorized=True,
+    )
+    _connected_display(state, code="ABCD", authorized=True)
+    display = state.printer_displays["disp1"]
+    display.assigned_scanner_ids = ["sc1"]
+    display.item_order = ["printer:p1"]  # p2 + sc1 sind (noch) nicht gelistet
+
+    view = state.printer_display_view(display)
+    assert view["card_order"] == ["printer:p1", "printer:p2", "scanner:sc1"]
+
+
 # ---- Label + Theme --------------------------------------------------------
 
 

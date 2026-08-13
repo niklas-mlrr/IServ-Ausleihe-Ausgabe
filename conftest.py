@@ -46,11 +46,13 @@ def _isolate_device_persistence(tmp_path, monkeypatch):
     `printer_store.py`-Tests einzeln per Hand machen)."""
     import server.helper_store as helper_store
     import server.printer_display_store as printer_display_store
+    import server.printer_scanner_store as printer_scanner_store
     import server.scan_station_store as scan_station_store
 
     monkeypatch.setattr(helper_store, "STORE_PATH", tmp_path / "helpers.json")
     monkeypatch.setattr(printer_display_store, "STORE_PATH", tmp_path / "printer_displays.json")
     monkeypatch.setattr(scan_station_store, "STORE_PATH", tmp_path / "scan_stations.json")
+    monkeypatch.setattr(printer_scanner_store, "STORE_PATH", tmp_path / "printer_scanners.json")
 
 
 @pytest.fixture

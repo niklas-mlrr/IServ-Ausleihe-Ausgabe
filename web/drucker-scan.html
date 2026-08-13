@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Ausleihe — Drucker-Scanner</title>
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <script src="/html5-qrcode.min.js"></script>
+  <script src="/common.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; }
+    :root {
+      --bg: #111; --text: #eee; --card: #1c1c1e; --card-border: #2c2c2e;
+      --muted: #9a9a9e; --surface: #2c2c2e;
+    }
+    [data-theme="light"] {
+      --bg: #f5f5f7; --text: #1c1c1e; --card: #ffffff; --card-border: #e5e5ea;
+      --muted: #6e6e73; --surface: #e9e9ee;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg); color: var(--text);
+      height: 100dvh; display: flex; flex-direction: column;
+    }
+    .view { display: none; flex: 1 1 auto; min-height: 0; flex-direction: column;
+      align-items: center; justify-content: center; text-align: center; padding: 24px; }
+    .view.show { display: flex; }
+    .reg-code {
+      font-size: 5rem; font-weight: 700; letter-spacing: .25em;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      background: var(--card); border: 1px solid var(--card-border); border-radius: 20px;
+      padding: 24px 44px; margin: 16px 0;
+    }
+    .reg-hint, .reg-sub { opacity: .55; font-size: 1.15rem; max-width: 32rem; margin: 8px 0; }
+    h1 { font-size: 1.6rem; font-weight: 600; margin-bottom: 8px; }
+
+    /* Scan-Ansicht: Kamera füllt die verfügbare Fläche, kein eigenes
+       Ergebnis-Feedback (das Ergebnis steht am zugeordneten Drucker-Display,
+       s. drucker-display.js) — nur ein neutraler Hinweistext oben. */
+    #view-scan { padding: 0; }
+    #view-scan.show { display: flex; }
+    #scan-hint { opacity: .6; font-size: 1.1rem; padding: 18px; }
+    #reader { width: 100%; max-width: 640px; flex: 1 1 auto; min-height: 0; }
+    #reader video { width: 100%; height: 100%; object-fit: cover; }
+    body.manual-mode #reader { display: flex; align-items: center; justify-content: center;
+      background: var(--card); border-radius: 20px; margin: 0 18px 18px; }
+    #manual-input {
+      width: 90%; max-width: 420px; font: inherit; font-size: 2rem; letter-spacing: .15em;
+      text-align: center; padding: 18px; border-radius: 14px;
+      border: 1px solid var(--card-border); background: var(--surface); color: var(--text);
+      outline: none;
+    }
+
+    #dd-name, #conn { position: fixed; bottom: 14px; font-size: .85rem; opacity: .55; }
+    #dd-name { left: 18px; }
+    #conn { right: 16px; }
+  </style>
+</head>
+<body>
+  <div id="dd-name"></div>
+  <div id="conn"><span id="conn-text">verbinde…</span></div>
+
+  <!-- Registrierung (vor Pairing am Host) — zeigt NUR die Nummer. -->
+  <div class="view" id="view-register">
+    <h1>Drucker-Scanner registrieren</h1>
+    <div class="reg-code" id="reg-code">····</div>
+    <p class="reg-sub">Am Host im Reiter „Scanner" diesen Code eingeben und einen Namen vergeben, um das Gerät freizuschalten.</p>
+  </div>
+
+  <!-- Gesperrt: vom Betreuer per × verboten (endgültig). -->
+  <div class="view" id="view-forbidden">
+    <h1>Gesperrt</h1>
+    <p class="reg-sub">Dieser Drucker-Scanner wurde vom Betreuer gesperrt. Bitte wende dich an den Betreuer.</p>
+  </div>
+
+  <!-- Scan-Ansicht: nur Kamera ODER manuelles Eingabefeld (Host-Vorgabe via
+       input_mode), bewusst OHNE eigenes Ergebnis-Feedback — das steht am
+       zugeordneten Drucker-Display. -->
+  <div class="view" id="view-scan">
+    <p id="scan-hint">Schülercode scannen</p>
+    <div id="reader"></div>
+  </div>
+
+  <script src="/drucker-scan.js"></script>
+</body>
+</html>

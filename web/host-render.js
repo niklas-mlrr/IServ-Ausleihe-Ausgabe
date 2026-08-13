@@ -810,12 +810,63 @@ window.__host = window.__host || {};
   async function removePdPrinter(displayId, pid) {
     await assignPdPrinters(displayId, _pdCurrentIds(displayId).filter(x => x !== pid));
   }
-  // Drucker-Box per Drag umsortieren: dragPid vor/unter targetPid einsortieren.
-  function reorderPdBoxPrinters(displayId, dragPid, targetPid) {
-    const ids = _pdCurrentIds(displayId).filter(x => x !== dragPid);
-    const to = ids.indexOf(targetPid);
-    ids.splice(to + 1, 0, dragPid);
-    assignPdPrinters(displayId, ids);
+  // Scanner-Boxen eines Displays — Spiegel der Drucker-Varianten oben, gegen
+  // `/api/drucker-display/assign-scanners` statt `/assign`.
+  function _pdCurrentScannerIds(displayId) {
+    const d = (state.printer_displays || []).find(x => x.display_id === displayId);
+    if (!d) return [];
+    const pool = state.printer_scanners || [];
+    if (d.assigned_scanner_ids === null) return pool.map(s => s.scanner_id);
+    const byId = {};
+    pool.forEach(s => { byId[s.scanner_id] = true; });
+    return d.assigned_scanner_ids.filter(sid => byId[sid]);
+  }
+  async function assignPdScanners(displayId, scannerIds) {
+    const r = await fetch('/api/drucker-display/assign-scanners', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ display_id: displayId, scanner_ids: scannerIds }),
+    });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Zuweisung fehlgeschlagen'); }
+  }
+  async function addPdScanner(displayId, sid) {
+    const ids = _pdCurrentScannerIds(displayId);
+    if (ids.includes(sid)) return;
+    await assignPdScanners(displayId, [...ids, sid]);
+  }
+  async function removePdScanner(displayId, sid) {
+    await assignPdScanners(displayId, _pdCurrentScannerIds(displayId).filter(x => x !== sid));
+  }
+  // Gemeinsame Drucker+Scanner-Reihenfolge setzen (`item_order`, eine Box-
+  // Reihe statt zweier getrennter Abschnitte — bestimmt auch die Spalten-
+  // reihenfolge am physischen Drucker-Display).
+  async function assignPdItemOrder(displayId, itemOrder) {
+    const r = await fetch('/api/drucker-display/reorder-items', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ display_id: displayId, item_order: itemOrder }),
+    });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Reihenfolge konnte nicht gespeichert werden'); }
+  }
+  // Box (Drucker ODER Scanner) per Drag umsortieren: dragKey vor/unter
+  // targetKey einsortieren — die aktuell im DOM sichtbare Reihenfolge (beide
+  // Kinds gemeinsam) ist die Ausgangsbasis, damit ein Drag genau die
+  // sichtbare Reihe verschiebt, egal ob Drucker oder Scanner beteiligt sind.
+  function reorderPdBoxItems(displayId, dragKind, dragId, targetKind, targetId) {
+    const host = document.querySelector(`.pdd-panel[data-display="${CSS.escape(displayId)}"]`);
+    const keys = host
+      ? Array.from(host.querySelectorAll('.pd-box[data-kind][data-pid]'))
+        .map(b => `${b.dataset.kind}:${b.dataset.pid}`)
+      : [];
+    const dragKey = `${dragKind}:${dragId}`;
+    const targetKey = `${targetKind}:${targetId}`;
+    const withoutDrag = keys.filter(k => k !== dragKey);
+    const to = withoutDrag.indexOf(targetKey);
+    withoutDrag.splice(to + 1, 0, dragKey);
+    assignPdItemOrder(displayId, withoutDrag);
+  }
+  // Anzeige-Label eines Drucker-Scanners: Name (falls gesetzt), sonst
+  // Registrierungs-Code/Short-ID (Mirror printerLabel).
+  function scannerLabel(s) {
+    return (s.label && s.label.trim()) ? s.label.trim() : (s.registration_code || s.scanner_id.slice(0, 6));
   }
   // Display-Name setzen (Name-Feld + Speichern / Enter).
   async function setPdLabel(displayId, label) {
@@ -842,7 +893,7 @@ window.__host = window.__host || {};
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ display_id: displayId }),
     });
-    if (r.ok) { activePdTab = 'queue'; showMsg('Display verboten'); }
+    if (r.ok) { activePdTab = null; showMsg('Display verboten'); }
     else { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Verbieten fehlgeschlagen'); }
   }
   // ---- Scan-Station: API-Aufrufe ----
@@ -933,24 +984,32 @@ window.__host = window.__host || {};
     });
   }
 
-  // „+"-Box der Drucker-Boxen: kleines Popover der noch nicht zugewiesenen
-  // Pool-Drucker. Auswahl → addPdPrinter. Schließt bei Außenklick/Esc. Liegt
-  // auf document.body (überlebt Re-Renders des Panels) und räumt sich selbst.
-  function openPdAddMenu(displayId, plusBox) {
+  // „+"-Box der Drucker-/Scanner-Boxen: kleines Popover der noch nicht
+  // zugewiesenen Pool-Drucker bzw. autorisierten Scanner (`kind`). Auswahl →
+  // addPdPrinter/addPdScanner. Schließt bei Außenklick/Esc. Liegt auf
+  // document.body (überlebt Re-Renders des Panels) und räumt sich selbst.
+  function openPdAddMenu(displayId, plusBox, kind = 'printer') {
     // Alte Popovers entfernen (nur eines gleichzeitig).
     document.querySelectorAll('.pd-add-popover').forEach(el => el.remove());
-    const pool = state.printers || [];
-    const assigned = new Set(_pdCurrentIds(displayId));
-    const available = pool.filter(p => !assigned.has(p.id));
-    if (!available.length) { showMsg('Alle Pool-Drucker bereits zugewiesen'); return; }
+    const isScanner = kind === 'scanner';
+    const pool = isScanner ? (state.printer_scanners || []) : (state.printers || []);
+    const idOf = isScanner ? (x => x.scanner_id) : (x => x.id);
+    const labelOf = isScanner ? scannerLabel : printerLabel;
+    const assigned = new Set(isScanner ? _pdCurrentScannerIds(displayId) : _pdCurrentIds(displayId));
+    const available = pool.filter(x => !assigned.has(idOf(x)));
+    if (!available.length) {
+      showMsg(isScanner ? 'Alle Scanner bereits zugewiesen' : 'Alle Pool-Drucker bereits zugewiesen');
+      return;
+    }
     const pop = document.createElement('div');
     pop.className = 'pd-add-popover';
-    pop.innerHTML = available.map(p =>
-      `<button class="pd-add-item" data-pid="${escapeHtml(p.id)}">${escapeHtml(printerLabel(p))}</button>`).join('');
+    pop.innerHTML = available.map(x =>
+      `<button class="pd-add-item" data-id="${escapeHtml(idOf(x))}">${escapeHtml(labelOf(x))}</button>`).join('');
     pop.addEventListener('click', (e) => {
       const item = e.target.closest('.pd-add-item');
       if (!item) return;
-      addPdPrinter(displayId, item.dataset.pid);
+      if (isScanner) addPdScanner(displayId, item.dataset.id);
+      else addPdPrinter(displayId, item.dataset.id);
       pop.remove();
     });
     document.body.appendChild(pop);
@@ -1156,7 +1215,23 @@ window.__host = window.__host || {};
 
   // Host-Tab (Helfer + Modus-B-Kontrolle) und Klassen-Tab (Now-Serving + Queue
   // + Pairing) getrennt rendern.
-  function renderHostTab() { renderHelpers(); renderModusBControl(); renderPrintQueue(); renderPrinterDisplays(); renderScanStations(); }
+  function renderHostTab() { renderHelpers(); renderModusBControl(); renderPrinterMainTabs(); renderPrintQueue(); renderPrinterDisplays(); renderScanStations(); renderPrinterScanners(); }
+
+  // Hauptreiter der „Drucker"-Karte: Warteschlange / Displays / Scanner
+  // (Scanner ist aktuell ein Platzhalter ohne eigene Funktion — die
+  // Scan-Stationen bleiben im Live-Ausgabe-Kasten, s. renderScanStations()).
+  // Rein clientseitige Sichtbarkeit — die Panels haben keine serverseitigen
+  // Daten, die das umschalten müssten.
+  function renderPrinterMainTabs() {
+    const tabs = document.getElementById('printer-main-tabs');
+    if (!tabs) return;
+    tabs.querySelectorAll('[data-pmt-tab]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.pmtTab === activePrinterMainTab);
+    });
+    document.getElementById('pmt-panel-queue')?.classList.toggle('active', activePrinterMainTab === 'queue');
+    document.getElementById('pmt-panel-displays')?.classList.toggle('active', activePrinterMainTab === 'displays');
+    document.getElementById('pmt-panel-scanner')?.classList.toggle('active', activePrinterMainTab === 'scanner');
+  }
   function renderClassTab(id) {
     if (!(state.contexts || {})[id]) return;
     if (!document.getElementById('panel-ctx-' + id)) return;
@@ -1575,13 +1650,24 @@ window.__host = window.__host || {};
         const helper = helpers.find(h => h.student_id === s.student_id);
         // Ein aktiver Schüler ohne Helfer-Zuordnung ist ein Schülerclient.
         // Erst im Druckmodus ist der Betreuerauslöser bereit; der Server
-        // behandelt den Auftrag dann automatisch wie einen Schüler-Auftrag
-        // (s. `print_loan_slip` in routes/slips.py — kein Client-Flag mehr).
+        // behandelt den ersten Auftrag dann automatisch wie einen Schüler-
+        // Auftrag (s. `print_loan_slip` in routes/slips.py — kein Client-Flag
+        // mehr). Der Druckbutton bleibt ab dem Druckmodus bis zum Abschluss
+        // sichtbar — auch während/nach dem Druck und im Unterschriften-Modus
+        // (links neben dem rechtsbündigen Unterschrift-Button), damit ein
+        // verlorener/zerstörter Leihschein jederzeit nachgedruckt werden kann.
+        // Ein Nachdruck (`slip_printed`) legt der Server bewusst als Host-
+        // Auftrag an (s. `is_reprint` in routes/slips.py); ein laufender
+        // Erstdruck wird serverseitig via `in_flight_student_ids()` blockiert.
+        // `station_print_needs_host`: Scan-Station-Druckermodus (Automatisch/
+        // Selbstauslöser) fand beim Eintritt keinen erlaubten, auf einem
+        // Display sichtbaren Drucker und hat bewusst KEINEN Auftrag erzeugt
+        // (s. server/routes/ws.py::ws_scan_station) — der Button muss hier
+        // unabhängig vom Klassen-`slip_trigger` erscheinen, damit der Host
+        // ganz normal drucken kann.
         const studentClientPrint = !helper
           && s.print_mode
-          && ctx.slip_trigger === 'helper'
-          && !s.slip_printing
-          && !s.slip_printed;
+          && (ctx.slip_trigger === 'helper' || s.station_print_needs_host);
         const studentClient = !helper && s.print_mode;
         const studentSignature = studentClient && ctx.done_signed === true && s.slip_signing;
         const printAction = studentClient
@@ -1626,21 +1712,59 @@ window.__host = window.__host || {};
             (alert.borrower ? `<div class="ns-borrower">${alert.kind === 'book_deleted' ? 'Ersatzanspruch' : 'verliehen an'} ${escapeHtml(alert.borrower)}</div>` : '') +
             `</div>`
           : '';
+        // Scan-Station-Druckermodus-Gate (s. PrintQueue.station_gate_snapshot):
+        // gelber Hinweis NUR, solange der Auftrag noch wartet (`status ===
+        // 'queued'`, noch nicht an einen Drucker gesendet) UND kein erlaubter
+        // Drucker gerade auf einem Display sichtbar ist. War zu Beginn schon
+        // keiner sichtbar, wurde gar kein Auftrag erzeugt (s. ws_scan_station)
+        // — dann gibt es hier auch keinen Hinweis, sondern nur den normalen
+        // Druckbutton (s. `studentClientPrint`/`station_print_needs_host`
+        // oben). Bereits dispatchte Aufträge zeigen ebenfalls nichts mehr
+        // (der Job kann nicht mehr umgebucht werden, `host_adopt_station_job`
+        // lässt nur wartende Aufträge zu).
+        const gate = (s.station_gate && !s.station_gate.dispatched && s.station_gate.blocked)
+          ? s.station_gate : null;
+        const gateText = gate
+          ? `${escapeHtml(s.form)}, ${escapeHtml(s.lastname)}, ${escapeHtml(s.firstname)}: `
+            + 'Kein erlaubter freigegebener Drucker verfügbar'
+          : '';
+        const gateLbl = gate
+          ? `<div class="ns-station-gate">
+              <div class="ns-station-gate-text">${gateText}</div>
+              <div class="ns-station-gate-picker" id="ns-sg-picker-${s.student_id}"></div>
+              <p class="ns-station-gate-err" id="ns-sg-err-${s.student_id}" style="display:none"></p>
+              <button type="button" class="secondary ns-station-gate-btn" data-action="station-gate-adopt" data-student-id="${s.student_id}" data-job-id="${escapeHtml(gate.job_id)}">Druckauftrag aktualisieren</button>
+            </div>`
+          : '';
+        // Hinweis, wenn der Scan-Station-Druckermodus (Automatisch/
+        // Selbstauslöser) beim Eintritt weder Drucker noch Drucker-Scanner
+        // erreichbar fand und deshalb bewusst KEINEN Auftrag erzeugt hat (s.
+        // `station_print_needs_host` oben) — macht sichtbar, WARUM hier
+        // (anders als sonst bei diesem Trigger) ein Druckbutton auftaucht.
+        const needsHostLbl = s.station_print_needs_host
+          ? `<div class="ns-station-gate ns-station-needs-host">
+              <div class="ns-station-gate-text">Kein erlaubter Drucker/Scanner erreichbar — bitte hier drucken.</div>
+            </div>`
+          : '';
         // Kästchen bleibt rot (wie gehabt); nur der Meldungstext ist beim
         // Verliehen-Alert normal — „verliehen an …" ist das einzige Rot im Text.
         return `<div class="ns-tile${alert ? ' ns-tile-alert' : ''}">
           <div class="ns-name">${escapeHtml(s.lastname)}, ${escapeHtml(s.firstname)}</div>
-          <div class="ns-info-grid">
-            <div class="ns-info-left">
-              ${codeLeft}
-              <div class="ns-class">${escapeHtml(s.form)}</div>
+          <div class="ns-tile-mid">
+            <div class="ns-info-grid">
+              <div class="ns-info-left">
+                ${codeLeft}
+                <div class="ns-class">${escapeHtml(s.form)}</div>
+              </div>
+              <div class="ns-info-right">
+                ${stationRight}
+                <div class="ns-status">${statusLbl}${helperLbl}</div>
+              </div>
             </div>
-            <div class="ns-info-right">
-              ${stationRight}
-              <div class="ns-status">${statusLbl}${helperLbl}</div>
-            </div>
+            ${alertLbl}
+            ${gateLbl}
+            ${needsHostLbl}
           </div>
-          ${alertLbl}
           <div class="ns-actions">
             <div class="ns-actions-left">
               <button class="success icon-only" data-action="finish" data-student-id="${s.student_id}" title="Abschließen" aria-label="Abschließen">${ICON_ACTION_CHECK}</button>
@@ -1661,6 +1785,21 @@ window.__host = window.__host || {};
       : '';
 
     el.innerHTML = `<div class="ns-head">Aktuell in Ausgabe</div>${body}${nextLbl}`;
+
+    // Drucker-Picker fürs "Druckauftrag aktualisieren"-Menü imperativ mounten
+    // (mountPrinterPicker baut eigenes DOM + Event-Listener, kann nicht als
+    // reiner innerHTML-String erzeugt werden). Nur für Schüler mit einem noch
+    // wartenden, blockierten Gate-Auftrag (s. gateLbl oben).
+    stationGatePickers = {};
+    const pool = hostPrinterPool();
+    for (const s of active) {
+      const gate = s.station_gate;
+      if (!gate || gate.dispatched || !gate.blocked) continue;
+      const mount = document.getElementById(`ns-sg-picker-${s.student_id}`);
+      if (!mount) continue;
+      const pool_ids = pool.map(p => p.id);
+      stationGatePickers[s.student_id] = mountPrinterPicker(mount, pool, pool_ids);
+    }
   }
 
 
@@ -2119,30 +2258,28 @@ window.__host = window.__host || {};
       ${waitBlock}`;
   }
 
-  // Drucker-Displays (Bildschirme neben den Druckern) als Reiter innerhalb der
-  // „Druckerwarteschlange"-Karte: der erste Reiter („Druckerwarteschlange",
-  // statisch im HTML) zeigt Pool + zentrale Warteschlange. Pro verbundenes
-  // Display kommt ein weiterer Reiter hinzu (Label = Display-Name, sonst
-  // Short-ID, plus Statuspunkt grau=unautorisiert / grün=autorisiert und ein
-  // × zum Trennen). Beim ersten Öffnen eines Display-Reiters steht dort die
-  // Code-Eingabe; nach Autorisation: Name-Feld, Light/Dark-Schieberegler und
-  // eine Box-Ansicht der zugewiesenen Drucker (Drag umsortieren, × entfernen,
-  // „+"-Box zum Hinzufügen). Daten aus `state.printer_displays`; der Server
-  // pusht bei jeder Änderung einen frischen Snapshot. `assigned_printer_ids:
-  // null` = alle Pool-Drucker (Default), geordnete Liste = Teilmenge in dieser
-  // Reihenfolge. Reiter kommen/verschwinden automatisch mit dem Verbindungsstand.
+  // Drucker-Displays (Bildschirme neben den Druckern) als Unter-Reiter im
+  // „Displays"-Hauptreiter der „Drucker"-Karte: pro verbundenem Display ein
+  // Reiter (Label = Display-Name, sonst Short-ID, plus Statuspunkt
+  // grau=unautorisiert / grün=autorisiert und ein × zum Trennen). Beim ersten
+  // Öffnen eines Display-Reiters steht dort die Code-Eingabe; nach
+  // Autorisation: Name-Feld, Light/Dark-Schieberegler und eine Box-Ansicht der
+  // zugewiesenen Drucker (Drag umsortieren, × entfernen, „+"-Box zum
+  // Hinzufügen). Daten aus `state.printer_displays`; der Server pusht bei
+  // jeder Änderung einen frischen Snapshot. `assigned_printer_ids: null` =
+  // alle Pool-Drucker (Default), geordnete Liste = Teilmenge in dieser
+  // Reihenfolge. Reiter kommen/verschwinden automatisch mit dem
+  // Verbindungsstand.
   function renderPrinterDisplays() {
     const tabList = document.getElementById('pd-tab-list');
     const panelsHost = document.getElementById('pd-panels-displays');
-    const queueTab = document.getElementById('pd-tab-queue');
-    const queuePanel = document.getElementById('pd-panel-queue');
-    if (!tabList || !panelsHost || !queueTab || !queuePanel) return;
+    if (!tabList || !panelsHost) return;
     const displays = state.printer_displays || [];
     const pool = state.printers || [];
     // Aktiver Sub-Reiter aufräumen, falls sein Display verschwunden ist
     // (Spiegel der Klassen-Tab-Logik in applyState).
-    if (activePdTab !== 'queue' && !displays.some(d => d.display_id === activePdTab)) {
-      activePdTab = 'queue';
+    if (activePdTab && !displays.some(d => d.display_id === activePdTab)) {
+      activePdTab = null;
     }
     // Tab-Leiste: je Display ein Reiter — Label = Name (falls gesetzt), sonst
     // der Registrierungs-Code (visuelle Zuordnung vor der Freischaltung), plus
@@ -2157,13 +2294,6 @@ window.__host = window.__host || {};
       const title = d.connected ? 'verbunden' : 'nicht verbunden';
       return `<button class="pd-tab${activePdTab === d.display_id ? ' active' : ''}" data-pd-tab="${escapeHtml(d.display_id)}" title="${title}"><span class="pd-tab-dot ${dotCls}" aria-hidden="true"></span>${lbl} <span class="pd-tab-close" data-pd-close="${escapeHtml(d.display_id)}" title="Display verbieten" aria-label="Display verbieten">×</span></button>`;
     }).join('');
-    queueTab.classList.toggle('active', activePdTab === 'queue');
-    // Panels umschalten: Queue-Panel nur bei aktivem Queue-Reiter; sonst das
-    // aktive Display-Panel in den Displays-Container rendern.
-    const queueActive = activePdTab === 'queue';
-    queuePanel.classList.toggle('active', queueActive);
-    panelsHost.classList.toggle('active', !queueActive);
-    if (queueActive) { panelsHost.innerHTML = ''; return; }
     const d = displays.find(x => x.display_id === activePdTab);
     if (!d) { panelsHost.innerHTML = ''; return; }
     // Fokus-Schutz: wird gerade im Name-Feld getippt, das Panel nicht neu
@@ -2177,44 +2307,79 @@ window.__host = window.__host || {};
     const code = d.registration_code || short;
     const did = escapeHtml(d.display_id);
     const ids = d.assigned_printer_ids; // null = alle, sonst geordnete Liste
-    // Boxen-Liste: bei null alle Pool-Drucker (Pool-Reihenfolge), sonst die
-    // zugewiesenen in der Display-Reihenfolge. by_id für Lookups.
     const byId = {};
     pool.forEach(p => { byId[p.id] = p; });
     const boxPrinters = ids === null ? pool : ids.map(pid => byId[pid]).filter(Boolean);
     const assignedIds = ids === null ? pool.map(p => p.id) : ids;
-    const available = pool.filter(p => !assignedIds.includes(p.id));  // für „+"
-    const boxes = boxPrinters.map(p => {
-      const pid = escapeHtml(p.id);
-      return `<div class="pd-box" draggable="true" data-pid="${pid}" data-display="${did}">
-        <span class="pd-box-name">${escapeHtml(printerLabel(p))}</span>
-        <button class="pd-box-remove" data-pd-remove="${pid}" data-display="${did}" title="Entfernen" aria-label="Drucker entfernen">×</button>
+    const available = pool.filter(p => !assignedIds.includes(p.id));  // für „+ Drucker"
+
+    // Scanner: gleiche Zuweisungs-Mechanik wie Drucker oben, gegen
+    // `state.printer_scanners`/`assigned_scanner_ids`. Nur autorisierte
+    // Scanner sind wählbar (unautorisierte tauchen erst nach Freischaltung
+    // im eigenen „Scanner"-Reiter auf).
+    const scannerPool = (state.printer_scanners || []).filter(s => s.authorized);
+    const sByIdMap = {};
+    scannerPool.forEach(s => { sByIdMap[s.scanner_id] = s; });
+    const sids = d.assigned_scanner_ids; // null = alle, sonst geordnete Liste
+    const boxScanners = sids === null ? scannerPool : sids.map(sid => sByIdMap[sid]).filter(Boolean);
+    const assignedSids = sids === null ? scannerPool.map(s => s.scanner_id) : sids;
+    const availableScanners = scannerPool.filter(s => !assignedSids.includes(s.scanner_id));
+
+    // Eine gemeinsame Box-Reihe für Drucker UND Scanner, in der vom Host frei
+    // wählbaren Reihenfolge (`item_order`, Mirror server-seitiger
+    // AppState._ordered_display_items — dieselbe Reihenfolge bestimmt auch
+    // die Spaltenreihenfolge am physischen Drucker-Display). Items ohne
+    // Eintrag in `item_order` hängen stabil ans Ende (erst Drucker, dann
+    // Scanner, `Array.prototype.sort` ist stabil).
+    const order = d.item_order || [];
+    const orderIndex = {};
+    order.forEach((k, i) => { orderIndex[k] = i; });
+    const combined = [
+      ...boxPrinters.map(p => ({ kind: 'printer', id: p.id, label: printerLabel(p) })),
+      ...boxScanners.map(s => ({ kind: 'scanner', id: s.scanner_id, label: scannerLabel(s) })),
+    ];
+    combined.sort((a, b) => {
+      const ai = orderIndex[`${a.kind}:${a.id}`] ?? order.length;
+      const bi = orderIndex[`${b.kind}:${b.id}`] ?? order.length;
+      return ai - bi;
+    });
+    const boxes = combined.map(item => {
+      const idEsc = escapeHtml(item.id);
+      const removeLabel = item.kind === 'scanner' ? 'Scanner entfernen' : 'Drucker entfernen';
+      return `<div class="pd-box" draggable="true" data-kind="${item.kind}" data-pid="${idEsc}" data-display="${did}">
+        <span class="pd-box-name">${escapeHtml(item.label)}</span>
+        <button class="pd-box-remove" data-kind="${item.kind}" data-pd-remove="${idEsc}" data-display="${did}" title="Entfernen" aria-label="${removeLabel}">×</button>
       </div>`;
     }).join('');
-    const addBox = available.length
-      ? `<div class="pd-box pd-box-add" data-display="${did}" title="Drucker hinzufügen">+</div>`
+    const addPrinterBox = available.length
+      ? `<div class="pd-box pd-box-add" data-kind="printer" data-display="${did}" title="Drucker hinzufügen">+ Drucker</div>`
       : '';
-    const boxGrid = `<div class="pd-box-grid">${boxes}${addBox}</div>`
-      + (boxPrinters.length || available.length ? '' : '<p class="hint" style="margin-top:6px">Kein Drucker im Pool.</p>');
-    const printerSection = `<div class="pdd-section-label">Drucker (${boxPrinters.length})</div>${boxGrid}`;
+    const addScannerBox = availableScanners.length
+      ? `<div class="pd-box pd-box-add" data-kind="scanner" data-display="${did}" title="Scanner hinzufügen">+ Scanner</div>`
+      : '';
+    const boxGrid = `<div class="pd-box-grid">${boxes}${addPrinterBox}${addScannerBox}</div>`
+      + (combined.length || available.length || availableScanners.length
+        ? '' : '<p class="hint" style="margin-top:6px">Kein Drucker im Pool, kein freigeschalteter Scanner.</p>');
+    const combinedSection = `<div class="pdd-section-label">Drucker und Scanner (${combined.length})</div>${boxGrid}`;
+
     if (!d.authorized) {
       // Unautorisiert: Display zeigt den Code (visuelle Zuordnung). Freischaltung
-      // per Namens-Eingabe (+ Einschalten). Drucker lassen sich schon vor dem
-      // Einschalten zuordnen (Boxen + „+"-Popover unten).
+      // per Namens-Eingabe (+ Einschalten). Drucker/Scanner lassen sich schon
+      // vor dem Einschalten zuordnen (Boxen + „+"-Popover unten).
       panelsHost.innerHTML = `<div class="pdd-panel" data-display="${did}">
         <div class="pdd-row" data-display="${did}">
           <span class="pdd-id">Code: ${escapeHtml(code)}</span>
           <input class="pdd-name pdd-enable-name" type="text" placeholder="Name" autocomplete="off" data-display="${did}">
           <button class="secondary pdd-enable" data-display="${did}">Einschalten</button>
         </div>
-        ${printerSection}
+        ${combinedSection}
       </div>`;
       panelsHost.querySelector('.pdd-enable-name')?.focus();
       wirePdBoxesDnD(panelsHost);
       return;
     }
     // Autorisiertes Panel: Name-Feld, Speichern, QR-Button (Token-URL dieses
-    // Displays), Theme-Schieberegler, Drucker-Boxen.
+    // Displays), Theme-Schieberegler, Drucker-/Scanner-Boxen.
     panelsHost.innerHTML = `<div class="pdd-panel" data-display="${did}">
       <div class="pdd-field-row">
         <span class="pdd-field-label">Name</span>
@@ -2227,7 +2392,7 @@ window.__host = window.__host || {};
           Dunkel
         </label>
       </div>
-      ${printerSection}
+      ${combinedSection}
     </div>`;
     wirePdBoxesDnD(panelsHost);
   }
@@ -2307,6 +2472,108 @@ window.__host = window.__host || {};
     </div>`;
   }
 
+  // ---- Drucker-Scanner (`/drucker-scan`) ----
+  // Reiter im „Scanner"-Hauptreiter der „Drucker"-Karte — je verbundener
+  // Scanner einer, plus „+" für QR/URL. Spiegel von `renderScanStations()`,
+  // nur ohne Schüler-Bindung: ein Scanner braucht nur Name, Theme und
+  // Eingabeart (vom Host vorgegeben, wie bei der Scan-Station). Die Reiter
+  // sind Umschalter — ein zweiter Klick klappt das Panel wieder zu.
+  function renderPrinterScanners() {
+    const tabList = document.getElementById('psc-tab-list');
+    const panelsHost = document.getElementById('psc-panels');
+    if (!tabList || !panelsHost) return;
+    const scanners = state.printer_scanners || [];
+    if (activePscTab && !scanners.some(s => s.scanner_id === activePscTab)) activePscTab = null;
+
+    tabList.innerHTML = scanners.map(s => {
+      const code = s.registration_code || s.scanner_id.slice(0, 6);
+      const lbl = escapeHtml(s.label && s.label.trim() ? s.label : code);
+      const dotCls = s.connected ? 'pd-dot-green' : 'pd-dot-gray';
+      const title = s.connected ? 'verbunden' : 'nicht verbunden';
+      const active = activePscTab === s.scanner_id ? ' active' : '';
+      return `<button class="pd-tab${active}" data-psc-tab="${escapeHtml(s.scanner_id)}" title="${title}"><span class="pd-tab-dot ${dotCls}" aria-hidden="true"></span>${lbl} <span class="pd-tab-close" data-psc-close="${escapeHtml(s.scanner_id)}" title="Scanner verbieten" aria-label="Scanner verbieten">×</span></button>`;
+    }).join('');
+
+    const s = scanners.find(x => x.scanner_id === activePscTab);
+    if (!s) { panelsHost.innerHTML = ''; return; }
+    const ae = document.activeElement;
+    if (ae && ae.classList && ae.classList.contains('pscd-name') && panelsHost.contains(ae)) return;
+
+    const sid = escapeHtml(s.scanner_id);
+    const short = s.scanner_id.slice(0, 6);
+    const code = s.registration_code || short;
+    if (!s.authorized) {
+      panelsHost.innerHTML = `<div class="pdd-panel" data-scanner="${sid}">
+        <div class="pdd-row" data-scanner="${sid}">
+          <span class="pdd-id">Code: ${escapeHtml(code)}</span>
+          <input class="pscd-name pscd-enable-name" type="text" placeholder="Name" autocomplete="off" data-scanner="${sid}">
+          <button class="secondary pscd-enable" data-scanner="${sid}">Einschalten</button>
+        </div>
+        <p class="hint">Der Code steht auf dem Bildschirm des Scanners — so lässt sich der richtige Reiter zuordnen.</p>
+      </div>`;
+      panelsHost.querySelector('.pscd-enable-name')?.focus();
+      return;
+    }
+    panelsHost.innerHTML = `<div class="pdd-panel" data-scanner="${sid}">
+      <div class="pdd-field-row">
+        <span class="pdd-field-label">Name</span>
+        <input class="pscd-name" type="text" value="${escapeHtml(s.label || '')}" placeholder="${escapeHtml(short)}" autocomplete="off" data-scanner="${sid}">
+        <button class="secondary pscd-name-save" data-scanner="${sid}">Speichern</button>
+        <button class="secondary pscd-qr" data-scanner="${sid}" title="QR-Code für diesen Scanner (mit Token) anzeigen">QR</button>
+        <label class="switch pdd-theme" title="Eingabeart am Scanner: Kamera oder manuelles Eingabefeld">
+          <input type="checkbox" class="pscd-mode-toggle" data-scanner="${sid}"${s.input_mode === 'manual' ? ' checked' : ''}>
+          <span class="track"></span>
+          Manuell
+        </label>
+        <label class="switch pdd-theme" title="Darstellung am Scanner: Hell oder Dunkel">
+          <input type="checkbox" class="pscd-theme-toggle" data-scanner="${sid}"${s.theme === 'dark' ? ' checked' : ''}>
+          <span class="track"></span>
+          Dunkel
+        </label>
+      </div>
+      <p class="hint">Diesem Gerät wird bei den Drucker-Displays im Reiter „Displays" eine Drucker-Scanner-Box zugeordnet.</p>
+    </div>`;
+  }
+
+  // ---- Drucker-Scanner: API-Aufrufe ----
+  async function showPrinterScannerQr(scannerId) {
+    const q = scannerId ? `?scanner_id=${encodeURIComponent(scannerId)}` : '';
+    const r = await fetch(`/api/drucker-scan/qr${q}`);
+    if (!r.ok) { showMsg('QR für Drucker-Scanner konnte nicht geladen werden'); return; }
+    const d = await r.json();
+    showQr(d.qr, d.url || '');
+  }
+  async function pscPost(path, body, okMsg, failMsg) {
+    const r = await fetch(`/api/drucker-scan/${path}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (r.ok) { if (okMsg) showMsg(okMsg); return true; }
+    const d = await r.json().catch(() => ({}));
+    showMsg(d.detail || failMsg);
+    return false;
+  }
+  async function enablePrinterScanner(scannerId, label, btn) {
+    if (!label || !label.trim()) return;
+    if (btn) await busy(btn, () =>
+      pscPost('enable', { scanner_id: scannerId, label: label.trim() },
+        'Drucker-Scanner freigeschaltet', 'Freischaltung fehlgeschlagen'));
+  }
+  const setPscLabel = (scannerId, label) =>
+    pscPost('label', { scanner_id: scannerId, label: label || '' },
+      'Scanner-Name gespeichert', 'Name konnte nicht gespeichert werden');
+  const setPscTheme = (scannerId, dark) =>
+    pscPost('theme', { scanner_id: scannerId, theme: dark ? 'dark' : 'light' },
+      null, 'Theme konnte nicht gesetzt werden');
+  const setPscInputMode = (scannerId, manual) =>
+    pscPost('input-mode', { scanner_id: scannerId, input_mode: manual ? 'manual' : 'camera' },
+      null, 'Eingabeart konnte nicht gesetzt werden');
+  async function forgetPrinterScanner(scannerId) {
+    if (await pscPost('forget', { scanner_id: scannerId }, 'Scanner verboten', 'Verbieten fehlgeschlagen')) {
+      activePscTab = null;
+    }
+  }
+
   // Druckzeile unten im Pairing-Kasten: „Scan-Station: [Schüler] [Erstellen]".
   // Öffnet den Druck-Dialog für den Zettel (Barcode + Bücherliste zum
   // Abhaken) eines wartenden Schülers dieser Klasse — die Handy-Alternative
@@ -2335,13 +2602,18 @@ window.__host = window.__host || {};
     if (sel && prev && pending.some(q => String(q.student_id) === prev)) sel.value = prev;
   }
 
-  // HTML5-Drag der Drucker-Boxen (Spiegel von wirePrinterTabDrag /
-  // onBlDrag*): eine Box auf eine andere ziehen → Reihenfolge im State
-  // neu festlegen und an /assign schicken.
+  // HTML5-Drag der Drucker-/Scanner-Boxen (Spiegel von wirePrinterTabDrag /
+  // onBlDrag*): eine Box auf eine andere ziehen → gemeinsame Reihenfolge neu
+  // festlegen und an /reorder-items schicken. `pdDragPid`/`pdDragKind` halten
+  // den gezogenen Eintrag über dragstart→drop hinweg (Drucker- ODER Scanner-
+  // Box, s. data-kind) — beide Kinds lassen sich gegeneinander umsortieren
+  // (eine gemeinsame Box-Reihe, s. renderPrinterDisplays).
+  let pdDragKind = 'printer';
   function wirePdBoxesDnD(host) {
     host.querySelectorAll('.pd-box[draggable="true"]').forEach(box => {
       box.addEventListener('dragstart', (e) => {
         pdDragPid = box.dataset.pid;
+        pdDragKind = box.dataset.kind || 'printer';
         box.classList.add('dragging');
         e.dataTransfer.effectAllowed = 'move';
       });
@@ -2353,8 +2625,9 @@ window.__host = window.__host || {};
       box.addEventListener('drop', (e) => {
         e.preventDefault();
         const targetPid = box.dataset.pid;
-        if (!pdDragPid || pdDragPid === targetPid) return;
-        reorderPdBoxPrinters(box.dataset.display, pdDragPid, targetPid);
+        const targetKind = box.dataset.kind || 'printer';
+        if (!pdDragPid || (pdDragPid === targetPid && pdDragKind === targetKind)) return;
+        reorderPdBoxItems(box.dataset.display, pdDragKind, pdDragPid, targetKind, targetPid);
       });
     });
   }
@@ -2650,6 +2923,38 @@ window.__host = window.__host || {};
       body: JSON.stringify({ student_id: studentId }),
     });
     if (!r.ok) { const d = await r.json().catch(() => ({})); showMsg(d.detail || 'Abmelden fehlgeschlagen'); }
+  }
+
+  // "Druckauftrag aktualisieren" im gelben Scan-Station-Gate-Hinweis (s.
+  // renderCtxNowServing): der Host übernimmt einen pausierten
+  // Druckermodus-Auftrag manuell (kein erlaubter Drucker mehr auf einem
+  // Display sichtbar) und macht ihn zu einem regulären Host-Auftrag.
+  async function adoptStationPrintJob(studentId, jobId, btn) {
+    const errEl = document.getElementById(`ns-sg-err-${studentId}`);
+    const picker = stationGatePickers[studentId];
+    const ids = picker ? picker.getSelectedIds() : [];
+    if (!ids.length) {
+      if (errEl) { errEl.textContent = 'Bitte mindestens einen Drucker auswählen.'; errEl.style.display = ''; }
+      return;
+    }
+    if (btn) btn.disabled = true;
+    try {
+      const r = await fetch(`/api/print-queue/${encodeURIComponent(jobId)}/adopt-station`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ printers: ids }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        if (errEl) { errEl.textContent = d.detail || 'Aktualisieren fehlgeschlagen'; errEl.style.display = ''; }
+        if (btn) btn.disabled = false;
+        return;
+      }
+      // Erfolg: der nächste state_snapshot (via print-queue-Notify) zeigt den
+      // Auftrag als normalen Host-Auftrag ohne station_gate mehr an.
+    } catch {
+      if (errEl) { errEl.textContent = 'Aktualisieren fehlgeschlagen'; errEl.style.display = ''; }
+      if (btn) btn.disabled = false;
+    }
   }
 
   // ---- Util: Toast-Stack (mehrere Meldungen gleichzeitig) ----
@@ -3080,8 +3385,8 @@ window.__host = window.__host || {};
   const ICON_CHECK = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="5,12 10,17 19,7"/></svg>';
   // Ausgeblendet-Indikator: rotes Kästchen mit Verbotssymbol (Kreis + 45°-Strich).
   const ICON_NO = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="12" cy="12" r="8.2"/><line x1="6.2" y1="6.2" x2="17.8" y2="17.8"/></svg>';
-  // Bestand-leer-Indikator: gelbes Kästchen mit „0".
-  const ICON_EMPTY = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="12" cy="12" r="8.2"/><text x="12" y="16" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" stroke="none">0</text></svg>';
+  // Bestand-leer-Indikator: gelbes Kästchen mit „0" (ohne Kreis).
+  const ICON_EMPTY = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><text x="12" y="12" text-anchor="middle" dominant-baseline="central" font-size="20" font-weight="700" fill="currentColor" stroke="none">0</text></svg>';
 
   function renderBooklistList() {
     const list = document.getElementById('bl-list');
@@ -3352,10 +3657,16 @@ window.__host = window.__host || {};
   });
   document.getElementById('show-mb-qr-btn').addEventListener('click', showMbQr);
   document.getElementById('show-display-qr-btn').addEventListener('click', showDisplayQr);
-  // Drucker-Display-Reiter: „+" öffnet den QR zum Verbinden eines neuen Displays;
-  // Klick auf einen Reiter wechselt den aktiven Sub-Reiter, × verbietet das
-  // Display endgültig (mit Bestätigungsdialog) innerhalb der „Druckerwarteschlange"-
-  // Karte.
+  // Hauptreiter der „Drucker"-Karte (Warteschlange / Displays / Scanner).
+  document.getElementById('printer-main-tabs').addEventListener('click', (e) => {
+    const tab = e.target.closest('[data-pmt-tab]');
+    if (!tab) return;
+    activePrinterMainTab = tab.dataset.pmtTab;
+    renderPrinterMainTabs();
+  });
+  // Drucker-Display-Reiter (im „Displays"-Hauptreiter): „+" öffnet den QR zum
+  // Verbinden eines neuen Displays; Klick auf einen Reiter klappt sein Panel
+  // auf/zu, × verbietet das Display endgültig (mit Bestätigungsdialog).
   document.getElementById('pd-tab-add').addEventListener('click', showPrinterDisplayQr);
   document.getElementById('pd-tabs-bar').addEventListener('click', async (e) => {
     const closeEl = e.target.closest('[data-pd-close]');
@@ -3373,7 +3684,9 @@ window.__host = window.__host || {};
     }
     const tab = e.target.closest('[data-pd-tab]');
     if (!tab) return;
-    activePdTab = tab.dataset.pdTab;
+    // Umschalter: derselbe Reiter erneut → Panel wieder zuklappen (Spiegel
+    // der Scan-Stations-Reiter).
+    activePdTab = activePdTab === tab.dataset.pdTab ? null : tab.dataset.pdTab;
     renderPrinterDisplays();
   });
   // Drucker-Displays: delegierte Handler für die per innerHTML gerenderten
@@ -3390,12 +3703,16 @@ window.__host = window.__host || {};
     }
     const removeBtn = e.target.closest('.pd-box-remove');
     if (removeBtn) {
-      removePdPrinter(removeBtn.dataset.display, removeBtn.dataset.pdRemove);
+      if (removeBtn.dataset.kind === 'scanner') {
+        removePdScanner(removeBtn.dataset.display, removeBtn.dataset.pdRemove);
+      } else {
+        removePdPrinter(removeBtn.dataset.display, removeBtn.dataset.pdRemove);
+      }
       return;
     }
     const addBox = e.target.closest('.pd-box-add');
     if (addBox) {
-      openPdAddMenu(addBox.dataset.display, addBox);
+      openPdAddMenu(addBox.dataset.display, addBox, addBox.dataset.kind || 'printer');
       return;
     }
     const nameSave = e.target.closest('.pdd-name-save');
@@ -3489,6 +3806,60 @@ window.__host = window.__host || {};
       if (save) save.click();
     }
   });
+  // Drucker-Scanner-Reiter im „Scanner"-Hauptreiter der „Drucker"-Karte:
+  // Spiegel der Scan-Stations-Handler oben.
+  document.getElementById('psc-tab-add').addEventListener('click', () => showPrinterScannerQr());
+  document.getElementById('psc-tabs-bar').addEventListener('click', async (e) => {
+    const closeEl = e.target.closest('[data-psc-close]');
+    if (closeEl) {
+      e.stopPropagation();
+      const id = closeEl.dataset.pscClose;
+      const s = (state.printer_scanners || []).find(x => x.scanner_id === id);
+      const name = s ? (s.label && s.label.trim() ? s.label : s.scanner_id.slice(0, 6)) : id;
+      if (!await confirmDialog(
+        `Drucker-Scanner „${name}" verbieten? Das Gerät wird gesperrt und kann nicht wieder aktiviert werden.`,
+        'Verbieten'
+      )) return;
+      forgetPrinterScanner(id);
+      return;
+    }
+    const tab = e.target.closest('[data-psc-tab]');
+    if (!tab) return;
+    activePscTab = activePscTab === tab.dataset.pscTab ? null : tab.dataset.pscTab;
+    renderPrinterScanners();
+  });
+  const pscBox = document.getElementById('psc-panels');
+  pscBox.addEventListener('click', (e) => {
+    const enableBtn = e.target.closest('.pscd-enable');
+    if (enableBtn) {
+      const row = enableBtn.closest('.pdd-row');
+      enablePrinterScanner(row.dataset.scanner, row.querySelector('.pscd-enable-name').value, enableBtn);
+      return;
+    }
+    const nameSave = e.target.closest('.pscd-name-save');
+    if (nameSave) {
+      const inp = nameSave.closest('.pdd-panel').querySelector('.pscd-name');
+      inp.blur();
+      setPscLabel(nameSave.dataset.scanner, inp.value);
+      return;
+    }
+    const qrBtn = e.target.closest('.pscd-qr');
+    if (qrBtn) { showPrinterScannerQr(qrBtn.dataset.scanner); return; }
+  });
+  pscBox.addEventListener('change', (e) => {
+    if (e.target.matches('.pscd-theme-toggle')) setPscTheme(e.target.dataset.scanner, e.target.checked);
+    else if (e.target.matches('.pscd-mode-toggle')) setPscInputMode(e.target.dataset.scanner, e.target.checked);
+  });
+  pscBox.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    if (e.target.matches('.pscd-enable-name')) {
+      const row = e.target.closest('.pdd-row');
+      enablePrinterScanner(row.dataset.scanner, e.target.value, row.querySelector('.pscd-enable'));
+    } else if (e.target.matches('.pscd-name')) {
+      const save = e.target.closest('.pdd-panel').querySelector('.pscd-name-save');
+      if (save) save.click();
+    }
+  });
   document.getElementById('add-helper-btn').addEventListener('click', addHelper);
   document.getElementById('qr-modal').addEventListener('click', closeQr);
   document.getElementById('qr-box').addEventListener('click', (e) => e.stopPropagation());
@@ -3518,6 +3889,7 @@ window.__host = window.__host || {};
       case 'disconnect': disconnectStudent(parseInt(el.dataset.studentId)); break;
       case 'clear-book-alert': clearBookAlert(parseInt(el.dataset.studentId)); break;
       case 'station-disconnect': disconnectFromStation(parseInt(el.dataset.studentId)); break;
+      case 'station-gate-adopt': adoptStationPrintJob(parseInt(el.dataset.studentId), el.dataset.jobId, el); break;
       case 'reprint-station-sheet': printStationSheet(parseInt(el.dataset.studentId), el, { reprint: true }); break;
       case 'ctx-reset': ctxResetQueue(id); break;
       case 'ctx-clear': ctxClearQueue(id); break;

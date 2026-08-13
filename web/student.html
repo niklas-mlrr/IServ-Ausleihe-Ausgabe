@@ -12,6 +12,10 @@
   <style>
     /* Active-View füllt die Höhe, damit nur die Tabelle scrollt */
     #view-active.show { flex: 1 1 auto; min-height: 0; align-items: stretch; }
+    /* Hilfe-Button ist im Schülerclient ausgeblendet; der Einstellungsbutton
+       übernimmt dessen Platz und füllt die volle Spaltenhöhe (111px = zwei
+       52px-Buttons + 7px Gap), passend zum #reader und zur rechten Spalte. */
+    #view-active .gear-wrap #gear-btn { height: 111px; }
     /* Pending-View: volle verbleibende Höhe, Inhalt mittig */
     #view-pending.show { flex: 1 1 auto; justify-content: center; }
     /* Druckmodus/Leihscheinmodus/Abschluss: volle verbleibende Höhe. Name
@@ -100,7 +104,6 @@
   <div class="view" id="view-active">
     <div class="top-bar">
       <div class="gear-wrap">
-        <button id="help-btn" title="Hilfe">?</button>
         <button id="gear-btn" title="Einstellungen / Kamera"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
         <div class="cam-dropdown" id="cam-dropdown">
           <select id="camera-select"><option>Kameras laden…</option></select>

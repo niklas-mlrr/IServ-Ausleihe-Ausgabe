@@ -153,6 +153,15 @@ class PrintJob:
     # Bereits wartende Aufträge behalten ihre Allowlist, auch wenn die Klasse
     # später umkonfiguriert wird (gewollt: „mit in der Warteschlange gespeichert").
     allowed_printers: set[str] | None = None
+    # True für einen automatisch/selbstauslöser-ausgelösten Scan-Station-
+    # Druckauftrag, solange der Host ihn noch nicht übernommen hat (Rolle
+    # bleibt dabei "student"). Ein solcher Auftrag darf nur auf einem Drucker
+    # gedruckt werden, der aktuell auf einem angemeldeten Drucker-Display
+    # sichtbar ist (`sessions.displayed_printer_ids`, geprüft in
+    # `_claim_fills`) — zusätzlich zur normalen Klassen-Allowlist
+    # (`allowed_printers`). `PrintQueue.host_adopt_station_job` setzt es auf
+    # False, sobald der Host den Auftrag manuell übernimmt.
+    station_display_gate: bool = False
     created_at: datetime = field(default_factory=datetime.now)
     done: asyncio.Event = field(default_factory=asyncio.Event)
 
@@ -299,6 +308,51 @@ class PrintQueue:
         await self._notify_all()
         return "ok"
 
+    async def host_adopt_station_job(
+        self, job_id: str, host_sid: str, printer_ids: list | None,
+    ) -> str:
+        """Host übernimmt einen noch **wartenden** Scan-Station-Druckermodus-
+        Auftrag (`PrintJob.station_display_gate=True`) manuell, wenn kein
+        erlaubter Drucker mehr auf einem Display sichtbar ist — das
+        "Druckauftrag aktualisieren"-Menü in der Schüler-Kachel am Host.
+
+        Anders als `update_job_printers` (In-place-Mutation, Position bleibt)
+        wird der Auftrag hier zu einem Host-Auftrag befördert: `role="host"`,
+        `host_sid` gesetzt, `station_display_gate` gelöscht (das
+        Display-Gate gilt ab dann nicht mehr, s. `_claim_fills`) — und dazu
+        aus `self.waiting` entfernt und an der zu seinem neuen Rang passenden
+        Stelle neu eingefügt (wie `enqueue`), statt an seiner alten Position
+        zu bleiben.
+
+        Rückgabe: ``"ok"``, ``"not_waiting"`` (Job nicht (mehr) in `waiting`
+        oder kein Scan-Station-Auftrag — bereits dispatchte Aufträge können
+        nicht mehr übernommen werden) oder ``"empty"`` (keine gültige
+        Drucker-ID im Pool ausgewählt)."""
+        async with self._lock:
+            job = next((j for j in self.waiting if j.id == job_id), None)
+            if job is None or not job.station_display_gate:
+                return "not_waiting"
+            from .state import get_state
+
+            pool_ids = {p.id for p in get_state().settings.printers}
+            valid_ids = {pid for pid in (printer_ids or []) if pid in pool_ids}
+            if not valid_ids:
+                return "empty"
+            self.waiting.remove(job)
+            job.allowed_printers = valid_ids
+            job.role = "host"
+            job.host_sid = host_sid
+            job.station_display_gate = False
+            idx = len(self.waiting)
+            for i, j in enumerate(self.waiting):
+                if _RANK[j.role] > _RANK[job.role]:
+                    idx = i
+                    break
+            self.waiting.insert(idx, job)
+        self._wake.set()
+        await self._notify_all()
+        return "ok"
+
     def invalidate_student(self, student_id: int) -> bool:
         """Mark non-final print jobs for a student as stale after a new scan.
 
@@ -338,9 +392,12 @@ class PrintQueue:
                 await asyncio.sleep(1)
 
     async def _step(self) -> None:
+        from .sessions import displayed_printer_ids
         from .state import get_state
 
-        printers = list(get_state().settings.printers)
+        state = get_state()
+        printers = list(state.settings.printers)
+        displayed_ids = displayed_printer_ids(state)
 
         # Pipeline füllen: wartende Aufträge auf freie Drucker-Kapazität verteilen
         # (level-weise, linkester Tie-Break, Allowlist-gerecht). Claims sammeln
@@ -348,7 +405,7 @@ class PrintQueue:
         # und OS-Polls laufen dort, der Worker blockiert nicht.
         async with self._lock:
             self._reconcile(printers)
-            claims = self._claim_fills(printers)
+            claims = self._claim_fills(printers, displayed_ids)
         for pid, _pname, job in claims:
             self._spawn_tracker(pid, job)
         if claims:
@@ -412,7 +469,9 @@ class PrintQueue:
 
     # ---- Füllen --------------------------------------------------------
 
-    def _claim_fills(self, printers: list) -> list[tuple[str, str | None, PrintJob]]:
+    def _claim_fills(
+        self, printers: list, displayed_ids: set[str] | None = None,
+    ) -> list[tuple[str, str | None, PrintJob]]:
         """Wartende Aufträge auf freie Drucker-Kapazität verteilen — level-weise
         und Allowlist-gerecht (s. Modul-Docstring). Liefert Claims
         `(printer_id, printer_name, job)`; der Job wird aus `waiting` entfernt,
@@ -426,7 +485,18 @@ class PrintQueue:
         (linkester zuerst); jeder Drucker zieht den ranghöchsten Auftrag, der
         ihn erlaubt (`allowed_printers is None` = alle, sonst ID darin). Ist der
         Kopf der Warteschlange für mehrere freie Drucker erlaubt, druckt der
-        linkeste — weil er zuerst pickt."""
+        linkeste — weil er zuerst pickt.
+
+        `displayed_ids`: aktuell auf einem Drucker-Display sichtbare
+        Pool-Drucker-IDs (`sessions.displayed_printer_ids`). Ein Auftrag mit
+        `station_display_gate=True` (Scan-Station-Druckermodus, noch nicht
+        vom Host übernommen) darf zusätzlich zur normalen Allowlist nur einen
+        Drucker aus dieser Menge ziehen — ist keiner seiner erlaubten Drucker
+        gerade sichtbar, bleibt er in `waiting` stehen (pausiert), ohne einen
+        anderen Drucker zu blockieren (die Suche geht zum nächsten Auftrag
+        weiter). `None` wird wie eine leere Menge behandelt (kein Display
+        verbunden)."""
+        shown = displayed_ids or set()
         claims: list[tuple[str, str | None, PrintJob]] = []
         for target_load in range(_PRINTER_CAPACITY):
             for printer in printers:
@@ -439,9 +509,12 @@ class PrintQueue:
                 # ersten ranghöchsten Auftrag suchen, der diesen Drucker erlaubt.
                 picked = None
                 for i, job in enumerate(self.waiting):
-                    if job.allowed_printers is None or printer.id in job.allowed_printers:
-                        picked = i
-                        break
+                    if job.allowed_printers is not None and printer.id not in job.allowed_printers:
+                        continue
+                    if job.station_display_gate and printer.id not in shown:
+                        continue
+                    picked = i
+                    break
                 if picked is None:
                     continue  # kein Auftrag erlaubt diesen Drucker → idle bleiben
                 job = self.waiting.pop(picked)
@@ -668,6 +741,79 @@ class PrintQueue:
                 elif j.status in ("dispatching", "spooled"):
                     states.setdefault(j.student_id, "waiting")
         return states
+
+    def active_job_id_for_student(self, student_id: int) -> str | None:
+        """Auftrags-ID des laufenden (wartenden oder druckenden) Druckauftrags
+        eines Schülers, sonst ``None``. Mirror von `print_job_states`, nur mit
+        der ID statt dem Status — für den Drucker-Scanner: bei einem Doppel-
+        Scan (Status „already") muss der Client wissen, WELCHES Kästchen in
+        Warteschlange/Drucker-Karte er markieren soll. Read-only ohne Lock."""
+        for j in self.waiting:
+            if not j.invalidated and j.student_id == student_id:
+                return j.id
+        for s in self.slots.values():
+            for j in s.jobs:
+                if not j.invalidated and j.student_id == student_id and (
+                    j.status in ("printing", "dispatching", "spooled")
+                ):
+                    return j.id
+        return None
+
+    def station_gate_snapshot(self, state) -> dict[int, dict]:
+        """student_id -> Zustand des laufenden Scan-Station-Druckermodus-
+        Auftrags (`PrintJob.station_display_gate=True`), für den gelben
+        Host-Hinweis in der "Aktuell in Ausgabe"-Kachel (s. state_snapshot).
+        `None`/fehlender Eintrag = kein solcher Auftrag aktiv (entweder nie
+        gestartet, schon vom Host übernommen, oder fertig/fehlgeschlagen).
+
+        `blocked`: kein erlaubter Drucker gerade auf einem Display sichtbar.
+        `dispatched`: Auftrag ist bereits an einen Drucker gesendet (Slot) —
+        dann zeigt der Host nur noch den normalen Warteschlangentext, ohne
+        Drucker-Nachfrage-Menü (das arbeitet nur auf `waiting`-Aufträgen).
+        Lock-frei, analog `print_job_states`/`waiting_list`."""
+        from .sessions import displayed_printer_ids
+
+        shown = displayed_printer_ids(state)
+        printers = list(state.settings.printers)
+        by_id = {p.id: p for p in printers}
+        positions = self._compute_positions(printers, faulty_ids=self.faulty_printers)
+        out: dict[int, dict] = {}
+
+        def _blocked(j: PrintJob) -> bool:
+            allowed = shown if j.allowed_printers is None else (j.allowed_printers & shown)
+            return not allowed
+
+        for j in self.waiting:
+            if j.invalidated or not j.station_display_gate:
+                continue
+            out[j.student_id] = {
+                "job_id": j.id,
+                "status": j.status,
+                "position": positions.get(j.id, 0),
+                "printer": None,
+                "printer_label": None,
+                "peer_error": self._is_peer_error(j, printers, in_slot=False),
+                "blocked": _blocked(j),
+                "dispatched": False,
+            }
+        for s in self.slots.values():
+            for j in s.jobs:
+                if j.invalidated or not j.station_display_gate:
+                    continue
+                if j.status in ("stalled", "peer_error", "failed", "done"):
+                    continue
+                p = by_id.get(j.assigned_printer_id)
+                out[j.student_id] = {
+                    "job_id": j.id,
+                    "status": j.status,
+                    "position": positions.get(j.id, 0),
+                    "printer": p.name if p is not None else None,
+                    "printer_label": self._printer_display(p) if p is not None else None,
+                    "peer_error": j.assigned_printer_id in self.faulty_printers,
+                    "blocked": _blocked(j),
+                    "dispatched": True,
+                }
+        return out
 
     def _remove_from_slot(self, printer_id: str, job: PrintJob) -> None:
         """Job aus der Kapazitäts-Liste seines Druckers nehmen (falls noch
@@ -1026,8 +1172,11 @@ class PrintQueue:
         hingegen ist am Auftrag gespeichert und bleibt stabil, auch wenn die
         Klasse später umkonfiguriert wird (s. PrintJob.allowed_printers)."""
 
+        from .sessions import displayed_printer_ids
+
         printers = list(state.settings.printers)
         positions = self._compute_positions(printers, faulty_ids=self.faulty_printers)
+        shown = displayed_printer_ids(state)
         out: list[dict] = []
         for j in self.waiting:
             student = state.find_student(j.student_id)
@@ -1052,10 +1201,17 @@ class PrintQueue:
                 allowed_names = [
                     self._printer_display(p) for p in printers if p.id in j.allowed_printers
                 ]
+            # Scan-Station-Druckermodus-Gate (s. PrintJob.station_display_gate):
+            # zusätzlich zur Klassen-Allowlist muss mindestens ein erlaubter
+            # Drucker gerade auf einem Display sichtbar sein.
+            blocked_no_display = j.station_display_gate and not (
+                shown if j.allowed_printers is None else j.allowed_printers & shown
+            )
             out.append(
                 {
                     "position": positions.get(j.id, 0),
                     "job_id": j.id,
+                    "student_id": j.student_id,
                     "student": student_name,
                     "form": form,
                     "originator": self._originator_label(state, j),
@@ -1071,6 +1227,8 @@ class PrintQueue:
                     "allowed_printer_ids": (
                         None if j.allowed_printers is None else sorted(j.allowed_printers)
                     ),
+                    "station_display_gate": j.station_display_gate,
+                    "blocked_no_display": blocked_no_display,
                 }
             )
         return out
