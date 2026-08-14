@@ -1076,6 +1076,34 @@ async def _mark_slip_printed(
     student.slip_printed = True
     student.slip_printer = printer
     student.slip_printer_label = printer_label
+    # Scan-Station-Schüler haben keine Modus-B-Session und damit keinen Weg,
+    # „Leihschein erhalten" zu bestätigen (kein eigener Client dafür) — der
+    # gedruckte Zettel selbst ist der Nachweis. Anders als beim Phone-Zweig
+    # oben (der bewusst auf die Bestätigung wartet) wird ihr Status deshalb
+    # HIER direkt weitergeschaltet, sobald der Leihschein physisch fertig
+    # ist: in den Unterschriften-Modus (Klasse mit `done_signed`) oder gleich
+    # auf „abgeschlossen" — Mirror des Modus-B-Zweigs in
+    # `confirm_slip_received`, nur ohne auf eine Bestätigung zu warten, die
+    # nie kommt. Erkennung über einen vergebenen Zettel-Code (überlebt auch
+    # ein zwischenzeitliches Trennen von der Station); greift unabhängig vom
+    # `slip_trigger`, der den Druck ausgelöst hat (Automatisch/Betreuer-/
+    # Schülerauslöser über den Drucker-Scanner).
+    if student_id in state.station_code_by_student:
+        done_signed, _done_collected = slip_signature_options_for(state, student_id)
+        if done_signed:
+            student.slip_signing = True
+        else:
+            try:
+                await end_student(
+                    state, get_hub(), student_id,
+                    queue_status="done", session_state="completed",
+                )
+            except Exception:  # noqa: BLE001 — Auto-Fertig darf den Druck-Marker nicht widerrufen
+                log.debug(
+                    "Auto-Fertig (Scan-Station) nach Leihschein-Druck fehlgeschlagen",
+                    exc_info=True,
+                )
+            return
     try:
         await get_hub().broadcast_host(state.state_snapshot())
     except Exception:  # noqa: BLE001 — Druck darf an einem Broadcast nicht scheitern

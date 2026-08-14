@@ -56,16 +56,35 @@ function send(msg) {
   }
 }
 
+// Anzeigedauer eines Scan-Ergebnisses am zugeordneten Drucker-Display
+// (`_SCANNER_RESULT_TTL_S` in server/routes/ws.py) — dieselbe Frist pausiert
+// hier die Kamera: solange am Display noch das letzte Ergebnis steht, soll
+// der nächste Schüler nicht schon versehentlich seinen Code hineinscannen.
+const SCAN_COOLDOWN_MS = 10000;
+
 // Ein Scan pro Cooldown-Fenster; derselbe Code erst nach Ablauf erneut
 // (Spiegel des Dublettenschutzes in scan-station.js). Kein Warten auf eine
 // Server-Antwort — der Scanner selbst zeigt kein Ergebnis (s. Modul-Kommentar).
+// Während des Cooldowns pausiert die Kamera komplett (kein Decoding, kein
+// Videobild) statt nur erkannte Codes zu ignorieren — Mirror-Verhalten für
+// manuelle Eingabe: das Feld bleibt zwar bedienbar, `cooldown` verwirft den
+// Wert aber genauso.
 function onScanSuccess(value) {
   const code = String(value || '').trim().replace(/\*/g, '');
   if (!code || cooldown || code === lastValue) return;
   lastValue = code;
   cooldown = true;
   clearTimeout(scanCooldownTimer);
-  scanCooldownTimer = setTimeout(() => { cooldown = false; lastValue = ''; }, 2000);
+  if (html5QrCode) {
+    try { html5QrCode.pause(true); } catch (e) { /* Kamera lief nicht/nicht pausierbar */ }
+  }
+  scanCooldownTimer = setTimeout(() => {
+    cooldown = false;
+    lastValue = '';
+    if (html5QrCode) {
+      try { html5QrCode.resume(); } catch (e) { /* Kamera inzwischen gestoppt/umgeschaltet */ }
+    }
+  }, SCAN_COOLDOWN_MS);
   // Sofortiges akustisches Feedback, sobald ein Code erkannt wurde — der
   // Scanner zeigt sonst nichts an (s. Modul-Kommentar), der Ton bestätigt
   // dem Schüler, dass der Scan angekommen ist.

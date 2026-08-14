@@ -8,6 +8,46 @@
 > `docs/phase4_modus_b_2026-06-15.md`, `docs/hardening_2026-06-18.md`) und
 > werden hier nur verlinkt, nicht dupliziert.
 
+## 2026-08-13 — Drucker-Scanner: Klassenpräfix, Beep, 10s-Kamerapause, Scan-Station-Auto-Fertig
+
+Vier kleinere Nachbesserungen:
+
+- **Klassenpräfix entfernt**: Die Scanner-Karte am Drucker-Display zeigte
+  bisher „Klasse 10a" statt „10a" — inkonsistent mit der normalen
+  Druckerwarteschlange, die das Präfix über `print_queue.slip_name` bereits
+  abschneidet. `_handle_drucker_scan` (`server/routes/ws.py`) schneidet das
+  Präfix jetzt genauso ab (`form_clean`, einmal berechnet, in allen drei
+  Payloads verwendet).
+- **Beep am Drucker-Scanner**: `web/drucker-scan.js` spielt jetzt sofort
+  einen Ton (`Beeper.playBeep()`, gleicher Mechanismus wie der Drucker-
+  Display-Fertigton), sobald ein Code erkannt wurde — für Kamera- und
+  manuelle Eingabe gleichermaßen (beide laufen über `onScanSuccess`).
+- **10s statt 5s + Kamerapause**: `_SCANNER_RESULT_TTL_S` (Anzeigedauer der
+  Scanner-Karte am Drucker-Display) auf 10s erhöht. Der Drucker-Scanner
+  pausiert für dieselbe Dauer die Kamera komplett (`html5QrCode.pause(true)`/
+  `.resume()`) statt nur erkannte Codes zu ignorieren — kein Decoding, kein
+  Videobild, bis das Ergebnis am Display abgelaufen ist.
+- **Scan-Station-Schüler schalten nach Druck automatisch weiter**: bisher
+  landete ein Scan-Station-Schüler nach dem physischen Leihschein-Druck in
+  keinem Auto-Übergang — anders als Modus-B-Schüler (die per „Leihschein
+  erhalten"-Bestätigung im Client in den Unterschriften-Modus bzw. auf
+  „abgeschlossen" wechseln, s. `confirm_slip_received`) haben Scan-Station-
+  Schüler keine Session und damit keinen Bestätigungsweg — der Host musste
+  bisher manuell abschließen. `_mark_slip_printed` (`server/sessions.py`)
+  erkennt jetzt Scan-Station-Schüler (vergebener Zettel-Code,
+  `state.station_code_by_student`) und schaltet SOFORT bei Druckende weiter:
+  in den Unterschriften-Modus (`done_signed` aktiv) oder direkt auf
+  „abgeschlossen" (`end_student`) — unabhängig vom auslösenden `slip_trigger`
+  (Automatisch/Betreuer-/Schülerauslöser über den Drucker-Scanner).
+- Tests: `tests/test_scan_station.py` (3 neue: Unterschriften-Modus,
+  Auto-Fertig ohne Unterschreiben, Nicht-Station-Schüler bleibt unberührt —
+  rufen `sessions._mark_slip_printed` direkt auf, da
+  `PrintQueue._mark_slip_printed_after_completion` intern den globalen
+  `state.get_state()`-Singleton statt der Test-lokalen State-Instanz
+  verwendet), `tests/test_ws_drucker_scan.py` (Klassenpräfix-Assertion). `uv
+  run pytest` (635 Tests grün) + `uvx ruff check server/ automation/ tests/`
+  sauber. Kein Browser-/Hardware-Livecheck.
+
 ## 2026-08-13 — Drucker-Scanner-Nachbesserungen: Reise-Animation, Doppel-Scan-Blitzer, kombinierte Reihenfolge
 
 Drei Nachbesserungen zum Drucker-Scanner (s. Eintrag darunter):

@@ -753,6 +753,58 @@ def test_station_sheet_never_marks_slip_printed(ctx):
     assert student.slip_printed is False
 
 
+def test_leihschein_completion_enters_signing_mode_for_station_student(ctx):
+    """Scan-Station-Schüler haben keine Modus-B-Session und damit keine
+    „Leihschein erhalten"-Bestätigung — bei aktivem `done_signed` wechselt
+    ihr Status deshalb direkt bei Druckende in den Unterschriften-Modus,
+    statt (wie bisher) bis zum manuellen Host-Abschluss auf „gedruckt"
+    stehen zu bleiben. Ruft `sessions._mark_slip_printed` direkt (statt über
+    `PrintQueue._mark_slip_printed_after_completion`), weil Letztere intern
+    den globalen `state.get_state()`-Singleton statt der lokalen `ctx`-State
+    verwendet."""
+    state, _, _ = ctx
+    student = _queue_student(state, student_id=1)
+    state.active_context.done_signed = True
+    state.allocate_station_code(1)
+
+    asyncio.run(sessions._mark_slip_printed(state, 1))
+
+    assert student.slip_printed is True
+    assert student.slip_signing is True
+    assert student.status == "pending"  # noch nicht abgeschlossen — wartet aufs Unterschreiben
+
+
+def test_leihschein_completion_auto_finishes_station_student_without_signing(ctx):
+    """Ohne aktives `done_signed` schließt der Druck den Scan-Station-Schüler
+    direkt ab (Mirror des Modus-B-Auto-Fertig-Zweigs in
+    `confirm_slip_received`, nur ohne auf eine nie kommende Bestätigung zu
+    warten)."""
+    state, _, _ = ctx
+    student = _queue_student(state, student_id=1)
+    state.active_context.done_signed = False
+    state.allocate_station_code(1)
+
+    asyncio.run(sessions._mark_slip_printed(state, 1))
+
+    assert student.slip_printed is True
+    assert student.status == "done"
+
+
+def test_leihschein_completion_leaves_non_station_student_untouched(ctx):
+    """Ohne Zettel-Code (Modus A ohne Scan-Station, kein Phone-Session-Match)
+    bleibt das bisherige Verhalten: der Host beendet manuell."""
+    state, _, _ = ctx
+    student = _queue_student(state, student_id=1)
+    state.active_context.done_signed = False
+    # Bewusst KEIN allocate_station_code — Schüler ist kein Scan-Station-Fall.
+
+    asyncio.run(sessions._mark_slip_printed(state, 1))
+
+    assert student.slip_printed is True
+    assert student.slip_signing is False
+    assert student.status == "pending"
+
+
 # ---------------------------------------------------------------------------
 # 4. Zettel-Druck macht den Schüler aktiv + „Bücher sammeln"
 # ---------------------------------------------------------------------------

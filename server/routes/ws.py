@@ -1194,9 +1194,11 @@ async def ws_drucker_display(websocket: WebSocket, token: str | None = None) -> 
 # Drucker-Scanner (`/drucker-scan`)
 # ---------------------------------------------------------------------------
 
-# Scan-Ergebnis gilt 5s (s. PLAN-Absprache mit dem Nutzer) — dieselbe Frist,
-# die die Scanner-Karte am Drucker-Display für ihre Rückfall-Animation nutzt.
-_SCANNER_RESULT_TTL_S = 5.0
+# Scan-Ergebnis gilt 10s (s. PLAN-Absprache mit dem Nutzer) — dieselbe Frist,
+# die die Scanner-Karte am Drucker-Display für ihre Rückfall-Animation nutzt
+# UND die der Drucker-Scanner selbst nutzt, um die Kamera währenddessen zu
+# pausieren (s. web/drucker-scan.js).
+_SCANNER_RESULT_TTL_S = 10.0
 
 
 @router.websocket("/ws/drucker-scan")

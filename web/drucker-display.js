@@ -135,10 +135,10 @@ let pendingQueueSeed = null;
 // darf eine andere abbrechen).
 let pendingTtlPid = null;
 // Letzter vollständiger Server-Snapshot — Grundlage für den erzwungenen
-// Re-Render, wenn eine Scanner-Karte lokal nach 5s abläuft, ohne dass der
+// Re-Render, wenn eine Scanner-Karte lokal nach 10s abläuft, ohne dass der
 // Server von sich aus einen neuen Snapshot pusht (s. revertScannerAndFlip).
 let lastQueueMsg = null;
-// Ein Scanner, dessen lokaler 5s-Timer abgelaufen ist, wird clientseitig auf
+// Ein Scanner, dessen lokaler 10s-Timer abgelaufen ist, wird clientseitig auf
 // „leer" erzwungen (der Server berechnet `expires_in` zwar korrekt nach,
 // pusht aber nicht von sich aus einen Snapshot GENAU beim Ablauf) — bis ein
 // GENUIN NEUER Scan-Event vom Server eintrifft (anderer status/code als beim
@@ -334,7 +334,7 @@ function applyWaitingOverflow() {
 //   'ready'         → Schritt-Label „Wartet jetzt auf Druck", Kästchen
 //                      (Klasse+Name) fährt nach unten, ggf. Unterschreiben-
 //                      Hinweis + „Zettel entsorgen"-Hinweis darunter. Nach
-//                      Ablauf der 5s „reist" dasselbe Kästchen (kein neues)
+//                      Ablauf der 10s „reist" dasselbe Kästchen (kein neues)
 //                      weiter an seine echte Position in der Warteschlange
 //                      oder auf einem Drucker — s. revertScannerAndFlip.
 //   'already'       → Schritt-Label je nach Job-Status, Kästchen fährt nach
@@ -426,7 +426,7 @@ function scanCardHtml(s) {
 }
 
 // Scan-Ergebnis-Events je Scanner tracken: der Client erzwingt den Rückfall
-// auf den Default-Zustand exakt nach Ablauf der lokalen 5s (s.
+// auf den Default-Zustand exakt nach Ablauf der lokalen 10s (s.
 // revertScannerAndFlip), unabhängig davon, ob der Server von sich aus einen
 // neuen Snapshot pusht (er berechnet `expires_in` zwar korrekt nach, pusht
 // aber nicht proaktiv bei reinem Ablauf). `locallyExpiredScanners`
@@ -453,7 +453,7 @@ function resolveScanners(rawScanners) {
   });
 }
 
-// Scanner-Karte nach Ablauf der 5s lokal auf den Default-Zustand zurückfallen
+// Scanner-Karte nach Ablauf der 10s lokal auf den Default-Zustand zurückfallen
 // lassen. War der Zustand 'ready' (Kästchen trägt `data-travel-job-id`), wird
 // dessen AKTUELLE Position gesichert und als Startpunkt für den FLIP an die
 // renderQueue()-Neuberechnung übergeben (`seed`) — dasselbe Kästchen „reist"
@@ -483,7 +483,7 @@ function renderQueue(msg, seed) {
     (Array.isArray(msg.scanners) ? msg.scanners : []).filter(s => s.connected)
   );
   // Aufträge, die GERADE als 'ready' an einer Scanner-Karte gezeigt werden
-  // (Kästchen „reist" erst nach Ablauf der 5s dorthin, s. revertScannerAndFlip):
+  // (Kästchen „reist" erst nach Ablauf der 10s dorthin, s. revertScannerAndFlip):
   // an ihrer echten Position (Warteschlange/Drucker) so lange unterdrückt,
   // damit dasselbe Kästchen nicht doppelt erscheint.
   const readyTravelJobIds = new Set(
@@ -718,7 +718,7 @@ function renderQueue(msg, seed) {
   });
 
   // Ebenso pro Scanner-Karte mit aktivem (nicht-Default-)Status: nach Ablauf
-  // der 5s zurückfallen (s. revertScannerAndFlip) bzw. „reisen", falls kein
+  // der 10s zurückfallen (s. revertScannerAndFlip) bzw. „reisen", falls kein
   // neuer Scan vorher nachzieht. `revertScannerAndFlip` geht selbst über
   // `scheduleQueueRender` — eine laufende Animation wird darüber bereits
   // koalesziert, kein eigener flipAnimating-Check hier nötig.
