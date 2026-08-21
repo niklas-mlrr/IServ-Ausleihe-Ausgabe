@@ -342,8 +342,16 @@ Das geht auf demselben Laptop oder einem anderen Rechner mit Python.
 
 ### Voraussetzungen
 
-- `ausleihe-api`-Repo liegt vor (Teil 1, Schritt 2). Allein genügt dieser Teil,
-  das `ausleihe-ausgabe`-Werkzeug muss dafür **nicht** laufen.
+- Die Repos `sba-bestand` **und** `ausleihe-api` liegen **nebeneinander** im
+  selben Ordner. `ausleihe-api` kommt aus Teil 1, Schritt 2; `sba-bestand` wird
+  zusätzlich geklont:
+
+  ```bash
+  git clone https://github.com/niklas-mlrr/sba-bestand.git
+  ```
+
+  Diese beiden genügen für diesen Teil — das `ausleihe-ausgabe`-Werkzeug muss
+  dafür **nicht** laufen.
 - **Python 3.9 oder neuer** ist installiert. Falls nicht: von
   <https://www.python.org/downloads/windows/> installieren und dabei unbedingt
   **„Add Python to PATH"** anhaken.
@@ -351,25 +359,29 @@ Das geht auf demselben Laptop oder einem anderen Rechner mit Python.
   (siehe Teil 1, Schritt 4; die gleiche Datei kann kopiert werden).
 - Die Excel-Datei `Bestand- und Nachbestellungsliste 2026.xlsx` (bzw. das
   jeweilige Jahr) im Ordner
-  `ausleihe-api\bestand- und nachbestellungen\New - API approach\`.
+  `sba-bestand\bestand\`.
 
 ### Einrichtung (einmalig pro Rechner)
 
-Im `ausleihe-api`-Ordner einmalig die Zusatz-Bibliotheken installieren. Git Bash
-im `ausleihe-api`-Ordner öffnen:
+Im `sba-bestand`-Ordner einmalig die Zusatz-Bibliotheken installieren. Git Bash
+im `sba-bestand`-Ordner öffnen:
 
 ```bash
-pip install -e ".[bestand]"
+pip install openpyxl isbnlib python-dotenv reportlab requests
 ```
 
-(Falls `pip` nicht geht: `python -m pip install -e ".[bestand]"`.)
+(Falls `pip` nicht geht: `python -m pip install openpyxl isbnlib python-dotenv
+reportlab requests` verwenden.)
+
+Die Skripte finden den IServ-Client `ausleihe` automatisch im Nachbarordner
+`ausleihe-api` — dort liegt auch die `.env` mit den Zugangsdaten.
 
 ### Aktualisierung ausführen
 
 1. In den Ordner wechseln (Git Bash oder Eingabeaufforderung):
 
 ```bash
-cd "bestand- und nachbestellungen/New - API approach"
+cd sba-bestand/bestand
 ```
 
 2. **Erst Trockenlauf** (prüft alles, schreibt noch nicht in die Excel-Datei):
@@ -500,7 +512,7 @@ es niemand reparieren.** Das ist der ehrliche Zustand. Und er ist in Ordnung:
   Helfer der SBA hat immer einen. Klärt ab, wer das nach eurem Abgang ist, und
   gebt ihm diese Anleitung + die Zugangsdaten.
 - **Excel-Datei:** das neue Jahres-Excel (z. B. „… 2027.xlsx") in den
-  `New - API approach`-Ordner legen und Teil 3 mit dem neuen Dateinamen laufen
+  `sba-bestand/bestand`-Ordner legen und Teil 3 mit dem neuen Dateinamen laufen
   lassen.
 
 ### Was nicht mehr gepflegt wird
