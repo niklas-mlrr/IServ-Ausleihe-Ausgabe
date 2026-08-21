@@ -30,7 +30,7 @@ IServ-Frontend.
 Barcode-Scanner und lokaler Leihschein-Druck.
 
 **Sicherheitsprinzip:** Die Anwendung liest Ausleihdaten über die separate
-[IServ-Ausleihe-API](https://github.com/niklas-mlrr/IServ-Ausleihe-API) und
+[ausleihe-api](https://github.com/niklas-mlrr/ausleihe-api) und
 führt Buchungen ausschließlich über das offizielle IServ-Frontend aus. Der
 bestehende USB-Scanner bleibt jederzeit als Fallback nutzbar.
 
@@ -57,7 +57,7 @@ Helfer-/Schüler-Handy (Kamera-Scanner)        iPad (QR-Anzeige)
 Leitplanken: **keine selbstprogrammierten Schreibzugriffe auf die
 Ausleihe-Datenbank** — alle Buchungen laufen durch das offizielle IServ-Frontend
 (Playwright) inklusive dessen Validierung. Die
-[ausleihe-api](https://github.com/niklas-mlrr/IServ-Ausleihe-API) wird
+[ausleihe-api](https://github.com/niklas-mlrr/ausleihe-api) wird
 ausschließlich lesend genutzt. Das bestehende System (USB-Handscanner) bleibt
 jederzeit als Fallback nutzbar.
 
@@ -106,7 +106,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh        # oder: brew install uv
 
 # 2) Schwester-Repo daneben klonen
 cd <ordner-über-ausleihe-ausgabe>
-git clone https://github.com/niklas-mlrr/IServ-Ausleihe-API.git ausleihe-api
+git clone https://github.com/niklas-mlrr/ausleihe-api.git ausleihe-api
 
 # 3) Projekt einrichten
 cd ausleihe-ausgabe
@@ -131,10 +131,10 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 
 ```powershell
 # 2) Dieses GitHub Repo klonen
-git clone https://github.com/niklas-mlrr/IServ-Ausleihe-Ausgabe.git ausleihe-ausgabe
+git clone https://github.com/niklas-mlrr/ausleihe-ausgabe.git ausleihe-ausgabe
 
 # 3) API-Repo daneben klonen
-git clone https://github.com/niklas-mlrr/IServ-Ausleihe-API.git ausleihe-api
+git clone https://github.com/niklas-mlrr/ausleihe-api.git ausleihe-api
 
 # 4) In den geklonten Haupt-Ordner navigieren
 cd ausleihe-ausgabe
@@ -225,5 +225,5 @@ Generalprobe im Schul-WLAN. Details/Phasenstand: [`docs/PLAN.md`](docs/PLAN.md)
 §5, laufender Verifizierungsstand: [`docs/test_status.md`](docs/test_status.md).
 
 Historie: Das Repo ist ein entkoppelter Fork des
-[Barcode-Scanners](https://github.com/niklas-mlrr/Barcode-Scanner); der alte
+[Barcode-Scanners](https://github.com/niklas-mlrr/barcode-scanner-simple); der alte
 Node-Server/Keyboard-Client liegt in der Git-Historie (bis `0bd06bc`).

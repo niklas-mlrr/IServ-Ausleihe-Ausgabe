@@ -145,8 +145,8 @@ eine Teil den anderen nicht.
 3. Nacheinander diese beiden Befehle eingeben (jeweils Enter, warten bis fertig):
 
 ```bash
-git clone https://github.com/niklas-mlrr/IServ-Ausleihe-Ausgabe.git ausleihe-ausgabe
-git clone https://github.com/niklas-mlrr/IServ-Ausleihe-API.git ausleihe-api
+git clone https://github.com/niklas-mlrr/ausleihe-ausgabe.git ausleihe-ausgabe
+git clone https://github.com/niklas-mlrr/ausleihe-api.git ausleihe-api
 ```
 
 Am Ende liegt vor euch:
